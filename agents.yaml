@@ -1,0 +1,5 @@
+agents:
+  - name: claude
+    description: Implements the change using Claude Code via /opsx:apply.
+    command: claude
+    args: ["/opsx:apply", "${change_id}"]

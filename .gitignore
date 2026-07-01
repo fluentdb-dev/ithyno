@@ -1,0 +1,10 @@
+node_modules/
+web/dist/
+*.log
+.DS_Store
+.switchboard/
+.worktrees/
+server-dist/
+electron/out/
+electron/dist/
+vscode-extension/out/

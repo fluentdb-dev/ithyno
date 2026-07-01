@@ -1,0 +1,237 @@
+import type {
+  AgentConfigResponse,
+  Change,
+  DiffPayload,
+  DocsFile,
+  DocsTree,
+  GitConfig,
+  GitIdentity,
+  GitStatus,
+  Job,
+  JobSummary,
+  TagDetail,
+  TagIndex,
+  ToggleResponse,
+  WorkspaceState,
+} from "./types";
+import { getSessionToken } from "./runtime";
+
+/**
+ * Thrown when the server returns 401 / 403 with an auth-related reason.
+ * Callers can let this bubble; the App-level effect surfaces the banner.
+ */
+export class AuthExpiredError extends Error {
+  constructor(public readonly status: number, message = "Session expired") {
+    super(message);
+    this.name = "AuthExpiredError";
+  }
+}
+
+let onAuthExpired: (() => void) | null = null;
+export function onAuthExpiredHandler(fn: () => void): void {
+  onAuthExpired = fn;
+}
+
+/**
+ * Verify the stored session token against the server. Used at App mount to
+ * detect a stale token without waiting for a mutating action.
+ */
+export async function checkAuth(): Promise<boolean> {
+  const token = getSessionToken();
+  if (!token) return false;
+  try {
+    const res = await fetch("/api/auth/check", {
+      headers: { "X-Session-Token": token },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getSessionToken();
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (token) h["X-Session-Token"] = token;
+  return h;
+}
+
+/** POST helper used by every mutating call. Handles auth headers + 401/403. */
+async function postJson<T>(url: string, body: unknown): Promise<{ status: number; data: T }> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error(`[api] POST ${url} network error:`, err);
+    throw err;
+  }
+  if (res.status === 401 || res.status === 403) {
+    // Distinguish auth failures from other 4xx (e.g. /api/agents/run's 403 for
+    // non-local clients, which can't happen from the UI anyway). We treat any
+    // 401/403 on a mutating call as session-expired and let the banner surface.
+    console.warn(`[api] POST ${url} auth failed (${res.status})`);
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  const data = (await res.json().catch(() => ({}))) as T;
+  if (res.status >= 400) {
+    console.warn(`[api] POST ${url} → ${res.status}`, data);
+  }
+  return { status: res.status, data };
+}
+
+export async function fetchState(): Promise<WorkspaceState> {
+  const res = await fetch("/api/state");
+  if (!res.ok) throw new Error(`GET /api/state failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchChange(id: string): Promise<Change> {
+  const res = await fetch(`/api/changes/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(`GET /api/changes/${id} failed: ${res.status}`);
+  return res.json();
+}
+
+/** Persist the chosen execution mode into the proposal's frontmatter. */
+export async function setProposalExecution(id: string, mode: "worktree" | "terminal"): Promise<void> {
+  const { status, data } = await postJson<{ status?: string; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/proposal/execution`,
+    { mode },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+export async function toggleTask(input: {
+  filePath: string;
+  line: number;
+  expectedText: string;
+  baseHash: string;
+  desiredChecked: boolean;
+}): Promise<ToggleResponse> {
+  // 409 (conflict) and 400 (invalid) carry a useful body too — postJson
+  // surfaces the body for any non-auth status.
+  const { data } = await postJson<ToggleResponse>("/api/tasks/toggle", input);
+  return data;
+}
+
+export async function fetchDocs(): Promise<DocsTree> {
+  const res = await fetch("/api/docs");
+  if (!res.ok) throw new Error(`GET /api/docs failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTagIndex(): Promise<TagIndex> {
+  const res = await fetch("/api/tags");
+  if (!res.ok) throw new Error(`GET /api/tags failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Fetch artifacts for a tag. The endpoint shape is `/api/tags/:ns/<name-with-slashes>`,
+ * with the `name` portion URL-encoded as a whole. For an "other"-namespace tag
+ * (no prefix), pass ns="other".
+ */
+export async function fetchTagDetail(ns: string, name: string): Promise<TagDetail> {
+  const res = await fetch(`/api/tags/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`GET /api/tags/${ns}/${name} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDocFile(path: string): Promise<DocsFile | null> {
+  const res = await fetch(`/api/docs/file?path=${encodeURIComponent(path)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/docs/file failed: ${res.status}`);
+  return res.json();
+}
+
+// ---- agent-runner ----------------------------------------------------------
+export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
+  const res = await fetch("/api/agents/config");
+  if (!res.ok) throw new Error(`GET /api/agents/config failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAgentJobs(): Promise<{ jobs: JobSummary[] }> {
+  const res = await fetch("/api/agents/jobs");
+  if (!res.ok) throw new Error(`GET /api/agents/jobs failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAgentJob(id: string): Promise<Job | null> {
+  const res = await fetch(`/api/agents/jobs/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/agents/jobs/${id} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAgentJobDiff(id: string): Promise<DiffPayload | null> {
+  const res = await fetch(`/api/agents/jobs/${encodeURIComponent(id)}/diff`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/agents/jobs/${id}/diff failed: ${res.status}`);
+  return res.json();
+}
+
+export async function runAgent(changeId: string, agentName: string): Promise<JobSummary> {
+  const { status, data } = await postJson<JobSummary & { error?: string }>(
+    "/api/agents/run",
+    { changeId, agentName },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+  return data;
+}
+
+// ---- git identity ----------------------------------------------------------
+export async function fetchGitStatus(): Promise<GitStatus> {
+  const res = await fetch("/api/git/status");
+  if (!res.ok) throw new Error(`GET /api/git/status failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchGitConfig(): Promise<GitConfig> {
+  const res = await fetch("/api/git/config");
+  if (!res.ok) throw new Error(`GET /api/git/config failed: ${res.status}`);
+  return res.json();
+}
+
+export async function postGitConfig(body: GitIdentity): Promise<GitStatus> {
+  const { status, data } = await postJson<{ ok?: boolean; gitStatus?: GitStatus; error?: string }>(
+    "/api/git/config",
+    body,
+  );
+  if (status >= 400 || !data.gitStatus) throw new Error(data.error ?? `HTTP ${status}`);
+  return data.gitStatus;
+}
+
+export async function postGitInit(): Promise<GitStatus> {
+  const { status, data } = await postJson<{ ok?: boolean; gitStatus?: GitStatus; error?: string }>(
+    "/api/git/init",
+    {},
+  );
+  if (status >= 400 || !data.gitStatus) throw new Error(data.error ?? `HTTP ${status}`);
+  return data.gitStatus;
+}
+
+export async function cancelAgentJob(id: string): Promise<void> {
+  // No body, but still uses the auth header. `postJson` adds Content-Type
+  // application/json which a body-less POST tolerates fine.
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/agents/jobs/${encodeURIComponent(id)}/cancel`,
+    {},
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+export type InjectResponse =
+  | { status: "ok"; activeTerminals: number }
+  | { status: "no-terminal"; reason: string }
+  | { error: string };
+
+/** Inject text into the most recently active embedded terminal (localhost only). */
+export async function injectPty(data: string, terminate = true): Promise<InjectResponse> {
+  const { data: body } = await postJson<InjectResponse>("/api/pty/inject", { data, terminate });
+  return body;
+}
