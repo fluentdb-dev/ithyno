@@ -42,7 +42,7 @@
 
 ## 8. Verification
 
-- [ ] 8.1 Start `add-vscode-extension` in Worktree mode with the `claude -p` agent; card starts at `0/32`, ticks up as tasks complete
+- [x] 8.1 Start `add-vscode-extension` in Worktree mode with the `claude -p` agent; card starts at `0/32`, ticks up as tasks complete
 - [ ] 8.2 Cancel a running job — final progress freezes at the last emission, no further events arrive
 - [ ] 8.3 Merge a completed job — `worktreeProgress[change.id]` clears and the card returns to the main-tree progress (which now reflects the merged state)
 - [ ] 8.4 Server restart mid-run — new server has no running jobs; card falls back to main-tree progress (empty until merge)

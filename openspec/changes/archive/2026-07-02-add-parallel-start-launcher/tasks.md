@@ -30,7 +30,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Open dashboard with agents defined and 3 TODO changes: launcher shows `Start ▾ (3)`
+- [x] 6.1 Open dashboard with agents defined and 3 TODO changes: launcher shows `Start ▾ (3)`
 - [ ] 6.2 Start one via card Start; count drops to 2 immediately (running job excluded)
 - [ ] 6.3 Open launcher, pick another → picker or direct spawn per proposal.execution; both jobs run in parallel
 - [ ] 6.4 verify-only or DONE changes never appear in the popover
