@@ -29,7 +29,13 @@
     "openspec": "openspec",
     "clean:worktrees": "bin/clean-worktrees.sh",
     "test": "vitest run --config vitest.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "npm run --workspace openspec-ui-electron dev",
+    "electron:package": "npm run --workspace openspec-ui-electron package:mac",
+    "electron:package:mac": "npm run --workspace openspec-ui-electron package:mac",
+    "electron:package:win": "npm run --workspace openspec-ui-electron package:win",
+    "electron:package:linux": "npm run --workspace openspec-ui-electron package:linux",
+    "electron:package:all": "npm run --workspace openspec-ui-electron package:all"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

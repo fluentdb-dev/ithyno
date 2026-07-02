@@ -1,0 +1,85 @@
+{
+  "name": "openspec-ui-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop shell for OpenSpec UI",
+  "main": "out/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && electron .",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux",
+    "package:all": "electron-builder --mac --win --linux"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.3"
+  },
+  "build": {
+    "appId": "dev.openspec.ui",
+    "productName": "OpenSpec UI",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../bin",
+        "to": "app/bin"
+      },
+      {
+        "from": "../server",
+        "to": "app/server"
+      },
+      {
+        "from": "../web/dist",
+        "to": "app/web/dist"
+      },
+      {
+        "from": "../templates",
+        "to": "app/templates"
+      },
+      {
+        "from": "../tsconfig.json",
+        "to": "app/tsconfig.json"
+      },
+      {
+        "from": "../package.json",
+        "to": "app/package.json"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Development"
+    }
+  }
+}
