@@ -12,7 +12,7 @@
 - [x] 3.1 `.kanban-verify-only`: muted color, small italic, no pointer
 
 ## 4. Verification
-- [ ] 4.1 `add-csrf-protection` (verify only after tier 8): Run hidden, hint shown
-- [ ] 4.2 `add-electron-shell` (0/40): Run shown
-- [ ] 4.3 `add-vscode-extension` (0/32): Run shown
-- [ ] 4.4 A change with both docs and verify left: Run still shown
+- [x] 4.1 `add-csrf-protection` (verify only after tier 8): Run hidden, hint shown
+- [x] 4.2 `add-electron-shell` (0/40): Run shown
+- [x] 4.3 `add-vscode-extension` (0/32): Run shown
+- [x] 4.4 A change with both docs and verify left: Run still shown
