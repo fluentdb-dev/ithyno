@@ -27,6 +27,10 @@ npm install
 # 開発（API: 4321 / UI: Vite 5173。UIは http://localhost:5173 を開く）
 npm run dev
 
+# 動作確認モード（web は HMR、server は watch なし。並列 agent が
+# サーバ再起動で殺されない — Kanban IN-PROGRESS の Start ▾ を dogfood する時はこちら）
+npm run dev:test
+
 # 本番相当（UIをビルドして単一プロセスで配信し、ブラウザを開く）
 npm run build
 npm start            # = node bin/openspec-ui.js（このリポジトリのopenspec/を表示）

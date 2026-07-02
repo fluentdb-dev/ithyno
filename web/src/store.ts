@@ -7,6 +7,9 @@ import {
   fetchAgentConfig,
   fetchAgentJobs,
   fetchGitConfig,
+  fetchGitStatus,
+  checkAuth,
+  triggerAuthExpired,
   toggleTask as apiToggle,
 } from "./api";
 import { getSessionToken } from "./runtime";
@@ -19,6 +22,7 @@ import type {
   JobStatus,
   JobSummary,
   OutputLine,
+  Progress,
   SpecDomain,
   TagIndex,
   Task,
@@ -55,6 +59,10 @@ type Store = {
   agentConfigError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
+  /** Per-change live progress derived from the running job's worktree
+   *  tasks.md. Preferred over `change.progress` while a job is active or
+   *  awaiting merge/discard. Cleared on merge/discard. */
+  worktreeProgress: Record<string, Progress>;
   gitConfig: GitConfig | null;
 
   load: () => Promise<void>;
@@ -76,9 +84,19 @@ type Store = {
   setJobFinished: (jobId: string, status: JobStatus, exitCode: number | null) => void;
   loadGitConfig: () => Promise<void>;
   setGitStatus: (gitStatus: WorkspaceState["gitStatus"]) => void;
+  refreshGitStatus: () => Promise<void>;
+  clearWorktreeProgress: (changeId: string) => void;
 };
 
 let toastSeq = 1;
+
+/**
+ * Module-level tracker for the current WebSocket. There is one live WS per
+ * app lifetime; connectWs is idempotent — a second call while a socket is
+ * still open is a no-op. This matters for React 19 StrictMode's
+ * double-invocation of the mounting effect in dev.
+ */
+let currentWs: WebSocket | null = null;
 
 // User preferences persisted to localStorage. Read once at module load so the
 // initial render already reflects the saved choice (no flash of default state).
@@ -139,6 +157,7 @@ export const useStore = create<Store>((set, get) => ({
   agentConfigError: null,
   jobs: {},
   jobOutputs: {},
+  worktreeProgress: {},
   gitConfig: null,
 
   loadAgents: async () => {
@@ -153,8 +172,15 @@ export const useStore = create<Store>((set, get) => ({
     try {
       const r = await fetchAgentJobs();
       const jobs: Record<string, JobSummary> = {};
-      for (const j of r.jobs) jobs[j.id] = j;
-      set({ jobs });
+      // Adopted / freshly-spawned jobs may already carry a
+      // `worktreeProgress` snapshot — mirror it into the store slice so the
+      // Kanban card renders the right number without waiting for a WS event.
+      const wtProgress: Record<string, Progress> = {};
+      for (const j of r.jobs) {
+        jobs[j.id] = j;
+        if (j.worktreeProgress) wtProgress[j.changeId] = j.worktreeProgress;
+      }
+      set((s) => ({ jobs, worktreeProgress: { ...s.worktreeProgress, ...wtProgress } }));
     } catch {
       /* swallow */
     }
@@ -190,6 +216,22 @@ export const useStore = create<Store>((set, get) => ({
   setGitStatus: (gitStatus) => {
     const s = get().state;
     if (s) set({ state: { ...s, gitStatus } });
+  },
+  refreshGitStatus: async () => {
+    try {
+      const gitStatus = await fetchGitStatus();
+      const s = get().state;
+      if (s) set({ state: { ...s, gitStatus } });
+    } catch {
+      // Non-fatal: keep the last-known status if the fetch fails.
+    }
+  },
+  clearWorktreeProgress: (changeId: string) => {
+    set((s) => {
+      if (!(changeId in s.worktreeProgress)) return {};
+      const { [changeId]: _drop, ...rest } = s.worktreeProgress;
+      return { worktreeProgress: rest };
+    });
   },
 
   loadTagIndex: async () => {
@@ -280,14 +322,47 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   connectWs: () => {
+    // If a socket is already connecting or open, reuse it. This makes
+    // connectWs idempotent under React 19 StrictMode's double-mount and
+    // avoids the "two live sockets → every event duplicated" trap that
+    // trying to close + reopen created (the close is async, so we ended
+    // up with three or four sockets under bad timing).
+    if (
+      currentWs &&
+      (currentWs.readyState === WebSocket.CONNECTING || currentWs.readyState === WebSocket.OPEN)
+    ) {
+      return;
+    }
+
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const token = getSessionToken();
     const ws = new WebSocket(
       `${proto}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`,
     );
-    ws.onopen = () => set({ connected: true });
+    currentWs = ws;
+    let openedOnce = false;
+    ws.onopen = () => {
+      openedOnce = true;
+      set({ connected: true });
+    };
     ws.onclose = () => {
+      if (currentWs === ws) currentWs = null;
       set({ connected: false });
+      // If the socket was destroyed before it even opened, the server likely
+      // rejected the CSRF/token gate — probably a stale token after a server
+      // restart. Verify via /api/auth/check and surface the "session expired"
+      // banner instead of retrying forever in the background.
+      if (!openedOnce) {
+        void checkAuth().then((ok) => {
+          if (!ok) {
+            console.warn("[ws] closed before open + auth check failed — session expired");
+            triggerAuthExpired();
+            return;
+          }
+          setTimeout(() => get().connectWs(), 1500);
+        });
+        return;
+      }
       setTimeout(() => get().connectWs(), 1500);
     };
     ws.onmessage = (ev) => {
@@ -321,10 +396,21 @@ export const useStore = create<Store>((set, get) => ({
         }
       } else if (msg.type === "agent-job-started") {
         get().upsertJob(msg.job);
+        // Drop any stale worktreeProgress for this change from a previous
+        // run — the fresh watcher will re-populate it once tasks tick.
+        set((s) => {
+          if (!(msg.job.changeId in s.worktreeProgress)) return {};
+          const { [msg.job.changeId]: _drop, ...rest } = s.worktreeProgress;
+          return { worktreeProgress: rest };
+        });
       } else if (msg.type === "agent-job-output") {
         get().appendJobOutput(msg.jobId, { stream: msg.stream, chunk: msg.chunk, ts: Date.now() });
       } else if (msg.type === "agent-job-finished") {
         get().setJobFinished(msg.jobId, msg.status, msg.exitCode);
+      } else if (msg.type === "worktree-progress-updated") {
+        set((s) => ({
+          worktreeProgress: { ...s.worktreeProgress, [msg.changeId]: msg.progress },
+        }));
       } else if (msg.type === "git-status-updated") {
         const s = get().state;
         if (s) set({ state: { ...s, gitStatus: msg.gitStatus } });

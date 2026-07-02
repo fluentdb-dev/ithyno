@@ -31,6 +31,11 @@ let onAuthExpired: (() => void) | null = null;
 export function onAuthExpiredHandler(fn: () => void): void {
   onAuthExpired = fn;
 }
+/** Fire the auth-expired handler from outside `postJson` (e.g. from the WS
+ *  reconnect loop when repeated closes suggest the session token is stale). */
+export function triggerAuthExpired(): void {
+  onAuthExpired?.();
+}
 
 /**
  * Verify the stored session token against the server. Used at App mount to
@@ -90,9 +95,19 @@ export async function fetchState(): Promise<WorkspaceState> {
   return res.json();
 }
 
-export async function fetchChange(id: string): Promise<Change> {
-  const res = await fetch(`/api/changes/${encodeURIComponent(id)}`);
-  if (!res.ok) throw new Error(`GET /api/changes/${id} failed: ${res.status}`);
+export async function fetchChange(
+  id: string,
+  opts?: { tree?: "worktree" },
+): Promise<Change> {
+  const query = opts?.tree === "worktree" ? "?tree=worktree" : "";
+  const res = await fetch(`/api/changes/${encodeURIComponent(id)}${query}`);
+  if (!res.ok) {
+    // Preserve the status so callers can distinguish 404 (worktree gone)
+    // from other failures.
+    const err = new Error(`GET /api/changes/${id}${query} failed: ${res.status}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -213,6 +228,23 @@ export async function postGitInit(): Promise<GitStatus> {
   );
   if (status >= 400 || !data.gitStatus) throw new Error(data.error ?? `HTTP ${status}`);
   return data.gitStatus;
+}
+
+/**
+ * Send user input to a running agent's stdin. The response gets echoed
+ * back into the job's output ring buffer (via WS `agent-job-output` with
+ * `stream: "stdin"`), so all connected clients see the transcript.
+ */
+export async function sendAgentInput(
+  id: string,
+  data: string,
+  appendNewline = true,
+): Promise<void> {
+  const { status, data: body } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/agents/jobs/${encodeURIComponent(id)}/input`,
+    { data, appendNewline },
+  );
+  if (status >= 400) throw new Error(body.error ?? `HTTP ${status}`);
 }
 
 export async function cancelAgentJob(id: string): Promise<void> {

@@ -121,7 +121,13 @@ export function useStartFlow() {
     return null;
   })();
 
-  const StartFlowModals = () => (
+  // Return JSX (not a component) so React sees stable element types across
+  // re-renders. Returning a `() => JSX` component defined inside the hook
+  // creates a new function reference every render, which React treats as a
+  // new component type — that forces unmount + mount of the modal tree on
+  // every parent re-render, and any useEffect inside a modal fires again
+  // and again in an unbounded loop.
+  const startFlowModals = (
     <>
       {applyPending && (
         <CommandModal
@@ -186,5 +192,5 @@ export function useStartFlow() {
     </>
   );
 
-  return { startImplementation, StartFlowModals };
+  return { startImplementation, startFlowModals };
 }

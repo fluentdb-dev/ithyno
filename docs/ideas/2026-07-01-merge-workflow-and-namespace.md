@@ -1,11 +1,19 @@
 ---
-status: idea
+status: promoted
 tags: [feature/merge, feature/agent-runner, area/skills, area/web]
 source: conversation
 related:
   - docs/ideas/2026-06-24-task-assignment.md
-promoted_to: null
+promoted_to: openspec/changes/add-ithy-opsx-archive/proposal.md
 ---
+
+> **Promotion note (2026-07-02)**: Idea B (the `ithy-opsx:` namespace)
+> is now real, promoted via `add-ithy-opsx-archive` — the first concrete
+> command in the namespace. Idea A (`/ithy-opsx:merge` as a standalone
+> command) remains open for a follow-up proposal. The archive skill
+> covers the merge step inline for the archive path; a separate merge
+> command is still worthwhile when the user wants to merge without
+> archiving.
 
 # Merge as a Claude-Code-orchestrated workflow + `ithy-opsx:` namespace
 

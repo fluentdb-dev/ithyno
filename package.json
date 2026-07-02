@@ -21,11 +21,13 @@
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "OPENSPEC_DEV=1 tsx watch server/index.ts",
     "dev:web": "vite",
+    "dev:test": "concurrently -n api,web -c blue,magenta \"OPENSPEC_DEV=1 tsx server/index.ts\" \"npm:dev:web\"",
     "build": "vite build",
     "build:server": "tsc -p server-dist.tsconfig.json",
     "start": "node bin/openspec-ui.js",
     "demo": "node bin/openspec-ui.js --dir examples/sample-project",
     "openspec": "openspec",
+    "clean:worktrees": "bin/clean-worktrees.sh",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

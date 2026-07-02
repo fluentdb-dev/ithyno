@@ -1,14 +1,15 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "../store";
 import { ProgressBar } from "../components/ProgressBar";
 import { TaskTree } from "../components/TaskTree";
 import { SpecView } from "../components/SpecView";
 import { CommandModal } from "../components/CommandModal";
 import { TagChipList } from "../components/TagChip";
-import { injectPty } from "../api";
+import { injectPty, fetchChange } from "../api";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
+import type { Change as ChangeType } from "../types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,7 +17,44 @@ type Tab = "tasks" | "proposal" | "design" | "delta";
 
 export function ChangeDetail() {
   const { id } = useParams<{ id: string }>();
-  const change = useStore((s) => s.state?.changes.find((c) => c.id === id));
+  const [searchParams] = useSearchParams();
+  const isWorktreeView = searchParams.get("tree") === "worktree";
+  const [worktreeChange, setWorktreeChange] = useState<ChangeType | null>(null);
+  const [worktreeGone, setWorktreeGone] = useState(false);
+
+  // add-worktree-change-view: when the URL says `tree=worktree`, fetch the
+  // change from `.worktrees/<id>/openspec/` so the tabs render whatever the
+  // running agent has produced. Fall back to the store's main-tree change
+  // (below) if the fetch 404s — the worktree may have been Discarded
+  // between the Kanban card click and this render.
+  useEffect(() => {
+    if (!isWorktreeView || !id) {
+      setWorktreeChange(null);
+      setWorktreeGone(false);
+      return;
+    }
+    let cancelled = false;
+    setWorktreeGone(false);
+    fetchChange(id, { tree: "worktree" })
+      .then((c) => {
+        if (!cancelled) setWorktreeChange(c);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if ((err as { status?: number }).status === 404) {
+          setWorktreeChange(null);
+          setWorktreeGone(true);
+        } else {
+          console.error("[change-detail] worktree fetch failed:", err);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isWorktreeView]);
+
+  const mainChange = useStore((s) => s.state?.changes.find((c) => c.id === id));
+  const change = isWorktreeView && worktreeChange ? worktreeChange : mainChange;
   const archivedEntry = useStore((s) => s.state?.archive.find((a) => a.id === id));
   const terminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
@@ -26,9 +64,13 @@ export function ChangeDetail() {
   const setCommandStyle = useStore((s) => s.setCommandStyle);
   const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
+  // Live worktree progress — same source as the Kanban card. Prefer the
+  // WS-driven per-change slice; fall back to the running job's own
+  // `worktreeProgress` snapshot (populated at job start / orphan adoption).
+  const worktreeProgressFromWs = useStore((s) => (id ? s.worktreeProgress[id] : undefined));
   const [tab, setTab] = useState<Tab>("tasks");
   const [pendingAction, setPendingAction] = useState<null | "archive">(null);
-  const { startImplementation, StartFlowModals } = useStartFlow();
+  const { startImplementation, startFlowModals } = useStartFlow();
 
   const runInject = async (line: string) => {
     const res = await injectPty(line, true);
@@ -90,15 +132,58 @@ export function ChangeDetail() {
       <Link to="/" className="back">
         ← Overview
       </Link>
+      {worktreeGone && isWorktreeView && (
+        <div className="notice">
+          ⚠ worktree gone — showing main tree.{" "}
+          <Link to={`/change/${encodeURIComponent(id ?? "")}`}>drop the ?tree=worktree</Link>
+        </div>
+      )}
       <div className="detail-head">
-        <h2>{change.id}</h2>
+        <h2>
+          {change.id}
+          {isWorktreeView && worktreeChange && (
+            <Link
+              to={`/change/${encodeURIComponent(id ?? "")}`}
+              className="detail-tree-pill"
+              title="Switch to main-tree view (URL without ?tree=worktree)."
+            >
+              viewing worktree · switch to main
+            </Link>
+          )}
+        </h2>
         <TagChipList tags={change.proposal?.tags} />
-        <ProgressBar progress={change.progress} />
         {(() => {
           const latestJob = Object.values(jobs)
             .filter((j) => j.changeId === change.id)
             .sort((a, b) => b.startedAt - a.startedAt)[0];
-          const isDone = change.progress.total > 0 && change.progress.done === change.progress.total;
+          const worktreeProgress = worktreeProgressFromWs ?? latestJob?.worktreeProgress;
+          const showWorktreeProgress =
+            !!worktreeProgress && !!latestJob && latestJob.status !== "cancelled";
+          const displayed = showWorktreeProgress ? worktreeProgress : change.progress;
+          return (
+            <>
+              <ProgressBar progress={displayed} />
+              {showWorktreeProgress && (
+                <span
+                  className="detail-worktree-badge muted"
+                  title="Live progress from the agent's worktree tasks.md (not yet merged to main)."
+                >
+                  worktree
+                </span>
+              )}
+            </>
+          );
+        })()}
+        {(() => {
+          const latestJob = Object.values(jobs)
+            .filter((j) => j.changeId === change.id)
+            .sort((a, b) => b.startedAt - a.startedAt)[0];
+          const worktreeProgress = worktreeProgressFromWs ?? latestJob?.worktreeProgress;
+          const effectiveProgress =
+            worktreeProgress && latestJob && latestJob.status !== "cancelled"
+              ? worktreeProgress
+              : change.progress;
+          const isDone = effectiveProgress.total > 0 && effectiveProgress.done === effectiveProgress.total;
           const canStart =
             agents.length > 0 &&
             !isDone &&
@@ -170,15 +255,15 @@ export function ChangeDetail() {
           build={(_input, m) =>
             m === "cli"
               ? `npx openspec archive ${change.id}`
-              : `/opsx:archive ${change.id}`
+              : `/ithy-opsx:archive ${change.id}`
           }
-          submitLabel={commandStyle === "cli" ? "Send npx openspec archive" : "Send /opsx:archive"}
+          submitLabel={commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive"}
           onCancel={() => setPendingAction(null)}
           onSubmit={runInject}
         />
       )}
 
-      <StartFlowModals />
+      {startFlowModals}
 
       <div className="tabs">
         <button className={tab === "tasks" ? "active" : ""} onClick={() => setTab("tasks")}>

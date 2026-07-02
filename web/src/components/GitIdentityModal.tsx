@@ -16,6 +16,7 @@ export function GitIdentityModal({ onClose }: Props) {
   const gitConfig = useStore((s) => s.gitConfig);
   const loadGitConfig = useStore((s) => s.loadGitConfig);
   const setGitStatus = useStore((s) => s.setGitStatus);
+  const refreshGitStatus = useStore((s) => s.refreshGitStatus);
   const pushToast = useStore((s) => s.pushToast);
   const isRepo = gitStatus?.isRepo === true;
 
@@ -23,6 +24,12 @@ export function GitIdentityModal({ onClose }: Props) {
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [initing, setIniting] = useState(false);
+
+  // Also refetch gitStatus on open so `hasCommits` / branch reflect any
+  // commits made outside the dashboard since the last WS-driven update.
+  useEffect(() => {
+    void refreshGitStatus();
+  }, [refreshGitStatus]);
 
   // Refresh config when the modal opens so we always see up-to-date local.
   useEffect(() => {

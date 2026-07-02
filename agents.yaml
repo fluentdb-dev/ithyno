@@ -1,5 +1,14 @@
 agents:
   - name: claude
-    description: Implements the change using Claude Code via /opsx:apply.
+    description: Implements the change using Claude Code via /ithy-opsx:apply (implementation + auto commit on the agent branch).
     command: claude
-    args: ["/opsx:apply", "${change_id}"]
+    # Print mode (-p) runs the prompt non-interactively — the slash command
+    # is submitted immediately, no paste-detection heuristics get in the way.
+    # `--dangerously-skip-permissions` bypasses the tool-approval prompts
+    # (worktree isolation is the safety net).
+    #
+    # `/ithy-opsx:apply` wraps `/opsx:apply` and adds a commit step at the
+    # end so the agent branch ends with the implementation recorded. See
+    # `.claude/skills/ithy-opsx-apply/SKILL.md`. Use `/opsx:apply` directly
+    # if you want the bare non-committing flow.
+    args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]

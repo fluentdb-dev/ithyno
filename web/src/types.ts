@@ -143,6 +143,7 @@ export type AgentPublic = {
   command: string;
   args: string[];
   hasEnv: boolean;
+  initialInput?: string;
 };
 
 export type AgentConfigResponse = {
@@ -151,7 +152,7 @@ export type AgentConfigResponse = {
   agents: AgentPublic[];
 };
 
-export type JobStatus = "running" | "completed" | "cancelled" | "crashed";
+export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";
 
 export type JobSummary = {
   id: string;
@@ -163,9 +164,10 @@ export type JobSummary = {
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
+  worktreeProgress?: Progress;
 };
 
-export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
+export type OutputLine = { stream: "stdout" | "stderr" | "stdin"; chunk: string; ts: number };
 export type Job = JobSummary & { output: OutputLine[] };
 
 export type DiffLine = { kind: "ctx" | "add" | "del"; text: string };

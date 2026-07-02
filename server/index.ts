@@ -86,8 +86,9 @@ type ServerEvent =
   | { type: "doc-updated"; path: string; file: DocsFile | null; tree: DocsTree }
   | { type: "tags-updated" }
   | { type: "agent-job-started"; job: JobSummary }
-  | { type: "agent-job-output"; jobId: string; chunk: string; stream: "stdout" | "stderr" }
+  | { type: "agent-job-output"; jobId: string; chunk: string; stream: "stdout" | "stderr" | "stdin" }
   | { type: "agent-job-finished"; jobId: string; status: JobStatus; exitCode: number | null }
+  | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: { done: number; total: number } }
   | { type: "git-status-updated"; gitStatus: GitStatus };
 
 function broadcast(event: ServerEvent): void {
@@ -150,6 +151,14 @@ if (existsSync(DOCS_DIR)) {
 const agentRegistry = new AgentRegistry(PROJECT_ROOT);
 await agentRegistry.load();
 const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadcast(ev));
+// Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
+// job map so the Kanban card can offer Merge/Discard without the user
+// having to shell out. Awaited so that the very first `/api/agents/jobs`
+// response and the initial `/api/state` a reconnecting client sees
+// already include the adopted orphans — otherwise the client races with
+// this init and misses the one-shot `agent-job-started` events.
+// See add-orphan-worktree-adoption.
+await agentRunner.adoptOrphanWorktrees();
 void agentRegistry.startWatching();
 
 process.on("SIGINT", () => {
@@ -258,10 +267,25 @@ fastify.post("/api/git/init", async (req, reply) => {
   }
 });
 
-fastify.get<{ Params: { id: string } }>("/api/changes/:id", async (req, reply) => {
-  if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
-  return parseChange(openspecDir, req.params.id);
-});
+fastify.get<{ Params: { id: string }; Querystring: { tree?: string } }>(
+  "/api/changes/:id",
+  async (req, reply) => {
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    if (req.query?.tree === "worktree") {
+      // add-worktree-change-view: serve from `.worktrees/<id>/openspec/` so
+      // the dashboard can render the running agent's live tasks.md, proposal
+      // edits, delta specs — anything the agent has touched on its branch.
+      const worktreeOpenspec = join(PROJECT_ROOT, ".worktrees", req.params.id, "openspec");
+      if (!existsSync(worktreeOpenspec)) {
+        return reply.code(404).send({
+          error: `no worktree at .worktrees/${req.params.id}. The plain URL /change/${req.params.id} shows the main-tree view.`,
+        });
+      }
+      return parseChange(worktreeOpenspec, req.params.id);
+    }
+    return parseChange(openspecDir, req.params.id);
+  },
+);
 
 type ProposalExecutionBody = { mode: ExecutionMode };
 fastify.post<{ Params: { id: string }; Body: ProposalExecutionBody }>(
@@ -353,6 +377,24 @@ fastify.post<{ Params: { id: string } }>("/api/agents/jobs/:id/cancel", async (r
   if (!res.ok) return reply.code(400).send({ error: res.reason });
   return { ok: true };
 });
+
+type InputBody = { data?: string; appendNewline?: boolean };
+fastify.post<{ Params: { id: string }; Body: InputBody }>(
+  "/api/agents/jobs/:id/input",
+  async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+      return reply.code(403).send({ error: "local only" });
+    }
+    const data = req.body?.data;
+    if (typeof data !== "string") {
+      return reply.code(400).send({ error: "data (string) is required" });
+    }
+    const appendNewline = req.body?.appendNewline ?? true;
+    const res = agentRunner.writeInput(req.params.id, data, appendNewline);
+    if (!res.ok) return reply.code(res.status).send({ error: res.reason });
+    return { ok: true };
+  },
+);
 
 // ---- tagging endpoints -----------------------------------------------------
 fastify.get("/api/tags", async () => {

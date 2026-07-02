@@ -4,7 +4,7 @@
 # loads it on startup and again whenever the file changes. With no agents
 # defined (or no `agents.yaml`), the Kanban Run button is hidden.
 #
-# Template variables available in `args` and `env`:
+# Template variables available in `args`, `env`, and `initialInput`:
 #   ${change_id}     — the OpenSpec change id (e.g. "add-task-filter")
 #   ${worktree_path} — absolute path to the agent's git worktree
 #   ${branch}        — the agent branch ("agent/<change-id>")
@@ -12,17 +12,58 @@
 # Spawning is `child_process.spawn(command, args, { cwd: worktree_path, env })`.
 # The agent inherits the project's working tree via the worktree; it should
 # end by leaving its changes committed (or at least staged) on the branch.
+#
+# Agents run inside a pseudo-terminal (node-pty), so TTY-detecting CLIs
+# behave as they would in a normal terminal. Omit `-p` / `--headless`
+# flags whose only purpose was to work around the missing TTY.
+#
+# `initialInput` (optional) — written to the PTY exactly once, immediately
+# after spawn, with a trailing `\r` appended if the value doesn't already
+# end with `\r` or `\n`. Every REPL-style CLI (Claude, Aider, Codex) reads
+# its first task from stdin — prefer this over per-CLI print-mode flags,
+# which are CLI-specific and can change between releases.
+#
+# Interactive prompts (permission gates in Claude Code, `y/N` in Aider, etc.)
+# can be answered live from the Agents page — the dashboard writes to the
+# running agent's stdin. Alternatively, add a YOLO flag to `args` to skip
+# prompts entirely (worktree isolation limits the blast radius):
+#   Claude:  args: ["--dangerously-skip-permissions", "/opsx:apply", "${change_id}"]
+#   Aider:   args: ["--yes-always", "--message", "Implement ${change_id}"]
 
 agents:
+  # Default Claude entry — uses `/ithy-opsx:apply` so the agent branch ends
+  # with the implementation committed. The wrapping skill delegates to
+  # `/opsx:apply` for the actual work, then adds one `git commit` at the
+  # end. See `.claude/skills/ithy-opsx-apply/SKILL.md`.
+  #
+  # Prefer this over the bare `/opsx:apply` unless you have a reason (e.g.
+  # you drive commits some other way, or you want the archive skill's
+  # safety-net commit step to be the single point of commit).
   - name: claude
-    description: Implements the change using Claude Code via /opsx:apply.
+    description: Implements the change using Claude Code via /ithy-opsx:apply (adds a commit at end).
     command: claude
-    args: ["/opsx:apply", "${change_id}"]
+    args: []
+    initialInput: "/ithy-opsx:apply ${change_id}"
 
   # Add more agents as you need them — any local CLI works.
   # - name: aider
   #   description: Implements with Aider.
   #   command: aider
-  #   args: ["--yes", "--message", "Implement openspec change ${change_id}"]
+  #   args: ["--yes-always"]
+  #   initialInput: "Implement OpenSpec change ${change_id}"
   #   env:
   #     OPENAI_API_KEY: "..."
+  #
+  # Bare non-committing Claude — the archive skill's safety net catches
+  # the commit at merge time. Use this if you want the "single commit at
+  # archive" flow rather than "commit at implement + commit at archive."
+  # - name: claude-plain
+  #   command: claude
+  #   args: []
+  #   initialInput: "/opsx:apply ${change_id}"
+  #
+  # An alternative shape for Claude that uses print mode instead of stdin.
+  # Works today but is more coupled to the Claude CLI's flag surface.
+  # - name: claude-print
+  #   command: claude
+  #   args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]

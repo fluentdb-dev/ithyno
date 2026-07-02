@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useStore } from "../store";
 import type { Change } from "../types";
 
 export type PickerReason = { text: string; hint?: "git-panel" } | null;
@@ -32,6 +33,13 @@ export function ExecutionPicker({
   onOpenGitPanel,
 }: ExecutionPickerProps) {
   const [save, setSave] = useState(false);
+  const refreshGitStatus = useStore((s) => s.refreshGitStatus);
+  // The user may have run `git commit` outside the dashboard between page-load
+  // and opening this picker. Refetch on mount so the `hasCommits` gate reflects
+  // reality, not stale server-side cache.
+  useEffect(() => {
+    void refreshGitStatus();
+  }, [refreshGitStatus]);
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal execution-picker" onClick={(e) => e.stopPropagation()}>

@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useStore } from "../store";
-import { fetchAgentJob, cancelAgentJob } from "../api";
-import type { Job, JobSummary, OutputLine } from "../types";
+import { cancelAgentJob } from "../api";
+import type { JobSummary } from "../types";
 import { DiffView } from "../components/DiffView";
+import { AgentOutputView } from "../components/AgentOutputView";
 
 export function Agents() {
-  const jobs = useStore((s) => Object.values(s.jobs));
+  // Subscribe to the jobs map (stable reference), then compute the array
+  // in-component. Returning `Object.values(s.jobs)` directly from the selector
+  // creates a new array every render → React 19 detects it as an infinite loop.
+  const jobsMap = useStore((s) => s.jobs);
+  const jobs = useMemo(() => Object.values(jobsMap), [jobsMap]);
   const agents = useStore((s) => s.agents);
   const agentConfigError = useStore((s) => s.agentConfigError);
   const loadAgents = useStore((s) => s.loadAgents);
@@ -127,33 +132,13 @@ function JobRow({ job, initialTab }: { job: JobSummary; initialTab?: "output" | 
               Diff
             </button>
           </div>
-          {tab === "output" ? <JobOutput jobId={job.id} /> : <DiffView jobId={job.id} />}
+          {tab === "output" ? (
+            <AgentOutputView jobId={job.id} />
+          ) : (
+            <DiffView jobId={job.id} />
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-function JobOutput({ jobId }: { jobId: string }) {
-  const live = useStore((s) => s.jobOutputs[jobId]);
-  const [seeded, setSeeded] = useState<OutputLine[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchAgentJob(jobId).then((j: Job | null) => {
-      if (!cancelled && j) setSeeded(j.output);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId]);
-
-  const lines = live ?? seeded ?? [];
-  return (
-    <pre className="job-output">
-      {lines.map((l, i) => (
-        <span key={i} className={`out-${l.stream}`}>{l.chunk}</span>
-      ))}
-    </pre>
   );
 }

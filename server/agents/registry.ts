@@ -15,6 +15,10 @@ export type AgentDef = {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /** Optional initial prompt written to the child's stdin at spawn time.
+   *  Supports the same `${change_id}` / `${worktree_path}` / `${branch}`
+   *  template variables as `args` and `env`. See add-agent-initial-input. */
+  initialInput?: string;
 };
 
 export type AgentConfig =
@@ -33,7 +37,14 @@ function validateAgents(raw: unknown): AgentDef[] {
     const args = Array.isArray(o.args) ? o.args.map(String) : [];
     const env = o.env && typeof o.env === "object" ? Object.fromEntries(Object.entries(o.env as object).map(([k, v]) => [k, String(v)])) : undefined;
     const description = typeof o.description === "string" ? o.description : undefined;
-    return { name: o.name, command: o.command, args, env, description };
+    let initialInput: string | undefined;
+    if (o.initialInput !== undefined) {
+      if (typeof o.initialInput !== "string") {
+        throw new Error(`agents[${i}].initialInput must be a string`);
+      }
+      initialInput = o.initialInput;
+    }
+    return { name: o.name, command: o.command, args, env, description, initialInput };
   });
 }
 
@@ -99,11 +110,11 @@ export class AgentRegistry {
     return this.cache.agents.find((a) => a.name === name) ?? null;
   }
 
-  /** Resolve `${change_id}` etc. in args and env strings. */
+  /** Resolve `${change_id}` etc. in args, env, and initialInput strings. */
   resolve(
     def: AgentDef,
     vars: { change_id: string; worktree_path: string; branch: string },
-  ): { args: string[]; env: Record<string, string> } {
+  ): { args: string[]; env: Record<string, string>; initialInput?: string } {
     const replace = (s: string): string =>
       s
         .replace(/\$\{change_id\}/g, vars.change_id)
@@ -112,6 +123,7 @@ export class AgentRegistry {
     const args = def.args.map(replace);
     const env: Record<string, string> = {};
     if (def.env) for (const [k, v] of Object.entries(def.env)) env[k] = replace(v);
-    return { args, env };
+    const initialInput = def.initialInput === undefined ? undefined : replace(def.initialInput);
+    return { args, env, initialInput };
   }
 }

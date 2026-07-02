@@ -17,6 +17,7 @@ import { injectPty } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
+import { ParallelStartLauncher } from "./ParallelStartLauncher";
 
 type ColumnId = "todo" | "inprogress" | "done";
 
@@ -36,30 +37,45 @@ function modalTitle(p: PendingDrag): string {
 function buildPendingCommand(p: PendingDrag, mode: string): string {
   const id = p.change.id;
   if (p.kind === "apply") return `/opsx:apply ${id}`;
-  if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : `/opsx:archive ${id}`;
+  if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : `/ithy-opsx:archive ${id}`;
   if (p.kind === "agent-merge") return `git merge --no-ff ${p.job.branch}`;
   return `git worktree remove --force ${p.job.worktreePath} && git branch -D ${p.job.branch}`;
 }
 
 function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): string {
   if (p.kind === "apply") return "Send /opsx:apply";
-  if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : "Send /opsx:archive";
+  if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive";
   if (p.kind === "agent-merge") return "Send git merge";
   return "Send cleanup";
 }
 
 
-function bucketize(changes: Change[]): Buckets {
+function bucketize(changes: Change[], jobByChange: Map<string, JobSummary>): Buckets {
   const todo: Change[] = [];
   const inprogress: Change[] = [];
   const done: Change[] = [];
   for (const c of changes) {
     const { done: d, total } = c.progress;
-    if (total === 0 || d === 0) todo.push(c);
-    else if (d < total) inprogress.push(c);
-    else done.push(c);
+    const job = jobByChange.get(c.id);
+    // A job that is running OR sitting post-run awaiting merge/discard means
+    // the change is IN-PROGRESS regardless of whether any tasks have been
+    // ticked yet — clicking Start should visibly move the card.
+    const hasActiveJob = !!job && (job.status === "running" || isPendingMergeOrDiscard(job));
+    if (d === total && total > 0) done.push(c);
+    else if (hasActiveJob) inprogress.push(c);
+    else if (total === 0 || d === 0) todo.push(c);
+    else inprogress.push(c);
   }
   return { todo, inprogress, done };
+}
+
+function isPendingMergeOrDiscard(job: JobSummary): boolean {
+  return (
+    job.status === "completed" ||
+    job.status === "crashed" ||
+    job.status === "cancelled" ||
+    job.status === "orphaned"
+  );
 }
 
 type PendingDrag =
@@ -75,15 +91,15 @@ export function KanbanBoard({
   changes: Change[];
   onNewChange: () => void;
 }) {
-  const buckets = useMemo(() => bucketize(changes), [changes]);
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
   const pushToast = useStore((s) => s.pushToast);
   const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
+  const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
   const [pending, setPending] = useState<PendingDrag | null>(null);
   const [draggingFrom, setDraggingFrom] = useState<ColumnId | null>(null);
-  const { startImplementation, StartFlowModals } = useStartFlow();
+  const { startImplementation, startFlowModals } = useStartFlow();
 
   // Build a per-change "latest job" lookup so cards can show status.
   const jobByChange = useMemo(() => {
@@ -94,6 +110,8 @@ export function KanbanBoard({
     }
     return m;
   }, [jobs]);
+
+  const buckets = useMemo(() => bucketize(changes, jobByChange), [changes, jobByChange]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -142,6 +160,12 @@ export function KanbanBoard({
     const res = await injectPty(line, true);
     if ((res as any).status === "ok") {
       pushToast("info", "Sent to terminal");
+      // Merge / Discard both take the worktree out of play — clear the
+      // stale worktreeProgress so the card reverts to the main-tree value
+      // (which reflects the merged/discarded state).
+      if (pending && (pending.kind === "agent-merge" || pending.kind === "agent-discard")) {
+        clearWorktreeProgress(pending.change.id);
+      }
       setPending(null);
     } else if ((res as any).status === "no-terminal") {
       pushToast("error", (res as any).reason ?? "No terminal open. Open a change view to start one.");
@@ -176,6 +200,13 @@ export function KanbanBoard({
           count={buckets.inprogress.length}
           allowedFrom="todo"
           draggingFrom={draggingFrom}
+          headerAction={
+            <ParallelStartLauncher
+              changes={changes}
+              jobByChange={jobByChange}
+              startImplementation={startImplementation}
+            />
+          }
         >
           {buckets.inprogress.map((c) => (
             <ChangeCard
@@ -240,7 +271,7 @@ export function KanbanBoard({
         </CommandModal>
       )}
 
-      <StartFlowModals />
+      {startFlowModals}
     </DndContext>
   );
 }
@@ -253,6 +284,7 @@ function Column({
   draggingFrom,
   children,
   onAdd,
+  headerAction,
 }: {
   id: ColumnId | "done";
   title: string;
@@ -261,6 +293,7 @@ function Column({
   draggingFrom: ColumnId | null;
   children: React.ReactNode;
   onAdd?: () => void;
+  headerAction?: React.ReactNode;
 }) {
   // The "done" outer column itself isn't a drop target; the archived sub
   // section inside is. So we only register a droppable for the inprogress
@@ -283,6 +316,7 @@ function Column({
             + New Change
           </button>
         )}
+        {headerAction}
       </header>
       <div className="kanban-col-body">{children}</div>
     </section>
@@ -310,6 +344,16 @@ function ChangeCard({
   onMerge: (job: JobSummary) => void;
   onDiscard: (job: JobSummary) => void;
 }) {
+  // add-worktree-tasks-watcher: when a running / pending-merge / orphaned
+  // job exists for this change, prefer the live worktree progress from
+  // tasks.md ticks over the main-tree parse (which won't move until the
+  // branch is merged). Fall back to the job's own `worktreeProgress`
+  // snapshot (populated at startup by orphan adoption) if the WS event
+  // hasn't landed yet.
+  const worktreeProgressFromWs = useStore((s) => s.worktreeProgress[change.id]);
+  const worktreeProgress = worktreeProgressFromWs ?? job?.worktreeProgress;
+  const showWorktreeProgress = !!worktreeProgress && !!job && job.status !== "cancelled";
+  const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
   // Cards are draggable from TODO only; IN-PROGRESS is read-only; DONE has the
   // Archive button instead of being draggable.
   const draggable = column === "todo";
@@ -326,7 +370,11 @@ function ChangeCard({
       {...listeners}
       className={`kanban-card${isDragging ? " dragging" : ""}${draggable ? " draggable" : ""}`}
     >
-      <Link to={`/change/${encodeURIComponent(change.id)}`} className="kanban-card-link" onClick={(e) => e.stopPropagation()}>
+      <Link
+        to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
+        className="kanban-card-link"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="kanban-card-head">
           <h4>{change.id}</h4>
           {column === "done" && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
@@ -335,7 +383,12 @@ function ChangeCard({
           <span className="kanban-card-assignee-slot" />
         </div>
         {change.proposal?.intent && <p className="kanban-card-intent">{change.proposal.intent}</p>}
-        <ProgressBar progress={change.progress} />
+        <ProgressBar progress={displayedProgress} />
+        {showWorktreeProgress && (
+          <span className="kanban-card-source-hint" title="Progress driven by the running agent's worktree tasks.md">
+            {displayedProgress.done}/{displayedProgress.total} (worktree)
+          </span>
+        )}
       </Link>
       {change.proposal?.tags && change.proposal.tags.length > 0 && (
         // Tags live OUTSIDE the card's <Link> because each chip is itself a
@@ -442,11 +495,27 @@ function AgentBadge({ job }: { job?: JobSummary }) {
   if (job.status === "cancelled") {
     return <span className="agent-badge muted">cancelled</span>;
   }
+  if (job.status === "orphaned") {
+    return (
+      <span
+        className="agent-badge orphaned"
+        title="Worktree adopted from disk (no process in this server lifetime) — Merge or Discard"
+      >
+        orphaned
+      </span>
+    );
+  }
   return <span className="agent-badge fail" title={`exit ${job.exitCode ?? "?"}`}>✗ failed</span>;
 }
 
 function isMergeable(job: JobSummary): boolean {
-  // Show Merge/Discard only when a worktree is sitting around (any post-running state).
-  return job.status === "completed" || job.status === "crashed" || job.status === "cancelled";
+  // Show Merge/Discard when a worktree is sitting around (any post-run state,
+  // including one we adopted from disk with no prior run in this session).
+  return (
+    job.status === "completed" ||
+    job.status === "crashed" ||
+    job.status === "cancelled" ||
+    job.status === "orphaned"
+  );
 }
 
