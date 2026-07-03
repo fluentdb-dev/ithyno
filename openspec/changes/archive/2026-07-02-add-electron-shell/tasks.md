@@ -50,17 +50,20 @@
 - [x] 9.3 `electron/README.md`: dev loop (`npm run electron:dev`), build, and side-loading notes
 
 ## 10. Verification
-- [ ] 10.1 `npm run electron:dev` opens the app, prompts for a folder, and renders the kanban
-- [ ] 10.2 Restart shows the same project without re-prompting
-- [ ] 10.3 "File → Open Project…" switches to a different folder
-- [ ] 10.4 "File → Open Recent" lists previous folders in MRU order
-- [ ] 10.5 Closing the window quits the app and the server child exits
-- [ ] 10.6 Double-launching focuses the existing window (single instance)
+- [x] 10.1 `npm run electron:dev` opens the app, prompts for a folder, and renders the kanban
+- [x] 10.2 Restart shows the same project without re-prompting
+- [x] 10.3 "File → Open Project…" switches to a different folder
+- [x] 10.4 "File → Open Recent" lists previous folders in MRU order
+- [x] 10.5 Closing the window quits the app and the server child exits
+- [ ] 10.6 Double-launching focuses the existing window (single instance) — dev-mode `electron .` sends `.` as argv → resolves to workspace dir (not the target project) → path-normalization fix landed (setProject absolute + workingDirectory-based resolve + currentProjectRoot compare) but the dev artifact where `.` corrupts state remains; full verification is packaged-only
 - [ ] 10.7 The packaged DMG runs the same flow end-to-end on macOS (analogous for Windows / Linux when CI is available)
 
-> §10 items require a GUI session (macOS Finder / dock double-click) which the
-> implementation environment cannot exercise. The server-spawner path was
-> verified with a Node smoke script that spawned `bin/openspec-ui.js`, parsed
-> the launch URL from stdout, and confirmed `/api/health` returned 200 on the
-> free port. All other pieces are unit-shaped enough that typecheck +
-> compilation gate them.
+> §10.1–10.5 verified manually post-merge via `npm run electron:dev` against
+> this repository. §10.6 revealed a real bug in the second-instance argv
+> handling (see follow-up commit before archive: absolute-path normalization
+> in `ProjectStore.setProject` + `workingDirectory`-based resolve in
+> `main.ts`'s `second-instance` handler). Full 10.6 pass is deferred to the
+> packaged build — a shipped DMG's second-instance argv doesn't include a
+> stray `.`, so the bug can't reproduce there. §10.7 blocks on
+> `add-electron-packaging-self-contained` (already listed in outcome
+> Follow-ups).

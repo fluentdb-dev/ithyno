@@ -61,6 +61,18 @@
   spawner path (which covers the interesting failure modes: bad port,
   hung startup, missing project root, SIGTERM cleanliness).
 
+  Post-merge follow-up (2026-07-03): 10.1–10.5 were manually re-verified
+  against main via `npm run electron:dev` and pass. 10.6 exposed a real
+  bug — the `second-instance` handler was resolving argv's `.` against
+  the first-instance's process CWD instead of the second instance's
+  `workingDirectory`, and `ProjectStore.setProject` accepted relative
+  paths. Both fixed in a follow-up commit (`electron: normalize project
+  paths on second-instance + store`). The dev-mode artifact where the
+  second `npm run electron:dev` corrupts state remains — a shipped
+  packaged app's argv doesn't include a stray `.`, so it doesn't
+  reproduce there. Full 10.6 pass therefore stays deferred to the
+  packaged verify (10.7).
+
 ## 🌱 Follow-ups
 
 - **`add-electron-packaging-self-contained`.** Fix the tsx dependency so

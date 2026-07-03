@@ -17,6 +17,7 @@ const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
 let mainWindow: BrowserWindow | null = null;
 let currentSpawn: SpawnResult | null = null;
+let currentProjectRoot: string | null = null;
 let quitting = false;
 
 /**
@@ -82,6 +83,7 @@ async function ensureProject(): Promise<string | null> {
 async function tearDownServer(): Promise<void> {
   const spawn = currentSpawn;
   currentSpawn = null;
+  currentProjectRoot = null;
   if (!spawn) return;
   const child = spawn.child;
   if (child.exitCode !== null) return;
@@ -160,6 +162,7 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     return;
   }
   currentSpawn = spawn;
+  currentProjectRoot = resolve(projectRoot);
   store.setProject(projectRoot);
   refreshMenu();
 
@@ -245,12 +248,13 @@ function refreshMenu(): void {
   Menu.setApplicationMenu(menu);
 }
 
-function extractFolderFromArgv(argv: string[]): string | null {
+function extractFolderFromArgv(argv: string[], cwd: string): string | null {
   for (let i = argv.length - 1; i >= 0; i--) {
     const a = argv[i];
     if (!a || a.startsWith('-')) continue;
     if (a.endsWith('.js') || a.endsWith('.exe') || a.endsWith('electron')) continue;
-    if (isDirectory(a)) return a;
+    const abs = resolve(cwd, a);
+    if (isDirectory(abs)) return abs;
   }
   return null;
 }
@@ -259,9 +263,9 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', (_event, argv) => {
-    const folder = extractFolderFromArgv(argv);
-    if (folder) {
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    const folder = extractFolderFromArgv(argv, workingDirectory ?? process.cwd());
+    if (folder && folder !== currentProjectRoot) {
       void switchProject(folder);
       return;
     }

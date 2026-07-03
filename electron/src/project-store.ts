@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export interface WindowState {
   width: number;
@@ -74,9 +74,10 @@ export class ProjectStore {
   }
 
   setProject(path: string): void {
-    this.state.lastProject = path;
-    const filtered = this.state.recent.filter((p) => p !== path);
-    filtered.unshift(path);
+    const abs = isAbsolute(path) ? path : resolve(path);
+    this.state.lastProject = abs;
+    const filtered = this.state.recent.filter((p) => p !== abs);
+    filtered.unshift(abs);
     this.state.recent = filtered.slice(0, RECENT_CAP);
     this.persist();
   }
