@@ -1,7 +1,13 @@
 import { useStore, taskKey } from "../store";
 import type { TaskList } from "../types";
 
-export function TaskTree({ tasks }: { tasks: TaskList }) {
+export function TaskTree({
+  tasks,
+  hideCompleted = false,
+}: {
+  tasks: TaskList;
+  hideCompleted?: boolean;
+}) {
   const toggle = useStore((s) => s.toggle);
   const conflicts = useStore((s) => s.conflicts);
   const dismissConflict = useStore((s) => s.dismissConflict);
@@ -19,9 +25,17 @@ export function TaskTree({ tasks }: { tasks: TaskList }) {
     return <p className="empty">No tasks found in tasks.md.</p>;
   }
 
+  const sections = hideCompleted
+    ? tasks.sections.map((s) => ({ ...s, tasks: s.tasks.filter((t) => !t.checked) }))
+    : tasks.sections;
+
+  if (hideCompleted && sections.every((s) => s.tasks.length === 0)) {
+    return <p className="empty">All tasks complete.</p>;
+  }
+
   return (
     <div className="task-tree">
-      {tasks.sections.map((section) =>
+      {sections.map((section) =>
         section.tasks.length === 0 ? null : (
           <section key={section.title} className="task-section">
             <h4>{section.title}</h4>

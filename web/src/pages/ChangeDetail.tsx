@@ -16,6 +16,24 @@ import remarkGfm from "remark-gfm";
 
 type Tab = "tasks" | "proposal" | "design" | "delta";
 
+const TASK_FILTER_PREFIX = "openspec-ui.taskFilter.";
+function readTaskFilter(changeId: string | undefined): boolean {
+  if (!changeId) return false;
+  try {
+    return localStorage.getItem(TASK_FILTER_PREFIX + changeId) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeTaskFilter(changeId: string | undefined, v: boolean): void {
+  if (!changeId) return;
+  try {
+    localStorage.setItem(TASK_FILTER_PREFIX + changeId, v ? "1" : "0");
+  } catch {
+    /* ignore quota / private-mode errors */
+  }
+}
+
 export function ChangeDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -75,6 +93,15 @@ export function ChangeDetail() {
   const worktreeProgressFromWs = useStore((s) => (id ? s.worktreeProgress[id] : undefined));
   const [tab, setTab] = useState<Tab>("tasks");
   const [pendingAction, setPendingAction] = useState<null | "archive">(null);
+  const [showIncompleteOnly, setShowIncompleteOnly] = useState(() => readTaskFilter(id));
+  // Re-hydrate when the user navigates between change ids without unmounting.
+  useEffect(() => {
+    setShowIncompleteOnly(readTaskFilter(id));
+  }, [id]);
+  const toggleTaskFilter = (v: boolean) => {
+    setShowIncompleteOnly(v);
+    writeTaskFilter(id, v);
+  };
   const { startImplementation, startFlowModals } = useStartFlow();
 
   const runInject = async (line: string) => {
@@ -289,7 +316,23 @@ export function ChangeDetail() {
 
       <div className="tab-body">
         {tab === "tasks" &&
-          (change.tasks ? <TaskTree tasks={change.tasks} /> : <p className="empty">No tasks.md.</p>)}
+          (change.tasks ? (
+            <>
+              <div className="tasks-filter">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showIncompleteOnly}
+                    onChange={(e) => toggleTaskFilter(e.target.checked)}
+                  />
+                  Show incomplete only
+                </label>
+              </div>
+              <TaskTree tasks={change.tasks} hideCompleted={showIncompleteOnly} />
+            </>
+          ) : (
+            <p className="empty">No tasks.md.</p>
+          ))}
 
         {tab === "proposal" &&
           (change.proposal ? (

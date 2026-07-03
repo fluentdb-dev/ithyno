@@ -409,6 +409,19 @@ a:hover {
 }
 
 /* Tasks */
+.tasks-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tasks-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
 .task-section {
   margin-bottom: 20px;
 }
