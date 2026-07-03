@@ -60,10 +60,10 @@
 - [x] 12.2 Agents page layout (job rows, tail viewer with monospace + scroll)
 
 ## 13. Verification
-- [ ] 13.1 With `agents.yaml` defining a `claude` agent, clicking Run on a TODO card creates `.worktrees/<id>/` and starts the agent
-- [ ] 13.2 The agents page tails the agent's output live
-- [ ] 13.3 A second Run on the same change returns 409
+- [x] 13.1 With `agents.yaml` defining a `claude` agent, clicking Run on a TODO card creates `.worktrees/<id>/` and starts the agent
+- [x] 13.2 The agents page tails the agent's output live
+- [x] 13.3 A second Run on the same change returns 409
 - [x] 13.4 Two changes can run agents in parallel without interference
-- [ ] 13.5 Merge button injects `git merge agent/<id>` into the embedded terminal
-- [ ] 13.6 Discard button injects the worktree+branch cleanup
-- [ ] 13.7 Server restart with active jobs SIGTERMs them; worktrees stay on disk for manual recovery
+- [x] 13.5 Merge button injects `git merge agent/<id>` into the embedded terminal
+- [x] 13.6 Discard button injects the worktree+branch cleanup
+- [x] 13.7 Server restart with active jobs SIGTERMs them; worktrees stay on disk for manual recovery
