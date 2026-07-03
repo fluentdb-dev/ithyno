@@ -52,7 +52,7 @@ Pick whichever entry point matches how you already work.
 | **devDep install** | `cd your-project && npm install --save-dev /path/to/openspec-ui` | pin to the project |
 | **Global link** | `cd openspec-ui && npm link` → `cd your-project && openspec-ui` | call from anywhere |
 | **Electron app** | download the DMG / NSIS installer / AppImage and open — pick the project folder on first launch | no editor / non-VS Code editor / prefer a native window |
-| **VS Code extension** | install the OpenSpec UI extension (Cursor / VS Code) | you already live in VS Code |
+| **VS Code extension** | build `vscode-extension/openspec-ui.vsix` → **Install from VSIX…** → run `OpenSpec UI: Show Dashboard` | for VS Code users; workspace folder becomes the OpenSpec root automatically |
 
 ```bash
 # Direct: open http://localhost:4321 in your browser
@@ -62,7 +62,29 @@ node /path/to/openspec-ui/bin/openspec-ui.js --dir . --port 4321
 The Electron and VS Code channels spawn the same `bin/openspec-ui.js` under
 the hood — the only difference is how the UI is presented (native window vs.
 browser vs. VS Code webview). See [`electron/README.md`](../electron/README.md)
-for build instructions.
+for build instructions and [`vscode-extension/README.md`](../vscode-extension/README.md)
+for the VSIX pipeline.
+
+### Install via VS Code extension
+
+Instead of running a standalone CLI, VS Code users can install the packaged
+extension and open the dashboard inside the editor as a webview panel.
+
+```bash
+# from the openspec-ui checkout
+npm install
+npm --workspace=vscode-extension run package
+# → vscode-extension/openspec-ui.vsix
+```
+
+Then in VS Code: **Extensions** view → `⋯` menu → **Install from VSIX…** →
+pick the file. Open the target project folder as your VS Code workspace and
+run **OpenSpec UI: Show Dashboard** from the Command Palette. The dashboard
+opens beside the editor; Apply / Archive / Merge / Run commands are typed
+into VS Code's own terminal panel (a persistent terminal named "OpenSpec
+UI") which auto-launches `claude --continue` on first use (configurable via
+`openspecUI.terminalStartup`). No `--dir` or `--port` flag needed — the
+workspace folder is the project root, and the port is picked automatically.
 
 ## Stage 3 — Add project-level configuration
 

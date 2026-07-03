@@ -56,8 +56,13 @@ program
       OPENSPEC_OPEN: opts.open ? "1" : "0",
     };
     const serverEntry = resolve(pkgRoot, "server", "index.ts");
-    const tsxBin = resolve(pkgRoot, "node_modules", ".bin", "tsx");
-    const child = spawn(tsxBin, [serverEntry], { env, stdio: "inherit" });
+    // Spawn tsx via its cli.mjs directly rather than `.bin/tsx`: vsce/pkg
+    // packaging tools replace `.bin` symlinks with copies, which breaks the
+    // relative sibling imports inside cli.mjs when it's copied outside its
+    // dist/. cli.mjs itself resolves its neighbors correctly, so pointing at
+    // it works both in dev and in packaged distributions.
+    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+    const child = spawn(process.execPath, [tsxCli, serverEntry], { env, stdio: "inherit" });
     child.on("exit", (code) => process.exit(code ?? 0));
   });
 

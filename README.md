@@ -50,10 +50,10 @@ npm run typecheck
 | チャネル | 対象ユーザー | 起動方法 |
 |---|---|---|
 | **CLI + ブラウザ** | 任意のエディタ / エディタなし | `node bin/openspec-ui.js` → 既定ブラウザ |
-| **VS Code拡張** | VS Code / Cursor | 拡張機能タブでインストール |
+| **VS Code拡張** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → 生成された `.vsix` を「VSIXからインストール」→ コマンドパレットで `OpenSpec UI: Show Dashboard` |
 | **Electronデスクトップアプリ** | Vim / JetBrains / Sublime / エディタ不問 | DMG / NSIS / AppImage をダウンロードして起動（開発は [`electron/README.md`](./electron/README.md) 参照） |
 
-3チャネルとも中身は同じ `bin/openspec-ui.js`（Fastify + Vite build）です。Electron 版は BrowserWindow が localhost サーバーを開くだけで、実装上の分岐はありません。
+3チャネルとも中身は同じ `bin/openspec-ui.js`（Fastify + Vite build）です。Electron 版は BrowserWindow が localhost サーバーを開くだけ、VS Code 拡張は WebviewPanel が同じ URL を iframe で開くだけで、実装上の分岐はありません。VS Code 拡張の詳細は [`vscode-extension/README.md`](./vscode-extension/README.md)。
 
 > 実装メモ: UIスタイルは依存とビルドの安定性を優先し、Tailwindではなく素のCSS（`web/src/styles.css`）で実装しています。設計意図（ユーティリティCSSで素早く組む）はそのままです。
 
