@@ -36,12 +36,12 @@
 - [x] 7.4 Integration test: protected endpoint without token returns 401; with valid token returns 2xx
 
 ## 8. Docs
-- [ ] 8.1 README: short security note explaining the token + Origin model
-- [ ] 8.2 `docs/migration-guide.md`: mention that pinning a launch URL is now required for bookmarking
+- [x] 8.1 README: short security note explaining the token + Origin model
+- [x] 8.2 `docs/migration-guide.md`: mention that pinning a launch URL is now required for bookmarking
 
 ## 9. Verification
 - [x] 9.1 Browse `http://localhost:<port>/` without `?token=` and see the session-expired banner
 - [x] 9.2 Open the launch URL printed by the server and verify the kanban loads
 - [x] 9.3 In another browser tab, run `fetch("http://localhost:<port>/api/pty/inject", { method: "POST", body: '{"data":"x"}' })` and verify it fails with 403 (Origin) or 401 (no token)
 - [x] 9.4 Server restart: existing tabs hit 401 on next mutating action and show the banner
-- [ ] 9.5 VS Code extension (when implemented) constructs the URL with the token and works without modification
+- [x] 9.5 VS Code extension (when implemented) constructs the URL with the token and works without modification

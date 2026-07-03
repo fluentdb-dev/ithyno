@@ -59,6 +59,13 @@ Pick whichever entry point matches how you already work.
 node /path/to/openspec-ui/bin/openspec-ui.js --dir . --port 4321
 ```
 
+> **Bookmarking the URL:** the launch URL now carries a per-process session
+> token (`?token=<hex>`). Bookmarking the *bare* `http://localhost:<port>/`
+> and revisiting will land on the session-expired banner because the token
+> query param is missing. Pin the full URL printed at startup — or just
+> re-open via the CLI / Electron / VS Code entry that regenerates it. This
+> is the tradeoff for the CSRF defense described in the root README.
+
 The Electron and VS Code channels spawn the same `bin/openspec-ui.js` under
 the hood — the only difference is how the UI is presented (native window vs.
 browser vs. VS Code webview). See [`electron/README.md`](../electron/README.md)

@@ -77,6 +77,16 @@ OPENSPEC_UI_SHELL=claude npm start
 
 **ローカル限定**：ターミナルは実シェルをWebSocketに繋ぐため、サーバーは `127.0.0.1` バインドで起動し、`/pty` upgradeは **localhost からのみ受け付け**ます（非ローカル接続は接続自体を破棄）。リモート公開は意図的にサポートしていません。
 
+### セキュリティモデル（CSRF 対策）
+
+Fastify は `127.0.0.1` バインドですが、それだけでは **ブラウザで開いた悪意あるページ** が `fetch("http://localhost:<port>/api/pty/inject", ...)` を叩く攻撃（TCP は local だが Origin は他サイト）を防げません。そこで 3 層で守っています：
+
+1. **セッショントークン** — サーバー起動時に 32 バイトの hex を生成し、起動 URL (`?token=...`) に埋め込む。ミューテーション系エンドポイントは token 一致を要求。
+2. **Origin allow-list** — `http://localhost:<port>` / `http://127.0.0.1:<port>` / `http://[::1]:<port>` / `vscode-webview://*` のみ許可。ブラウザは Origin を偽装できないので他サイトからの fetch は 403。
+3. **Content-Type チェック** — `application/json` 以外は拒否。`<form>` からの CSRF を単純に落とす。
+
+各層は独立しているため、1 つ失敗しても他が守ります。詳細は `openspec/specs/csrf-protection/spec.md`。
+
 **PTYバックエンドが無い環境**：ネイティブモジュール（`@homebridge/node-pty-prebuilt-multiarch`）のロードに失敗した場合、ダッシュボードは通常どおり起動し、`/api/health` が `terminal.available: false` を返してターミナルペインは表示されません（グレースフル劣化）。
 
 ### Windows / WSL ユーザーへの重要事項
