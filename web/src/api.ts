@@ -164,6 +164,26 @@ export async function fetchDocFile(path: string): Promise<DocsFile | null> {
   return res.json();
 }
 
+// ---- start (worktree) uncommitted-proposal guard --------------------------
+export async function fetchChangeGitState(
+  id: string,
+): Promise<{ untracked: string[]; modified: string[] }> {
+  const res = await fetch(`/api/changes/${encodeURIComponent(id)}/git-state`);
+  if (!res.ok) throw new Error(`GET /api/changes/${id}/git-state failed: ${res.status}`);
+  return res.json();
+}
+
+export async function commitChangeProposal(id: string): Promise<{ commitHash: string }> {
+  const { status, data } = await postJson<{ ok?: boolean; commitHash?: string; reason?: string; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/commit-proposal`,
+    {},
+  );
+  if (status >= 400 || !data.commitHash) {
+    throw new Error(data.reason ?? data.error ?? `HTTP ${status}`);
+  }
+  return { commitHash: data.commitHash };
+}
+
 // ---- agent-runner ----------------------------------------------------------
 export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
   const res = await fetch("/api/agents/config");

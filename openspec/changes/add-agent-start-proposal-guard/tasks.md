@@ -1,40 +1,40 @@
 ## 1. Server: git-state endpoint
 
-- [ ] 1.1 `GET /api/changes/:id/git-state` handler in `server/index.ts` — auth-gated (same middleware everything else uses); returns `{ untracked: string[], modified: string[] }`
-- [ ] 1.2 Implementation: `git status --porcelain -- openspec/changes/<id>/` via `execFile`; parse the `??` / ` M` / `A ` prefixes into the two arrays; paths are relative to project root
-- [ ] 1.3 Guard: reject if `<id>` contains `/`, `..`, or characters outside `[A-Za-z0-9._-]` — same safe-id regex the toggle writeback uses
-- [ ] 1.4 Return `{ untracked: [], modified: [] }` when the change dir doesn't exist at all — the pre-check is defensive, not a validity check
+- [x] 1.1 `GET /api/changes/:id/git-state` handler in `server/index.ts` — auth-gated (same middleware everything else uses); returns `{ untracked: string[], modified: string[] }`
+- [x] 1.2 Implementation: `git status --porcelain -- openspec/changes/<id>/` via `execFile`; parse the `??` / ` M` / `A ` prefixes into the two arrays; paths are relative to project root
+- [x] 1.3 Guard: reject if `<id>` contains `/`, `..`, or characters outside `[A-Za-z0-9._-]` — same safe-id regex the toggle writeback uses
+- [x] 1.4 Return `{ untracked: [], modified: [] }` when the change dir doesn't exist at all — the pre-check is defensive, not a validity check
 
 ## 2. Server: commit-proposal endpoint
 
-- [ ] 2.1 `POST /api/changes/:id/commit-proposal` handler in `server/index.ts`
-- [ ] 2.2 Implementation: `git add openspec/changes/<id>/` then `git commit -m "propose: <id>"`; returns `{ ok: true, commitHash: string }` or `{ ok: false, reason: string }` (409 when nothing to commit)
-- [ ] 2.3 Same safe-id regex guard as §1.3
-- [ ] 2.4 Local-only check (already covered by the shared `isLocal` middleware, but the endpoint mutates so double-check)
+- [x] 2.1 `POST /api/changes/:id/commit-proposal` handler in `server/index.ts`
+- [x] 2.2 Implementation: `git add openspec/changes/<id>/` then `git commit -m "propose: <id>"`; returns `{ ok: true, commitHash: string }` or `{ ok: false, reason: string }` (409 when nothing to commit)
+- [x] 2.3 Same safe-id regex guard as §1.3
+- [x] 2.4 Local-only check (already covered by the shared `isLocal` middleware, but the endpoint mutates so double-check)
 
 ## 3. Web: API helpers
 
-- [ ] 3.1 `web/src/api.ts`: `fetchChangeGitState(id): Promise<{ untracked: string[], modified: string[] }>`
-- [ ] 3.2 `web/src/api.ts`: `commitChangeProposal(id): Promise<{ commitHash: string }>` — throws on non-2xx
+- [x] 3.1 `web/src/api.ts`: `fetchChangeGitState(id): Promise<{ untracked: string[], modified: string[] }>`
+- [x] 3.2 `web/src/api.ts`: `commitChangeProposal(id): Promise<{ commitHash: string }>` — throws on non-2xx
 
 ## 4. Web: modal component
 
-- [ ] 4.1 `web/src/components/UncommittedProposalModal.tsx` — props: `{ changeId, files, onCommitAndStart, onCancel }`
-- [ ] 4.2 List the untracked + modified files in a scrollable region so a large delta doesn't blow out the modal
-- [ ] 4.3 Two buttons: `Commit & Start` (primary), `Cancel` (ghost); Escape closes = Cancel; click on backdrop = Cancel
+- [x] 4.1 `web/src/components/UncommittedProposalModal.tsx` — props: `{ changeId, files, onCommitAndStart, onCancel }`
+- [x] 4.2 List the untracked + modified files in a scrollable region so a large delta doesn't blow out the modal
+- [x] 4.3 Two buttons: `Commit & Start` (primary), `Cancel` (ghost); Escape closes = Cancel; click on backdrop = Cancel
 
 ## 5. Web: gate the Start (Worktree) flow
 
-- [ ] 5.1 In `web/src/hooks/useStartFlow.tsx::startImplementation`, before `runAgent`, `await fetchChangeGitState(change.id)`
-- [ ] 5.2 If `untracked.length > 0 || modified.length > 0`, set `uncommittedPending` state (like `applyPending`) and return early
-- [ ] 5.3 `startFlowModals` renders `<UncommittedProposalModal>` when `uncommittedPending` is set
-- [ ] 5.4 `Commit & Start` handler: `await commitChangeProposal(id)` → clear `uncommittedPending` → call `startWorktreeFlow(change)` (the same function the default path calls)
-- [ ] 5.5 `Cancel` handler: clear `uncommittedPending`; no toast (user cancelled deliberately)
-- [ ] 5.6 The Terminal branch of Start is unchanged — the modal only intercepts the Worktree branch
+- [x] 5.1 In `web/src/hooks/useStartFlow.tsx::startImplementation`, before `runAgent`, `await fetchChangeGitState(change.id)`
+- [x] 5.2 If `untracked.length > 0 || modified.length > 0`, set `uncommittedPending` state (like `applyPending`) and return early
+- [x] 5.3 `startFlowModals` renders `<UncommittedProposalModal>` when `uncommittedPending` is set
+- [x] 5.4 `Commit & Start` handler: `await commitChangeProposal(id)` → clear `uncommittedPending` → call `startWorktreeFlow(change)` (the same function the default path calls)
+- [x] 5.5 `Cancel` handler: clear `uncommittedPending`; no toast (user cancelled deliberately)
+- [x] 5.6 The Terminal branch of Start is unchanged — the modal only intercepts the Worktree branch
 
 ## 6. Spec delta
 
-- [ ] 6.1 `openspec/changes/add-agent-start-proposal-guard/specs/dashboard/spec.md`: MODIFIED requirement — Start (Worktree mode) SHALL surface a modal when the target change's `openspec/changes/<id>/` has uncommitted files
+- [x] 6.1 `openspec/changes/add-agent-start-proposal-guard/specs/dashboard/spec.md`: MODIFIED requirement — Start (Worktree mode) SHALL surface a modal when the target change's `openspec/changes/<id>/` has uncommitted files
 
 ## 7. Verification
 

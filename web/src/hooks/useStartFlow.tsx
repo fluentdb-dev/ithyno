@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { injectPty, runAgent, setProposalExecution } from "../api";
+import {
+  commitChangeProposal,
+  fetchChangeGitState,
+  injectPty,
+  runAgent,
+  setProposalExecution,
+} from "../api";
 import type { Change } from "../types";
 import { CommandModal } from "../components/CommandModal";
 import { ExecutionPicker, type PickerReason } from "../components/ExecutionPicker";
 import { AgentPickerModal } from "../components/AgentPickerModal";
 import { GitIdentityModal } from "../components/GitIdentityModal";
+import { UncommittedProposalModal } from "../components/UncommittedProposalModal";
 import { isVsCodeShell } from "../runtime/shell";
 
 /**
@@ -33,6 +40,11 @@ export function useStartFlow() {
   const [applyPending, setApplyPending] = useState<{ change: Change } | null>(null);
   const [agentPicker, setAgentPicker] = useState<{ change: Change } | null>(null);
   const [executionPicker, setExecutionPicker] = useState<{ change: Change } | null>(null);
+  const [uncommittedPending, setUncommittedPending] = useState<{
+    change: Change;
+    files: { untracked: string[]; modified: string[] };
+  } | null>(null);
+  const [committingProposal, setCommittingProposal] = useState(false);
   const [openGitPanel, setOpenGitPanel] = useState(false);
 
   const startTerminalFlow = (change: Change) => {
@@ -55,6 +67,22 @@ export function useStartFlow() {
         return;
       }
     }
+    // Pre-check: `git worktree add HEAD` will silently skip anything the user
+    // hasn't committed under `openspec/changes/<id>/`. Surface that before
+    // spawning the agent so a fresh /opsx:propose doesn't turn into a
+    // wasted round-trip.
+    try {
+      const state = await fetchChangeGitState(change.id);
+      if (state.untracked.length > 0 || state.modified.length > 0) {
+        console.log("[start:worktree]", change.id, "proposal uncommitted → modal");
+        setUncommittedPending({ change, files: state });
+        return;
+      }
+    } catch (err) {
+      // The check is defensive — if it fails (not a repo, git missing,
+      // network blip), fall through to the normal spawn.
+      console.warn("[start:worktree]", change.id, "git-state check failed:", err);
+    }
     console.log("[start:worktree]", change.id, "runAgent →", agentName);
     try {
       const job = await runAgent(change.id, agentName);
@@ -63,6 +91,25 @@ export function useStartFlow() {
     } catch (err) {
       console.error("[start:worktree]", change.id, "failed:", err);
       pushToast("error", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const commitAndStart = async () => {
+    if (!uncommittedPending) return;
+    const change = uncommittedPending.change;
+    setCommittingProposal(true);
+    try {
+      await commitChangeProposal(change.id);
+      pushToast("info", `Committed proposal for ${change.id}`);
+      setUncommittedPending(null);
+      // Restart the worktree flow now that the proposal is on HEAD — the
+      // pre-check will see an empty git-state and pass through.
+      await startWorktreeFlow(change);
+    } catch (err) {
+      console.error("[start:worktree]", change.id, "commit-proposal failed:", err);
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setCommittingProposal(false);
     }
   };
 
@@ -178,6 +225,16 @@ export function useStartFlow() {
             if (mode === "worktree") await startWorktreeFlow(change);
             else startTerminalFlow(change);
           }}
+        />
+      )}
+
+      {uncommittedPending && (
+        <UncommittedProposalModal
+          changeId={uncommittedPending.change.id}
+          files={uncommittedPending.files}
+          busy={committingProposal}
+          onCommitAndStart={commitAndStart}
+          onCancel={() => setUncommittedPending(null)}
         />
       )}
 

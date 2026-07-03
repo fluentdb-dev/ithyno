@@ -29,6 +29,17 @@ import type { Change, DocsFile, DocsTree, SpecDomain, GitStatus } from "./model.
 import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
 import { gitInit } from "./git/init.js";
+import { getChangeGitState, commitChangeProposal } from "./git/change-state.js";
+
+// Same shape as the change-id validation done implicitly by other endpoints
+// (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
+// below shell out to `git` with `<id>` embedded in the path.
+const SAFE_CHANGE_ID = /^[A-Za-z0-9._-]+$/;
+function isSafeChangeId(id: string): boolean {
+  if (!id) return false;
+  if (id === "." || id === "..") return false;
+  return SAFE_CHANGE_ID.test(id);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -311,6 +322,44 @@ fastify.post<{ Params: { id: string }; Body: ProposalExecutionBody }>(
     const change = await parseChange(openspecDir, req.params.id);
     broadcast({ type: "change-updated", changeId: req.params.id, change });
     return { status: "ok", change };
+  },
+);
+
+// ---- start (worktree) uncommitted-proposal guard --------------------------
+// GET /api/changes/:id/git-state returns files under openspec/changes/<id>/
+// that would NOT be carried into a fresh `git worktree add HEAD`. The Kanban
+// Start flow queries this before dispatching the runner and pops
+// UncommittedProposalModal if anything shows up. Localhost-only + auth-gated
+// like the other GETs.
+fastify.get<{ Params: { id: string } }>(
+  "/api/changes/:id/git-state",
+  async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    return getChangeGitState(PROJECT_ROOT, req.params.id);
+  },
+);
+
+// POST /api/changes/:id/commit-proposal runs `git add openspec/changes/<id>/`
+// + `git commit -m "propose: <id>"` in the main tree. Used by
+// UncommittedProposalModal's Commit & Start action so the follow-up
+// `git worktree add HEAD` carries the proposal into the agent's tree.
+fastify.post<{ Params: { id: string } }>(
+  "/api/changes/:id/commit-proposal",
+  async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    try {
+      const { commitHash } = await commitChangeProposal(PROJECT_ROOT, req.params.id);
+      return { ok: true, commitHash };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === "NOTHING_TO_COMMIT") {
+        return reply.code(409).send({ ok: false, reason: "nothing to commit" });
+      }
+      req.log.error({ err, changeId: req.params.id }, "commit-proposal failed");
+      return reply.code(500).send({ ok: false, reason: msg });
+    }
   },
 );
 
