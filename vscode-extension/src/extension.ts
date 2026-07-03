@@ -1,0 +1,99 @@
+import * as vscode from "vscode";
+import { spawnServer, SpawnedServer } from "./server-spawner";
+import { renderWebviewHtml } from "./webview-html";
+
+type PanelSession = {
+  panel: vscode.WebviewPanel;
+  server: SpawnedServer;
+  terminal: vscode.Terminal | null;
+  workspaceRoot: string;
+};
+
+let session: PanelSession | null = null;
+
+export function activate(context: vscode.ExtensionContext): void {
+  const cmd = vscode.commands.registerCommand("openspecUI.show", async () => {
+    if (session) {
+      session.panel.reveal(vscode.ViewColumn.Beside);
+      return;
+    }
+
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+      vscode.window.showErrorMessage("OpenSpec UI: open a folder first.");
+      return;
+    }
+    const workspaceRoot = folders[0].uri.fsPath;
+
+    let server: SpawnedServer;
+    try {
+      server = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "OpenSpec UI: starting server…",
+          cancellable: false,
+        },
+        () => spawnServer({ extensionPath: context.extensionPath, workspaceRoot }),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`OpenSpec UI: failed to start server (${msg})`);
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      "openspecUI",
+      "OpenSpec UI",
+      vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] },
+    );
+    panel.webview.html = renderWebviewHtml(server.url);
+
+    const s: PanelSession = { panel, server, terminal: null, workspaceRoot };
+    session = s;
+
+    panel.webview.onDidReceiveMessage((msg) => {
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "pty.inject" && typeof msg.data === "string") {
+        const terminate = msg.terminate !== false;
+        if (!s.terminal || s.terminal.exitStatus !== undefined) {
+          s.terminal = vscode.window.createTerminal({
+            name: "OpenSpec UI",
+            cwd: s.workspaceRoot,
+          });
+          // Auto-launch the same startup command the embedded PTY uses (see
+          // server/sync/pty.ts::ptyStartupCommand) so `/opsx:*` slash
+          // commands land in Claude's REPL rather than dropping to the raw
+          // shell. Configurable via `openspecUI.terminalStartup` — set it
+          // to "" for a raw shell.
+          const startup = vscode.workspace
+            .getConfiguration("openspecUI")
+            .get<string>("terminalStartup", "claude --continue");
+          if (startup && startup.trim().length > 0) {
+            s.terminal.sendText(startup, true);
+          }
+        }
+        s.terminal.sendText(msg.data, terminate);
+        s.terminal.show(true);
+      }
+    });
+
+    panel.onDidDispose(() => {
+      s.server.dispose();
+      if (s.terminal && s.terminal.exitStatus === undefined) {
+        // Leave the terminal for the user — they may want its scrollback.
+      }
+      if (session === s) session = null;
+    });
+  });
+
+  context.subscriptions.push(cmd);
+}
+
+export function deactivate(): void {
+  if (session) {
+    session.server.dispose();
+    session.panel.dispose();
+    session = null;
+  }
+}

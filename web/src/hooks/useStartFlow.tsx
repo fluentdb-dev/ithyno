@@ -22,7 +22,12 @@ import { isVsCodeShell } from "../runtime/shell";
 export function useStartFlow() {
   const agents = useStore((s) => s.agents);
   const gitStatus = useStore((s) => s.state?.gitStatus);
-  const terminalAvailable = useStore((s) => s.terminalAvailable);
+  const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
+  // In VS Code, the extension owns a `vscode.window.createTerminal` — inject
+  // targets that instead of the embedded xterm pane, so "terminal available"
+  // is always true regardless of the server's /api/health probe (which
+  // reports node-pty availability, irrelevant to the VS Code runtime).
+  const terminalAvailable = isVsCodeShell() ? true : storeTerminalAvailable;
   const pushToast = useStore((s) => s.pushToast);
 
   const [applyPending, setApplyPending] = useState<{ change: Change } | null>(null);

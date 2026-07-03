@@ -1,0 +1,4 @@
+out/
+host/
+*.vsix
+node_modules/

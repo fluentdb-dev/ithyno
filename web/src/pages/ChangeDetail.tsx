@@ -9,6 +9,7 @@ import { TagChipList } from "../components/TagChip";
 import { injectPty } from "../api";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
+import { isVsCodeShell } from "../runtime/shell";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -18,7 +19,11 @@ export function ChangeDetail() {
   const { id } = useParams<{ id: string }>();
   const change = useStore((s) => s.state?.changes.find((c) => c.id === id));
   const archivedEntry = useStore((s) => s.state?.archive.find((a) => a.id === id));
-  const terminalAvailable = useStore((s) => s.terminalAvailable);
+  const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
+  // In the VS Code shell the extension host owns a terminal, so injection is
+  // always possible — keep the action buttons enabled regardless of what the
+  // server reports about its own PTY backend.
+  const terminalAvailable = isVsCodeShell() ? true : storeTerminalAvailable;
   const terminalVisible = useStore((s) => s.terminalVisible);
   const setTerminalVisible = useStore((s) => s.setTerminalVisible);
   const pushToast = useStore((s) => s.pushToast);
@@ -155,9 +160,11 @@ export function ChangeDetail() {
                 {commandStyle === "cli" ? "CLI" : "Claude"}
               </span>
             </button>
-            <button className="term-toggle" onClick={() => setTerminalVisible(!terminalVisible)}>
-              {terminalVisible ? "▸ Hide terminal" : "◂ Show terminal"}
-            </button>
+            {!isVsCodeShell() && (
+              <button className="term-toggle" onClick={() => setTerminalVisible(!terminalVisible)}>
+                {terminalVisible ? "▸ Hide terminal" : "◂ Show terminal"}
+              </button>
+            )}
           </>
         )}
       </div>

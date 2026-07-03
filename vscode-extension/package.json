@@ -1,0 +1,46 @@
+{
+  "name": "openspec-ui-vscode",
+  "displayName": "OpenSpec UI",
+  "description": "OpenSpec dashboard, embedded in VS Code as a webview panel.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "openspec-ui",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:openspecUI.show"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "openspecUI.show",
+        "title": "OpenSpec UI: Show Dashboard",
+        "category": "OpenSpec UI"
+      }
+    ],
+    "configuration": {
+      "title": "OpenSpec UI",
+      "properties": {
+        "openspecUI.terminalStartup": {
+          "type": "string",
+          "default": "claude --continue",
+          "description": "Command auto-launched when the OpenSpec UI terminal is created (so slash commands land in Claude's REPL). Set to an empty string to disable and stay in the raw shell."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "prepack:host": "node scripts/prepack.mjs",
+    "package": "npm run build && npm run prepack:host && vsce package --no-dependencies --allow-missing-repository --out openspec-ui.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.3"
+  }
+}

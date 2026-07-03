@@ -15,6 +15,7 @@ import type {
   WorkspaceState,
 } from "./types";
 import { getSessionToken } from "./runtime";
+import { isVsCodeShell, postToVsCode } from "./runtime/shell";
 
 /**
  * Thrown when the server returns 401 / 403 with an auth-related reason.
@@ -232,6 +233,13 @@ export type InjectResponse =
 
 /** Inject text into the most recently active embedded terminal (localhost only). */
 export async function injectPty(data: string, terminate = true): Promise<InjectResponse> {
+  // VS Code webview: the extension host owns the terminal, so post a message
+  // instead of hitting our HTTP endpoint (there is no embedded terminal to
+  // target inside the webview).
+  if (isVsCodeShell()) {
+    postToVsCode({ type: "pty.inject", data, terminate });
+    return { status: "ok", activeTerminals: 1 };
+  }
   const { data: body } = await postJson<InjectResponse>("/api/pty/inject", { data, terminate });
   return body;
 }

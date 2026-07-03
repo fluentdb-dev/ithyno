@@ -44,18 +44,39 @@ your-project/
 
 ## Stage 2 — Run OpenSpec UI against the target
 
-Until OpenSpec UI is published on npm, there are three ways to run it:
+Until OpenSpec UI is published on npm, there are four ways to run it:
 
 | method | command | when |
 |---|---|---|
 | **Direct** | `node /path/to/openspec-ui/bin/openspec-ui.js --dir /path/to/your-project` | quick trial |
 | **devDep install** | `cd your-project && npm install --save-dev /path/to/openspec-ui` | pin to the project |
 | **Global link** | `cd openspec-ui && npm link` → `cd your-project && openspec-ui` | call from anywhere |
+| **VS Code extension** | build `vscode-extension/openspec-ui.vsix` → **Install from VSIX…** | for VS Code users; folder in the workspace becomes the OpenSpec root automatically |
 
 ```bash
 # Direct: open http://localhost:4321 in your browser
 node /path/to/openspec-ui/bin/openspec-ui.js --dir . --port 4321
 ```
+
+### Install via VS Code extension
+
+Instead of running a standalone CLI, VS Code users can install the packaged
+extension and open the dashboard inside the editor as a webview panel.
+
+```bash
+# from the openspec-ui checkout
+npm install
+npm --workspace=vscode-extension run package
+# → vscode-extension/openspec-ui.vsix
+```
+
+Then in VS Code: **Extensions** view → `⋯` menu → **Install from VSIX…** →
+pick the file. Open the target project folder as your VS Code workspace and
+run **OpenSpec UI: Show Dashboard** from the Command Palette. The dashboard
+opens beside the editor; Apply / Archive / Merge / Run commands are typed
+into VS Code's own terminal panel (a persistent terminal named "OpenSpec
+UI"). No `--dir` or `--port` flag needed — the workspace folder is the
+project root, and the port is picked automatically.
 
 ## Stage 3 — Add project-level configuration
 

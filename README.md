@@ -39,6 +39,19 @@ npm test
 npm run typecheck
 ```
 
+### VS Code 拡張として使う
+
+VS Code ユーザー向けに、同じダッシュボードをエディタ内のパネルとして開く拡張を同梱しています（`vscode-extension/`）。ワークスペースフォルダが自動的にOpenSpecプロジェクトのルートになるため、ポートやパス指定は不要です。
+
+```bash
+npm install
+npm --workspace=vscode-extension run package
+# 生成された vscode-extension/openspec-ui.vsix を
+# 「拡張機能: VSIXからインストール…」で読み込む
+```
+
+コマンドパレットから **OpenSpec UI: Show Dashboard** を実行するとサーバーが起動し、パネルが横に開きます。Apply / Archive / Merge / Run 系のコマンドはVS Codeの標準ターミナル（`OpenSpec UI`）に流れ込みます。詳細は [`vscode-extension/README.md`](./vscode-extension/README.md)。
+
 > 実装メモ: UIスタイルは依存とビルドの安定性を優先し、Tailwindではなく素のCSS（`web/src/styles.css`）で実装しています。設計意図（ユーティリティCSSで素早く組む）はそのままです。
 
 ### 埋め込みターミナル（ChangeDetailの右ペイン）

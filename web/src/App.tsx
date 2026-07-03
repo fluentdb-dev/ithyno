@@ -23,8 +23,12 @@ export function App() {
   const state = useStore((s) => s.state);
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
-  const terminalAvailable = useStore((s) => s.terminalAvailable);
+  const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
+  // In VS Code the extension host owns a real terminal, so we skip the
+  // embedded xterm pane entirely. Command injection still works — see
+  // `isVsCodeShell()` branch in `api.ts#injectPty`.
+  const embeddedTerminalAvailable = !isVsCodeShell() && storeTerminalAvailable;
 
   // Bootstrap a "session expired" banner state. Two paths trigger it:
   //   1. No token at all on load (sessionStorage empty AND no ?token=) → banner.
@@ -58,7 +62,7 @@ export function App() {
     connectWs();
   }, [load, connectWs, authExpired]);
 
-  const showTerminal = terminalAvailable && terminalVisible;
+  const showTerminal = embeddedTerminalAvailable && terminalVisible;
 
   if (authExpired) {
     return (
@@ -129,7 +133,7 @@ export function App() {
         )}
       </main>
 
-      {terminalAvailable && (
+      {embeddedTerminalAvailable && (
         <aside className={`global-terminal${terminalVisible ? "" : " hidden"}`}>
           <div className="terminal-head">
             <span>Terminal</span>
