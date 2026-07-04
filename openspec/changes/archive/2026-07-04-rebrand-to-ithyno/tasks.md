@@ -42,8 +42,8 @@
 ## 7. Verification
 
 - [x] 7.1 `npm test && npm run typecheck && npm run build` all pass
-- [ ] 7.2 `node bin/ithyno.js --dir . --port 4321 --no-open` (or `npm start`) prints `✔  ithyno on http://…`
-- [ ] 7.3 `npm run electron:dev` opens a window titled "ithyno" (macOS app menu says "ithyno" too)
-- [ ] 7.4 `npm --workspace=vscode-extension run package` produces a VSIX; installing it exposes command palette entries starting with `ithyno:`
-- [ ] 7.5 Grep for stale references: `grep -rn "OpenSpec UI\|openspec-ui\|OPENSPEC_UI_" --include='*.ts' --include='*.tsx' --include='*.md' --include='*.json'` returns only intended survivors (upstream OpenSpec refs, this proposal, and the archived changes' historical prose)
-- [ ] 7.6 Old binary invocation `openspec-ui` no longer exists — `which openspec-ui` returns nothing after a fresh `npm install`
+- [x] 7.2 `node bin/ithyno.js --dir . --port 4321 --no-open` (or `npm start`) prints `✔  ithyno on http://…`
+- [x] 7.3 `npm run electron:dev` opens a window titled "ithyno" (macOS app menu says "ithyno" too)
+- [x] 7.4 `npm --workspace=vscode-extension run package` produces a VSIX; installing it exposes command palette entries starting with `ithyno:`
+- [x] 7.5 Grep for stale references: `grep -rn "OpenSpec UI\|openspec-ui\|OPENSPEC_UI_" --include='*.ts' --include='*.tsx' --include='*.md' --include='*.json'` returns only intended survivors (upstream OpenSpec refs, this proposal, and the archived changes' historical prose)
+- [x] 7.6 Old binary invocation `openspec-ui` no longer exists — `which openspec-ui` returns nothing after a fresh `npm install`
