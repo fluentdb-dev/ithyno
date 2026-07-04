@@ -493,3 +493,23 @@ cancel. The Terminal branch of Start is unaffected.
 - **AND** does NOT render the modal
 - **AND** the `/opsx:apply` inject into the embedded terminal proceeds unchanged; the terminal reads main tree files directly, so uncommitted proposals are visible there
 
+### Requirement: Orphaned Worktree Card Surfaces Archive as Primary
+The Kanban card SHALL render an `Archive` button styled as the row's
+primary action when the change's latest job status is `orphaned`, and
+its click MUST open the existing CommandModal preloaded with
+`/ithy-opsx:archive <change-id>` so the operator can drive the full
+commit → merge → archive chain via the ithy-opsx-archive skill without
+leaving the Kanban.
+
+#### Scenario: Orphaned card shows Archive as primary
+- **WHEN** the card renders for a change whose latest job has `status === "orphaned"`
+- **THEN** the action row contains an `Archive` button using the `action-btn primary` class (or equivalent primary variant), positioned before `Merge` and `Discard`
+
+#### Scenario: Archive click opens the CommandModal
+- **WHEN** the user clicks the orphaned card's `Archive` button
+- **THEN** the existing archive `CommandModal` opens with the preview `/ithy-opsx:archive <change-id>` and submit label `Send /ithy-opsx:archive`, identical to the ChangeDetail archive path
+
+#### Scenario: Non-orphaned states do not gain Archive
+- **WHEN** the card renders for a change whose latest job status is `completed`, `crashed`, or `cancelled`
+- **THEN** the card action row does NOT gain the new Archive button (Merge / Discard / View diff behavior is unchanged; the DONE column's own Archive path covers the fully-done case)
+

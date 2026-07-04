@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Kanban Card Action Row Reflects Worktree State
 The Kanban `ChangeCard` component SHALL suppress the `Start` button on
