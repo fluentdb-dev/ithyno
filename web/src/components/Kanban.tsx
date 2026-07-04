@@ -16,7 +16,7 @@ import { CommandModal } from "./CommandModal";
 import { injectPty } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
-import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
+import { hasNonVerifyWork } from "../util/changeState";
 import { ParallelStartLauncher } from "./ParallelStartLauncher";
 
 type ColumnId = "todo" | "inprogress" | "done";
@@ -38,14 +38,19 @@ function buildPendingCommand(p: PendingDrag, mode: string): string {
   const id = p.change.id;
   if (p.kind === "apply") return `/opsx:apply ${id}`;
   if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : `/ithy-opsx:archive ${id}`;
-  if (p.kind === "agent-merge") return `git merge --no-ff ${p.job.branch}`;
+  if (p.kind === "agent-merge") {
+    // Claude mode delegates to the ithy-opsx-merge skill so the auto-stash /
+    // auto-pop dance handles a dirty main tree; CLI mode keeps the raw git
+    // invocation (users who chose CLI expect to handle stashing themselves).
+    return mode === "cli" ? `git merge --no-ff ${p.job.branch}` : `/ithy-opsx:merge ${id}`;
+  }
   return `git worktree remove --force ${p.job.worktreePath} && git branch -D ${p.job.branch}`;
 }
 
 function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): string {
   if (p.kind === "apply") return "Send /opsx:apply";
   if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive";
-  if (p.kind === "agent-merge") return "Send git merge";
+  if (p.kind === "agent-merge") return commandStyle === "cli" ? "Send git merge" : "Send /ithy-opsx:merge";
   return "Send cleanup";
 }
 
@@ -187,6 +192,7 @@ export function KanbanBoard({
               hasAgents={agents.length > 0}
               onStart={() => onStartClick(c)}
               hasExecution={c.proposal?.execution != null}
+              onArchive={() => onArchiveClick(c)}
               onMerge={(j) => onMergeClick(c, j)}
               onDiscard={(j) => onDiscardClick(c, j)}
             />
@@ -217,6 +223,7 @@ export function KanbanBoard({
               hasAgents={agents.length > 0}
               onStart={() => onStartClick(c)}
               hasExecution={c.proposal?.execution != null}
+              onArchive={() => onArchiveClick(c)}
               onMerge={(j) => onMergeClick(c, j)}
               onDiscard={(j) => onDiscardClick(c, j)}
             />
@@ -246,10 +253,11 @@ export function KanbanBoard({
       {pending && (
         <CommandModal
           title={modalTitle(pending)}
-          // Only Archive has a CLI equivalent (`npx openspec archive`); Apply
-          // is Claude-only, so the mode selector is hidden for it.
-          mode={pending.kind === "archive" ? commandStyle : undefined}
-          onModeChange={pending.kind === "archive" ? setCommandStyle : undefined}
+          // Archive and Merge both have a CLI equivalent (raw `npx openspec
+          // archive` / `git merge`); Apply is Claude-only, so the mode
+          // selector is hidden for it.
+          mode={pending.kind === "archive" || pending.kind === "agent-merge" ? commandStyle : undefined}
+          onModeChange={pending.kind === "archive" || pending.kind === "agent-merge" ? setCommandStyle : undefined}
           build={(_input, m) => buildPendingCommand(pending, m ?? "claude")}
           submitLabel={modalSubmitLabel(pending, commandStyle)}
           onCancel={() => setPending(null)}
@@ -413,7 +421,7 @@ function ChangeCard({
         )}
         {hasAgents &&
           (column === "todo" || column === "inprogress") &&
-          !isRunningOrPending(job) &&
+          !job &&
           (hasNonVerifyWork(change.tasks) ? (
             <button
               className="action-btn"
@@ -440,6 +448,19 @@ function ChangeCard({
               verify only
             </span>
           ))}
+        {hasAgents && job?.status === "orphaned" && onArchive && (
+          <button
+            className="action-btn"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onArchive();
+            }}
+            title="Runs /ithy-opsx:archive — commits any pending worktree work, merges to main, archives, and offers cleanup."
+          >
+            Archive
+          </button>
+        )}
         {hasAgents && job && job.status !== "running" && isMergeable(job) && (
           <>
             <Link
@@ -450,7 +471,7 @@ function ChangeCard({
               View diff
             </Link>
             <button
-              className="action-btn"
+              className="action-btn ghost"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
