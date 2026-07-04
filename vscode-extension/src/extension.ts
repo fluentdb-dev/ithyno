@@ -12,7 +12,7 @@ type PanelSession = {
 let session: PanelSession | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
-  const cmd = vscode.commands.registerCommand("openspecUI.show", async () => {
+  const cmd = vscode.commands.registerCommand("ithyno.show", async () => {
     if (session) {
       session.panel.reveal(vscode.ViewColumn.Beside);
       return;
@@ -20,7 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
-      vscode.window.showErrorMessage("OpenSpec UI: open a folder first.");
+      vscode.window.showErrorMessage("ithyno: open a folder first.");
       return;
     }
     const workspaceRoot = folders[0].uri.fsPath;
@@ -30,20 +30,20 @@ export function activate(context: vscode.ExtensionContext): void {
       server = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "OpenSpec UI: starting server…",
+          title: "ithyno: starting server…",
           cancellable: false,
         },
         () => spawnServer({ extensionPath: context.extensionPath, workspaceRoot }),
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`OpenSpec UI: failed to start server (${msg})`);
+      vscode.window.showErrorMessage(`ithyno: failed to start server (${msg})`);
       return;
     }
 
     const panel = vscode.window.createWebviewPanel(
-      "openspecUI",
-      "OpenSpec UI",
+      "ithyno",
+      "ithyno",
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] },
     );
@@ -58,16 +58,16 @@ export function activate(context: vscode.ExtensionContext): void {
         const terminate = msg.terminate !== false;
         if (!s.terminal || s.terminal.exitStatus !== undefined) {
           s.terminal = vscode.window.createTerminal({
-            name: "OpenSpec UI",
+            name: "ithyno",
             cwd: s.workspaceRoot,
           });
           // Auto-launch the same startup command the embedded PTY uses (see
           // server/sync/pty.ts::ptyStartupCommand) so `/opsx:*` slash
           // commands land in Claude's REPL rather than dropping to the raw
-          // shell. Configurable via `openspecUI.terminalStartup` — set it
+          // shell. Configurable via `ithyno.terminalStartup` — set it
           // to "" for a raw shell.
           const startup = vscode.workspace
-            .getConfiguration("openspecUI")
+            .getConfiguration("ithyno")
             .get<string>("terminalStartup", "claude --continue");
           if (startup && startup.trim().length > 0) {
             s.terminal.sendText(startup, true);

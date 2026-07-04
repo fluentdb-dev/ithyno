@@ -14,7 +14,7 @@ Command exposed: **OpenSpec UI: Show Dashboard** (`openspecUI.show`).
    npm install
    npm --workspace=vscode-extension run package
    ```
-   This produces `vscode-extension/openspec-ui.vsix`.
+   This produces `vscode-extension/ithyno.vsix`.
 
 2. In VS Code, open the Extensions view (⇧⌘X / Ctrl+Shift+X) → click the
    `⋯` menu → **Install from VSIX…** → pick the file.
@@ -32,7 +32,7 @@ recompile on save.
 ## How it works
 
 - On `openspecUI.show`, the extension picks a free port and spawns
-  `bin/openspec-ui.js` with `OPENSPEC_PROJECT_ROOT=<workspace-folder>`,
+  `bin/ithyno.js` with `OPENSPEC_PROJECT_ROOT=<workspace-folder>`,
   `PORT=<picked>`, `OPENSPEC_OPEN=0`.
 - It polls `/api/health` (50ms, 5s cap) and captures the session token
   printed on stdout, then opens a webview panel loading

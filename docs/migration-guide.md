@@ -2,7 +2,7 @@
 tags: [feature/migration, area/docs]
 ---
 
-# Migrating an existing project to OpenSpec UI
+# Migrating an existing project to ithyno
 
 A step-by-step guide for adopting OpenSpec + this dashboard on a project that
 already exists. Three stages: install OpenSpec → run the dashboard → optionally
@@ -42,21 +42,21 @@ your-project/
     └── skills/        # openspec-propose / apply / archive ...
 ```
 
-## Stage 2 — Run OpenSpec UI against the target
+## Stage 2 — Run ithyno against the target
 
 Pick whichever entry point matches how you already work.
 
 | method | command | when |
 |---|---|---|
-| **Direct** | `node /path/to/openspec-ui/bin/openspec-ui.js --dir /path/to/your-project` | quick trial |
+| **Direct** | `node /path/to/openspec-ui/bin/ithyno.js --dir /path/to/your-project` | quick trial |
 | **devDep install** | `cd your-project && npm install --save-dev /path/to/openspec-ui` | pin to the project |
 | **Global link** | `cd openspec-ui && npm link` → `cd your-project && openspec-ui` | call from anywhere |
 | **Electron app** | download the DMG / NSIS installer / AppImage and open — pick the project folder on first launch | no editor / non-VS Code editor / prefer a native window |
-| **VS Code extension** | build `vscode-extension/openspec-ui.vsix` → **Install from VSIX…** → run `OpenSpec UI: Show Dashboard` | for VS Code users; workspace folder becomes the OpenSpec root automatically |
+| **VS Code extension** | build `vscode-extension/ithyno.vsix` → **Install from VSIX…** → run `ithyno: Show Dashboard` | for VS Code users; workspace folder becomes the OpenSpec root automatically |
 
 ```bash
 # Direct: open http://localhost:4321 in your browser
-node /path/to/openspec-ui/bin/openspec-ui.js --dir . --port 4321
+node /path/to/openspec-ui/bin/ithyno.js --dir . --port 4321
 ```
 
 > **Bookmarking the URL:** the launch URL now carries a per-process session
@@ -66,7 +66,7 @@ node /path/to/openspec-ui/bin/openspec-ui.js --dir . --port 4321
 > re-open via the CLI / Electron / VS Code entry that regenerates it. This
 > is the tradeoff for the CSRF defense described in the root README.
 
-The Electron and VS Code channels spawn the same `bin/openspec-ui.js` under
+The Electron and VS Code channels spawn the same `bin/ithyno.js` under
 the hood — the only difference is how the UI is presented (native window vs.
 browser vs. VS Code webview). See [`electron/README.md`](../electron/README.md)
 for build instructions and [`vscode-extension/README.md`](../vscode-extension/README.md)
@@ -81,12 +81,12 @@ extension and open the dashboard inside the editor as a webview panel.
 # from the openspec-ui checkout
 npm install
 npm --workspace=vscode-extension run package
-# → vscode-extension/openspec-ui.vsix
+# → vscode-extension/ithyno.vsix
 ```
 
 Then in VS Code: **Extensions** view → `⋯` menu → **Install from VSIX…** →
 pick the file. Open the target project folder as your VS Code workspace and
-run **OpenSpec UI: Show Dashboard** from the Command Palette. The dashboard
+run **ithyno: Show Dashboard** from the Command Palette. The dashboard
 opens beside the editor; Apply / Archive / Merge / Run commands are typed
 into VS Code's own terminal panel (a persistent terminal named "OpenSpec
 UI") which auto-launches `claude --continue` on first use (configurable via
@@ -164,6 +164,6 @@ Edit the copied `CLAUDE.md` to remove the openspec-ui-specific command lines
 
 ## Future improvements (not yet shipped)
 
-- An `openspec-ui init` subcommand that performs all of Stage 3 in one shot
+- An `ithyno init` subcommand that performs all of Stage 3 in one shot
   is proposed as `add-init-command` (see active changes).
-- Publishing to npm so `npx openspec-ui --dir .` works without manual install.
+- Publishing to npm so `npx ithyno --dir .` works without manual install.

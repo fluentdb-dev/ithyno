@@ -21,15 +21,15 @@ let currentProjectRoot: string | null = null;
 let quitting = false;
 
 /**
- * Resolve the path to bin/openspec-ui.js in both dev (electron/out/main.js →
- * ../../bin/openspec-ui.js) and packaged (extraResources copies bin/ under
+ * Resolve the path to bin/ithyno.js in both dev (electron/out/main.js →
+ * ../../bin/ithyno.js) and packaged (extraResources copies bin/ under
  * process.resourcesPath/app/bin) layouts.
  */
 function resolveBinPath(): string {
   if (app.isPackaged) {
-    return join(process.resourcesPath, 'app', 'bin', 'openspec-ui.js');
+    return join(process.resourcesPath, 'app', 'bin', 'ithyno.js');
   }
-  return resolve(app.getAppPath(), '..', 'bin', 'openspec-ui.js');
+  return resolve(app.getAppPath(), '..', 'bin', 'ithyno.js');
 }
 
 function isDirectory(p: string): boolean {
@@ -126,8 +126,8 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
   const binPath = resolveBinPath();
   if (!existsSync(binPath)) {
     dialog.showErrorBox(
-      'OpenSpec UI',
-      `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/openspec-ui.js.`,
+      'ithyno',
+      `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
     );
     app.quit();
     return;
@@ -147,8 +147,8 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const choice = dialog.showMessageBoxSync({
       type: 'error',
-      title: 'OpenSpec UI',
-      message: 'Failed to start the OpenSpec server',
+      title: 'ithyno',
+      message: 'Failed to start the ithyno server',
       detail: message,
       buttons: ['Retry', 'Quit'],
       defaultId: 0,
@@ -179,7 +179,7 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     height: savedWs.height,
     x: savedWs.x,
     y: savedWs.y,
-    title: 'OpenSpec UI',
+    title: 'ithyno',
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -224,7 +224,7 @@ function refreshMenu(): void {
       if (!isDirectory(path)) {
         store.removeFromRecent(path);
         refreshMenu();
-        dialog.showErrorBox('OpenSpec UI', `Project folder no longer exists:\n${path}`);
+        dialog.showErrorBox('ithyno', `Project folder no longer exists:\n${path}`);
         return;
       }
       void switchProject(path);

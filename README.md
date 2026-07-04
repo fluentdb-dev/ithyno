@@ -1,9 +1,9 @@
-# OpenSpec UI
+# ithyno
 
 > 裏側はMarkdown、表側は進捗ダッシュボード。
 > AIエージェントは生の `.md` を読み書きし、人間はブラウザUIで仕様駆動開発（SDD）の進捗を把握・操作する。
 
-OpenSpec UI は、[OpenSpec](https://github.com/Fission-AI/OpenSpec) のディレクトリ構造（`openspec/specs/`・`openspec/changes/`）をそのまま **Single Source of Truth** として扱い、その上に被せる **ローカル起動の進捗ダッシュボード** です。
+ithyno は、[OpenSpec](https://github.com/Fission-AI/OpenSpec) のディレクトリ構造（`openspec/specs/`・`openspec/changes/`）をそのまま **Single Source of Truth** として扱い、その上に被せる **ローカル起動の進捗ダッシュボード** です。
 
 - **依存を増やさない** — 進捗データは `tasks.md` の `- [ ]` / `- [x]` に存在する。UIはそれを可視化・編集するだけ。ツールが壊れてもエディタで開発を続行できる。
 - **AIと人間の両立** — AIはプレーンな `.md` を読み書きし、人間はカンバン／プログレスツリーで全体像を掴む。
@@ -33,10 +33,10 @@ npm run dev:test
 
 # 本番相当（UIをビルドして単一プロセスで配信し、ブラウザを開く）
 npm run build
-npm start            # = node bin/openspec-ui.js（このリポジトリのopenspec/を表示）
+npm start            # = node bin/ithyno.js（このリポジトリのopenspec/を表示）
 
 # 任意のOpenSpecプロジェクトを対象にする
-node bin/openspec-ui.js --dir /path/to/your/project --port 4321
+node bin/ithyno.js --dir /path/to/your/project --port 4321
 
 # テスト・型チェック
 npm test
@@ -49,11 +49,11 @@ npm run typecheck
 
 | チャネル | 対象ユーザー | 起動方法 |
 |---|---|---|
-| **CLI + ブラウザ** | 任意のエディタ / エディタなし | `node bin/openspec-ui.js` → 既定ブラウザ |
-| **VS Code拡張** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → 生成された `.vsix` を「VSIXからインストール」→ コマンドパレットで `OpenSpec UI: Show Dashboard` |
+| **CLI + ブラウザ** | 任意のエディタ / エディタなし | `node bin/ithyno.js` → 既定ブラウザ |
+| **VS Code拡張** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → 生成された `.vsix` を「VSIXからインストール」→ コマンドパレットで `ithyno: Show Dashboard` |
 | **Electronデスクトップアプリ** | Vim / JetBrains / Sublime / エディタ不問 | DMG / NSIS / AppImage をダウンロードして起動（開発は [`electron/README.md`](./electron/README.md) 参照） |
 
-3チャネルとも中身は同じ `bin/openspec-ui.js`（Fastify + Vite build）です。Electron 版は BrowserWindow が localhost サーバーを開くだけ、VS Code 拡張は WebviewPanel が同じ URL を iframe で開くだけで、実装上の分岐はありません。VS Code 拡張の詳細は [`vscode-extension/README.md`](./vscode-extension/README.md)。
+3チャネルとも中身は同じ `bin/ithyno.js`（Fastify + Vite build）です。Electron 版は BrowserWindow が localhost サーバーを開くだけ、VS Code 拡張は WebviewPanel が同じ URL を iframe で開くだけで、実装上の分岐はありません。VS Code 拡張の詳細は [`vscode-extension/README.md`](./vscode-extension/README.md)。
 
 > 実装メモ: UIスタイルは依存とビルドの安定性を優先し、Tailwindではなく素のCSS（`web/src/styles.css`）で実装しています。設計意図（ユーティリティCSSで素早く組む）はそのままです。
 
@@ -68,11 +68,11 @@ ChangeDetail画面に **本物のシェル** をxterm.jsで埋め込んでいま
 | macOS / Linux | `$SHELL`（未設定なら `/bin/bash`） |
 | Windows | `pwsh.exe`（PATHにある場合）、なければ `powershell.exe` |
 
-環境変数 `OPENSPEC_UI_SHELL` で上書きできます。例：
+環境変数 `ITHYNO_SHELL` で上書きできます。例：
 
 ```bash
 # 起動直後に Claude Code を直接出す
-OPENSPEC_UI_SHELL=claude npm start
+ITHYNO_SHELL=claude npm start
 ```
 
 **ローカル限定**：ターミナルは実シェルをWebSocketに繋ぐため、サーバーは `127.0.0.1` バインドで起動し、`/pty` upgradeは **localhost からのみ受け付け**ます（非ローカル接続は接続自体を破棄）。リモート公開は意図的にサポートしていません。
@@ -91,7 +91,7 @@ Fastify は `127.0.0.1` バインドですが、それだけでは **ブラウ�
 
 ### Windows / WSL ユーザーへの重要事項
 
-WindowsでClaude Codeを使う場合、**OpenSpec UIサーバーとClaude Codeを同一環境で起動**してください。
+WindowsでClaude Codeを使う場合、**ithynoサーバーとClaude Codeを同一環境で起動**してください。
 
 - ✅ 両方ともWSL内（推奨）
 - ✅ 両方ともWindowsネイティブ
@@ -99,7 +99,7 @@ WindowsでClaude Codeを使う場合、**OpenSpec UIサーバーとClaude Code�
 
 PTYはWindows 10 1809+ の **ConPTY** を使用します。`@homebridge/node-pty-prebuilt-multiarch` がprebuiltを提供しているため通常はビルド不要ですが、prebuiltが無いNodeバージョンを使う場合は Visual Studio Build Tools が必要になります。その場合はターミナルを無効化（PTYロード失敗時に自動でスキップ）したまま使うこともできます。
 
-### ドッグフーディング（OpenSpec で OpenSpec UI を開発する）
+### ドッグフーディング（OpenSpec で ithyno を開発する）
 
 このリポジトリ自身が **本物のOpenSpec**（`@fission-ai/openspec`）で仕様駆動開発されています。
 

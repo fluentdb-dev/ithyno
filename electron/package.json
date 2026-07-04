@@ -1,8 +1,8 @@
 {
-  "name": "openspec-ui-electron",
+  "name": "ithyno-electron",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron desktop shell for OpenSpec UI",
+  "description": "Electron desktop shell for ithyno",
   "main": "out/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -19,8 +19,8 @@
     "typescript": "^5.7.3"
   },
   "build": {
-    "appId": "dev.openspec.ui",
-    "productName": "OpenSpec UI",
+    "appId": "dev.ithyno.app",
+    "productName": "ithyno",
     "directories": {
       "output": "dist",
       "buildResources": "build"

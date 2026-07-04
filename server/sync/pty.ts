@@ -30,9 +30,9 @@ export async function loadPty(): Promise<PtyAvailability> {
 export function defaultShell(): { cmd: string; args: string[] } {
   if (process.platform === "win32") {
     // Prefer pwsh.exe (PowerShell 7+) when on PATH; fall back to powershell.exe.
-    return { cmd: process.env.OPENSPEC_UI_SHELL ?? "pwsh.exe", args: [] };
+    return { cmd: process.env.ITHYNO_SHELL ?? "pwsh.exe", args: [] };
   }
-  const sh = process.env.OPENSPEC_UI_SHELL ?? process.env.SHELL ?? "/bin/bash";
+  const sh = process.env.ITHYNO_SHELL ?? process.env.SHELL ?? "/bin/bash";
   return { cmd: sh, args: [] };
 }
 
@@ -43,12 +43,12 @@ export function defaultShell(): { cmd: string; args: string[] } {
  * conversation". Users can force a fresh session from inside Claude via
  * `/clear`.
  *
- * Override with `OPENSPEC_UI_TERMINAL_STARTUP=<cmd>` for a different agent
+ * Override with `ITHYNO_TERMINAL_STARTUP=<cmd>` for a different agent
  * (e.g. `claude` for always-new, `aider` for a different CLI), or set it
  * to an empty string to disable auto-launch (raw shell).
  */
 export function ptyStartupCommand(): string {
-  const v = process.env.OPENSPEC_UI_TERMINAL_STARTUP;
+  const v = process.env.ITHYNO_TERMINAL_STARTUP;
   return v ?? "claude --continue";
 }
 

@@ -1,5 +1,5 @@
 /**
- * Minimal HTML shell for the OpenSpec UI webview.
+ * Minimal HTML shell for the ithyno webview.
  *
  * The extension spawns the existing Fastify server on a random localhost
  * port and hands the resulting URL to this template. We embed it in a

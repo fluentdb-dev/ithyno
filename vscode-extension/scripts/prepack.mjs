@@ -2,7 +2,7 @@
 // web/dist/, templates/, top-level package.json, and production node_modules)
 // into vscode-extension/host/ so vsce bundles them into the VSIX.
 //
-// At runtime, the extension's server-spawner resolves `bin/openspec-ui.js`
+// At runtime, the extension's server-spawner resolves `bin/ithyno.js`
 // relative to either the extension folder or one directory above it. The
 // staged layout puts everything a level below the extension root so we
 // support both.
@@ -31,7 +31,7 @@ for (const rel of ["bin", "server", "web/dist", "templates"]) {
   cpSync(src, dst, { recursive: true });
 }
 
-// Also stage a minimal package.json so `bin/openspec-ui.js` treats stageDir
+// Also stage a minimal package.json so `bin/ithyno.js` treats stageDir
 // as the package root and can resolve `server/` etc. relative to it.
 //
 // Deliberately DROP `@homebridge/node-pty-prebuilt-multiarch` from the staged

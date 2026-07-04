@@ -1,32 +1,32 @@
 {
-  "name": "openspec-ui-vscode",
-  "displayName": "OpenSpec UI",
-  "description": "OpenSpec dashboard, embedded in VS Code as a webview panel.",
+  "name": "ithyno-vscode",
+  "displayName": "ithyno",
+  "description": "ithyno dashboard for the OpenSpec workflow, embedded in VS Code as a webview panel.",
   "version": "0.1.0",
   "private": true,
-  "publisher": "openspec-ui",
+  "publisher": "ithyno",
   "engines": {
     "vscode": "^1.85.0"
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onCommand:openspecUI.show"
+    "onCommand:ithyno.show"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "openspecUI.show",
-        "title": "OpenSpec UI: Show Dashboard",
-        "category": "OpenSpec UI"
+        "command": "ithyno.show",
+        "title": "ithyno: Show Dashboard",
+        "category": "ithyno"
       }
     ],
     "configuration": {
-      "title": "OpenSpec UI",
+      "title": "ithyno",
       "properties": {
-        "openspecUI.terminalStartup": {
+        "ithyno.terminalStartup": {
           "type": "string",
           "default": "claude --continue",
-          "description": "Command auto-launched when the OpenSpec UI terminal is created (so slash commands land in Claude's REPL). Set to an empty string to disable and stay in the raw shell."
+          "description": "Command auto-launched when the ithyno terminal is created (so slash commands land in Claude's REPL). Set to an empty string to disable and stay in the raw shell."
         }
       }
     }
@@ -35,7 +35,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "prepack:host": "node scripts/prepack.mjs",
-    "package": "npm run build && npm run prepack:host && vsce package --no-dependencies --allow-missing-repository --out openspec-ui.vsix"
+    "package": "npm run build && npm run prepack:host && vsce package --no-dependencies --allow-missing-repository --out ithyno.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",

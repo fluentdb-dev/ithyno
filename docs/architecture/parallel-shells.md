@@ -4,7 +4,7 @@ tags: [feature/electron, feature/vscode-extension, area/server]
 
 # Parallel shells: Electron + VS Code extension
 
-OpenSpec UI's north-star is **UI-driven parallel agent execution in
+ithyno's north-star is **UI-driven parallel agent execution in
 isolated git worktrees**. The two shell-packaging changes
 (`add-electron-shell`, `add-vscode-extension`) are the first real-world
 test of that workflow: both are independent in scope, both want to land,
@@ -23,7 +23,7 @@ This document explains the moving parts and where to look.
 
 ## Shared substrate (already in place)
 
-- `bin/openspec-ui.js` — both shells spawn this.
+- `bin/ithyno.js` — both shells spawn this.
 - `add-csrf-protection` — both shells consume the session-token launch URL.
 - `add-agent-runner` — both shells will themselves be implemented by agents
   running in `.worktrees/add-electron-shell/` and

@@ -1,6 +1,6 @@
 # アーキテクチャ設計
 
-OpenSpec UI の技術設計。**ローカルブラウザダッシュボード** 形態・**OpenSpec準拠** を前提とする。
+ithyno の技術設計。**ローカルブラウザダッシュボード** 形態・**OpenSpec準拠** を前提とする。
 
 ---
 
@@ -302,7 +302,7 @@ type ServerEvent =
 openspec-ui/
 ├── package.json
 ├── bin/
-│   └── openspec-ui.js          # CLIエントリ（commander）
+│   └── ithyno.js          # CLIエントリ（commander）
 ├── server/
 │   ├── index.ts                # Fastify起動・静的配信・WS
 │   ├── parser/                 # remarkベースのパーサ群

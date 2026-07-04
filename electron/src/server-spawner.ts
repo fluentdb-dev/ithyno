@@ -76,12 +76,12 @@ export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
   const nodeBin = opts.nodePath ?? process.execPath;
   const env: NodeJS.ProcessEnv = { ...process.env };
   // The Electron shell always runs the server in production-static mode, even
-  // if the developer's shell has OPENSPEC_DEV set for the CLI workflow.
-  delete env.OPENSPEC_DEV;
+  // if the developer's shell has ITHYNO_DEV set for the CLI workflow.
+  delete env.ITHYNO_DEV;
   env.ELECTRON_RUN_AS_NODE = '1';
-  env.OPENSPEC_PROJECT_ROOT = opts.projectRoot;
+  env.ITHYNO_PROJECT_ROOT = opts.projectRoot;
   env.PORT = String(port);
-  env.OPENSPEC_OPEN = '0';
+  env.ITHYNO_OPEN = '0';
 
   const child = spawn(
     nodeBin,

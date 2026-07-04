@@ -1,6 +1,6 @@
 ---
 name: openspec-flow
-description: The project's spec-driven workflow for OpenSpec UI. Use this BEFORE implementing any spec-level change — to decide whether a change proposal is needed and to run the propose → validate → implement → archive loop. This is a project-local skill that composes with the OpenSpec-installed skills (openspec-propose, openspec-apply-change, openspec-archive-change).
+description: The project's spec-driven workflow for ithyno. Use this BEFORE implementing any spec-level change — to decide whether a change proposal is needed and to run the propose → validate → implement → archive loop. This is a project-local skill that composes with the OpenSpec-installed skills (openspec-propose, openspec-apply-change, openspec-archive-change).
 license: MIT
 ---
 

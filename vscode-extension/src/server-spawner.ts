@@ -83,7 +83,7 @@ function resolvePackageRoot(extensionPath: string): string {
     path.dirname(extensionPath),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, "bin", "openspec-ui.js"))) return c;
+    if (fs.existsSync(path.join(c, "bin", "ithyno.js"))) return c;
   }
   return extensionPath;
 }
@@ -97,13 +97,13 @@ export async function spawnServer(opts: {
 }): Promise<SpawnedServer> {
   const port = await pickFreePort();
   const pkgRoot = resolvePackageRoot(opts.extensionPath);
-  const entry = path.join(pkgRoot, "bin", "openspec-ui.js");
+  const entry = path.join(pkgRoot, "bin", "ithyno.js");
 
-  // Pass port + project root as CLI args, not env: bin/openspec-ui.js uses
+  // Pass port + project root as CLI args, not env: bin/ithyno.js uses
   // commander whose --port default ("4321") overwrites env.PORT. Passing
   // --port explicitly is the only way to actually pin the picked port.
   const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.OPENSPEC_DEV;
+  delete env.ITHYNO_DEV;
 
   const child = spawn(
     process.execPath,
@@ -111,7 +111,7 @@ export async function spawnServer(opts: {
     { env, cwd: pkgRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
 
-  const log = vscode.window.createOutputChannel("OpenSpec UI");
+  const log = vscode.window.createOutputChannel("ithyno");
 
   // Capture stdout to (a) surface it in the output channel and (b) sniff the
   // launch URL for the per-process session token.

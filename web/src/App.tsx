@@ -70,7 +70,7 @@ export function App() {
         <div className="auth-expired">
           <h2>Session expired</h2>
           <p>
-            Open the launch URL printed by the OpenSpec UI server to reload with
+            Open the launch URL printed by the ithyno server to reload with
             a fresh token. The URL looks like{" "}
             <code>http://localhost:&lt;port&gt;/?token=…</code>.
           </p>
@@ -86,7 +86,7 @@ export function App() {
     <div className={`app${showTerminal ? " with-terminal" : ""}`}>
       <header className="topbar">
         <div className="brand">
-          <span className="logo">◑</span> OpenSpec UI
+          <span className="logo">◑</span> ithyno
         </div>
         <nav>
           <NavLink to="/" end>
