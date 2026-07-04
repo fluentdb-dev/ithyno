@@ -34,6 +34,12 @@ When uncertain, ask once: "is this spec-level (proposal needed) or trivial?"
 If implementation happened ahead of a proposal, retrofit the change after the
 fact (see "Retrofit" in the skill). Do not let spec-level work go unrecorded.
 
+For reverting a past change, follow the **Revert** section of
+`.claude/skills/openspec-flow/SKILL.md` — it defines the `revert-<scope>`
+naming convention, Case α (archived target → MODIFIED/REMOVED delta) vs
+Case β (in-flight target → ADDED delta + reverted-target archive)
+classification, and the reverted-target archive procedure.
+
 ## Idea capture (stage ①)
 
 When a design conversation produces a conclusion worth keeping but NOT yet a

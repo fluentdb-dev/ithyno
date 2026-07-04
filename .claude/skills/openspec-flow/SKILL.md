@@ -380,3 +380,66 @@ npm run openspec -- archive <id>
 /opsx:archive <id>
 /opsx:sync <id>
 ```
+
+---
+
+## Revert
+
+Reverting a past change is a first-class workflow variant. It has
+its own naming convention and disposition rules, formalized by
+`add-revert-workflow`.
+
+### Naming
+
+- Revert change id: `revert-<scope>` where scope names the
+  reverted behavior (not necessarily every target id). Examples:
+  `revert-agent-pty-layers` reverts three siblings under one scope
+  name.
+- `tags:` frontmatter includes `feature/revert`.
+- Proposal's **Why** section lists every reverted target by id and
+  classifies each as Case α or Case β.
+
+### Case α — target already archived when the revert lands
+
+- Target's ADDED spec deltas have reached
+  `openspec/specs/<capability>/spec.md`.
+- Revert change's spec delta uses `MODIFIED` and/or `REMOVED` to
+  undo those requirements.
+- Target archive stays put; revert's outcome links back to it.
+
+### Case β — target still in-flight when the revert lands
+
+- Target's ADDED spec deltas never reached specs.
+- Revert change's spec delta uses `ADDED` only, describing the
+  post-revert baseline directly.
+- Target itself is archived alongside the revert (see below).
+
+A single revert may have targets in both cases.
+
+### Reverted-target archive (Case β)
+
+For each in-flight target being wrapped up by a revert:
+
+1. **Delete** `openspec/changes/<target>/specs/`. Its ADDED deltas
+   would collide with the revert's own baseline in the capability
+   spec if applied.
+2. **Write** `openspec/changes/<target>/outcome.md`:
+   - Title: `# Outcome: <target-id> (reverted)`
+   - Preserve `## ✅ Worked` and `## ⚠️ Surprises` from the actual
+     implementation — history is honest about what was tried.
+   - Replace `## 🔁 Differently` and `## 🌱 Follow-ups` with a
+     single bold line pointing at the reverting change id:
+     `**Reverted by [<revert-id>](../archive/<date>-<revert-id>/).**`
+3. **Archive**: `openspec archive <target-id> --yes` (or via
+   `/ithy-opsx:archive`).
+4. **Commit**: `archive: <target-id> (reverted)`.
+5. **Ordering**: archive all reverted targets BEFORE archiving the
+   reverting change itself. The revert's archive commit lands
+   last so the Kanban and archive tree reflect the revert as the
+   terminal state.
+
+### Cross-references
+
+- `CLAUDE.md` Standard order cross-references this section.
+- `add-revert-workflow` codified these rules; see its proposal for
+  the design rationale.
