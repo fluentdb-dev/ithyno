@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: External Worktree Discard Detection
 The dashboard SHALL detect worktree removals performed outside the UI
