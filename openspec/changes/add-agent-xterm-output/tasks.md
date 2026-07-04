@@ -27,8 +27,8 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Restart the server (`dev:test`), Start `add-vscode-extension` under Worktree mode
-- [ ] 5.2 Agents page shows Claude Code's REPL with correct colors, cursor drawing, no accumulated status-line residue
+- [x] 5.1 Restart the server (`dev:test`), Start `add-vscode-extension` under Worktree mode
+- [x] 5.2 Agents page shows Claude Code's REPL with correct colors, cursor drawing, no accumulated status-line residue
 - [ ] 5.3 Arrow-key option prompt from Claude — press `↑` / `↓` to move the highlight, `Enter` to select, agent proceeds
 - [ ] 5.4 Ctrl-C sends interrupt appropriately
 - [ ] 5.5 Paste a long block of text — one HTTP call fires (visible in DevTools), the paste appears in the terminal
