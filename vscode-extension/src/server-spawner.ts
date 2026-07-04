@@ -66,7 +66,7 @@ export function waitForHealth(port: number, timeoutMs = 5000): Promise<void> {
 }
 
 /**
- * Locate the packaged openspec-ui repo root.
+ * Locate the packaged ithyno repo root.
  *
  * Search order:
  *   1. `<extensionPath>/host/`   — the staged monorepo layout produced by
@@ -130,7 +130,7 @@ export async function spawnServer(opts: {
     };
     child.stdout?.on("data", onData);
     child.on("exit", (code) => {
-      log.appendLine(`[openspec-ui] server exited: ${code}`);
+      log.appendLine(`[ithyno] server exited: ${code}`);
       if (!token) reject(new Error(`server exited before printing launch URL (code ${code})`));
     });
     setTimeout(() => {
@@ -153,7 +153,7 @@ export async function spawnServer(opts: {
   } catch (err) {
     if (!child.killed) child.kill("SIGTERM");
     const msg = err instanceof Error ? err.message : String(err);
-    log.appendLine(`[openspec-ui] spawn failed: ${msg}`);
+    log.appendLine(`[ithyno] spawn failed: ${msg}`);
     log.show(true);
     throw err;
   }

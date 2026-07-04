@@ -12,13 +12,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(__dirname, "..");
 
 const program = new Command();
-program.name("openspec-ui").description("Local progress dashboard for OpenSpec");
+program.name("ithyno").description("ithyno — local dashboard for the OpenSpec workflow");
 
 // `init` subcommand: scaffold a target project.
 program
   .command("init [dir]")
   .description(
-    "Scaffold the project-side files OpenSpec UI expects (CLAUDE.md, skill, agents.yaml.example, docs/, .gitignore)",
+    "Scaffold the project-side files ithyno expects (CLAUDE.md, skill, agents.yaml.example, docs/, .gitignore)",
   )
   .option("-f, --force", "overwrite existing files instead of skipping them")
   .option("--no-gitignore", "do not modify the target .gitignore")
@@ -38,8 +38,7 @@ program
     process.exit(0);
   });
 
-// Default action: start the dashboard. Keeps the original flags so existing
-// invocations (`openspec-ui --dir ... --port ...`) continue to work.
+// Default action: start the dashboard.
 program
   .option("-p, --port <number>", "port to listen on", "4321")
   .option(
@@ -52,8 +51,8 @@ program
     const env = {
       ...process.env,
       PORT: String(opts.port),
-      OPENSPEC_PROJECT_ROOT: resolve(opts.dir),
-      OPENSPEC_OPEN: opts.open ? "1" : "0",
+      ITHYNO_PROJECT_ROOT: resolve(opts.dir),
+      ITHYNO_OPEN: opts.open ? "1" : "0",
     };
     const serverEntry = resolve(pkgRoot, "server", "index.ts");
     // Spawn tsx via its cli.mjs directly rather than `.bin/tsx`: vsce/pkg

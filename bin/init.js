@@ -1,5 +1,5 @@
-// Init handler for `openspec-ui init [dir]`. Pure JS (no tsx) so it runs
-// directly via `npx openspec-ui init` once the package is published.
+// Init handler for `ithyno init [dir]`. Pure JS (no tsx) so it runs
+// directly via `npx ithyno init` once the package is published.
 //
 // The implementation is split:
 //   - `runInit` is the pure orchestrator (filesystem effects via fs/promises)
@@ -122,7 +122,7 @@ export async function runInit({
     return {
       ok: false,
       exitCode: 2,
-      reason: `${target} is not a git repository. Run \`git init\` first — OpenSpec UI's agent runner needs a git working tree.`,
+      reason: `${target} is not a git repository. Run \`git init\` first — ithyno's agent runner needs a git working tree.`,
     };
   }
 
@@ -170,7 +170,7 @@ export async function runInit({
       log("  npx -y -p @fission-ai/openspec@latest openspec init . --tools claude");
       log("");
     }
-    log("  openspec-ui      # start the dashboard at http://localhost:4321");
+    log("  ithyno            # start the dashboard at http://localhost:4321");
   }
 
   return {

@@ -1,4 +1,4 @@
-// Pre-package: stage the openspec-ui monorepo assets (bin/, server/,
+// Pre-package: stage the ithyno monorepo assets (bin/, server/,
 // web/dist/, templates/, top-level package.json, and production node_modules)
 // into vscode-extension/host/ so vsce bundles them into the VSIX.
 //

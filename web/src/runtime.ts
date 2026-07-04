@@ -4,7 +4,7 @@
 // stash it in sessionStorage, and call history.replaceState to drop the token
 // from the visible address bar so it doesn't linger in screenshots / history.
 
-const STORAGE_KEY = "openspec-ui.sessionToken";
+const STORAGE_KEY = "ithyno.sessionToken";
 
 function bootstrapToken(): string | null {
   // Only run in browser (vitest in node would fail otherwise).
