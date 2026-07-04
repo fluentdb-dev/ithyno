@@ -251,23 +251,6 @@ export async function postGitInit(): Promise<GitStatus> {
   return data.gitStatus;
 }
 
-/**
- * Send user input to a running agent's stdin. The response gets echoed
- * back into the job's output ring buffer (via WS `agent-job-output` with
- * `stream: "stdin"`), so all connected clients see the transcript.
- */
-export async function sendAgentInput(
-  id: string,
-  data: string,
-  appendNewline = true,
-): Promise<void> {
-  const { status, data: body } = await postJson<{ ok?: boolean; error?: string }>(
-    `/api/agents/jobs/${encodeURIComponent(id)}/input`,
-    { data, appendNewline },
-  );
-  if (status >= 400) throw new Error(body.error ?? `HTTP ${status}`);
-}
-
 export async function cancelAgentJob(id: string): Promise<void> {
   // No body, but still uses the auth header. `postJson` adds Content-Type
   // application/json which a body-less POST tolerates fine.

@@ -167,7 +167,7 @@ export type JobSummary = {
   worktreeProgress?: Progress;
 };
 
-export type OutputLine = { stream: "stdout" | "stderr" | "stdin"; chunk: string; ts: number };
+export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
 export type Job = JobSummary & { output: OutputLine[] };
 
 export type DiffLine = { kind: "ctx" | "add" | "del"; text: string };

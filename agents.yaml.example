@@ -1,4 +1,4 @@
-# OpenSpec UI agent registry.
+# ithyno agent registry.
 #
 # Copy this file to `agents.yaml` at the project root and edit. The dashboard
 # loads it on startup and again whenever the file changes. With no agents
@@ -9,26 +9,19 @@
 #   ${worktree_path} — absolute path to the agent's git worktree
 #   ${branch}        — the agent branch ("agent/<change-id>")
 #
-# Spawning is `child_process.spawn(command, args, { cwd: worktree_path, env })`.
-# The agent inherits the project's working tree via the worktree; it should
-# end by leaving its changes committed (or at least staged) on the branch.
+# Spawning is `child_process.spawn(command, args, { cwd: worktree_path, env,
+# stdio: ["ignore", "pipe", "pipe"] })`. Agents run headless (no TTY); Claude
+# Code and friends should be invoked in their non-interactive `-p` mode so
+# they print plain lines to stdout and exit cleanly.
 #
-# Agents run inside a pseudo-terminal (node-pty), so TTY-detecting CLIs
-# behave as they would in a normal terminal. Omit `-p` / `--headless`
-# flags whose only purpose was to work around the missing TTY.
+# `initialInput` (optional) — when set, the runner prepends `-p
+# "<initialInput>"` to `args` at spawn time (unless `args` already contains
+# `-p`, in which case the user's explicit configuration wins). This is the
+# recommended way to hand the CLI its opening task without hard-coding the
+# `-p` flag in `args`.
 #
-# `initialInput` (optional) — written to the PTY exactly once, immediately
-# after spawn, with a trailing `\r` appended if the value doesn't already
-# end with `\r` or `\n`. Every REPL-style CLI (Claude, Aider, Codex) reads
-# its first task from stdin — prefer this over per-CLI print-mode flags,
-# which are CLI-specific and can change between releases.
-#
-# Interactive prompts (permission gates in Claude Code, `y/N` in Aider, etc.)
-# can be answered live from the Agents page — the dashboard writes to the
-# running agent's stdin. Alternatively, add a YOLO flag to `args` to skip
-# prompts entirely (worktree isolation limits the blast radius):
-#   Claude:  args: ["--dangerously-skip-permissions", "/opsx:apply", "${change_id}"]
-#   Aider:   args: ["--yes-always", "--message", "Implement ${change_id}"]
+# Worktree isolation limits the blast radius of `-p` mode's implicit
+# permission grant — every write lands under `.worktrees/<change-id>/`.
 
 agents:
   # Default Claude entry — uses `/ithy-opsx:apply` so the agent branch ends

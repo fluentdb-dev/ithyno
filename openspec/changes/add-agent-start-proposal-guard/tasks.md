@@ -38,8 +38,8 @@
 
 ## 7. Verification
 
-- [ ] 7.1 `/opsx:propose "some-test-change"` in the embedded terminal; DO NOT commit; click Start (Worktree) → modal appears listing the new `proposal.md` etc.
-- [ ] 7.2 Click `Commit & Start` → modal closes → new commit lands on main (`propose: some-test-change`) → agent worktree is created from the fresh commit → agent finds the proposal and proceeds
+- [x] 7.1 `/opsx:propose "some-test-change"` in the embedded terminal; DO NOT commit; click Start (Worktree) → modal appears listing the new `proposal.md` etc.
+- [x] 7.2 Click `Commit & Start` → modal closes → new commit lands on main (`propose: some-test-change`) → agent worktree is created from the fresh commit → agent finds the proposal and proceeds
 - [ ] 7.3 Repeat 7.1 but click `Cancel` → nothing happens; `git status` still shows the untracked files; no agent spawn
 - [ ] 7.4 Commit the proposal manually, then click Start → no modal (endpoint returns empty arrays); agent spawns straight into the worktree
 - [ ] 7.5 Start (Terminal) mode with an uncommitted proposal: no modal appears; the embedded `/opsx:apply` runs against main tree files as before

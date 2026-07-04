@@ -16,7 +16,7 @@ import remarkGfm from "remark-gfm";
 
 type Tab = "tasks" | "proposal" | "design" | "delta";
 
-const TASK_FILTER_PREFIX = "openspec-ui.taskFilter.";
+const TASK_FILTER_PREFIX = "ithyno.taskFilter.";
 function readTaskFilter(changeId: string | undefined): boolean {
   if (!changeId) return false;
   try {
@@ -73,7 +73,12 @@ export function ChangeDetail() {
   }, [id, isWorktreeView]);
 
   const mainChange = useStore((s) => s.state?.changes.find((c) => c.id === id));
-  const change = isWorktreeView && worktreeChange ? worktreeChange : mainChange;
+  // A fresher worktree Change may have been pushed via WS
+  // (`worktree-change-updated`) since the initial fetch — prefer that if
+  // present, so verify ticks reflect across clients without a page reload.
+  const wsWorktreeChange = useStore((s) => (id ? s.worktreeChangeById[id] : undefined));
+  const effectiveWorktreeChange = wsWorktreeChange ?? worktreeChange;
+  const change = isWorktreeView && effectiveWorktreeChange ? effectiveWorktreeChange : mainChange;
   const archivedEntry = useStore((s) => s.state?.archive.find((a) => a.id === id));
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   // In the VS Code shell the extension host owns a terminal, so injection is
@@ -173,15 +178,37 @@ export function ChangeDetail() {
       <div className="detail-head">
         <h2>
           {change.id}
-          {isWorktreeView && worktreeChange && (
-            <Link
-              to={`/change/${encodeURIComponent(id ?? "")}`}
-              className="detail-tree-pill"
-              title="Switch to main-tree view (URL without ?tree=worktree)."
-            >
-              viewing worktree · switch to main
-            </Link>
-          )}
+          {(() => {
+            const latestJob = Object.values(jobs)
+              .filter((j) => j.changeId === change.id)
+              .sort((a, b) => b.startedAt - a.startedAt)[0];
+            const worktreeProgress = worktreeProgressFromWs ?? latestJob?.worktreeProgress;
+            const hasWorktree =
+              !!worktreeProgress && !!latestJob && latestJob.status !== "cancelled";
+            if (isWorktreeView && worktreeChange) {
+              return (
+                <Link
+                  to={`/change/${encodeURIComponent(id ?? "")}`}
+                  className="detail-tree-pill"
+                  title="Switch to main-tree view (URL without ?tree=worktree)."
+                >
+                  viewing worktree · switch to main
+                </Link>
+              );
+            }
+            if (!isWorktreeView && hasWorktree) {
+              return (
+                <Link
+                  to={`/change/${change.id}?tree=worktree`}
+                  className="detail-tree-pill"
+                  title="Switch to the agent's worktree view (URL with ?tree=worktree)."
+                >
+                  viewing main · switch to worktree
+                </Link>
+              );
+            }
+            return null;
+          })()}
         </h2>
         <TagChipList tags={change.proposal?.tags} />
         {(() => {
@@ -189,22 +216,11 @@ export function ChangeDetail() {
             .filter((j) => j.changeId === change.id)
             .sort((a, b) => b.startedAt - a.startedAt)[0];
           const worktreeProgress = worktreeProgressFromWs ?? latestJob?.worktreeProgress;
-          const showWorktreeProgress =
-            !!worktreeProgress && !!latestJob && latestJob.status !== "cancelled";
-          const displayed = showWorktreeProgress ? worktreeProgress : change.progress;
-          return (
-            <>
-              <ProgressBar progress={displayed} />
-              {showWorktreeProgress && (
-                <span
-                  className="detail-worktree-badge muted"
-                  title="Live progress from the agent's worktree tasks.md (not yet merged to main)."
-                >
-                  worktree
-                </span>
-              )}
-            </>
-          );
+          const displayed =
+            !!worktreeProgress && !!latestJob && latestJob.status !== "cancelled"
+              ? worktreeProgress
+              : change.progress;
+          return <ProgressBar progress={displayed} />;
         })()}
         {(() => {
           const latestJob = Object.values(jobs)

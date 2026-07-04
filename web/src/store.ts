@@ -63,6 +63,10 @@ type Store = {
    *  tasks.md. Preferred over `change.progress` while a job is active or
    *  awaiting merge/discard. Cleared on merge/discard. */
   worktreeProgress: Record<string, Progress>;
+  /** Per-change worktree Change snapshots pushed via `worktree-change-updated`
+   *  (e.g. when the user ticks a verify item on the worktree view). Consumed
+   *  by ChangeDetail's worktree view to keep tick state fresh across clients. */
+  worktreeChangeById: Record<string, Change>;
   gitConfig: GitConfig | null;
 
   load: () => Promise<void>;
@@ -100,7 +104,7 @@ let currentWs: WebSocket | null = null;
 
 // User preferences persisted to localStorage. Read once at module load so the
 // initial render already reflects the saved choice (no flash of default state).
-const TERM_KEY = "openspec-ui.terminalVisible";
+const TERM_KEY = "ithyno.terminalVisible";
 function readTerminalVisible(): boolean {
   try {
     const v = localStorage.getItem(TERM_KEY);
@@ -110,7 +114,7 @@ function readTerminalVisible(): boolean {
   }
 }
 
-const STYLE_KEY = "openspec-ui.commandStyle";
+const STYLE_KEY = "ithyno.commandStyle";
 function readCommandStyle(): CommandStyle {
   try {
     const v = localStorage.getItem(STYLE_KEY);
@@ -120,7 +124,7 @@ function readCommandStyle(): CommandStyle {
   }
 }
 
-const OVERVIEW_LAYOUT_KEY = "openspec-ui.overviewLayout";
+const OVERVIEW_LAYOUT_KEY = "ithyno.overviewLayout";
 function readOverviewLayout(): OverviewLayout {
   try {
     const v = localStorage.getItem(OVERVIEW_LAYOUT_KEY);
@@ -158,6 +162,7 @@ export const useStore = create<Store>((set, get) => ({
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
+  worktreeChangeById: {},
   gitConfig: null,
 
   loadAgents: async () => {
@@ -376,6 +381,8 @@ export const useStore = create<Store>((set, get) => ({
       if (!cur) return;
       if (msg.type === "change-updated") {
         set({ state: replaceChange(cur, msg.change) });
+      } else if (msg.type === "worktree-change-updated") {
+        set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [msg.changeId]: msg.change } }));
       } else if (msg.type === "spec-updated") {
         set({ state: replaceSpec(cur, msg.domain, msg.spec) });
       } else if (msg.type === "state-replaced") {
@@ -407,6 +414,20 @@ export const useStore = create<Store>((set, get) => ({
         get().appendJobOutput(msg.jobId, { stream: msg.stream, chunk: msg.chunk, ts: Date.now() });
       } else if (msg.type === "agent-job-finished") {
         get().setJobFinished(msg.jobId, msg.status, msg.exitCode);
+      } else if (msg.type === "agent-job-removed") {
+        // add-worktree-external-discard-detection: a terminal-driven
+        // `git worktree remove` unlinked the watched tasks.md → server
+        // dropped the job → drop it from the client too so the Kanban
+        // card falls back to TODO instead of showing a ghost job.
+        set((s) => {
+          const jobs = { ...s.jobs };
+          delete jobs[msg.jobId];
+          const jobOutputs = { ...s.jobOutputs };
+          delete jobOutputs[msg.jobId];
+          const worktreeProgress = { ...s.worktreeProgress };
+          delete worktreeProgress[msg.changeId];
+          return { jobs, jobOutputs, worktreeProgress };
+        });
       } else if (msg.type === "worktree-progress-updated") {
         set((s) => ({
           worktreeProgress: { ...s.worktreeProgress, [msg.changeId]: msg.progress },
@@ -423,18 +444,32 @@ export const useStore = create<Store>((set, get) => ({
   toggle: async (task) => {
     const cur = get().state;
     if (!cur) return;
-    const change = cur.changes.find((c) => c.id && c.tasks?.filePath === task.filePath);
-    const baseHash = change?.tasks?.baseHash ?? "";
+    // Worktree tick: `<root>/.worktrees/<worktreeId>/openspec/changes/<id>/…`
+    // The main state doesn't hold the worktree Change; look it up (and update
+    // it) in `worktreeChangeById` instead.
+    const worktreeMatch = task.filePath.match(/\.worktrees\/[^/]+\/openspec\/changes\/([^/]+)\//);
+    const worktreeChangeId = worktreeMatch ? worktreeMatch[1] : null;
+    const mainChange = cur.changes.find((c) => c.id && c.tasks?.filePath === task.filePath);
+    const wtChange = worktreeChangeId ? get().worktreeChangeById[worktreeChangeId] : undefined;
+    const baseHash = (worktreeChangeId ? wtChange?.tasks?.baseHash : mainChange?.tasks?.baseHash) ?? "";
     const desired = !task.checked;
     const key = taskKey(task);
 
     // Optimistic update: flip the checkbox immediately and clear any stale conflict.
     set((s) => {
-      if (!s.state) return {};
-      const next = mutateTask(s.state, task, (t) => ({ ...t, checked: desired }));
       const conflicts = { ...s.conflicts };
       delete conflicts[key];
-      return { state: next, conflicts };
+      if (worktreeChangeId) {
+        const cur = s.worktreeChangeById[worktreeChangeId];
+        if (!cur) return { conflicts };
+        const flipped = mutateChangeTask(cur, task, (t) => ({ ...t, checked: desired }));
+        return {
+          worktreeChangeById: { ...s.worktreeChangeById, [worktreeChangeId]: flipped },
+          conflicts,
+        };
+      }
+      if (!s.state) return { conflicts };
+      return { state: mutateTask(s.state, task, (t) => ({ ...t, checked: desired })), conflicts };
     });
 
     const res = await apiToggle({
@@ -445,31 +480,46 @@ export const useStore = create<Store>((set, get) => ({
       desiredChecked: desired,
     });
 
-    const live = get().state;
-    if (!live) return;
-
     if (res.status === "ok" && res.change) {
       // Authoritative refresh (fresh baseHash + line numbers).
-      set({ state: replaceChange(live, res.change) });
+      if (worktreeChangeId) {
+        set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [worktreeChangeId]: res.change! } }));
+      } else {
+        const live = get().state;
+        if (live) set({ state: replaceChange(live, res.change) });
+      }
     } else if (res.status === "conflict" && res.change) {
-      // Background reconciliation: adopt the authoritative change (rolls back
-      // the optimistic flip), then flag THIS task for local re-confirmation.
-      const reconciled = replaceChange(live, res.change);
-      const refreshed = findTask(reconciled, task);
-      set((s) => ({
-        state: reconciled,
-        conflicts: refreshed
-          ? {
-              ...s.conflicts,
-              [taskKey(refreshed)]: {
-                newText: refreshed.raw,
-                message: res.reason ?? "This task was updated externally.",
-              },
-            }
-          : s.conflicts,
-      }));
+      // Background reconciliation: adopt authoritative change; flag task for
+      // local re-confirmation.
+      if (worktreeChangeId) {
+        set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [worktreeChangeId]: res.change! } }));
+      } else {
+        const live = get().state;
+        if (!live) return;
+        const reconciled = replaceChange(live, res.change);
+        const refreshed = findTask(reconciled, task);
+        set((s) => ({
+          state: reconciled,
+          conflicts: refreshed
+            ? {
+                ...s.conflicts,
+                [taskKey(refreshed)]: {
+                  newText: refreshed.raw,
+                  message: res.reason ?? "This task was updated externally.",
+                },
+              }
+            : s.conflicts,
+        }));
+      }
     } else {
-      if (res.change) set({ state: replaceChange(live, res.change) });
+      if (res.change) {
+        if (worktreeChangeId) {
+          set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [worktreeChangeId]: res.change! } }));
+        } else {
+          const live = get().state;
+          if (live) set({ state: replaceChange(live, res.change) });
+        }
+      }
       get().pushToast("error", res.reason ?? "Update failed.");
     }
   },
@@ -478,23 +528,25 @@ export const useStore = create<Store>((set, get) => ({
 function mutateTask(state: WorkspaceState, target: Task, fn: (t: Task) => Task): WorkspaceState {
   return {
     ...state,
-    changes: state.changes.map((c) => {
-      if (c.tasks?.filePath !== target.filePath) return c;
-      const tasks = c.tasks;
-      let done = 0;
-      let total = 0;
-      const sections = tasks.sections.map((sec) => ({
-        ...sec,
-        tasks: sec.tasks.map((t) => {
-          const updated = taskKey(t) === taskKey(target) ? fn(t) : t;
-          total++;
-          if (updated.checked) done++;
-          return updated;
-        }),
-      }));
-      return { ...c, tasks: { ...tasks, sections }, progress: { done, total } };
-    }),
+    changes: state.changes.map((c) => (c.tasks?.filePath === target.filePath ? mutateChangeTask(c, target, fn) : c)),
   };
+}
+
+function mutateChangeTask(c: Change, target: Task, fn: (t: Task) => Task): Change {
+  if (!c.tasks) return c;
+  const tasks = c.tasks;
+  let done = 0;
+  let total = 0;
+  const sections = tasks.sections.map((sec) => ({
+    ...sec,
+    tasks: sec.tasks.map((t) => {
+      const updated = taskKey(t) === taskKey(target) ? fn(t) : t;
+      total++;
+      if (updated.checked) done++;
+      return updated;
+    }),
+  }));
+  return { ...c, tasks: { ...tasks, sections }, progress: { done, total } };
 }
 
 function findTask(state: WorkspaceState, target: Task): Task | null {

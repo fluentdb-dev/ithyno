@@ -1343,21 +1343,21 @@ a:hover {
   padding: 6px 10px;
 }
 
-.agent-terminal-container {
+.agent-output-pre {
   background: #0f1115;
+  color: #e6e9ef;
   border-top: 1px solid var(--border);
   padding: 8px;
   height: 480px;
-  overflow: hidden;
+  margin: 0;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.agent-terminal-container .xterm,
-.agent-terminal-container .xterm-viewport,
-.agent-terminal-container .xterm-screen {
-  width: 100% !important;
-  height: 100% !important;
-}
-.agent-terminal-container:focus-within {
-  outline: 1px solid var(--accent);
+.agent-output-pre .agent-stderr {
+  color: #f28b82;
 }
 
 /* Archived change panel (shown at /change/:id when id is in archive) */

@@ -89,6 +89,11 @@ function JobRow({ job, initialTab }: { job: JobSummary; initialTab?: "output" | 
   const [open, setOpen] = useState(job.status === "running" || initialTab === "diff");
   const defaultTab: "output" | "diff" = initialTab ?? (job.status === "running" ? "output" : "diff");
   const [tab, setTab] = useState<"output" | "diff">(defaultTab);
+  // Local flag flipped when Cancel is clicked. The button then shows
+  // "Cancelling…" and is disabled until the WS finish event flips
+  // `job.status` off "running" (at which point the whole button
+  // disappears — its guard is `job.status === "running"`).
+  const [cancelling, setCancelling] = useState(false);
 
   return (
     <div className={`job-row job-${job.status}`}>
@@ -104,11 +109,13 @@ function JobRow({ job, initialTab }: { job: JobSummary; initialTab?: "output" | 
         {job.status === "running" && (
           <button
             className="action-btn ghost"
+            disabled={cancelling}
             onClick={() => {
-              void cancelAgentJob(job.id).catch(() => {});
+              setCancelling(true);
+              void cancelAgentJob(job.id).catch(() => setCancelling(false));
             }}
           >
-            Cancel
+            {cancelling ? "Cancelling…" : "Cancel"}
           </button>
         )}
         <span className="job-meta muted">

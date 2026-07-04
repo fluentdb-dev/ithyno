@@ -24,10 +24,15 @@ export type WorktreeProgressOpts = {
   changeId: string;
   onProgress: (progress: Progress) => void;
   onError?: (err: unknown) => void;
+  /** Fires (at most once) when the watched `tasks.md` file is unlinked —
+   *  the signal we use to detect an external `git worktree remove`. Callers
+   *  should treat this as "the worktree is gone; clean up your job entry."
+   *  Landed by add-worktree-external-discard-detection. */
+  onUnlink?: () => void;
 };
 
 export function startWorktreeProgressWatcher(opts: WorktreeProgressOpts): WorktreeProgressHandle {
-  const { projectRoot, changeId, onProgress, onError } = opts;
+  const { projectRoot, changeId, onProgress, onError, onUnlink } = opts;
   const tasksPath = join(
     projectRoot,
     ".worktrees",
@@ -74,6 +79,16 @@ export function startWorktreeProgressWatcher(opts: WorktreeProgressOpts): Worktr
   watcher.on("add", schedule);
   watcher.on("change", schedule);
   watcher.on("error", (err: unknown) => onError?.(err));
+  let unlinkFired = false;
+  watcher.on("unlink", () => {
+    if (disposed || unlinkFired) return;
+    unlinkFired = true;
+    try {
+      onUnlink?.();
+    } catch (err) {
+      onError?.(err);
+    }
+  });
 
   return {
     dispose() {

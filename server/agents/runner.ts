@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
-import { loadPty } from "../sync/pty.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
 import { listOrphanWorktrees } from "./adopt-orphans.js";
 import type { Progress } from "../model.js";
@@ -48,31 +47,20 @@ export type Job = JobSummary & {
   lastWorktreeProgress?: Progress;
 };
 
-export type OutputLine = { stream: "stdout" | "stderr" | "stdin"; chunk: string; ts: number };
+export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
 
 const RING_LIMIT = 10_000;
 
 type RunnerEvent =
   | { type: "agent-job-started"; job: JobSummary }
-  | { type: "agent-job-output"; jobId: string; chunk: string; stream: "stdout" | "stderr" | "stdin" }
+  | { type: "agent-job-output"; jobId: string; chunk: string; stream: "stdout" | "stderr" }
   | { type: "agent-job-finished"; jobId: string; status: JobStatus; exitCode: number | null }
+  | { type: "agent-job-removed"; jobId: string; changeId: string }
   | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: Progress };
-
-/**
- * A minimal shape of node-pty's IPty that we depend on. Kept structural so
- * we don't couple to the native module's type surface (which varies across
- * @homebridge/node-pty-prebuilt-multiarch versions).
- */
-type IPty = {
-  write(data: string): void;
-  kill(signal?: string): void;
-  onData(cb: (data: string) => void): void;
-  onExit(cb: (e: { exitCode: number; signal?: number }) => void): void;
-};
 
 export class AgentRunner {
   private jobs = new Map<string, Job>();
-  private processes = new Map<string, IPty>();
+  private processes = new Map<string, ChildProcess>();
   private locks = new Map<string, string>(); // changeId -> jobId
   private seq = 0;
 
@@ -175,8 +163,35 @@ export class AgentRunner {
             `[runner] orphan worktree-progress read failed for ${orphan.changeId}: ${err instanceof Error ? err.message : String(err)}`,
           );
         },
+        onUnlink: () => this.removeJobExternally(jobId, orphan.changeId),
       });
     }
+  }
+
+  /**
+   * Called by the worktree-progress watcher when its watched `tasks.md`
+   * is unlinked — the signal that someone ran `git worktree remove` (or
+   * equivalent) outside the UI. Drops the job from the runner's maps and
+   * broadcasts so the client's Kanban card returns to TODO without a
+   * server restart. Landed by add-worktree-external-discard-detection.
+   */
+  private removeJobExternally(jobId: string, changeId: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    if (job.status === "running") {
+      console.warn(
+        `[runner] worktree externally removed while ${changeId} agent was live — the process will exit on its own when it notices the missing cwd`,
+      );
+    }
+    try {
+      job.worktreeTasksWatcher?.dispose();
+    } catch {
+      /* ignore */
+    }
+    job.worktreeTasksWatcher = undefined;
+    this.jobs.delete(jobId);
+    if (this.locks.get(changeId) === jobId) this.locks.delete(changeId);
+    this.emit({ type: "agent-job-removed", jobId, changeId });
   }
 
   listJobs(limit = 50): JobSummary[] {
@@ -247,7 +262,14 @@ export class AgentRunner {
       worktree_path: worktreePath,
       branch,
     });
-    console.log(`[runner] spawn ${def.command} ${resolved.args.join(" ")} (cwd=${worktreePath})`);
+    // revert-agent-pty-layers: translate `initialInput` into a `-p
+    // "<initialInput>"` CLI arg (Claude Code's non-interactive mode).
+    // User-supplied `-p` wins — don't double it up.
+    const finalArgs = [...resolved.args];
+    if (resolved.initialInput !== undefined && !finalArgs.includes("-p")) {
+      finalArgs.unshift("-p", resolved.initialInput);
+    }
+    console.log(`[runner] spawn ${def.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
 
     const id = this.newId();
     const job: Job = {
@@ -263,88 +285,39 @@ export class AgentRunner {
     this.jobs.set(id, job);
     this.locks.set(changeId, id);
 
-    // Spawn under a PTY so TTY-detecting CLIs (Claude Code, Aider, Codex,
-    // …) enter their interactive modes. Reuses the embedded terminal's
-    // node-pty loader; if the native module is unavailable we surface a
-    // clean 500 before touching the worktree state further.
-    const ptyMod = await loadPty();
-    if (!ptyMod.available) {
-      console.error(`[runner] pty unavailable: ${ptyMod.reason}`);
-      // Roll back the worktree we just created so the user can retry once
-      // the pty problem is fixed.
-      try {
-        await execFile("git", ["worktree", "remove", "--force", worktreePath], { cwd: this.projectRoot });
-        await execFile("git", ["branch", "-D", branch], { cwd: this.projectRoot });
-      } catch {
-        /* best effort */
-      }
-      return { ok: false, status: 500, reason: `pty unavailable: ${ptyMod.reason}` };
-    }
-    const term: IPty = ptyMod.module.spawn(def.command, resolved.args, {
-      name: "xterm-256color",
+    // Piped stdio spawn: `-p` mode means Claude Code (and equivalents) print
+    // plain lines to stdout and exit cleanly — no TTY required, no permission
+    // prompts. The prior PTY layer + xterm.js + input-relay chain was
+    // reverted because `-p` makes them all unnecessary. See
+    // openspec/changes/archive/…-revert-agent-pty-layers.
+    const child = spawnChild(def.command, finalArgs, {
       cwd: worktreePath,
-      env: { ...process.env, ...resolved.env, TERM: "xterm-256color" },
-      cols: 200,
-      rows: 50,
+      env: { ...process.env, ...resolved.env },
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    this.processes.set(id, term);
+    this.processes.set(id, child);
 
     this.emit({ type: "agent-job-started", job: stripOutput(job) });
 
-    // add-agent-initial-input: hand the CLI its opening prompt via the PTY
-    // write channel.
-    //
-    // Two-step write is deliberate. Claude Code's Ink-based input handler
-    // treats a multi-char chunk arriving in a single stdin read as a
-    // *paste* — inside a paste, `\r` is inserted as a newline in the
-    // composer, NOT treated as submit. So `write("/opsx:apply foo\r")` in
-    // one call leaves Claude sitting at the prompt with the text typed
-    // but no Enter fired. This is the same automation gotcha tmux
-    // `send-keys` users hit.
-    //
-    // The fix: send the text and the Enter as separate writes with a
-    // short gap. Each hits stdin as a distinct read; the second one is a
-    // single `\r` byte that Claude treats as a submit.
-    //
-    // The 800ms pre-delay lets Claude's REPL initialize before either
-    // write lands — install line editor, register handlers, etc.
-    if (resolved.initialInput !== undefined) {
-      // If the caller embedded a trailing newline, honor it (no double).
-      const stripped = resolved.initialInput.replace(/[\r\n]+$/, "");
-      setTimeout(() => {
-        if (!this.processes.has(id)) return;
-        try {
-          term.write(stripped);
-          pushOutput(job, { stream: "stdin", chunk: stripped, ts: Date.now() });
-          this.emit({ type: "agent-job-output", jobId: id, chunk: stripped, stream: "stdin" });
-          console.log(`[runner] wrote initialInput text for ${changeId}`);
-          // Second write: standalone Enter, as its own stdin read.
-          // 300ms is long enough that Claude's paste-mode timer has
-          // definitely finished between the two reads.
-          setTimeout(() => {
-            if (!this.processes.has(id)) return;
-            try {
-              term.write("\r");
-              pushOutput(job, { stream: "stdin", chunk: "\r", ts: Date.now() });
-              this.emit({ type: "agent-job-output", jobId: id, chunk: "\r", stream: "stdin" });
-              console.log(`[runner] wrote initialInput Enter for ${changeId}`);
-            } catch (err) {
-              console.error(
-                `[runner] initial input Enter write failed for ${changeId}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          }, 300);
-        } catch (err) {
-          console.error(
-            `[runner] initial input write failed for ${changeId}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }, 800);
-    }
+    // Echo the spawn command line into the job's transcript as a synthetic
+    // first stdout line. `-p` mode agents (Claude Code, etc.) typically
+    // buffer their output and flush at the end — the user sees nothing
+    // until completion. Showing the resolved command line up front means
+    // the transcript has visible context immediately (what was requested,
+    // even if the result takes a while).
+    const spawnLine = `$ ${def.command}${finalArgs.length ? " " + finalArgs.map(quoteArg).join(" ") : ""}\n\n`;
+    pushOutput(job, { stream: "stdout", chunk: spawnLine, ts: Date.now() });
+    this.emit({ type: "agent-job-output", jobId: id, chunk: spawnLine, stream: "stdout" });
 
-    term.onData((data: string) => {
-      pushOutput(job, { stream: "stdout", chunk: data, ts: Date.now() });
-      this.emit({ type: "agent-job-output", jobId: id, chunk: data, stream: "stdout" });
+    child.stdout?.on("data", (buf: Buffer) => {
+      const chunk = buf.toString("utf8");
+      pushOutput(job, { stream: "stdout", chunk, ts: Date.now() });
+      this.emit({ type: "agent-job-output", jobId: id, chunk, stream: "stdout" });
+    });
+    child.stderr?.on("data", (buf: Buffer) => {
+      const chunk = buf.toString("utf8");
+      pushOutput(job, { stream: "stderr", chunk, ts: Date.now() });
+      this.emit({ type: "agent-job-output", jobId: id, chunk, stream: "stderr" });
     });
 
     // add-worktree-tasks-watcher: watch the worktree's tasks.md so the
@@ -358,6 +331,7 @@ export class AgentRunner {
         job.lastWorktreeProgress = progress;
         this.emit({ type: "worktree-progress-updated", jobId: id, changeId, progress });
       },
+      onUnlink: () => this.removeJobExternally(id, changeId),
       onError: (err) => {
         console.warn(
           `[runner] worktree-progress read failed for ${changeId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -381,27 +355,26 @@ export class AgentRunner {
           progress: job.lastWorktreeProgress,
         });
       }
-      // Dispose the fs watcher before broadcasting the finished event so
-      // no more progress emissions can race the terminal transition.
-      try {
-        job.worktreeTasksWatcher?.dispose();
-      } catch {
-        /* ignore */
-      }
-      job.worktreeTasksWatcher = undefined;
+      // Do NOT dispose the fs watcher here — post-run jobs (completed /
+      // crashed / cancelled) leave the worktree on disk waiting for
+      // Merge / Discard. The watcher stays alive so an external `git
+      // worktree remove` still fires `onUnlink` → `removeJobExternally`
+      // and the Kanban card returns to TODO without a server restart.
+      // Disposal happens in removeJobExternally itself.
+      // Landed by add-worktree-external-discard-detection.
       this.emit({ type: "agent-job-finished", jobId: id, status, exitCode });
     };
 
-    term.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
-      // SIGTERM (signal 15) with no prior cancel-flag flip still ends the
-      // process; when we cancelled we already flipped status ourselves.
-      const isSigterm = signal === 15;
+    child.on("exit", (code, signal) => {
+      // SIGTERM handling: when we called cancel() we already flipped status,
+      // so respect the existing flag; otherwise infer from code/signal.
+      const isSigterm = signal === "SIGTERM";
       const finalStatus = job.status === "running"
-        ? (isSigterm ? "cancelled" : exitCode === 0 ? "completed" : "crashed")
+        ? (isSigterm ? "cancelled" : code === 0 ? "completed" : "crashed")
         : job.status;
-      console.log(`[runner] exit ${changeId} status=${finalStatus} code=${exitCode} signal=${signal}`);
+      console.log(`[runner] exit ${changeId} status=${finalStatus} code=${code} signal=${signal}`);
       if (job.status === "running") {
-        finish(finalStatus, exitCode);
+        finish(finalStatus, code);
       }
     });
 
@@ -422,44 +395,6 @@ export class AgentRunner {
     if (!proc) return { ok: false, reason: "Process handle missing" };
     job.status = "cancelled";
     proc.kill("SIGTERM");
-    return { ok: true };
-  }
-
-  /**
-   * Write user-supplied bytes to a running agent through its PTY. When
-   * appendNewline is true (the default; most CLIs consume input line-by-line),
-   * a `\r` — the byte a terminal actually sends on Enter — is appended.
-   * The written bytes are echoed into the job's ring buffer as a
-   * `stream: "stdin"` line and broadcast to all listeners so the transcript
-   * remains self-contained for post-hoc review.
-   */
-  writeInput(id: string, data: string, appendNewline = true): { ok: true } | { ok: false; status: number; reason: string } {
-    const job = this.jobs.get(id);
-    if (!job) return { ok: false, status: 404, reason: "Unknown job id" };
-    if (job.status === "orphaned") {
-      return {
-        ok: false,
-        status: 409,
-        reason: "This job is orphaned; interactive input is disabled — no process handle.",
-      };
-    }
-    if (job.status !== "running") {
-      return { ok: false, status: 409, reason: `Job is ${job.status}, not accepting input.` };
-    }
-    const term = this.processes.get(id);
-    if (!term) {
-      return { ok: false, status: 500, reason: "PTY handle not available." };
-    }
-    const bytes = appendNewline ? `${data}\r` : data;
-    try {
-      term.write(bytes);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[runner] pty write failed for ${id}: ${msg}`);
-      return { ok: false, status: 500, reason: `pty write failed: ${msg}` };
-    }
-    pushOutput(job, { stream: "stdin", chunk: bytes, ts: Date.now() });
-    this.emit({ type: "agent-job-output", jobId: id, chunk: bytes, stream: "stdin" });
     return { ok: true };
   }
 
@@ -488,6 +423,17 @@ function pushOutput(job: Job, line: OutputLine): void {
   if (job.output.length > RING_LIMIT) {
     job.output.splice(0, job.output.length - RING_LIMIT);
   }
+}
+
+/**
+ * POSIX-ish shell quoting for readable output. Not for actual re-execution —
+ * spawn already got the args verbatim; this is just so the user sees an
+ * unambiguous representation of what was launched.
+ */
+function quoteArg(a: string): string {
+  if (a === "") return "''";
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(a)) return a;
+  return `'${a.replace(/'/g, "'\\''")}'`;
 }
 
 function stripOutput(job: Job): JobSummary {

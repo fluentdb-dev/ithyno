@@ -1,103 +1,142 @@
-import { useEffect, useRef } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
+import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../store";
-import { sendAgentInput } from "../api";
 
 /**
- * Interactive xterm view for an agent job.
+ * Plain scrolling output view for an agent job.
  *
- * Data source: the store's `jobOutputs[jobId]` slice, which accumulates every
- * `agent-job-output` WebSocket event since the app started.
+ * Data source: the store's `jobOutputs[jobId]` slice, populated from
+ * `agent-job-output` WebSocket events. Since the revert of the PTY /
+ * xterm / stdin-relay chain, agent stdout is *plain lines* — Claude
+ * Code (etc.) runs with `-p "<initial input>"` and never enters TUI
+ * mode, so cursor motion / in-place redraws don't happen. That means
+ * a simple `<pre>` with append-only content renders correctly; SGR
+ * color codes are converted to `<span style="color: …">` inline.
  *
- * We attach directly to `useStore.subscribe` (imperative zustand API) rather
- * than reading `outputs` via a `useStore(selector)` hook + `useEffect([outputs])`.
- * The subscribe pattern is simpler to reason about with React 19 StrictMode's
- * double-mount semantics: setup runs, cleanup runs, setup runs again — each
- * time we re-seed from the current store snapshot and start a fresh subscription
- * scoped to *this* mount. No stale refs from a torn-down mount can survive to
- * confuse the second one.
- *
- * Interactive input: user keystrokes captured via `term.onData` are forwarded
- * to the agent's PTY through `POST /api/agents/jobs/:id/input` with
- * `appendNewline: false` — xterm produces terminal-correct bytes (\r for
- * Enter, \x1b[A for Up, etc.), so the server does not need to append anything.
+ * Auto-scroll pins the tail unless the user has scrolled up (we detect
+ * "user is at the bottom" with a small tolerance and only re-pin if so).
  */
 export function AgentOutputView({ jobId }: { jobId: string }) {
-  const hostRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLPreElement>(null);
+  const isAtBottomRef = useRef(true);
+  const chunks = useStore((s) => s.jobOutputs[jobId]);
+
+  const rendered = useMemo(() => renderAnsi(chunks ?? []), [chunks]);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (isAtBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [rendered]);
 
-    const term = new XTerm({
-      fontFamily:
-        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-      fontSize: 13,
-      cursorBlink: true,
-      theme: {
-        background: "#0f1115",
-        foreground: "#e6e9ef",
-        cursor: "#6ea8fe",
-      },
-      scrollback: 10_000,
-      convertEol: false,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const slack = 8;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= slack;
+  };
 
-    const fitNow = () => {
-      try {
-        fit.fit();
-      } catch {
-        /* container may not be measurable yet */
+  return (
+    <pre
+      ref={scrollRef}
+      onScroll={onScroll}
+      className="agent-output-pre"
+      dangerouslySetInnerHTML={{ __html: rendered }}
+    />
+  );
+}
+
+/**
+ * Convert a stream of ring-buffer chunks into HTML. Handles:
+ *   - SGR color codes (foreground 30-37 / 90-97, bright 90+, reset 0/39)
+ *   - Bold (1) as `<b>`; reset via 22 or 0
+ *   - Strips all other escape sequences (cursor motion, erase-in-line,
+ *     mode toggles). `-p` mode shouldn't emit them, but stay defensive.
+ *
+ * HTML-escapes `<`, `>`, `&` in the plain text so pasted markup / diffs
+ * don't inject nodes.
+ */
+function renderAnsi(chunks: { stream: string; chunk: string }[]): string {
+  const ESC = /\x1b\[([0-9;]*)([A-Za-z])/g;
+  const stderrClassOpen = '<span class="agent-stderr">';
+  let html = "";
+  let openSpans = 0;
+  let bold = false;
+  const closeAll = () => {
+    let s = "";
+    if (bold) {
+      s += "</b>";
+      bold = false;
+    }
+    while (openSpans > 0) {
+      s += "</span>";
+      openSpans--;
+    }
+    return s;
+  };
+  for (const { stream, chunk } of chunks) {
+    const wrapStderr = stream === "stderr";
+    if (wrapStderr) html += stderrClassOpen;
+    let last = 0;
+    ESC.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = ESC.exec(chunk)) !== null) {
+      html += escapeHtml(chunk.slice(last, m.index));
+      last = m.index + m[0].length;
+      if (m[2] !== "m") continue; // ignore non-SGR (cursor moves etc.)
+      const codes = m[1].length === 0 ? [0] : m[1].split(";").map((s) => parseInt(s, 10) || 0);
+      for (const c of codes) {
+        if (c === 0) {
+          html += closeAll();
+        } else if (c === 1) {
+          if (!bold) {
+            html += "<b>";
+            bold = true;
+          }
+        } else if (c === 22) {
+          if (bold) {
+            html += "</b>";
+            bold = false;
+          }
+        } else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) {
+          const color = SGR_COLORS[c];
+          if (color) {
+            html += `<span style="color:${color}">`;
+            openSpans++;
+          }
+        } else if (c === 39) {
+          if (openSpans > 0) {
+            html += "</span>";
+            openSpans--;
+          }
+        }
       }
-    };
-    fitNow();
-    requestAnimationFrame(fitNow);
+    }
+    html += escapeHtml(chunk.slice(last));
+    if (wrapStderr) html += "</span>";
+  }
+  html += closeAll();
+  return html;
+}
 
-    let lastWrittenLen = 0;
+const SGR_COLORS: Record<number, string> = {
+  30: "#4a4a4a",
+  31: "#e06c75",
+  32: "#98c379",
+  33: "#e5c07b",
+  34: "#61afef",
+  35: "#c678dd",
+  36: "#56b6c2",
+  37: "#e6e9ef",
+  90: "#5c6370",
+  91: "#f28b82",
+  92: "#b3e28b",
+  93: "#f0d68a",
+  94: "#82c1ff",
+  95: "#d491e0",
+  96: "#7dd3d0",
+  97: "#ffffff",
+};
 
-    // Write any store chunks we haven't written yet, then advance the pointer.
-    // Called once for seed and again whenever the store slice changes.
-    const writeUnwritten = () => {
-      const slice = useStore.getState().jobOutputs[jobId];
-      if (!slice) return;
-      if (slice.length <= lastWrittenLen) return;
-      for (let i = lastWrittenLen; i < slice.length; i++) {
-        term.write(slice[i].chunk);
-      }
-      lastWrittenLen = slice.length;
-    };
-
-    // Seed from current snapshot before subscribing so we don't miss anything
-    // in the tiny window between construction and the first subscription tick.
-    writeUnwritten();
-
-    const unsubscribe = useStore.subscribe((s, prev) => {
-      if (s.jobOutputs[jobId] !== prev.jobOutputs[jobId]) writeUnwritten();
-    });
-
-    const inputDisposable = term.onData((data) => {
-      void sendAgentInput(jobId, data, false).catch((err) => {
-        console.error("[agent-terminal] input send failed:", err);
-      });
-    });
-
-    const ro = new ResizeObserver(() => fitNow());
-    ro.observe(host);
-    window.addEventListener("resize", fitNow);
-
-    return () => {
-      window.removeEventListener("resize", fitNow);
-      ro.disconnect();
-      unsubscribe();
-      inputDisposable.dispose();
-      term.dispose();
-    };
-  }, [jobId]);
-
-  return <div ref={hostRef} className="agent-terminal-container" />;
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

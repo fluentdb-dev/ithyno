@@ -45,9 +45,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
 
 const PORT = Number(process.env.PORT ?? 4321);
-const PROJECT_ROOT = resolve(process.env.OPENSPEC_PROJECT_ROOT ?? process.cwd());
-const DEV = process.env.OPENSPEC_DEV === "1";
-const SHOULD_OPEN = process.env.OPENSPEC_OPEN === "1";
+const PROJECT_ROOT = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
+const DEV = process.env.ITHYNO_DEV === "1";
+const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
 const openspecDir = resolveOpenspecDir(PROJECT_ROOT);
 
@@ -93,12 +93,14 @@ const ptyWss = new WebSocketServer({ noServer: true });
 type ServerEvent =
   | { type: "state-replaced" }
   | { type: "change-updated"; changeId: string; change: Change }
+  | { type: "worktree-change-updated"; changeId: string; change: Change }
   | { type: "spec-updated"; domain: string; spec: SpecDomain }
   | { type: "doc-updated"; path: string; file: DocsFile | null; tree: DocsTree }
   | { type: "tags-updated" }
   | { type: "agent-job-started"; job: JobSummary }
   | { type: "agent-job-output"; jobId: string; chunk: string; stream: "stdout" | "stderr" | "stdin" }
   | { type: "agent-job-finished"; jobId: string; status: JobStatus; exitCode: number | null }
+  | { type: "agent-job-removed"; jobId: string; changeId: string }
   | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: { done: number; total: number } }
   | { type: "git-status-updated"; gitStatus: GitStatus };
 
@@ -182,10 +184,21 @@ process.on("SIGTERM", () => {
 });
 
 // ---- Helpers ---------------------------------------------------------------
+const SAFE_ID_RE = /^[A-Za-z0-9._-]+$/;
+
 function withinOpenspec(filePath: string): boolean {
-  if (!openspecDir) return false;
   const abs = resolve(filePath);
-  return abs === openspecDir || abs.startsWith(openspecDir + sep);
+  if (openspecDir && (abs === openspecDir || abs.startsWith(openspecDir + sep))) return true;
+  // Also accept `<projectRoot>/.worktrees/<safe-id>/openspec/…` so verify
+  // ticks on the worktree view can write back. Enforce a safe id charset and
+  // require the `openspec` segment to prevent writes into worktree code.
+  const worktreesRoot = resolve(PROJECT_ROOT, ".worktrees");
+  if (!(abs === worktreesRoot || abs.startsWith(worktreesRoot + sep))) return false;
+  const rel = abs.slice(worktreesRoot.length + 1);
+  const [id, second] = rel.split(sep);
+  if (!id || !SAFE_ID_RE.test(id)) return false;
+  if (second !== "openspec") return false;
+  return true;
 }
 
 function isLocal(addr: string | undefined): boolean {
@@ -427,24 +440,6 @@ fastify.post<{ Params: { id: string } }>("/api/agents/jobs/:id/cancel", async (r
   return { ok: true };
 });
 
-type InputBody = { data?: string; appendNewline?: boolean };
-fastify.post<{ Params: { id: string }; Body: InputBody }>(
-  "/api/agents/jobs/:id/input",
-  async (req, reply) => {
-    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
-      return reply.code(403).send({ error: "local only" });
-    }
-    const data = req.body?.data;
-    if (typeof data !== "string") {
-      return reply.code(400).send({ error: "data (string) is required" });
-    }
-    const appendNewline = req.body?.appendNewline ?? true;
-    const res = agentRunner.writeInput(req.params.id, data, appendNewline);
-    if (!res.ok) return reply.code(res.status).send({ error: res.reason });
-    return { ok: true };
-  },
-);
-
 // ---- tagging endpoints -----------------------------------------------------
 fastify.get("/api/tags", async () => {
   const { index } = await collectTags(PROJECT_ROOT);
@@ -510,8 +505,24 @@ fastify.post<{ Body: ToggleBody }>("/api/tasks/toggle", async (req, reply) => {
     desiredChecked: body.desiredChecked,
   });
 
-  const changeId = changeIdForPath(openspecDir, filePath);
-  const reparse = async () => (changeId ? parseChange(openspecDir, changeId) : null);
+  // Determine whether this edit targets the main openspec dir or a worktree's.
+  const worktreesRoot = resolve(PROJECT_ROOT, ".worktrees");
+  const isWorktreePath = filePath.startsWith(worktreesRoot + sep);
+  let worktreeOpenspecDir: string | null = null;
+  let worktreeChangeId: string | null = null;
+  if (isWorktreePath) {
+    const rel = filePath.slice(worktreesRoot.length + 1);
+    const worktreeId = rel.split(sep)[0];
+    worktreeOpenspecDir = join(worktreesRoot, worktreeId, "openspec");
+    worktreeChangeId = changeIdForPath(worktreeOpenspecDir, filePath);
+  }
+  const mainChangeId = isWorktreePath ? null : (openspecDir ? changeIdForPath(openspecDir, filePath) : null);
+  const changeId = mainChangeId ?? worktreeChangeId;
+  const reparse = async () => {
+    if (worktreeOpenspecDir && worktreeChangeId) return parseChange(worktreeOpenspecDir, worktreeChangeId);
+    if (openspecDir && mainChangeId) return parseChange(openspecDir, mainChangeId);
+    return null;
+  };
 
   if (result.status === "invalid") {
     return reply.code(400).send({ status: "invalid", reason: result.reason, change: await reparse() });
@@ -527,7 +538,13 @@ fastify.post<{ Body: ToggleBody }>("/api/tasks/toggle", async (req, reply) => {
   }
 
   const change = await reparse();
-  if (changeId && change) broadcast({ type: "change-updated", changeId, change });
+  if (changeId && change) {
+    broadcast(
+      isWorktreePath
+        ? { type: "worktree-change-updated", changeId, change }
+        : { type: "change-updated", changeId, change },
+    );
+  }
 
   return {
     status: "ok",
@@ -616,7 +633,7 @@ ptyWss.on("connection", async (ws) => {
   const result = await attachPtyToSocket(ws, { cwd });
   if (!result.ok) {
     try {
-      ws.send(`\r\n[openspec-ui] terminal unavailable: ${result.reason}\r\n`);
+      ws.send(`\r\n[ithyno] terminal unavailable: ${result.reason}\r\n`);
     } catch {
       /* ignore */
     }
@@ -635,12 +652,12 @@ try {
     console.log(`⚠  No openspec/ directory found under ${PROJECT_ROOT}`);
     console.log(`   Run this from an OpenSpec project root, or use --dir <path>.`);
   } else {
-    console.log(`✔  OpenSpec UI watching ${openspecDir}`);
+    console.log(`✔  ithyno watching ${openspecDir}`);
   }
   if (DEV) {
     console.log(`✔  API server on http://localhost:${PORT}  (UI dev: http://localhost:5173/?token=${SESSION_TOKEN})`);
   } else {
-    console.log(`✔  OpenSpec UI on ${launchUrl}`);
+    console.log(`✔  ithyno on ${launchUrl}`);
     if (SHOULD_OPEN) {
       const { default: open } = await import("open");
       await open(launchUrl);
