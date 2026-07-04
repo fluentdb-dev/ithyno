@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Merge Action Command
 The dashboard's Kanban Merge action SHALL inject
