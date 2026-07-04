@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Start (Worktree) Uncommitted-Proposal Guard
 The dashboard SHALL check the target change's `openspec/changes/<id>/`
