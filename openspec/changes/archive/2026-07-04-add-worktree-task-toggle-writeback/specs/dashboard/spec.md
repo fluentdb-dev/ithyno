@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Task Toggle Writeback Scope
 The dashboard's `POST /api/tasks/toggle` endpoint SHALL accept file
