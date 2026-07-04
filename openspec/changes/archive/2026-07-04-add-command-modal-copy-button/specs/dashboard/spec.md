@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: CommandModal Copy Button
 The dashboard's `CommandModal` SHALL expose an explicit "Copy
