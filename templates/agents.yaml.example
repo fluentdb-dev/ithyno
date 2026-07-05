@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # OpenSpec UI agent registry.
 #
 # Copy this file to `agents.yaml` at the project root and edit. The dashboard

@@ -47,6 +47,7 @@ const { "@homebridge/node-pty-prebuilt-multiarch": _dropPty, ...depsMinusPty } =
 const stagedPkg = {
   name: rootPkg.name,
   version: rootPkg.version,
+  license: rootPkg.license,
   type: rootPkg.type,
   bin: rootPkg.bin,
   dependencies: depsMinusPty,

@@ -2,6 +2,7 @@
   "name": "ithyno",
   "version": "0.1.0",
   "description": "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "bin": {
     "ithyno": "bin/ithyno.js"

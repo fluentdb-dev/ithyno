@@ -159,4 +159,7 @@ AIがファイルを更新 → File Watcherが検知 → UIへ即時push。
 ## ライセンス / ステータス
 
 - ステータス: **動作するMVP**
-- ライセンス: 未定
+- ライセンス:
+  - **アプリコード** (`server/`, `web/`, `electron/`, `bin/`, `vscode-extension/`, `.claude/skills/ithy-opsx-*/`, `.claude/skills/openspec-*/` ほか) は **GPL-3.0-or-later**。詳細は [`LICENSE`](./LICENSE) を参照。
+  - **ユーザープロジェクトへコピーされるサブツリー** (`templates/`, `.claude/skills/openspec-flow/`) は **MIT License**。`ithyno init` で採用してもプロジェクト側が GPL の派生ライセンス条件に縛られないようにするためです。詳細は [`templates/LICENSE`](./templates/LICENSE) と [`.claude/skills/openspec-flow/LICENSE`](./.claude/skills/openspec-flow/LICENSE) を参照。
+  - サブツリーの Markdown / YAML には SPDX ヘッダー（`<!-- SPDX-License-Identifier: MIT -->` / `# SPDX-License-Identifier: MIT`）を付与しています。SKILL.md はフロントマターの `license: MIT` フィールドで表明しています。

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Project rules for Claude
 
 This repository is developed with **OpenSpec**, a spec-driven workflow, and is
