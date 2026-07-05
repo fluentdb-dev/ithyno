@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFile, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, relative, sep, isAbsolute } from "node:path";
+import { dirname, join, relative, sep, isAbsolute } from "node:path";
 import { parseTasks, countProgress } from "./tasks.js";
 import { parseSpec } from "./spec.js";
 import { parseProposal } from "./proposal.js";
 import type { Change, ChangeSummary, RawDoc, SpecDomain, WorkspaceState } from "../model.js";
+import { readSidecar, extractSidecarFields } from "../sidecar.js";
 import { getGitStatus } from "../git/status.js";
 
 /** Locate the openspec/ directory under a project root. */
@@ -54,6 +55,12 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
   const proposal = proposalRaw != null ? parseProposal(join(dir, "proposal.md"), proposalRaw) : null;
   const deltaSpecs = await parseSpecsDir(join(dir, "specs"));
 
+  // Sidecar-persisted workflow phase. `dirname(openspecDir)` is the project
+  // root, which is the API the sidecar module expects.
+  const projectRoot = dirname(openspecDir);
+  const sidecarRaw = await readSidecar(projectRoot, id);
+  const { phase, priorPhase, escalatedAt } = extractSidecarFields(sidecarRaw, id);
+
   return {
     id,
     proposal,
@@ -62,6 +69,9 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
     deltaSpecs,
     progress: countProgress(tasks),
     hasOutcome,
+    phase,
+    priorPhase,
+    escalatedAt,
   };
 }
 

@@ -122,6 +122,15 @@ export async function setProposalExecution(id: string, mode: "worktree" | "termi
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Set the workflow phase for a change (add-phase-state-machine). */
+export async function setChangePhase(id: string, phase: string): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/phase`,
+    { phase },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 export async function toggleTask(input: {
   filePath: string;
   line: number;
