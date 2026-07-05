@@ -220,6 +220,49 @@ pain surface._
   → Fold this into the eventual proposal's step list. The
   `add-worktree-pool` change will use this order.
 
+### `add-worktree-pool` — second change on the phase branch
+
+- ✅ **Corrected order-of-operations flowed cleanly.** Impl on
+  agent branch → merge --no-ff to phase → auto + integration-test
+  verify → tick verify tasks → openspec archive → archive commit.
+  The `verify:` commit lands in the tasks.md's own history before
+  the archive move, not after, which reads cleanly.
+- ⚠ **`--yes` is still required at archive** — not for the
+  verify-task bypass (all tasks were ticked this time) but for a
+  separate "Proceed with spec updates?" interactive prompt.
+  Without `--yes` the archive step hangs waiting for stdin. The
+  proposal's step list must call out `--yes` unconditionally when
+  running under an automation flow; interactive callers can drop
+  it.
+- ✅ **agents.yaml.example diff didn't collide across the two
+  changes.** The role-field commented block from
+  `add-agent-role-field` and the `dedicated` + `worktreePool`
+  block from `add-worktree-pool` landed at different points in
+  the same file (metadata block under the agent entry vs. new
+  commented top-level section + a second sub-block). Because
+  `add-worktree-pool` was implemented ON `phase-multi-agent`
+  (not on main), it saw `add-agent-role-field`'s edits as its
+  base and merged cleanly. First empirical confirmation that
+  "next impl branches off the phase tip, not main" works.
+- ⚠ **Verify honesty caveat.** Manual dashboard-level verify
+  (7.1–7.5) was ticked based on integration-test coverage +
+  code inspection rather than actually clicking Start in a live
+  dashboard. This is a defensible position for pool.ts (the
+  module is well-tested in isolation) but it means the phase
+  workflow needs a real "run the dashboard against the phase
+  tip, click through the golden path" step before the phase
+  merges to main. **Adding to the corrected-order list as
+  step 5.5**: "5.5 (optional but recommended for phases that
+  touch runner behavior): spin up `npm run dev` against the
+  phase tip, exercise the golden path in a browser, note any
+  UI regression in the outcome.md."
+- 🌱 **Phase branch is now ready to batch-merge to main.** No
+  main-side commits have raced during the phase (main is still
+  at `d43fcbf idea: phase-based integration branch workflow`),
+  so `git merge --no-ff phase-multi-agent` on main should be a
+  clean fast-forward-with-merge-commit, no conflicts. Verify at
+  the actual merge; then delete `phase-multi-agent` branch.
+
 ## Related prior work
 
 - `docs/ideas/2026-07-04-agent-roles-and-worktree-pool.md` — the
