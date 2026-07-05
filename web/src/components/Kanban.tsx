@@ -9,7 +9,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
@@ -19,14 +19,44 @@ import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
 import { ParallelStartLauncher } from "./ParallelStartLauncher";
-import { PHASES, type Phase } from "../phases";
+import { PHASES, type Phase, isPhase } from "../phases";
 
-type ColumnId = "todo" | "inprogress" | "done";
+/**
+ * add-kanban-phase-lanes: the Kanban is now organized around workflow
+ * phase. Cards for changes that carry a `phase:` sidecar value are
+ * placed in one of 4 phase lanes (proposed → coded → reviewed → done).
+ * Everything else — legacy changes with no phase, or changes with a
+ * phase string the client doesn't understand — falls back into an
+ * "Unphased" section that reuses the pre-existing progress-derived
+ * todo / inprogress / done grouping.
+ *
+ * The old 3-column ColumnId type is gone. The two relevant coordinate
+ * systems here are:
+ *   - `Slot`: where a rendered card *lives* (phase lane OR one of the
+ *     3 unphased sub-buckets). Used to pick which action buttons the
+ *     card shows.
+ *   - `DropTargetId`: what a drop target announces itself as. The 4
+ *     phase lanes are drop targets; the Unphased section is not (drops
+ *     onto Unphased would mean "unset the phase" which the API can't
+ *     express yet).
+ */
 
-type Buckets = {
+type UnphasedSubBucket = "unphased-todo" | "unphased-inprogress" | "unphased-done";
+type Slot = Phase | UnphasedSubBucket;
+type DropTargetId = Phase;
+
+type PhaseBuckets = {
+  proposed: Change[];
+  coded: Change[];
+  reviewed: Change[];
+  done: Change[];
+  unphased: Change[];
+};
+
+type UnphasedBuckets = {
   todo: Change[];
   inprogress: Change[];
-  done: Change[]; // active changes with done == total > 0 (ready to archive)
+  done: Change[];
 };
 
 function modalTitle(p: PendingDrag): string {
@@ -56,17 +86,41 @@ function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): strin
   return "Send cleanup";
 }
 
+/**
+ * Bucket changes by their persisted phase. Anything without a recognized
+ * phase (missing, unknown string, or a value like `needs-human` we don't
+ * treat as a lane yet) falls into `unphased`. The Unphased section then
+ * uses `bucketizeByProgress` to sub-group its members todo/inprogress/done.
+ */
+function bucketize(changes: Change[]): PhaseBuckets {
+  const b: PhaseBuckets = {
+    proposed: [],
+    coded: [],
+    reviewed: [],
+    done: [],
+    unphased: [],
+  };
+  for (const c of changes) {
+    if (isPhase(c.phase)) b[c.phase].push(c);
+    else b.unphased.push(c);
+  }
+  return b;
+}
 
-function bucketize(changes: Change[], jobByChange: Map<string, JobSummary>): Buckets {
+/**
+ * Pre-existing progress-derived bucketing, kept here to power the Unphased
+ * section. A change is:
+ *   - `done` if all tasks are ticked (progress complete),
+ *   - `inprogress` if a live/orphaned/completed job is attached, else
+ *   - `todo` (no started work).
+ */
+function bucketizeByProgress(changes: Change[], jobByChange: Map<string, JobSummary>): UnphasedBuckets {
   const todo: Change[] = [];
   const inprogress: Change[] = [];
   const done: Change[] = [];
   for (const c of changes) {
     const { done: d, total } = c.progress;
     const job = jobByChange.get(c.id);
-    // A job that is running OR sitting post-run awaiting merge/discard means
-    // the change is IN-PROGRESS regardless of whether any tasks have been
-    // ticked yet — clicking Start should visibly move the card.
     const hasActiveJob = !!job && (job.status === "running" || isPendingMergeOrDiscard(job));
     if (d === total && total > 0) done.push(c);
     else if (hasActiveJob) inprogress.push(c);
@@ -91,6 +145,20 @@ type PendingDrag =
   | { kind: "agent-merge"; change: Change; job: JobSummary }
   | { kind: "agent-discard"; change: Change; job: JobSummary };
 
+const PHASE_LABEL: Record<Phase, string> = {
+  proposed: "PROPOSED",
+  coded: "CODED",
+  reviewed: "REVIEWED",
+  done: "DONE",
+};
+
+const PHASE_EMPTY: Record<Phase, string> = {
+  proposed: "No changes in proposed.",
+  coded: "No changes in coded.",
+  reviewed: "No changes in reviewed.",
+  done: "No changes in done.",
+};
+
 export function KanbanBoard({
   changes,
   onNewChange,
@@ -105,10 +173,8 @@ export function KanbanBoard({
   const jobs = useStore((s) => s.jobs);
   const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
   const [pending, setPending] = useState<PendingDrag | null>(null);
-  const [draggingFrom, setDraggingFrom] = useState<ColumnId | null>(null);
   const { startImplementation, startFlowModals } = useStartFlow();
 
-  // Build a per-change "latest job" lookup so cards can show status.
   const jobByChange = useMemo(() => {
     const m = new Map<string, JobSummary>();
     for (const j of Object.values(jobs)) {
@@ -118,40 +184,34 @@ export function KanbanBoard({
     return m;
   }, [jobs]);
 
-  const buckets = useMemo(() => bucketize(changes, jobByChange), [changes, jobByChange]);
+  const buckets = useMemo(() => bucketize(changes), [changes]);
+  const unphasedBuckets = useMemo(
+    () => bucketizeByProgress(buckets.unphased, jobByChange),
+    [buckets.unphased, jobByChange],
+  );
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const onDragStart = (e: DragStartEvent) => {
-    const from = (e.active.data.current as { from?: ColumnId } | undefined)?.from;
-    setDraggingFrom(from ?? null);
-  };
-
   const onDragEnd = (e: DragEndEvent) => {
-    setDraggingFrom(null);
     const dropId = e.over?.id;
-    if (!dropId) return;
-    const fromCol = (e.active.data.current as { from?: ColumnId; id?: string } | undefined)?.from;
+    if (!dropId || typeof dropId !== "string") return;
     const id = (e.active.data.current as { id?: string } | undefined)?.id;
-    if (!fromCol || !id) return;
+    if (!id) return;
     const change = changes.find((c) => c.id === id);
     if (!change) return;
-
-    if (fromCol === "todo" && dropId === "inprogress") {
-      startImplementation(change).catch((err) => {
-        console.error("[start] unhandled:", err);
-        pushToast("error", err instanceof Error ? err.message : String(err));
-      });
-    }
-    // any other combo: silently ignore (UI already disables them visually)
+    // Only phase lanes are drop targets. Same-lane drop is a no-op.
+    if (!isPhase(dropId)) return;
+    if (change.phase === dropId) return;
+    setChangePhase(change.id, dropId).catch((err) => {
+      console.error("[phase] setChangePhase failed:", err);
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    });
   };
 
   const onArchiveClick = (change: Change) => {
     setPending({ kind: "archive", change });
   };
 
-  // Start button click. Same handler as the drag gesture — the unified
-  // dispatcher picks worktree / terminal / picker as appropriate.
   const onStartClick = (change: Change) => {
     void startImplementation(change);
   };
@@ -167,9 +227,6 @@ export function KanbanBoard({
     const res = await injectPty(line, true);
     if ((res as any).status === "ok") {
       pushToast("info", "Sent to terminal");
-      // Merge / Discard both take the worktree out of play — clear the
-      // stale worktreeProgress so the card reverts to the main-tree value
-      // (which reflects the merged/discarded state).
       if (pending && (pending.kind === "agent-merge" || pending.kind === "agent-discard")) {
         clearWorktreeProgress(pending.change.id);
       }
@@ -181,83 +238,56 @@ export function KanbanBoard({
     }
   };
 
+  const renderCard = (c: Change, slot: Slot) => (
+    <ChangeCard
+      key={c.id}
+      change={c}
+      slot={slot}
+      job={jobByChange.get(c.id)}
+      hasAgents={agents.length > 0}
+      onStart={() => onStartClick(c)}
+      onArchive={() => onArchiveClick(c)}
+      onMerge={(j) => onMergeClick(c, j)}
+      onDiscard={(j) => onDiscardClick(c, j)}
+    />
+  );
+
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      <div className="kanban-board">
-        <Column id="todo" title="TODO" count={buckets.todo.length} allowedFrom={null} draggingFrom={draggingFrom} onAdd={onNewChange}>
-          {buckets.todo.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="todo"
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onArchive={() => onArchiveClick(c)}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.todo.length === 0 && <p className="empty kanban-empty">No proposed changes.</p>}
-        </Column>
+    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+      <div className="kanban-board kanban-board-phases">
+        {PHASES.map((phase, i) => (
+          <PhaseLane
+            key={phase}
+            id={phase}
+            title={PHASE_LABEL[phase]}
+            count={buckets[phase].length}
+            emptyText={PHASE_EMPTY[phase]}
+            onAdd={i === 0 ? onNewChange : undefined}
+            headerAction={
+              i === 0 ? (
+                <ParallelStartLauncher
+                  changes={changes}
+                  jobByChange={jobByChange}
+                  startImplementation={startImplementation}
+                />
+              ) : undefined
+            }
+          >
+            {buckets[phase].map((c) => renderCard(c, phase))}
+          </PhaseLane>
+        ))}
 
-        <Column
-          id="inprogress"
-          title="IN-PROGRESS"
-          count={buckets.inprogress.length}
-          allowedFrom="todo"
-          draggingFrom={draggingFrom}
-          headerAction={
-            <ParallelStartLauncher
-              changes={changes}
-              jobByChange={jobByChange}
-              startImplementation={startImplementation}
-            />
-          }
-        >
-          {buckets.inprogress.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="inprogress"
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onArchive={() => onArchiveClick(c)}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.inprogress.length === 0 && <p className="empty kanban-empty">No work in progress.</p>}
-        </Column>
-
-        <Column id="done" title="DONE" count={buckets.done.length} allowedFrom={null} draggingFrom={draggingFrom}>
-          {buckets.done.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="done"
-              onArchive={() => onArchiveClick(c)}
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.done.length === 0 && <p className="empty kanban-empty">Nothing waiting to archive.</p>}
-        </Column>
+        {buckets.unphased.length > 0 && (
+          <UnphasedSection
+            buckets={unphasedBuckets}
+            renderCard={renderCard}
+          />
+        )}
       </div>
 
       {pending && (
         <CommandModal
           title={modalTitle(pending)}
-          // Archive and Merge both have a CLI equivalent (raw `npx openspec
-          // archive` / `git merge`); Apply is Claude-only, so the mode
-          // selector is hidden for it.
           mode={pending.kind === "archive" || pending.kind === "agent-merge" ? commandStyle : undefined}
           onModeChange={pending.kind === "archive" || pending.kind === "agent-merge" ? setCommandStyle : undefined}
           build={(_input, m) => buildPendingCommand(pending, m ?? "claude")}
@@ -286,36 +316,28 @@ export function KanbanBoard({
   );
 }
 
-function Column({
+function PhaseLane({
   id,
   title,
   count,
-  allowedFrom,
-  draggingFrom,
-  children,
+  emptyText,
   onAdd,
   headerAction,
+  children,
 }: {
-  id: ColumnId | "done";
+  id: DropTargetId;
   title: string;
   count: number;
-  allowedFrom: ColumnId | null;
-  draggingFrom: ColumnId | null;
-  children: React.ReactNode;
+  emptyText: string;
   onAdd?: () => void;
   headerAction?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  // The "done" outer column itself isn't a drop target; the archived sub
-  // section inside is. So we only register a droppable for the inprogress
-  // column at this level.
-  const { setNodeRef, isOver } = useDroppable({ id, disabled: id !== "inprogress" });
-  const legal = draggingFrom != null && allowedFrom === draggingFrom;
-  const blocked =
-    draggingFrom != null && id !== draggingFrom && allowedFrom !== draggingFrom && id === "inprogress";
+  const { setNodeRef, isOver } = useDroppable({ id });
   return (
     <section
-      ref={id === "inprogress" ? setNodeRef : undefined}
-      className={`kanban-col${legal && isOver ? " over-legal" : ""}${blocked && isOver ? " over-blocked" : ""}`}
+      ref={setNodeRef}
+      className={`kanban-col kanban-phase-lane${isOver ? " over-legal" : ""}`}
     >
       <header className="kanban-col-head">
         <h3>
@@ -328,57 +350,115 @@ function Column({
         )}
         {headerAction}
       </header>
-      <div className="kanban-col-body">{children}</div>
+      <div className="kanban-col-body">
+        {count === 0 ? <p className="empty kanban-empty">{emptyText}</p> : children}
+      </div>
+    </section>
+  );
+}
+
+function UnphasedSection({
+  buckets,
+  renderCard,
+}: {
+  buckets: UnphasedBuckets;
+  renderCard: (c: Change, slot: Slot) => React.ReactNode;
+}) {
+  const total = buckets.todo.length + buckets.inprogress.length + buckets.done.length;
+  return (
+    <section className="kanban-unphased">
+      <header className="kanban-unphased-head">
+        <h3>
+          UNPHASED <span className="kanban-col-count">{total}</span>
+        </h3>
+        <span className="kanban-unphased-hint">
+          Legacy changes without a phase. Drag a card into a phase lane to opt in.
+        </span>
+      </header>
+      <div className="kanban-unphased-body">
+        <div className="kanban-unphased-sub">
+          <h4>Todo <span className="kanban-col-count">{buckets.todo.length}</span></h4>
+          {buckets.todo.length === 0 ? (
+            <p className="empty kanban-empty">—</p>
+          ) : (
+            buckets.todo.map((c) => renderCard(c, "unphased-todo"))
+          )}
+        </div>
+        <div className="kanban-unphased-sub">
+          <h4>In-progress <span className="kanban-col-count">{buckets.inprogress.length}</span></h4>
+          {buckets.inprogress.length === 0 ? (
+            <p className="empty kanban-empty">—</p>
+          ) : (
+            buckets.inprogress.map((c) => renderCard(c, "unphased-inprogress"))
+          )}
+        </div>
+        <div className="kanban-unphased-sub">
+          <h4>Done <span className="kanban-col-count">{buckets.done.length}</span></h4>
+          {buckets.done.length === 0 ? (
+            <p className="empty kanban-empty">—</p>
+          ) : (
+            buckets.done.map((c) => renderCard(c, "unphased-done"))
+          )}
+        </div>
+      </div>
     </section>
   );
 }
 
 function ChangeCard({
   change,
-  column,
+  slot,
   onArchive,
   job,
   hasAgents,
   onStart,
-  hasExecution: _hasExecution,
   onMerge,
   onDiscard,
 }: {
   change: Change;
-  column: ColumnId;
-  onArchive?: () => void;
+  slot: Slot;
+  onArchive: () => void;
   job?: JobSummary;
   hasAgents: boolean;
   onStart: () => void;
-  hasExecution: boolean;
   onMerge: (job: JobSummary) => void;
   onDiscard: (job: JobSummary) => void;
 }) {
-  // add-worktree-tasks-watcher: when a running / pending-merge / orphaned
-  // job exists for this change, prefer the live worktree progress from
-  // tasks.md ticks over the main-tree parse (which won't move until the
-  // branch is merged). Fall back to the job's own `worktreeProgress`
-  // snapshot (populated at startup by orphan adoption) if the WS event
-  // hasn't landed yet.
   const worktreeProgressFromWs = useStore((s) => s.worktreeProgress[change.id]);
   const worktreeProgress = worktreeProgressFromWs ?? job?.worktreeProgress;
   const showWorktreeProgress = !!worktreeProgress && !!job && job.status !== "cancelled";
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
-  // Cards are draggable from TODO only; IN-PROGRESS is read-only; DONE has the
-  // Archive button instead of being draggable.
-  const draggable = column === "todo";
+
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `card-${change.id}`,
-    data: { from: column, id: change.id },
-    disabled: !draggable,
+    data: { id: change.id },
   });
+
+  // Only the Unphased section's "done" sub-bucket shows the "ready to
+  // archive" dot — progress-driven. In the phase-done lane, done means
+  // "user marked done" and MAY have unfinished tasks, so no dot.
+  const showReadyDot = slot === "unphased-done";
+
+  // Archive button in the phase-done lane and the Unphased-done sub-bucket.
+  const showArchiveInSlot = slot === "done" || slot === "unphased-done";
+
+  // Start button visibility: any phase lane except done, or any Unphased
+  // sub-bucket except unphased-done. Plus the existing gates (agents
+  // configured, no active job, non-verify work remaining).
+  const startEligibleSlot =
+    slot === "proposed" ||
+    slot === "coded" ||
+    slot === "reviewed" ||
+    slot === "unphased-todo" ||
+    slot === "unphased-inprogress";
+  const showStartArea = hasAgents && startEligibleSlot && !job;
 
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      className={`kanban-card${isDragging ? " dragging" : ""}${draggable ? " draggable" : ""}`}
+      className={`kanban-card${isDragging ? " dragging" : ""} draggable`}
     >
       <Link
         to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
@@ -387,7 +467,7 @@ function ChangeCard({
       >
         <div className="kanban-card-head">
           <h4>{change.id}</h4>
-          {column === "done" && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
+          {showReadyDot && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
           <AgentBadge job={job} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
@@ -402,14 +482,12 @@ function ChangeCard({
         )}
       </Link>
       {change.proposal?.tags && change.proposal.tags.length > 0 && (
-        // Tags live OUTSIDE the card's <Link> because each chip is itself a
-        // <Link to="/tags/…"> and HTML forbids nested <a>.
         <div className="kanban-card-tags">
           <TagChipList tags={change.proposal.tags} small />
         </div>
       )}
       <div className="kanban-card-actions">
-        {column === "done" && onArchive && (
+        {showArchiveInSlot && (
           <button
             className="action-btn ghost"
             onClick={(e) => {
@@ -422,9 +500,7 @@ function ChangeCard({
             {!change.hasOutcome && <span className="kanban-card-warn" title="No outcome.md yet">⚠</span>}
           </button>
         )}
-        {hasAgents &&
-          (column === "todo" || column === "inprogress") &&
-          !job &&
+        {showStartArea &&
           (hasNonVerifyWork(change.tasks) ? (
             <button
               className="action-btn"
@@ -451,7 +527,7 @@ function ChangeCard({
               verify only
             </span>
           ))}
-        {hasAgents && job?.status === "orphaned" && onArchive && (
+        {hasAgents && job?.status === "orphaned" && (
           <button
             className="action-btn"
             onClick={(e) => {
@@ -533,8 +609,6 @@ function AgentBadge({ job }: { job?: JobSummary }) {
 }
 
 function isMergeable(job: JobSummary): boolean {
-  // Show Merge/Discard when a worktree is sitting around (any post-run state,
-  // including one we adopted from disk with no prior run in this session).
   return (
     job.status === "completed" ||
     job.status === "crashed" ||
@@ -544,14 +618,10 @@ function isMergeable(job: JobSummary): boolean {
 }
 
 /**
- * Per-card phase transition control. add-phase-state-machine ships this as
- * the minimum viable transition affordance — a small `<select>` next to the
- * card head. Full drag-between-swim-lanes UX is deferred to a follow-up
- * change (`add-kanban-phase-lanes`) that refactors the KanbanBoard layout.
- *
- * The select is intentionally kept out of the card's <Link> so clicks don't
- * navigate. The current phase is the selected option; an "Unphased"
- * placeholder appears for changes with no phase yet.
+ * Per-card phase transition control. Kept as the secondary,
+ * keyboard-accessible affordance beside the primary drag-between-lanes
+ * gesture (see the spec's "Manual Phase Transitions In The UI"
+ * requirement).
  */
 function PhaseControl({ change }: { change: Change }) {
   const pushToast = useStore((s) => s.pushToast);
@@ -572,17 +642,18 @@ function PhaseControl({ change }: { change: Change }) {
     }
   };
 
+  const currentIsKnown = isPhase(current);
   return (
     <select
       className="kanban-phase-select"
-      value={current ?? ""}
+      value={currentIsKnown ? (current as Phase) : ""}
       onChange={onChange}
       disabled={pending}
       onClick={(e) => e.stopPropagation()}
       title="Change workflow phase"
       aria-label={`Phase for ${change.id}`}
     >
-      {!current && <option value="">— unphased —</option>}
+      {!currentIsKnown && <option value="">— unphased —</option>}
       {PHASES.map((p) => (
         <option key={p} value={p}>
           {p}
@@ -592,3 +663,4 @@ function PhaseControl({ change }: { change: Change }) {
   );
 }
 
+export { bucketize, bucketizeByProgress };
