@@ -48,6 +48,10 @@ export type Change = {
   /** ISO 8601 timestamp of the escalation; used by the needs-human lane to
    *  sort cards by wait time. Populated only while `phase === "needs-human"`. */
   escalatedAt?: string;
+  /** First-line H1 of `needs-human.md`, surfaced on the Kanban card in the
+   *  needs-human lane. Populated only while `phase === "needs-human"` AND
+   *  the artifact exists on disk. See add-needs-human-phase. */
+  needsHumanQuestion?: string;
 };
 
 export type ChangeSummary = {

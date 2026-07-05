@@ -43,6 +43,9 @@ export type Change = {
   priorPhase?: import("./phases").PersistedPhase;
   /** ISO 8601 timestamp of the escalation. add-needs-human-phase. */
   escalatedAt?: string;
+  /** Question surfaced from `needs-human.md` for the Kanban card in the
+   *  needs-human lane. Populated only while `phase === "needs-human"`. */
+  needsHumanQuestion?: string;
 };
 
 export type ChangeSummary = {
