@@ -57,6 +57,41 @@ All three channels wrap the same `bin/ithyno.js` (Fastify + Vite build). Electro
 
 > Implementation note: UI styles are plain CSS (`web/src/styles.css`), not Tailwind. The design intent (utility CSS for fast iteration) is unchanged; the dependency + build surface stays small.
 
+### Building the shells
+
+Every shell wraps the same `bin/ithyno.js` + `web/dist/` output. Rebuild the web bundle first (`npm run build` at the repo root) so the shell picks up your latest UI changes; then package the shell.
+
+**Electron desktop app**
+
+```bash
+# Dev launch (compiles electron/src/ and opens the window)
+npm run electron:dev
+
+# Package for the current platform's macOS target
+npm run electron:package:mac      # → electron/dist/*.dmg + *-mac.zip
+
+# Or explicitly per OS
+npm run electron:package:win      # → electron/dist/*.exe (NSIS installer)
+npm run electron:package:linux    # → electron/dist/*.AppImage, *.deb
+npm run electron:package:all      # all three (requires each toolchain locally)
+```
+
+Config lives in `electron/package.json`'s `build:` block; the workspace scripts are thin proxies over `electron-builder`. **Code signing / notarization is not set up** — unsigned builds trigger Gatekeeper on macOS ("cannot be opened because the developer cannot be verified") and SmartScreen on Windows; end users have to right-click → Open (macOS) or bypass SmartScreen (Windows) on first launch. Configure `CSC_LINK` / `APPLE_ID` env vars before running the package step if you want signed output; see [`electron/README.md`](./electron/README.md) for the walkthrough.
+
+**VS Code extension (VSIX)**
+
+```bash
+# Build the VSIX from a fresh checkout
+npm install
+npm --workspace=vscode-extension run package   # → vscode-extension/ithyno.vsix
+```
+
+`package` runs three steps in order: TypeScript compile (`build`) → stage the monorepo assets (`prepack:host`, which copies `bin/`, `server/`, `web/dist/`, `templates/` into `vscode-extension/host/` and does a production `npm install` there) → `vsce package` produces the VSIX. On first attempt run `npm run build` at the repo root first so `web/dist/` exists.
+
+**Install** the resulting `ithyno.vsix`: VS Code → Extensions view (⇧⌘X / Ctrl+Shift+X) → `⋯` menu → **Install from VSIX…** → pick the file. Then open a folder that contains an `openspec/` directory and run **ithyno: Show Dashboard** from the Command Palette.
+
+**Development loop** for the extension: open `vscode-extension/` as the VS Code workspace root and press **F5** to launch an Extension Development Host. Run `npm --workspace=vscode-extension run watch` in a background terminal so `tsc` recompiles on save. See [`vscode-extension/README.md`](./vscode-extension/README.md) for extension-side details (webview HTML, server spawner, terminal delegation).
+
 ### Embedded terminal (right pane of ChangeDetail)
 
 ChangeDetail embeds a **real shell** via xterm.js. The server spawns a PTY and bridges stdin / stdout to the browser terminal. Running `claude` or `/opsx:apply` inside the terminal edits `tasks.md`, and the **Kanban on the same screen follows the change live**.
