@@ -205,6 +205,20 @@ pain surface._
   will branch off `phase-multi-agent` (not main), it will see
   this template edit as its base — no merge conflict expected.
   Verify empirically at the next impl.
+- ⚠ **Order-of-operations slip: archived before running manual
+  verify.** Ran `openspec archive --yes` to bypass the 3 unchecked
+  verify tasks, then had to retroactively verify + tick after
+  archive. The tick landed in the archived tasks.md via a
+  `verify:` commit, which works but reads oddly in history.
+  Correct order should be:
+  1. impl commit on agent branch
+  2. merge --no-ff to phase branch
+  3. **verify (auto + manual)** on phase branch
+  4. tick verify tasks in the change's tasks.md
+  5. `openspec archive <id>` (no --yes needed)
+  6. archive commit
+  → Fold this into the eventual proposal's step list. The
+  `add-worktree-pool` change will use this order.
 
 ## Related prior work
 
