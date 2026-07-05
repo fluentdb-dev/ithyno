@@ -185,4 +185,6 @@ The runtime dependency tree contains only GPL-3.0-compatible licenses (MIT / ISC
 
 ## Status
 
-**Working MVP.** Follows the OpenSpec workflow for its own development — see the [`openspec/`](./openspec/) directory for the current specs and in-flight changes.
+**Alpha (working MVP).** The dashboard boots, the golden paths work, and the repo is dogfooded on itself — but expect breaking changes, rough edges, and undocumented behavior. Follows the OpenSpec workflow for its own development; see the [`openspec/`](./openspec/) directory for the current specs and in-flight changes.
+
+**No warranty.** ithyno is provided **as-is**, without warranty of any kind. The authors and copyright holders accept **no liability for damages** — direct, indirect, incidental, or consequential — arising from installation, use, or inability to use the software, to the extent permitted by applicable law. Full disclaimers live in [`LICENSE`](./LICENSE) (GPL-3.0-or-later, the "No Warranty" and "Limitation of Liability" sections), [`templates/LICENSE`](./templates/LICENSE), and [`.claude/skills/openspec-flow/LICENSE`](./.claude/skills/openspec-flow/LICENSE) (MIT, the "AS IS" clause).
