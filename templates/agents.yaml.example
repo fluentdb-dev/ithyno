@@ -13,12 +13,39 @@
 # Spawning is `child_process.spawn(command, args, { cwd: worktree_path, env })`.
 # The agent inherits the project's working tree via the worktree; it should
 # end by leaving its changes committed (or at least staged) on the branch.
+#
+# Top-level `worktreePool` block (all keys optional, defaults shown):
+#   worktreePool:
+#     max: 5                   # hard cap on .worktrees/pool-N/; integer >= 1
+#     namePrefix: pool         # -> .worktrees/pool-1/, pool-2/, ...
+#     cleanupBetweenJobs: git-clean   # Phase 1 accepts only this
+#
+# The pool block tunes the pool but does NOT activate it. Agents opt in
+# individually via `dedicated: false` on the agent entry. With no agent
+# opted in, the pool block is inert and behavior is identical to the
+# pre-pool per-change worktree flow. Landed by add-worktree-pool.
 
 agents:
   - name: claude
     description: Implements the change using Claude Code via /opsx:apply.
     command: claude
     args: ["/opsx:apply", "${change_id}"]
+
+    # Optional metadata fields — Phase 1 of the multi-agent redesign records
+    # them but the runner does not consume them yet. Later phases wire them
+    # into a dispatcher that routes jobs by role + specialty and honors
+    # per-agent concurrency caps. Safe to omit; defaults shown below.
+    #
+    # role: coder          # coder | reviewer | proposer | ... (open set)
+    # specialties: []      # tag prefixes claimed as expertise; empty = any
+    # concurrency: 1       # integer >= 1; declared capacity, NOT enforced yet
+
+    # dedicated: true      # (default) each job gets .worktrees/<change-id>/;
+                           # set to false to lease from the pool below instead.
+                           # Uncommitted work in a pool worktree is DISCARDED
+                           # at release — the bundled apply skill commits
+                           # before stopping so this only bites misbehaving
+                           # agents. Landed by add-worktree-pool.
 
   # Add more agents as you need them — any local CLI works.
   # - name: aider

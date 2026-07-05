@@ -22,6 +22,10 @@ describe("AgentRegistry initialInput", () => {
       command: "claude",
       args: [],
       initialInput: "/opsx:apply ${change_id} on ${branch}",
+      role: "coder",
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
     };
     const r = reg.resolve(def, {
       change_id: "add-foo",
@@ -33,7 +37,15 @@ describe("AgentRegistry initialInput", () => {
 
   it("resolve leaves initialInput undefined when the def has none", () => {
     const reg = stubRegistry();
-    const def = { name: "no-input", command: "echo", args: ["hi"] };
+    const def = {
+      name: "no-input",
+      command: "echo",
+      args: ["hi"],
+      role: "coder",
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    };
     const r = reg.resolve(def, {
       change_id: "c",
       worktree_path: "/w",
@@ -50,6 +62,10 @@ describe("AgentRegistry initialInput", () => {
       args: ["--dangerously-skip-permissions"],
       env: { HELLO: "${change_id}" },
       initialInput: "/opsx:apply ${change_id}",
+      role: "coder",
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
     };
     const r = reg.resolve(def, {
       change_id: "add-bar",
