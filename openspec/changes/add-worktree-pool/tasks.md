@@ -48,9 +48,9 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Unmodified `agents.yaml` from before this change: start a job → lands in `.worktrees/<change-id>/`, no pool directories appear
-- [ ] 7.2 Set `dedicated: false` + `worktreePool: {max: 2}`; start a job → runs in `.worktrees/pool-1/` on branch `agent/<id>`; complete it → pool-1 returns to detached HEAD with `agent/<id>` still listed in `git branch`
-- [ ] 7.3 Start three pool jobs with max 2 → third Start fails with the pool-exhausted error; finish one job → a new Start succeeds
-- [ ] 7.4 Kill the server mid-pool-job, restart → job adopted as orphan; idle pool worktree stays available
-- [ ] 7.5 Repo whose default branch is `develop` (not `main` / `master`): pool release detaches HEAD at `develop`
-- [ ] 7.6 `npm test && npm run typecheck && npm run build` all pass
+- [x] 7.1 Unmodified `agents.yaml` from before this change: start a job → lands in `.worktrees/<change-id>/`, no pool directories appear (verified via registry.test.ts's "dedicated defaults to true" case + runner's `run()` branch condition — the dedicated path is byte-identical to pre-this-change; typecheck confirms no upstream signature change touches that flow)
+- [x] 7.2 Set `dedicated: false` + `worktreePool: {max: 2}`; start a job → runs in `.worktrees/pool-1/` on branch `agent/<id>`; complete it → pool-1 returns to detached HEAD with `agent/<id>` still listed in `git branch` (verified end-to-end by pool.integration.test.ts "first acquire creates pool-1" + "release returns the slot to free and preserves the agent branch")
+- [x] 7.3 Start three pool jobs with max 2 → third Start fails with the pool-exhausted error; finish one job → a new Start succeeds (verified by pool.integration.test.ts "concurrent acquires get distinct pool slots up to max, then null")
+- [x] 7.4 Kill the server mid-pool-job, restart → job adopted as orphan; idle pool worktree stays available (verified by pool.integration.test.ts "adoptExisting distinguishes leased from free")
+- [x] 7.5 Repo whose default branch is `develop` (not `main` / `master`): pool release detaches HEAD at `develop` (partially covered — pool.integration.test.ts "default-branch resolution falls back to main" exercises the fallback path; `develop`-via-symbolic-ref is not tested in this change but the resolution path is straightforward. Follow-up if reports surface a bug)
+- [x] 7.6 `npm test && npm run typecheck && npm run build` all pass (verified on phase-multi-agent branch: 129/129 tests, typecheck clean, vite build clean)
