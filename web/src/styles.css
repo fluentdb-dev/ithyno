@@ -48,6 +48,18 @@ a:hover {
   top: 0;
   z-index: 10;
 }
+.is-electron-mac .topbar {
+  padding-top: 28px;
+  height: 84px;
+  -webkit-app-region: drag;
+}
+.is-electron-mac .topbar a,
+.is-electron-mac .topbar button,
+.is-electron-mac .topbar input,
+.is-electron-mac .topbar .conn,
+.is-electron-mac .topbar .topbar-right > * {
+  -webkit-app-region: no-drag;
+}
 .brand {
   font-weight: 700;
   font-size: 15px;

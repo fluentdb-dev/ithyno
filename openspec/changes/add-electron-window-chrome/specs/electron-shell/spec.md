@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Custom Window Chrome
 The Electron shell's BrowserWindow SHALL render without the OS's
@@ -36,7 +36,7 @@ the dashboard's active theme (see `add-light-dark-mode`).
 - **AND** no white/gray fallback is visible before the renderer's first paint
 
 #### Scenario: CLI + browser is unaffected
-- **WHEN** the dashboard is served from `bin/openspec-ui.js` and opened in a browser (not Electron)
+- **WHEN** the dashboard is served from `bin/ithyno.js` and opened in a browser (not Electron)
 - **THEN** none of the Electron-specific title-bar handling runs
 - **AND** the renderer's Electron-runtime detection returns false
 - **AND** no top-padding safe-area is applied

@@ -13,6 +13,7 @@ import { Agents } from "./pages/Agents";
 import { Terminal } from "./components/Terminal";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { isVsCodeShell } from "./runtime/shell";
+import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
 
 export function App() {
   const load = useStore((s) => s.load);
@@ -40,6 +41,15 @@ export function App() {
       clearSessionToken();
       setAuthExpired(true);
     });
+  }, []);
+
+  useEffect(() => {
+    if (!isElectronShell()) return;
+    if (isElectronMac()) document.body.classList.add("is-electron-mac");
+    const styles = getComputedStyle(document.documentElement);
+    const bg = styles.getPropertyValue("--bg").trim() || "#0f1115";
+    const text = styles.getPropertyValue("--text").trim() || "#e6e9ef";
+    setTitleBarColor(bg, text);
   }, []);
 
   // Detect a stale token at first mount (e.g. after a server restart) by

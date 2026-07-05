@@ -3,11 +3,17 @@ import {
   BrowserWindow,
   Menu,
   dialog,
+  ipcMain,
   screen,
   shell,
 } from 'electron';
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
+const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
+const DEFAULT_CHROME_COLOR = '#0f1115';
+const DEFAULT_CHROME_SYMBOL = '#e6e9ef';
+const OVERLAY_HEIGHT = 32;
 
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
@@ -181,10 +187,22 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     y: savedWs.y,
     title: 'ithyno',
     show: false,
+    backgroundColor: DEFAULT_CHROME_COLOR,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    ...(process.platform === 'darwin'
+      ? {}
+      : {
+          titleBarOverlay: {
+            color: DEFAULT_CHROME_COLOR,
+            symbolColor: DEFAULT_CHROME_SYMBOL,
+            height: OVERLAY_HEIGHT,
+          },
+        }),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: join(__dirname, 'preload.js'),
     },
   });
 
@@ -274,6 +292,28 @@ if (!gotLock) {
       mainWindow.focus();
     }
   });
+
+  ipcMain.on(
+    IPC_SET_TITLE_BAR_COLOR,
+    (event, color: unknown, symbolColor: unknown) => {
+      if (typeof color !== 'string') return;
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || win.isDestroyed()) return;
+      if (process.platform === 'darwin') {
+        win.setBackgroundColor(color);
+      } else if (typeof symbolColor === 'string') {
+        try {
+          win.setTitleBarOverlay({
+            color,
+            symbolColor,
+            height: OVERLAY_HEIGHT,
+          });
+        } catch {
+          // setTitleBarOverlay is unavailable on some Linux setups; swallow.
+        }
+      }
+    },
+  );
 
   void app.whenReady().then(async () => {
     refreshMenu();
