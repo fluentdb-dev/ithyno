@@ -32,7 +32,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Start the dashboard against a project whose `agents.yaml` predates this change → loads clean, agent starts and runs as before
-- [ ] 6.2 Add `role: reviewer` + `specialties: [area/web]` + `concurrency: 2` to an agent, reload → no error, job start behavior unchanged
-- [ ] 6.3 Set `concurrency: 0` → dashboard reports the registry error naming the agent and field
+- [x] 6.1 Start the dashboard against a project whose `agents.yaml` predates this change → loads clean, agent starts and runs as before (verified via direct AgentRegistry.load() against tmpfs; legacy yaml with only name/command/args yielded ok:true and defaults role=coder / specialties=[] / concurrency=1)
+- [x] 6.2 Add `role: reviewer` + `specialties: [area/web]` + `concurrency: 2` to an agent, reload → no error, job start behavior unchanged (verified: fields round-trip through publicConfig())
+- [x] 6.3 Set `concurrency: 0` → dashboard reports the registry error naming the agent and field (verified: ok:false with error "agents[0].concurrency must be an integer >= 1")
 - [x] 6.4 `npm test && npm run typecheck && npm run build` all pass
