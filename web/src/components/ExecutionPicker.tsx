@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import type { Change } from "../types";

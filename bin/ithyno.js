@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: GPL-3.0-or-later
 // CLI entry. Two modes:
 //   - default (no subcommand): start the dashboard server via tsx
 //   - `init [dir]`           : scaffold a target project (pure JS handler)

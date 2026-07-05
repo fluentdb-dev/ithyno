@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Normalized, read-only domain model parsed from the openspec/ directory.
 // This model is never serialized back to Markdown wholesale — task edits are
 // applied as surgical, line-level patches (see sync/surgicalEdit.ts).

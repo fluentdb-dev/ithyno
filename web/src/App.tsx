@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useStore } from "./store";

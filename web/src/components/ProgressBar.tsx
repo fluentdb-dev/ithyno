@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import type { Progress } from "../types";
 
 export function ProgressBar({ progress, showLabel = true }: { progress: Progress; showLabel?: boolean }) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Runtime bootstrap: session token + (future) VS Code webview detection.
 //
 // The server prints a launch URL with `?token=<token>`. We read it once,

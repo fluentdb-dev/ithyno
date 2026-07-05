@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { setCheckbox, isCheckboxLine, applyToggle, CHECKBOX_RE } from "./surgicalEdit.js";
 import { sha1 } from "../util/hash.js";

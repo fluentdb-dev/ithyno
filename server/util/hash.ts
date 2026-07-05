@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { createHash } from "node:crypto";
 
 export function sha1(content: string): string {

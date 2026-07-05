@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 
 export interface MenuHandlers {

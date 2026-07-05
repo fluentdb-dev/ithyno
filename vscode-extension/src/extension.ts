@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import * as vscode from "vscode";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderWebviewHtml } from "./webview-html";

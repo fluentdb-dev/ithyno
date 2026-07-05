@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { spawn, ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import * as http from "node:http";

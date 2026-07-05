@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { startableCandidates } from "./changeState";
 import type { AgentPublic, Change, JobSummary, TaskList } from "../types";

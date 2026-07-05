@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { useStore, taskKey } from "../store";
 import type { TaskList } from "../types";
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Client-side mirror of the server domain model (server/model.ts).
 
 export type WorkspaceState = {

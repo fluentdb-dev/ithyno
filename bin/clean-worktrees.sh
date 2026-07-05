@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Clean up agent worktrees, branches, and any lingering `claude` processes
 # tied to those worktrees.
 #

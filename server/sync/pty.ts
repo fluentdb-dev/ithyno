@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // PTY bridge: spawns a real shell in a pseudo-terminal and pipes bytes
 // to/from a browser xterm.js session over a dedicated WebSocket.
 //

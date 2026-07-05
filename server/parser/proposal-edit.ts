@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * Surgical edit for the proposal's YAML frontmatter. Two entry points:
  *   - setExecutionInFrontmatter(source, mode) — insert/update the

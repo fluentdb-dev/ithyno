@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { toString as mdToString } from "mdast-util-to-string";
 import { visit } from "unist-util-visit";
 import { parseMarkdown, toLines } from "./markdown.js";

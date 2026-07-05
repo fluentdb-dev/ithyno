@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Init handler for `ithyno init [dir]`. Pure JS (no tsx) so it runs
 // directly via `npx ithyno init` once the package is published.
 //

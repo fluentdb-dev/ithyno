@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { useStore } from "../store";
 import { SpecView } from "../components/SpecView";
 

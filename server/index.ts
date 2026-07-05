@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";

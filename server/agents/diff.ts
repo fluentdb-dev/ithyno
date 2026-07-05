@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Diff extractor for agent jobs. Shells out to `git diff` against the job's
 // branch from the parent repository (worktrees share .git so we never need to
 // chdir into the worktree itself), then parses the unified output into a

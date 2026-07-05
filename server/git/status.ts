@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { execFile as execFileCb } from "node:child_process";

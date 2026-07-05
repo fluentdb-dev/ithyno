@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useMemo } from "react";
 import { useParams, NavLink, Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";

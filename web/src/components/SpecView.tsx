@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import type { SpecDomain } from "../types";
 
 export function SpecView({ spec }: { spec: SpecDomain }) {

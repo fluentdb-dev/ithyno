@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { Link } from "react-router-dom";
 
 export function TagChip({ tag, small = false }: { tag: string; small?: boolean }) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import chokidar, { type FSWatcher } from "chokidar";
 import { readFile } from "node:fs/promises";
 import { sha1 } from "../util/hash.js";

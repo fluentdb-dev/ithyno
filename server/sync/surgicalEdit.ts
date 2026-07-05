@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { sha1 } from "../util/hash.js";
 
 // Strict checkbox marker matcher. Captures everything around the single state

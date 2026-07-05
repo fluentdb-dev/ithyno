@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { readFile, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative, sep, isAbsolute } from "node:path";
