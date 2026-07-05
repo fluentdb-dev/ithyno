@@ -20,6 +20,15 @@ export type AgentDef = {
    *  Supports the same `${change_id}` / `${worktree_path}` / `${branch}`
    *  template variables as `args` and `env`. See add-agent-initial-input. */
   initialInput?: string;
+  /** Agent role, defaulted to "coder". Open set — later phases add
+   *  "reviewer", "proposer", etc. Not consumed yet (Phase 1 metadata only). */
+  role: string;
+  /** Tag prefixes this agent claims expertise in (e.g. `area/web`). Empty
+   *  array means "accepts any tag". Not consumed yet (Phase 1 metadata only). */
+  specialties: string[];
+  /** Declared job-parallelism capacity, defaulted to 1. Integer ≥ 1.
+   *  Not enforced by the runner — recorded for a later dispatcher. */
+  concurrency: number;
 };
 
 export type AgentConfig =
@@ -45,7 +54,37 @@ function validateAgents(raw: unknown): AgentDef[] {
       }
       initialInput = o.initialInput;
     }
-    return { name: o.name, command: o.command, args, env, description, initialInput };
+
+    let role = "coder";
+    if (o.role !== undefined) {
+      if (typeof o.role !== "string" || !o.role) {
+        throw new Error(`agents[${i}].role must be a non-empty string`);
+      }
+      role = o.role;
+    }
+
+    let specialties: string[] = [];
+    if (o.specialties !== undefined) {
+      if (!Array.isArray(o.specialties)) {
+        throw new Error(`agents[${i}].specialties must be an array of non-empty strings`);
+      }
+      specialties = o.specialties.map((v, j) => {
+        if (typeof v !== "string" || !v) {
+          throw new Error(`agents[${i}].specialties[${j}] must be a non-empty string`);
+        }
+        return v;
+      });
+    }
+
+    let concurrency = 1;
+    if (o.concurrency !== undefined) {
+      if (typeof o.concurrency !== "number" || !Number.isInteger(o.concurrency) || o.concurrency < 1) {
+        throw new Error(`agents[${i}].concurrency must be an integer >= 1`);
+      }
+      concurrency = o.concurrency;
+    }
+
+    return { name: o.name, command: o.command, args, env, description, initialInput, role, specialties, concurrency };
   });
 }
 
