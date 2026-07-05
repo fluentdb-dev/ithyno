@@ -23,6 +23,11 @@ export type WorktreeProgressHandle = { dispose(): void };
 export type WorktreeProgressOpts = {
   projectRoot: string;
   changeId: string;
+  /** Explicit worktree path override. Defaults to
+   *  `projectRoot/.worktrees/<changeId>/` (the pre-pool dedicated layout).
+   *  Pool-leased worktrees are named `.worktrees/<prefix>-N/` and need to
+   *  pass their actual path here. Landed by add-worktree-pool. */
+  worktreePath?: string;
   onProgress: (progress: Progress) => void;
   onError?: (err: unknown) => void;
   /** Fires (at most once) when the watched `tasks.md` file is unlinked —
@@ -34,10 +39,9 @@ export type WorktreeProgressOpts = {
 
 export function startWorktreeProgressWatcher(opts: WorktreeProgressOpts): WorktreeProgressHandle {
   const { projectRoot, changeId, onProgress, onError, onUnlink } = opts;
+  const worktreePath = opts.worktreePath ?? join(projectRoot, ".worktrees", changeId);
   const tasksPath = join(
-    projectRoot,
-    ".worktrees",
-    changeId,
+    worktreePath,
     "openspec",
     "changes",
     changeId,

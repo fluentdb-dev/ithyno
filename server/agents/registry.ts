@@ -29,11 +29,31 @@ export type AgentDef = {
   /** Declared job-parallelism capacity, defaulted to 1. Integer ≥ 1.
    *  Not enforced by the runner — recorded for a later dispatcher. */
   concurrency: number;
+  /** When true (the default), each job gets a dedicated
+   *  `.worktrees/<change-id>/` worktree — the pre-pool behavior. When
+   *  false, jobs are leased from the shared pool per the top-level
+   *  `worktreePool` block. See add-worktree-pool. */
+  dedicated: boolean;
+};
+
+/** Resolved `worktreePool` config with defaults applied. Present in the
+ *  loaded registry whether or not any agent has opted in, so consumers can
+ *  read it without null-checking. */
+export type WorktreePoolConfig = {
+  max: number;
+  namePrefix: string;
+  cleanupBetweenJobs: "git-clean";
+};
+
+export const DEFAULT_WORKTREE_POOL: WorktreePoolConfig = {
+  max: 5,
+  namePrefix: "pool",
+  cleanupBetweenJobs: "git-clean",
 };
 
 export type AgentConfig =
-  | { ok: true; agents: AgentDef[] }
-  | { ok: false; agents: AgentDef[]; error: string }; // agents = last-known-good
+  | { ok: true; agents: AgentDef[]; worktreePool: WorktreePoolConfig }
+  | { ok: false; agents: AgentDef[]; worktreePool: WorktreePoolConfig; error: string }; // agents = last-known-good
 
 function validateAgents(raw: unknown): AgentDef[] {
   if (!raw || typeof raw !== "object") throw new Error("agents.yaml must be an object");
@@ -84,12 +104,61 @@ function validateAgents(raw: unknown): AgentDef[] {
       concurrency = o.concurrency;
     }
 
-    return { name: o.name, command: o.command, args, env, description, initialInput, role, specialties, concurrency };
+    let dedicated = true;
+    if (o.dedicated !== undefined) {
+      if (typeof o.dedicated !== "boolean") {
+        throw new Error(`agents[${i}].dedicated must be a boolean`);
+      }
+      dedicated = o.dedicated;
+    }
+
+    return { name: o.name, command: o.command, args, env, description, initialInput, role, specialties, concurrency, dedicated };
   });
 }
 
+const KNOWN_POOL_KEYS = new Set(["max", "namePrefix", "cleanupBetweenJobs"]);
+
+function validateWorktreePool(raw: unknown): WorktreePoolConfig {
+  if (raw === undefined || raw === null) return { ...DEFAULT_WORKTREE_POOL };
+  if (typeof raw !== "object") throw new Error("worktreePool must be an object");
+  const o = raw as Record<string, unknown>;
+
+  for (const key of Object.keys(o)) {
+    if (!KNOWN_POOL_KEYS.has(key)) {
+      throw new Error(`worktreePool.${key}: unknown key`);
+    }
+  }
+
+  const cfg: WorktreePoolConfig = { ...DEFAULT_WORKTREE_POOL };
+
+  if (o.max !== undefined) {
+    if (typeof o.max !== "number" || !Number.isInteger(o.max) || o.max < 1) {
+      throw new Error("worktreePool.max must be an integer >= 1");
+    }
+    cfg.max = o.max;
+  }
+
+  if (o.namePrefix !== undefined) {
+    if (typeof o.namePrefix !== "string" || !o.namePrefix) {
+      throw new Error("worktreePool.namePrefix must be a non-empty string");
+    }
+    cfg.namePrefix = o.namePrefix;
+  }
+
+  if (o.cleanupBetweenJobs !== undefined) {
+    if (o.cleanupBetweenJobs !== "git-clean") {
+      throw new Error(
+        `worktreePool.cleanupBetweenJobs: "${String(o.cleanupBetweenJobs)}" is not yet supported (Phase 1 accepts only "git-clean")`,
+      );
+    }
+    cfg.cleanupBetweenJobs = "git-clean";
+  }
+
+  return cfg;
+}
+
 export class AgentRegistry {
-  private cache: AgentConfig = { ok: true, agents: [] };
+  private cache: AgentConfig = { ok: true, agents: [], worktreePool: { ...DEFAULT_WORKTREE_POOL } };
   private projectRoot: string;
   private watcher: any = null;
 
@@ -100,17 +169,20 @@ export class AgentRegistry {
   async load(): Promise<void> {
     const path = join(this.projectRoot, "agents.yaml");
     if (!existsSync(path)) {
-      this.cache = { ok: true, agents: [] };
+      this.cache = { ok: true, agents: [], worktreePool: { ...DEFAULT_WORKTREE_POOL } };
       return;
     }
     try {
       const raw = await readFile(path, "utf8");
       const parsed = parseYaml(raw);
       const agents = validateAgents(parsed);
-      this.cache = { ok: true, agents };
+      const worktreePool = validateWorktreePool(
+        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).worktreePool : undefined,
+      );
+      this.cache = { ok: true, agents, worktreePool };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.cache = { ok: false, agents: this.cache.agents, error: msg };
+      this.cache = { ok: false, agents: this.cache.agents, worktreePool: this.cache.worktreePool, error: msg };
     }
   }
 
@@ -148,6 +220,12 @@ export class AgentRegistry {
 
   find(name: string): AgentDef | null {
     return this.cache.agents.find((a) => a.name === name) ?? null;
+  }
+
+  /** Resolved worktree pool config (with defaults applied). Present whether
+   *  or not any agent has opted in via `dedicated: false`. */
+  worktreePoolConfig(): WorktreePoolConfig {
+    return this.cache.worktreePool;
   }
 
   /** Resolve `${change_id}` etc. in args, env, and initialInput strings. */
