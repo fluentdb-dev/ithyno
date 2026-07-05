@@ -1,165 +1,188 @@
 # ithyno
 
-> 裏側はMarkdown、表側は進捗ダッシュボード。
-> AIエージェントは生の `.md` を読み書きし、人間はブラウザUIで仕様駆動開発（SDD）の進捗を把握・操作する。
+> Markdown underneath, a progress dashboard on top.
+> AI agents read and write raw `.md`; humans work in a browser UI to keep spec-driven development (SDD) legible and clickable.
 
-ithyno は、[OpenSpec](https://github.com/Fission-AI/OpenSpec) のディレクトリ構造（`openspec/specs/`・`openspec/changes/`）をそのまま **Single Source of Truth** として扱い、その上に被せる **ローカル起動の進捗ダッシュボード** です。
+**ithyno** takes the [OpenSpec](https://github.com/Fission-AI/OpenSpec) directory layout (`openspec/specs/` and `openspec/changes/`) as its **single source of truth**, and layers a **local dashboard** on top of it.
 
-- **依存を増やさない** — 進捗データは `tasks.md` の `- [ ]` / `- [x]` に存在する。UIはそれを可視化・編集するだけ。ツールが壊れてもエディタで開発を続行できる。
-- **AIと人間の両立** — AIはプレーンな `.md` を読み書きし、人間はカンバン／プログレスツリーで全体像を掴む。
-- **Git がそのまま進捗の履歴** — 「誰がいつどのタスクを完了したか」はMarkdownのコミットdiffとしてGitに残る。
+- **No new state store.** Progress lives in `tasks.md` — `- [ ]` becomes `- [x]` — and the UI just visualizes and edits that. Break the tool and you can still edit in any text editor.
+- **Human + AI both first-class.** Agents read and write plain `.md`; humans navigate a Kanban / progress tree to see the whole picture.
+- **Git is the audit log.** "Who checked off which task, when" shows up as a normal markdown commit diff.
 
 ---
 
-## このリポジトリの位置づけ
+## What this repo is
 
-ロードマップ フェーズ0〜2（＋3・4の一部）を実装済みの **動作するMVP** です。
+A **working MVP** covering roadmap phases 0–2 (with parts of 3 and 4).
 
-- [`idea.md`](./idea.md) — 元になったアイデアと考察。
-- [`docs/architecture.md`](./docs/architecture.md) — アーキテクチャ・技術選定・データモデル・双方向同期の設計。
-- [`docs/roadmap.md`](./docs/roadmap.md) — フェーズ分割した実装ロードマップ。
+- [`idea.md`](./idea.md) — the original brainstorm and rationale.
+- [`docs/architecture.md`](./docs/architecture.md) — architecture, tech choices, data model, and two-way sync design.
+- [`docs/roadmap.md`](./docs/roadmap.md) — phased implementation roadmap.
 
 ### Quick Start
 
 ```bash
 npm install
 
-# 開発（API: 4321 / UI: Vite 5173。UIは http://localhost:5173 を開く）
+# Development (API on 4321, Vite UI on 5173 — open http://localhost:5173)
 npm run dev
 
-# 動作確認モード（web は HMR、server は watch なし。並列 agent が
-# サーバ再起動で殺されない — Kanban IN-PROGRESS の Start ▾ を dogfood する時はこちら）
+# Verification mode: Vite HMR on, server not in watch mode — parallel agents
+# survive a client reload. Use this when dogfooding Kanban IN-PROGRESS + Start ▾.
 npm run dev:test
 
-# 本番相当（UIをビルドして単一プロセスで配信し、ブラウザを開く）
+# Production-equivalent (build the UI, single-process serve, open the browser)
 npm run build
-npm start            # = node bin/ithyno.js（このリポジトリのopenspec/を表示）
+npm start            # = node bin/ithyno.js (shows this repo's own openspec/)
 
-# 任意のOpenSpecプロジェクトを対象にする
+# Point at any OpenSpec-initialized project
 node bin/ithyno.js --dir /path/to/your/project --port 4321
 
-# テスト・型チェック
+# Tests + typecheck
 npm test
 npm run typecheck
 ```
 
-### 配布チャネル
+### Distribution channels
 
-同じダッシュボードを3つの経路で使えます — 好きな入口を選んでください。
+The same dashboard ships through three entry points — pick whichever fits your editor setup.
 
-| チャネル | 対象ユーザー | 起動方法 |
+| Channel | Audience | How to launch |
 |---|---|---|
-| **CLI + ブラウザ** | 任意のエディタ / エディタなし | `node bin/ithyno.js` → 既定ブラウザ |
-| **VS Code拡張** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → 生成された `.vsix` を「VSIXからインストール」→ コマンドパレットで `ithyno: Show Dashboard` |
-| **Electronデスクトップアプリ** | Vim / JetBrains / Sublime / エディタ不問 | DMG / NSIS / AppImage をダウンロードして起動（開発は [`electron/README.md`](./electron/README.md) 参照） |
+| **CLI + browser** | Any editor (or none) | `node bin/ithyno.js` → opens your default browser |
+| **VS Code extension** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → install the generated `.vsix` via "Install from VSIX" → command palette `ithyno: Show Dashboard` |
+| **Electron desktop app** | Vim / JetBrains / Sublime / editor-agnostic | Download the DMG / NSIS / AppImage and launch (see [`electron/README.md`](./electron/README.md) for dev setup) |
 
-3チャネルとも中身は同じ `bin/ithyno.js`（Fastify + Vite build）です。Electron 版は BrowserWindow が localhost サーバーを開くだけ、VS Code 拡張は WebviewPanel が同じ URL を iframe で開くだけで、実装上の分岐はありません。VS Code 拡張の詳細は [`vscode-extension/README.md`](./vscode-extension/README.md)。
+All three channels wrap the same `bin/ithyno.js` (Fastify + Vite build). Electron's BrowserWindow just loads the localhost server URL; the VS Code webview panel loads the same URL in an iframe. No implementation branches. VS Code extension details: [`vscode-extension/README.md`](./vscode-extension/README.md).
 
-> 実装メモ: UIスタイルは依存とビルドの安定性を優先し、Tailwindではなく素のCSS（`web/src/styles.css`）で実装しています。設計意図（ユーティリティCSSで素早く組む）はそのままです。
+> Implementation note: UI styles are plain CSS (`web/src/styles.css`), not Tailwind. The design intent (utility CSS for fast iteration) is unchanged; the dependency + build surface stays small.
 
-### 埋め込みターミナル（ChangeDetailの右ペイン）
+### Embedded terminal (right pane of ChangeDetail)
 
-ChangeDetail画面に **本物のシェル** をxterm.jsで埋め込んでいます。サーバーがPTYを `spawn` し、ブラウザのターミナルとstdin/stdoutを橋渡しします。ターミナル内で `claude` や `/opsx:apply` を実行すると、編集が `tasks.md` に反映されて**同じ画面のカンバンが即追従**します。
+ChangeDetail embeds a **real shell** via xterm.js. The server spawns a PTY and bridges stdin / stdout to the browser terminal. Running `claude` or `/opsx:apply` inside the terminal edits `tasks.md`, and the **Kanban on the same screen follows the change live**.
 
-**起動シェルの選択（OS別の既定）**
+**Default shell (per OS):**
 
-| OS | 既定 |
+| OS | Default |
 |---|---|
-| macOS / Linux | `$SHELL`（未設定なら `/bin/bash`） |
-| Windows | `pwsh.exe`（PATHにある場合）、なければ `powershell.exe` |
+| macOS / Linux | `$SHELL` (falls back to `/bin/bash`) |
+| Windows | `pwsh.exe` if on PATH, otherwise `powershell.exe` |
 
-環境変数 `ITHYNO_SHELL` で上書きできます。例：
+Override with `ITHYNO_SHELL`. Example:
 
 ```bash
-# 起動直後に Claude Code を直接出す
+# Boot straight into Claude Code
 ITHYNO_SHELL=claude npm start
 ```
 
-**ローカル限定**：ターミナルは実シェルをWebSocketに繋ぐため、サーバーは `127.0.0.1` バインドで起動し、`/pty` upgradeは **localhost からのみ受け付け**ます（非ローカル接続は接続自体を破棄）。リモート公開は意図的にサポートしていません。
+**Local-only.** Because the terminal bridges a real shell over WebSocket, the server binds to `127.0.0.1` and `/pty` upgrades are **accepted only from localhost** (non-local connections are dropped). Exposing this remotely is not supported by design.
 
-### セキュリティモデル（CSRF 対策）
+### Security model (CSRF protection)
 
-Fastify は `127.0.0.1` バインドですが、それだけでは **ブラウザで開いた悪意あるページ** が `fetch("http://localhost:<port>/api/pty/inject", ...)` を叩く攻撃（TCP は local だが Origin は他サイト）を防げません。そこで 3 層で守っています：
+Binding to `127.0.0.1` alone does not stop a **malicious page in the user's browser** from firing `fetch("http://localhost:<port>/api/pty/inject", ...)` — the TCP endpoint is local, but the browser Origin is a hostile site. Three layered defenses:
 
-1. **セッショントークン** — サーバー起動時に 32 バイトの hex を生成し、起動 URL (`?token=...`) に埋め込む。ミューテーション系エンドポイントは token 一致を要求。
-2. **Origin allow-list** — `http://localhost:<port>` / `http://127.0.0.1:<port>` / `http://[::1]:<port>` / `vscode-webview://*` のみ許可。ブラウザは Origin を偽装できないので他サイトからの fetch は 403。
-3. **Content-Type チェック** — `application/json` 以外は拒否。`<form>` からの CSRF を単純に落とす。
+1. **Session token** — 32 hex bytes generated on server boot, embedded in the launch URL (`?token=…`). Every mutating endpoint requires a matching token.
+2. **Origin allow-list** — only `http://localhost:<port>` / `http://127.0.0.1:<port>` / `http://[::1]:<port>` / `vscode-webview://*`. The browser cannot forge Origin, so cross-site fetches return 403.
+3. **Content-Type check** — anything other than `application/json` is rejected, killing simple `<form>` CSRF.
 
-各層は独立しているため、1 つ失敗しても他が守ります。詳細は `openspec/specs/csrf-protection/spec.md`。
+Each layer stands on its own; one breaking doesn't defeat the others. See `openspec/specs/csrf-protection/spec.md`.
 
-**PTYバックエンドが無い環境**：ネイティブモジュール（`@homebridge/node-pty-prebuilt-multiarch`）のロードに失敗した場合、ダッシュボードは通常どおり起動し、`/api/health` が `terminal.available: false` を返してターミナルペインは表示されません（グレースフル劣化）。
+**Environments without a PTY backend.** If the native module (`@homebridge/node-pty-prebuilt-multiarch`) fails to load, the dashboard still boots, `/api/health` reports `terminal.available: false`, and the terminal pane is hidden. Graceful degradation, no crash.
 
-### Windows / WSL ユーザーへの重要事項
+### Notes for Windows / WSL users
 
-WindowsでClaude Codeを使う場合、**ithynoサーバーとClaude Codeを同一環境で起動**してください。
+If you use Claude Code on Windows, **run the ithyno server and Claude Code in the same environment**.
 
-- ✅ 両方ともWSL内（推奨）
-- ✅ 両方ともWindowsネイティブ
-- ❌ 片方だけWSL（chokidarのファイル監視がWSL↔Windows境界をまたぐと不安定で、カンバンがClaudeの編集に追従しません）
+- ✅ Both in WSL (recommended)
+- ✅ Both native Windows
+- ❌ One in WSL, one on the Windows side — chokidar's file watching is unreliable across the WSL↔Windows boundary; the Kanban stops tracking Claude's edits.
 
-PTYはWindows 10 1809+ の **ConPTY** を使用します。`@homebridge/node-pty-prebuilt-multiarch` がprebuiltを提供しているため通常はビルド不要ですが、prebuiltが無いNodeバージョンを使う場合は Visual Studio Build Tools が必要になります。その場合はターミナルを無効化（PTYロード失敗時に自動でスキップ）したまま使うこともできます。
+The PTY uses Windows 10 1809+ **ConPTY**. `@homebridge/node-pty-prebuilt-multiarch` ships prebuilt binaries for common Node versions, so no compile step in most cases; if your Node has no prebuilt, Visual Studio Build Tools are required — or you can just leave the terminal disabled (the PTY-load failure path skips it automatically).
 
-### ドッグフーディング（OpenSpec で ithyno を開発する）
+### Dogfooding (developing ithyno with OpenSpec)
 
-このリポジトリ自身が **本物のOpenSpec**（`@fission-ai/openspec`）で仕様駆動開発されています。
+This repository is itself developed with **real OpenSpec** (`@fission-ai/openspec`).
 
-- リポジトリ直下の [`openspec/`](./openspec/) が**このプロジェクトの実仕様**です。`npm start` でダッシュボードを開くと、自分自身の開発タスクが表示され、UIからチェックして進められます。
-  - `specs/`：実装済みアーキテクチャの現行仕様（`markdown-sync` / `dashboard` / `openspec-parsing`）
-  - `changes/`：未着手の提案（`add-kanban-view` / `add-task-filter` / `add-writing-status`）
-- 動作確認用のサンプル（架空データ）は [`examples/sample-project/openspec/`](./examples/sample-project/) に分離。`npm run demo` で表示できます。
-- OpenSpecのワークフロー：`npm run openspec -- list` / `npm run openspec -- validate --all`。新しい変更は `/opsx:propose` で起こせます（`.claude/` にコマンド導入済み）。
+- [`openspec/`](./openspec/) at the repo root **is this project's live spec.** `npm start` opens the dashboard against it, so you see your own development work and can tick tasks from the UI.
+  - `specs/` — current architectural specs of what's already implemented (`markdown-sync` / `dashboard` / `openspec-parsing`, etc.).
+  - `changes/` — active proposals.
+- Sample data for demos (fictional project) lives in [`examples/sample-project/openspec/`](./examples/sample-project/). Serve it with `npm run demo`.
+- OpenSpec workflow: `npm run openspec -- list` / `npm run openspec -- validate --all`. Kick off a new change with `/opsx:propose` (the `.claude/` skills are wired up).
 
 ```bash
-npm start                       # 自分自身の openspec/ を表示（ドッグフーディング）
-npm run demo                    # examples/ のサンプルを表示
+npm start                       # shows this repo's own openspec/ (dogfooding)
+npm run demo                    # shows the examples/ sample
 npm run openspec -- validate --all
 ```
 
 ---
 
-## コンセプト（要約）
+## Concept (in one diagram)
 
 ```
             ┌─────────────────────────────────────────────┐
-            │                  ブラウザUI                   │
-            │   Overview / Change詳細 / Specsブラウザ        │
-            │   ・進捗バー  ・カンバン  ・チェックボックス操作  │
+            │                Browser UI                    │
+            │   Overview / ChangeDetail / Specs browser    │
+            │   ・progress bars ・Kanban ・checkbox edits    │
             └───────────────▲───────────────┬──────────────┘
                     WebSocket (push)   │ REST (toggle)
             ┌───────────────┴───────────────▼──────────────┐
-            │            ローカルサーバー (Node)              │
-            │   Markdownパーサ / 行単位サージカル編集 /        │
-            │   chokidar File Watcher / エコー抑制            │
+            │              Local server (Node)              │
+            │   Markdown parser / line-surgical edits /     │
+            │   chokidar file watcher / echo suppression    │
             └───────────────▲───────────────┬──────────────┘
-                  watch (AIの変更)     │ 最小diff書き込み
+                  watch (AI edits)      │ minimum-diff writes
             ┌───────────────┴───────────────▼──────────────┐
-            │   openspec/  (Single Source of Truth, .md)    │
-            │   specs/**/spec.md   changes/**/tasks.md ...   │
+            │  openspec/ (Single Source of Truth, .md)     │
+            │  specs/**/spec.md    changes/**/tasks.md ...  │
             └────────────────────▲──────────────────────────┘
-                                 │ 直接読み書き
-                          AIエージェント (Claude / Cursor 等)
+                                 │ direct read / write
+                          AI agent (Claude / Cursor / …)
 ```
 
-人間がUIのチェックボックスをクリック → サーバーが `tasks.md` の該当行だけを `- [ ]` ⇄ `- [x]` に書き換え → Gitにdiffが残る。
-AIがファイルを更新 → File Watcherが検知 → UIへ即時push。
+A human ticks a checkbox in the UI → the server rewrites just the one line in `tasks.md` (`- [ ]` ⇄ `- [x]`) → the diff shows up in git.
+An AI edits a file → the file watcher sees it → the UI updates in real time.
 
-詳細は [`docs/architecture.md`](./docs/architecture.md) を参照。
-
----
-
-## 実装状況（ロードマップ対応）
-
-- ✅ フェーズ0: プロジェクト基盤（CLI / Vite / Fastify）
-- ✅ フェーズ1: 読み取り専用ダッシュボード（パーサ・`GET /api/state`・Overview/詳細/Specs）
-- ✅ フェーズ2: 双方向同期（サージカル編集・`expectedText`楽観ロック・chokidar+エコー抑制・WebSocket）
-- 🚧 フェーズ3/4: SPAフォールバック・静的配信は実装済み。カンバン・「編集中」表示・npm公開は未着手。
+Full detail: [`docs/architecture.md`](./docs/architecture.md).
 
 ---
 
-## ライセンス / ステータス
+## Roadmap status
 
-- ステータス: **動作するMVP**
-- ライセンス:
-  - **アプリコード** (`server/`, `web/`, `electron/`, `bin/`, `vscode-extension/`, `.claude/skills/ithy-opsx-*/`, `.claude/skills/openspec-*/` ほか) は **GPL-3.0-or-later**。詳細は [`LICENSE`](./LICENSE) を参照。
-  - **ユーザープロジェクトへコピーされるサブツリー** (`templates/`, `.claude/skills/openspec-flow/`) は **MIT License**。`ithyno init` で採用してもプロジェクト側が GPL の派生ライセンス条件に縛られないようにするためです。詳細は [`templates/LICENSE`](./templates/LICENSE) と [`.claude/skills/openspec-flow/LICENSE`](./.claude/skills/openspec-flow/LICENSE) を参照。
-  - サブツリーの Markdown / YAML には SPDX ヘッダー（`<!-- SPDX-License-Identifier: MIT -->` / `# SPDX-License-Identifier: MIT`）を付与しています。SKILL.md はフロントマターの `license: MIT` フィールドで表明しています。
+- ✅ Phase 0: project scaffolding (CLI / Vite / Fastify)
+- ✅ Phase 1: read-only dashboard (parser, `GET /api/state`, Overview / Detail / Specs)
+- ✅ Phase 2: two-way sync (surgical edits, `expectedText` optimistic locking, chokidar + echo suppression, WebSocket push)
+- 🚧 Phase 3/4: SPA fallback and static serving are done; Kanban, "editing…" indicator, and npm publishing are underway or pending.
+
+---
+
+## License
+
+**ithyno uses a split license so that adopting it does NOT taint your project with GPL.**
+
+- **Application code** is licensed under **GPL-3.0-or-later.**
+  This covers `server/`, `web/`, `electron/`, `bin/`, `vscode-extension/`, the dev-facing `.claude/skills/ithy-opsx-*/` and `.claude/skills/openspec-*/` directories, and everything else at the repo root not explicitly excepted below. See [`LICENSE`](./LICENSE) for the full text.
+- **Files that get copied into user projects** are licensed under the **MIT License.**
+  Everything under [`templates/`](./templates/) and [`.claude/skills/openspec-flow/`](./.claude/skills/openspec-flow/) — the files `ithyno init` (or an equivalent copy step) drops into your repo — is MIT. This is a deliberate split: **projects initialized with ithyno's templates and workflow skill do NOT inherit copyleft obligations from ithyno.** You can freely modify, redistribute, or embed these files in a project under any license (proprietary included) without concerning yourself with GPL derivative-work rules. Per-subtree LICENSE files: [`templates/LICENSE`](./templates/LICENSE), [`.claude/skills/openspec-flow/LICENSE`](./.claude/skills/openspec-flow/LICENSE).
+
+For individual files lifted out of those directories, the license attaches per-file via SPDX headers: `<!-- SPDX-License-Identifier: MIT -->` in markdown, `# SPDX-License-Identifier: MIT` in YAML. SKILL.md files declare `license: MIT` inside their frontmatter (an SPDX comment before `---` collides with Claude Code's skill loader).
+
+### What this means in practice
+
+| You want to… | The license you're operating under is… |
+|---|---|
+| Modify or redistribute the ithyno app itself | GPL-3.0-or-later (share modifications back under GPL) |
+| Adopt `templates/CLAUDE.md` / `templates/agents.yaml.example` verbatim in your own project | MIT (do whatever, no obligation flows back to your project) |
+| Adopt or fork `.claude/skills/openspec-flow/SKILL.md` in your own project | MIT (same as above) |
+| Bundle ithyno as a library into a closed-source product | GPL-3.0-or-later applies — likely not the license you want; consider dual-licensing negotiation |
+| Contribute a patch to ithyno itself | GPL-3.0-or-later (implicit under the inbound=outbound convention) |
+
+### Dependency licenses
+
+The runtime dependency tree contains only GPL-3.0-compatible licenses (MIT / ISC / BSD / Apache-2.0 / BlueOak / Python-2.0 / Artistic-2.0 / WTFPL / CC0 / 0BSD). No AGPL, SSPL, BUSL, or proprietary deps. Two `CC-BY` packages (`caniuse-lite`, `spdx-exceptions`) are build-time only and not linked into the shipped artifact.
+
+---
+
+## Status
+
+**Working MVP.** Follows the OpenSpec workflow for its own development — see the [`openspec/`](./openspec/) directory for the current specs and in-flight changes.
