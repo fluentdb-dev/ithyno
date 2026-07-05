@@ -31,6 +31,8 @@ import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
 import { gitInit } from "./git/init.js";
 import { getChangeGitState, commitChangeProposal } from "./git/change-state.js";
+import { PHASES, isPhase, isReservedPhase, type Phase } from "./phases.js";
+import { readSidecar, writeSidecar, extractSidecarFields } from "./sidecar.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -374,6 +376,54 @@ fastify.post<{ Params: { id: string } }>(
       req.log.error({ err, changeId: req.params.id }, "commit-proposal failed");
       return reply.code(500).send({ ok: false, reason: msg });
     }
+  },
+);
+
+// ---- phase state machine (add-phase-state-machine) ------------------------
+// GET returns the persisted phase for a change (null when unphased).
+// POST validates against the active enum, rejects reserved values with a
+// pointer to the phase-gates idea note, writes the sidecar, and rebroadcasts
+// the change via the existing `change-updated` WS event (state-updated
+// equivalent — no new event variant added).
+fastify.get<{ Params: { id: string } }>(
+  "/api/changes/:id/phase",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+    const raw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const { phase } = extractSidecarFields(raw, req.params.id);
+    return { phase: phase ?? null };
+  },
+);
+
+type PhasePostBody = { phase?: unknown };
+fastify.post<{ Params: { id: string }; Body: PhasePostBody }>(
+  "/api/changes/:id/phase",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const requested = req.body?.phase;
+    if (isReservedPhase(requested)) {
+      return reply.code(400).send({
+        error: `phase '${requested}' is reserved for Phase 4 (see docs/ideas/2026-07-04-phase-gates-and-putback.md); not yet supported`,
+      });
+    }
+    if (!isPhase(requested)) {
+      return reply.code(400).send({
+        error: `unknown phase '${String(requested)}'; expected one of ${PHASES.join(", ")}`,
+      });
+    }
+
+    await writeSidecar(PROJECT_ROOT, req.params.id, { phase: requested });
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: requested satisfies Phase };
   },
 );
 

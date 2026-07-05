@@ -32,6 +32,17 @@ export type Change = {
   deltaSpecs: SpecDomain[];
   progress: Progress;
   hasOutcome: boolean;
+  /** Workflow phase persisted in `.openspec.yaml`. Undefined = unphased
+   *  (Kanban renders in the legacy fallback section). Landed by
+   *  add-phase-state-machine. Includes `needs-human` (from
+   *  add-needs-human-phase); the client narrows unknown strings to
+   *  undefined. */
+  phase?: import("./phases").PersistedPhase;
+  /** Restored when a `needs-human` escalation is answered.
+   *  add-needs-human-phase. */
+  priorPhase?: import("./phases").PersistedPhase;
+  /** ISO 8601 timestamp of the escalation. add-needs-human-phase. */
+  escalatedAt?: string;
 };
 
 export type ChangeSummary = {

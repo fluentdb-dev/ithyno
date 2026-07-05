@@ -37,6 +37,17 @@ export type Change = {
   progress: Progress;
   /** True when an `outcome.md` file sits next to the change's other artifacts. */
   hasOutcome: boolean;
+  /** Explicit workflow phase persisted in `.openspec.yaml`. Undefined =
+   *  unphased (renders in the Kanban's legacy fallback section). Landed by
+   *  add-phase-state-machine. `needs-human` (from add-needs-human-phase)
+   *  is included in the type union but its lane is rendered separately. */
+  phase?: import("./phases.js").PersistedPhase;
+  /** The phase to restore when a `needs-human` escalation is answered.
+   *  Populated only while `phase === "needs-human"`. See add-needs-human-phase. */
+  priorPhase?: import("./phases.js").PersistedPhase;
+  /** ISO 8601 timestamp of the escalation; used by the needs-human lane to
+   *  sort cards by wait time. Populated only while `phase === "needs-human"`. */
+  escalatedAt?: string;
 };
 
 export type ChangeSummary = {

@@ -14,11 +14,12 @@ import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
 import { CommandModal } from "./CommandModal";
-import { injectPty } from "../api";
+import { injectPty, setChangePhase } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
 import { ParallelStartLauncher } from "./ParallelStartLauncher";
+import { PHASES, type Phase } from "../phases";
 
 type ColumnId = "todo" | "inprogress" | "done";
 
@@ -390,6 +391,7 @@ function ChangeCard({
           <AgentBadge job={job} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
+          <PhaseControl change={change} />
         </div>
         {change.proposal?.intent && <p className="kanban-card-intent">{change.proposal.intent}</p>}
         <ProgressBar progress={displayedProgress} />
@@ -538,6 +540,55 @@ function isMergeable(job: JobSummary): boolean {
     job.status === "crashed" ||
     job.status === "cancelled" ||
     job.status === "orphaned"
+  );
+}
+
+/**
+ * Per-card phase transition control. add-phase-state-machine ships this as
+ * the minimum viable transition affordance — a small `<select>` next to the
+ * card head. Full drag-between-swim-lanes UX is deferred to a follow-up
+ * change (`add-kanban-phase-lanes`) that refactors the KanbanBoard layout.
+ *
+ * The select is intentionally kept out of the card's <Link> so clicks don't
+ * navigate. The current phase is the selected option; an "Unphased"
+ * placeholder appears for changes with no phase yet.
+ */
+function PhaseControl({ change }: { change: Change }) {
+  const pushToast = useStore((s) => s.pushToast);
+  const current = change.phase;
+  const [pending, setPending] = useState(false);
+
+  const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    if (!next || next === current) return;
+    if (!(PHASES as readonly string[]).includes(next)) return;
+    setPending(true);
+    try {
+      await setChangePhase(change.id, next as Phase);
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <select
+      className="kanban-phase-select"
+      value={current ?? ""}
+      onChange={onChange}
+      disabled={pending}
+      onClick={(e) => e.stopPropagation()}
+      title="Change workflow phase"
+      aria-label={`Phase for ${change.id}`}
+    >
+      {!current && <option value="">— unphased —</option>}
+      {PHASES.map((p) => (
+        <option key={p} value={p}>
+          {p}
+        </option>
+      ))}
+    </select>
   );
 }
 
