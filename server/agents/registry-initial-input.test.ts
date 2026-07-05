@@ -25,6 +25,7 @@ describe("AgentRegistry initialInput", () => {
       role: "coder",
       specialties: [],
       concurrency: 1,
+      dedicated: true,
     };
     const r = reg.resolve(def, {
       change_id: "add-foo",
@@ -43,6 +44,7 @@ describe("AgentRegistry initialInput", () => {
       role: "coder",
       specialties: [],
       concurrency: 1,
+      dedicated: true,
     };
     const r = reg.resolve(def, {
       change_id: "c",
@@ -63,6 +65,7 @@ describe("AgentRegistry initialInput", () => {
       role: "coder",
       specialties: [],
       concurrency: 1,
+      dedicated: true,
     };
     const r = reg.resolve(def, {
       change_id: "add-bar",
