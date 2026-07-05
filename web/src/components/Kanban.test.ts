@@ -48,12 +48,14 @@ describe("bucketize (phase lanes)", () => {
   });
 
   it("falls back to unphased for missing / unknown / reserved phase values", () => {
+    // add-needs-human-phase updated bucketize to split "needs-human" out
+    // into its own bucket instead of falling into unphased. The rest of the
+    // unrecognized-value fallbacks are unchanged.
     const changes = [
       mkChange("no-phase"), // undefined
       mkChange("unknown-string", "elsewhere"), // rejected by isPhase
       mkChange("reserved-1", "validated"), // Phase 4 reserved value
       mkChange("reserved-2", "verified"),
-      mkChange("needs-human", "needs-human"), // recognized persisted phase but not a lane
     ];
     const b = bucketize(changes);
     expect(b.unphased.map((c) => c.id)).toEqual([
@@ -61,12 +63,31 @@ describe("bucketize (phase lanes)", () => {
       "unknown-string",
       "reserved-1",
       "reserved-2",
-      "needs-human",
     ]);
     expect(b.proposed).toEqual([]);
     expect(b.coded).toEqual([]);
     expect(b.reviewed).toEqual([]);
     expect(b.done).toEqual([]);
+    expect(b.needsHuman).toEqual([]);
+  });
+
+  it("routes needs-human into its own bucket (add-needs-human-phase)", () => {
+    const changes = [mkChange("escalated", "needs-human")];
+    const b = bucketize(changes);
+    expect(b.needsHuman.map((c) => c.id)).toEqual(["escalated"]);
+    expect(b.unphased).toEqual([]);
+  });
+
+  it("sorts needs-human by escalatedAt ascending — longest wait first", () => {
+    const a = mkChange("a", "needs-human");
+    const b = mkChange("b", "needs-human");
+    const c = mkChange("c", "needs-human");
+    // Attach escalatedAt after construction (mkChange doesn't type it).
+    (a as unknown as { escalatedAt?: string }).escalatedAt = "2026-07-05T09:00:00Z";
+    (b as unknown as { escalatedAt?: string }).escalatedAt = "2026-07-05T07:00:00Z";
+    (c as unknown as { escalatedAt?: string }).escalatedAt = "2026-07-05T08:00:00Z";
+    const bk = bucketize([a, b, c]);
+    expect(bk.needsHuman.map((x) => x.id)).toEqual(["b", "c", "a"]);
   });
 
   it("does not consult progress for lane placement — Progress-Independent Phase Placement", () => {

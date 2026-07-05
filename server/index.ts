@@ -31,8 +31,9 @@ import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
 import { gitInit } from "./git/init.js";
 import { getChangeGitState, commitChangeProposal } from "./git/change-state.js";
-import { PHASES, isPhase, isReservedPhase, type Phase } from "./phases.js";
+import { PHASES, isPhase, isReservedPhase, NEEDS_HUMAN, type Phase } from "./phases.js";
 import { readSidecar, writeSidecar, extractSidecarFields } from "./sidecar.js";
+import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -123,6 +124,27 @@ if (openspecDir) {
       if (filePath.endsWith(".md")) broadcast({ type: "tags-updated" });
       const changeId = changeIdForPath(openspecDir, filePath);
       if (changeId) {
+        // add-needs-human-phase editor fallback: if the changed file is
+        // `needs-human.md`, guard on the current phase BEFORE parsing so a
+        // duplicate chokidar fire (or a manual re-save after resolution) is
+        // a no-op — we've already restored on the first event. When the
+        // guard passes and the footer reads `answered: true`, run the same
+        // restore path the /answer API uses.
+        if (event !== "unlink" && filePath.endsWith("/needs-human.md")) {
+          const raw = await readSidecar(PROJECT_ROOT, changeId);
+          const cur = extractSidecarFields(raw, changeId);
+          if (cur.phase === NEEDS_HUMAN) {
+            const doc = await parseNeedsHuman(PROJECT_ROOT, changeId);
+            if (doc?.answered) {
+              const restored = cur.priorPhase ?? "proposed";
+              await writeSidecar(PROJECT_ROOT, changeId, {
+                phase: restored,
+                priorPhase: undefined,
+                escalatedAt: undefined,
+              });
+            }
+          }
+        }
         const change = await parseChange(openspecDir, changeId);
         broadcast({ type: "change-updated", changeId, change });
         return;
@@ -424,6 +446,81 @@ fastify.post<{ Params: { id: string }; Body: PhasePostBody }>(
     const change = await parseChange(openspecDir, req.params.id);
     broadcast({ type: "change-updated", changeId: req.params.id, change });
     return { ok: true, phase: requested satisfies Phase };
+  },
+);
+
+// ---- needs-human escalation (add-needs-human-phase) -----------------------
+// Phase-agnostic escalation state that lives on top of the phase machine.
+// A change escalates *from* any phase (defaulting to `proposed` when
+// unphased) and *returns* to that phase when the escalation is answered.
+// Both routes inherit CSRF protection from the global onRequest hook.
+
+type EscalatePostBody = { question?: unknown; context?: unknown };
+fastify.post<{ Params: { id: string }; Body: EscalatePostBody }>(
+  "/api/changes/:id/needs-human",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+    if (!question) return reply.code(400).send({ error: "question required" });
+    const context = typeof req.body?.context === "string" ? req.body.context : undefined;
+
+    // 409 when already escalated — one open escalation per change.
+    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const current = extractSidecarFields(currentRaw, req.params.id);
+    if (current.phase === NEEDS_HUMAN) {
+      return reply.code(409).send({ error: "change already escalated" });
+    }
+
+    const priorPhase = current.phase ?? "proposed";
+    const escalatedAt = new Date().toISOString();
+    await writeNeedsHuman(PROJECT_ROOT, req.params.id, question, context);
+    await writeSidecar(PROJECT_ROOT, req.params.id, {
+      phase: NEEDS_HUMAN,
+      priorPhase,
+      escalatedAt,
+    });
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: NEEDS_HUMAN, priorPhase, escalatedAt };
+  },
+);
+
+type AnswerPostBody = { answer?: unknown };
+fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
+  "/api/changes/:id/needs-human/answer",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
+    if (!answer) return reply.code(400).send({ error: "answer required" });
+
+    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const current = extractSidecarFields(currentRaw, req.params.id);
+    if (current.phase !== NEEDS_HUMAN) {
+      return reply.code(409).send({ error: "change is not in needs-human" });
+    }
+
+    await appendAnswer(PROJECT_ROOT, req.params.id, answer);
+    // Restore prior phase; clear escalation fields (undefined DELETES them
+    // via the writeSidecar contract).
+    const restored = current.priorPhase ?? "proposed";
+    await writeSidecar(PROJECT_ROOT, req.params.id, {
+      phase: restored,
+      priorPhase: undefined,
+      escalatedAt: undefined,
+    });
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: restored };
   },
 );
 

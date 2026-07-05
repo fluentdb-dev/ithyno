@@ -131,6 +131,32 @@ export async function setChangePhase(id: string, phase: string): Promise<void> {
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/**
+ * Escalate a change to the needs-human state (add-needs-human-phase).
+ * Writes `needs-human.md`, sets `phase: needs-human`, records
+ * `priorPhase` and `escalatedAt` in the sidecar.
+ */
+export async function escalateChange(
+  id: string,
+  question: string,
+  context?: string,
+): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/needs-human`,
+    { question, context },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Answer an open escalation; restores the change's prior phase. */
+export async function answerEscalation(id: string, answer: string): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/needs-human/answer`,
+    { answer },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 export async function toggleTask(input: {
   filePath: string;
   line: number;

@@ -7,6 +7,7 @@ import { parseSpec } from "./spec.js";
 import { parseProposal } from "./proposal.js";
 import type { Change, ChangeSummary, RawDoc, SpecDomain, WorkspaceState } from "../model.js";
 import { readSidecar, extractSidecarFields } from "../sidecar.js";
+import { parseNeedsHuman } from "../needs-human.js";
 import { getGitStatus } from "../git/status.js";
 
 /** Locate the openspec/ directory under a project root. */
@@ -61,6 +62,17 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
   const sidecarRaw = await readSidecar(projectRoot, id);
   const { phase, priorPhase, escalatedAt } = extractSidecarFields(sidecarRaw, id);
 
+  // Surface the escalation question when the change is currently in
+  // needs-human AND the artifact exists on disk. Reading it here means the
+  // Kanban card can render the question without a separate fetch. When phase
+  // is anything else the file is ignored — a lingering file from a past
+  // escalation shouldn't render as a live question.
+  let needsHumanQuestion: string | undefined;
+  if (phase === "needs-human") {
+    const doc = await parseNeedsHuman(projectRoot, id);
+    if (doc?.question) needsHumanQuestion = doc.question;
+  }
+
   return {
     id,
     proposal,
@@ -72,6 +84,7 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
     phase,
     priorPhase,
     escalatedAt,
+    needsHumanQuestion,
   };
 }
 
