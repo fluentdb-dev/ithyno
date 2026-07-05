@@ -163,7 +163,48 @@ _This section fills in during Phase 1 execution. Every rough
 edge belongs here so the eventual proposal captures the actual
 pain surface._
 
-- (initial state — no observations yet)
+### `add-agent-role-field` — first change on the phase branch
+
+- ✅ **`openspec archive` on a non-main branch works.** No branch
+  identity check inside the CLI; it moves files and applies the
+  delta against `openspec/specs/` regardless of what branch you're
+  on. First open question answered: safe to archive on the phase
+  branch.
+- ⚠ **Manual verify tasks (6.1–6.3) block archive by default.**
+  Had to run `openspec archive --yes` to bypass the 3-incomplete-
+  tasks warning. Under the phase workflow, manual verifies against
+  a dashboard on main won't have anything to verify until the
+  phase merges. Options for the future format:
+  1. Split verify tasks that require the phase-merged state out
+     into the archive commit's *own* checklist (post-merge on main),
+     not the change's tasks.md — but that fights `openspec
+     archive`'s file-moving semantics.
+  2. Add a phase-workflow convention: verify tasks that need
+     "actual main behavior" are marked with a suffix (e.g.
+     `[post-phase]`) and the archive step skips them explicitly,
+     rather than requiring `--yes`.
+  3. Accept `--yes` on phase archives; document that manual
+     verify happens after the phase-to-main merge.
+- ✅ **Impl commit → merge --no-ff → archive commit** produced the
+  branch topology the idea sketched. `git log --graph --all`
+  shows the expected diamond: `impl(A)` on the agent branch, the
+  merge commit on the phase branch, then the archive commit
+  above it.
+- 🌱 **Cross-branch idea-file edits.** Live-log observations
+  belong on the phase branch (that's where the work is
+  happening). Main sees them only when the phase merges. That
+  matches the "batch reveal" intent, but means someone looking
+  at main today doesn't see today's observations. Acceptable
+  trade — noting it so a future contributor doesn't try to
+  reconcile the two.
+- 🌱 **agents.yaml.example modification landed cleanly.** The
+  template file getting a `role`/`specialties`/`concurrency`
+  block on the phase branch is exactly the file
+  `add-worktree-pool` also needs to touch (for `dedicated` +
+  `worktreePool`). Because the pool worktree for the next change
+  will branch off `phase-multi-agent` (not main), it will see
+  this template edit as its base — no merge conflict expected.
+  Verify empirically at the next impl.
 
 ## Related prior work
 
