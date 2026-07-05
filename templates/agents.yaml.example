@@ -20,6 +20,15 @@ agents:
     command: claude
     args: ["/opsx:apply", "${change_id}"]
 
+    # Optional metadata fields — Phase 1 of the multi-agent redesign records
+    # them but the runner does not consume them yet. Later phases wire them
+    # into a dispatcher that routes jobs by role + specialty and honors
+    # per-agent concurrency caps. Safe to omit; defaults shown below.
+    #
+    # role: coder          # coder | reviewer | proposer | ... (open set)
+    # specialties: []      # tag prefixes claimed as expertise; empty = any
+    # concurrency: 1       # integer >= 1; declared capacity, NOT enforced yet
+
   # Add more agents as you need them — any local CLI works.
   # - name: aider
   #   description: Implements with Aider.
