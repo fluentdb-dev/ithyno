@@ -33,18 +33,19 @@ export type Change = {
   progress: Progress;
   hasOutcome: boolean;
   /** Workflow phase persisted in `.openspec.yaml`. Undefined = unphased
-   *  (Kanban renders in the legacy fallback section). Landed by
-   *  add-phase-state-machine. Includes `needs-human` (from
-   *  add-needs-human-phase); the client narrows unknown strings to
-   *  undefined. */
+   *  (Kanban renders in the legacy fallback section). `needs-human` is a
+   *  valid value but does not place the card in a dedicated lane; the
+   *  card stays in its `priorPhase` lane with a WaitBadge. The client
+   *  narrows unknown strings to undefined. */
   phase?: import("./phases").PersistedPhase;
-  /** Restored when a `needs-human` escalation is answered.
-   *  add-needs-human-phase. */
+  /** Restored when a `needs-human` escalation is answered. Also read by
+   *  the Kanban to place the card in its home lane while escalated. */
   priorPhase?: import("./phases").PersistedPhase;
-  /** ISO 8601 timestamp of the escalation. add-needs-human-phase. */
+  /** ISO 8601 timestamp of the escalation. Rendered as a WaitBadge on
+   *  the card while `phase === "needs-human"`. */
   escalatedAt?: string;
-  /** Question surfaced from `needs-human.md` for the Kanban card in the
-   *  needs-human lane. Populated only while `phase === "needs-human"`. */
+  /** Question surfaced from `needs-human.md` and shown on the Kanban
+   *  card head while `phase === "needs-human"`. */
   needsHumanQuestion?: string;
 };
 
