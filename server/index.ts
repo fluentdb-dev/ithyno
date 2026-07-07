@@ -15,6 +15,7 @@ import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount } from "./sync/pty.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { dispatch } from "./agents/dispatch.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -540,6 +541,46 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   const job = agentRunner.getJob(req.params.id);
   if (!job) return reply.code(404).send({ error: "not found" });
   return job;
+});
+
+type DispatchBody = {
+  role?: unknown;
+  changeId?: unknown;
+  runtime?: unknown;
+  promptSuffix?: unknown;
+  wait?: unknown;
+  timeoutMs?: unknown;
+};
+fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const b = req.body ?? {};
+  const role = typeof b.role === "string" ? b.role : "";
+  const changeId = typeof b.changeId === "string" ? b.changeId : "";
+  const runtime = typeof b.runtime === "string" ? b.runtime : undefined;
+  const promptSuffix = typeof b.promptSuffix === "string" ? b.promptSuffix : undefined;
+  const wait = typeof b.wait === "boolean" ? b.wait : true;
+  const timeoutMs = typeof b.timeoutMs === "number" ? b.timeoutMs : undefined;
+
+  if (changeId && !isSafeChangeId(changeId)) {
+    return reply.code(400).send({ error: "invalid change id" });
+  }
+
+  const outcome = await dispatch(agentRunner, agentRegistry, PROJECT_ROOT, {
+    role,
+    changeId,
+    runtime,
+    promptSuffix,
+    wait,
+    timeoutMs,
+  });
+  if (!outcome.ok) {
+    const body: Record<string, unknown> = { error: outcome.error };
+    if (outcome.matches !== undefined) body.matches = outcome.matches;
+    return reply.code(outcome.status).send(body);
+  }
+  return outcome.result;
 });
 
 type RunBody = { changeId: string; agentName: string };
