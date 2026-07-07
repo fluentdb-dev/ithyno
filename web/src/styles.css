@@ -631,9 +631,10 @@ a:hover {
   gap: 16px;
   margin-top: 18px;
 }
-/* add-kanban-phase-lanes: 4 phase lanes (proposed, coded, reviewed, done). */
+/* Phase-first layout: 4 phase lanes (proposed, coded, reviewed, done). */
 .kanban-board-phases {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 0; /* the toolbar above provides the gap */
 }
 @media (max-width: 900px) {
   .kanban-board,
@@ -641,53 +642,25 @@ a:hover {
     grid-template-columns: 1fr;
   }
 }
-/* Needs-human strip spans all lane columns as a full-width row on top.
-   Always rendered; when empty, still visible so the emptiness is
-   glanceable good news. */
-.kanban-needs-human {
-  grid-column: 1 / -1;
-  background: color-mix(in oklab, var(--accent) 6%, var(--panel));
-  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
-  border-left: 4px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 10px 14px;
+
+/* Top-of-board toolbar. Carries "+ New Change" and the parallel Start
+   launcher — at 4-lane widths the PROPOSED lane header would overflow
+   with these embedded, so they float above the board. */
+.kanban-toolbar {
   display: flex;
-  flex-direction: column;
   gap: 10px;
-}
-.kanban-needs-human.empty {
-  background: var(--panel);
-  border: 1px dashed var(--border);
-  border-left: 4px dashed color-mix(in oklab, var(--accent) 30%, var(--border));
-}
-.kanban-needs-human-head {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 18px;
+  margin-bottom: 8px;
 }
-.kanban-needs-human-head h3 {
-  margin: 0;
+.kanban-toolbar .kanban-add {
   font-size: 12px;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
-.kanban-needs-human.empty .kanban-needs-human-head h3 {
-  color: var(--muted);
-}
-.kanban-needs-human-hint {
-  font-size: 11px;
-  color: var(--muted);
-}
-.kanban-needs-human-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-}
+
+/* Escalation-state markers. needs-human cards live in their priorPhase
+   lane; the WaitBadge and italic question line make them visible without
+   a dedicated strip. */
 .kanban-wait-badge {
   display: inline-flex;
   align-items: center;
@@ -701,7 +674,6 @@ a:hover {
 }
 .kanban-card.needs-human {
   border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
-  cursor: default;
 }
 .kanban-card-question {
   font-style: italic;

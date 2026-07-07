@@ -3,10 +3,11 @@
 /**
  * Workflow phase enum shared between server and web.
  *
- * The four active values render as swim lanes on the Kanban in the order
- * declared. `needs-human` is a valid persisted phase (added by
- * add-needs-human-phase) but does NOT appear in `PHASES` — it gets its
- * own dedicated lane rendered separately.
+ * The four active values are the phase lanes rendered on the Kanban in
+ * order. `needs-human` is a valid persisted phase but NOT one of `PHASES`
+ * — a change in `needs-human` stays in its `priorPhase` lane on the
+ * Kanban with a WaitBadge on the card; escalation Q&A itself is handled
+ * agent-side (see revert-active-phase-ui).
  *
  * The reserved values are recognized by the API only to return a clear
  * error; they do not render as lanes. Phase 4 will move them into
@@ -18,8 +19,9 @@ export const PHASES = ["proposed", "coded", "reviewed", "done"] as const;
 export type Phase = (typeof PHASES)[number];
 
 /** Persisted phase for a change escalated to human. Not in PHASES so it
- *  doesn't render as a linear lane; the needs-human lane is rendered
- *  separately by add-needs-human-phase. */
+ *  is excluded from lane placement; the Kanban keeps such a change in
+ *  its `priorPhase` lane with a WaitBadge until the escalation is
+ *  answered (agent-side). */
 export const NEEDS_HUMAN = "needs-human" as const;
 
 /** Reserved for Phase 4 (validated / verified gate agents). Rejected by

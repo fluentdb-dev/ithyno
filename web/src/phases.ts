@@ -5,6 +5,10 @@
  * changes rare). If they diverge, `web/src/store.ts` narrows unknown phase
  * strings to `undefined` on receipt so the UI degrades to the Unphased
  * section rather than crashing.
+ *
+ * `NEEDS_HUMAN` is a valid persisted value but does not appear as its own
+ * Kanban lane — such a change stays in its `priorPhase` lane with a
+ * WaitBadge on the card. See `Kanban.tsx::bucketize()`.
  */
 
 export const PHASES = ["proposed", "coded", "reviewed", "done"] as const;

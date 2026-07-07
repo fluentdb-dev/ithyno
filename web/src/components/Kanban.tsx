@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  DndContext,
-  PointerSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import type { DragEndEvent } from "@dnd-kit/core";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
 import { CommandModal } from "./CommandModal";
-import { injectPty, setChangePhase } from "../api";
+import { injectPty } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
@@ -22,28 +13,25 @@ import { ParallelStartLauncher } from "./ParallelStartLauncher";
 import { PHASES, NEEDS_HUMAN, type Phase, isPhase } from "../phases";
 
 /**
- * add-kanban-phase-lanes: the Kanban is now organized around workflow
- * phase. Cards for changes that carry a `phase:` sidecar value are
- * placed in one of 4 phase lanes (proposed → coded → reviewed → done).
- * Everything else — legacy changes with no phase, or changes with a
- * phase string the client doesn't understand — falls back into an
- * "Unphased" section that reuses the pre-existing progress-derived
- * todo / inprogress / done grouping.
+ * Kanban is a *state monitor* — it shows the current phase / progress of
+ * each change, not a control surface. Phase transitions are written by
+ * the Phase 3 Manager (the `/opsx:apply` claude session itself) via
+ * `POST /api/changes/:id/phase`; the dashboard just reflects them.
  *
- * The old 3-column ColumnId type is gone. The two relevant coordinate
- * systems here are:
- *   - `Slot`: where a rendered card *lives* (phase lane OR one of the
- *     3 unphased sub-buckets). Used to pick which action buttons the
- *     card shows.
- *   - `DropTargetId`: what a drop target announces itself as. The 4
- *     phase lanes are drop targets; the Unphased section is not (drops
- *     onto Unphased would mean "unset the phase" which the API can't
- *     express yet).
+ * User-facing affordances are limited to:
+ *   - `+ New Change` (top toolbar) → proposal creation
+ *   - `Start` / `Apply` (per card) → hand-off to the agent runner
+ *   - `Archive` / `Merge` (per card) → post-completion openspec steps
+ *
+ * Cards for changes whose `phase` is `needs-human` remain in the *prior*
+ * phase lane and are marked with a `<WaitBadge>` + the question. The
+ * escalation Q&A itself is handled agent-side (Manager spawns an
+ * interactive PTY and reports via the notification chain); no dashboard
+ * modal is involved. See `docs/2026-07-06-phase-2-implementation-and-redesign.md`.
  */
 
 type UnphasedSubBucket = "unphased-todo" | "unphased-inprogress" | "unphased-done";
-type Slot = Phase | UnphasedSubBucket | "needs-human";
-type DropTargetId = Phase;
+type Slot = Phase | UnphasedSubBucket;
 
 type PhaseBuckets = {
   proposed: Change[];
@@ -51,7 +39,6 @@ type PhaseBuckets = {
   reviewed: Change[];
   done: Change[];
   unphased: Change[];
-  needsHuman: Change[];
 };
 
 type UnphasedBuckets = {
@@ -88,10 +75,14 @@ function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): strin
 }
 
 /**
- * Bucket changes by their persisted phase. Anything without a recognized
- * phase (missing, unknown string, or a value like `needs-human` we don't
- * treat as a lane yet) falls into `unphased`. The Unphased section then
- * uses `bucketizeByProgress` to sub-group its members todo/inprogress/done.
+ * Bucket changes by their persisted phase.
+ *
+ * - Known `Phase` value (proposed / coded / reviewed / done) → matching lane
+ * - `needs-human` phase → **`priorPhase` lane** (falls back to `proposed`
+ *   if priorPhase is missing or itself needs-human). The card is marked
+ *   with `<WaitBadge>` + question in its head so it stays visible in its
+ *   working lane while awaiting human input — no dedicated lane.
+ * - Anything else (missing, unknown string) → `unphased`
  */
 function bucketize(changes: Change[]): PhaseBuckets {
   const b: PhaseBuckets = {
@@ -100,23 +91,17 @@ function bucketize(changes: Change[]): PhaseBuckets {
     reviewed: [],
     done: [],
     unphased: [],
-    needsHuman: [],
   };
   for (const c of changes) {
-    if (isPhase(c.phase)) b[c.phase].push(c);
-    else if (c.phase === NEEDS_HUMAN) b.needsHuman.push(c);
-    else b.unphased.push(c);
+    if (isPhase(c.phase)) {
+      b[c.phase].push(c);
+    } else if (c.phase === NEEDS_HUMAN) {
+      const target: Phase = isPhase(c.priorPhase) ? c.priorPhase : "proposed";
+      b[target].push(c);
+    } else {
+      b.unphased.push(c);
+    }
   }
-  // Sort needs-human by wait time (longest wait first) so the top of the
-  // lane is the most-neglected escalation. Fallback ordering by id keeps
-  // it stable when escalatedAt is missing (should not happen but tolerated).
-  b.needsHuman.sort((a, b2) => {
-    const at = a.escalatedAt ?? "";
-    const bt = b2.escalatedAt ?? "";
-    if (at < bt) return -1;
-    if (at > bt) return 1;
-    return a.id.localeCompare(b2.id);
-  });
   return b;
 }
 
@@ -203,27 +188,6 @@ export function KanbanBoard({
     [buckets.unphased, jobByChange],
   );
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const onDragEnd = (e: DragEndEvent) => {
-    const dropId = e.over?.id;
-    if (!dropId || typeof dropId !== "string") return;
-    const id = (e.active.data.current as { id?: string } | undefined)?.id;
-    if (!id) return;
-    const change = changes.find((c) => c.id === id);
-    if (!change) return;
-    // Cards in the needs-human lane cannot be dragged out — answering is
-    // the only exit (belt-and-suspenders with useDraggable's `disabled`).
-    if (change.phase === NEEDS_HUMAN) return;
-    // Only phase lanes are drop targets. Same-lane drop is a no-op.
-    if (!isPhase(dropId)) return;
-    if (change.phase === dropId) return;
-    setChangePhase(change.id, dropId).catch((err) => {
-      console.error("[phase] setChangePhase failed:", err);
-      pushToast("error", err instanceof Error ? err.message : String(err));
-    });
-  };
-
   const onArchiveClick = (change: Change) => {
     setPending({ kind: "archive", change });
   };
@@ -269,30 +233,27 @@ export function KanbanBoard({
   );
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+    <>
+      {/* Top-of-board toolbar. Kept from the display-fix work: at 4-lane
+          widths, embedding both `+ New Change` and the parallel launcher in
+          the PROPOSED lane header would overflow. */}
+      <div className="kanban-toolbar">
+        <button className="primary kanban-add" onClick={onNewChange}>
+          + New Change
+        </button>
+        <ParallelStartLauncher
+          changes={changes}
+          jobByChange={jobByChange}
+          startImplementation={startImplementation}
+        />
+      </div>
       <div className="kanban-board kanban-board-phases">
-        {/* needs-human sits above the phase lanes as a full-width strip.
-            Rendered ALWAYS (even when empty) so its emptiness is glanceable
-            good news — the spec pins this. */}
-        <NeedsHumanLane changes={buckets.needsHuman} renderCard={renderCard} />
-
-        {PHASES.map((phase, i) => (
+        {PHASES.map((phase) => (
           <PhaseLane
             key={phase}
-            id={phase}
             title={PHASE_LABEL[phase]}
             count={buckets[phase].length}
             emptyText={PHASE_EMPTY[phase]}
-            onAdd={i === 0 ? onNewChange : undefined}
-            headerAction={
-              i === 0 ? (
-                <ParallelStartLauncher
-                  changes={changes}
-                  jobByChange={jobByChange}
-                  startImplementation={startImplementation}
-                />
-              ) : undefined
-            }
           >
             {buckets[phase].map((c) => renderCard(c, phase))}
           </PhaseLane>
@@ -333,81 +294,31 @@ export function KanbanBoard({
       )}
 
       {startFlowModals}
-    </DndContext>
+    </>
   );
 }
 
 function PhaseLane({
-  id,
   title,
   count,
   emptyText,
-  onAdd,
-  headerAction,
   children,
 }: {
-  id: DropTargetId;
   title: string;
   count: number;
   emptyText: string;
-  onAdd?: () => void;
-  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <section
-      ref={setNodeRef}
-      className={`kanban-col kanban-phase-lane${isOver ? " over-legal" : ""}`}
-    >
+    <section className="kanban-col kanban-phase-lane">
       <header className="kanban-col-head">
         <h3>
           {title} <span className="kanban-col-count">{count}</span>
         </h3>
-        {onAdd && (
-          <button className="primary kanban-add" onClick={onAdd}>
-            + New Change
-          </button>
-        )}
-        {headerAction}
       </header>
       <div className="kanban-col-body">
         {count === 0 ? <p className="empty kanban-empty">{emptyText}</p> : children}
       </div>
-    </section>
-  );
-}
-
-/**
- * Needs-human lane. Rendered as a full-width strip above the phase
- * lanes; always visible so its emptiness is glanceable good news. NOT
- * a drop target — cards can only exit via the answer path (API or
- * `answered: true` in the artifact footer).
- */
-function NeedsHumanLane({
-  changes,
-  renderCard,
-}: {
-  changes: Change[];
-  renderCard: (c: Change, slot: Slot) => React.ReactNode;
-}) {
-  return (
-    <section className={`kanban-needs-human${changes.length === 0 ? " empty" : ""}`}>
-      <header className="kanban-needs-human-head">
-        <h3>
-          NEEDS HUMAN <span className="kanban-col-count">{changes.length}</span>
-        </h3>
-        <span className="kanban-needs-human-hint">
-          {changes.length === 0
-            ? "No open escalations."
-            : "Sorted by wait time — longest first. Answer to release."}
-        </span>
-      </header>
-      {changes.length > 0 && (
-        <div className="kanban-needs-human-body">
-          {changes.map((c) => renderCard(c, "needs-human"))}
-        </div>
-      )}
     </section>
   );
 }
@@ -427,7 +338,7 @@ function UnphasedSection({
           UNPHASED <span className="kanban-col-count">{total}</span>
         </h3>
         <span className="kanban-unphased-hint">
-          Legacy changes without a phase. Drag a card into a phase lane to opt in.
+          Legacy changes without a phase. The Phase 3 Manager will opt them in.
         </span>
       </header>
       <div className="kanban-unphased-body">
@@ -484,41 +395,33 @@ function ChangeCard({
   const showWorktreeProgress = !!worktreeProgress && !!job && job.status !== "cancelled";
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
 
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `card-${change.id}`,
-    data: { id: change.id },
-    // Cards in the needs-human lane cannot be dragged — answering is the
-    // only exit. Enforced in the UI here + in `onDragEnd` as backup.
-    disabled: slot === "needs-human",
-  });
+  // Phase-based judgment (Manager-first, revert-active-phase-ui). `slot`
+  // still tells us where the card sits (its home lane, decided by
+  // bucketize), but the *behavior* is driven by `change.phase`:
+  //   - needs-human phase → WaitBadge + question, no Start / Archive
+  //   - anything else → normal Start / Archive gating by slot
+  const isNeedsHuman = change.phase === NEEDS_HUMAN;
 
-  // Only the Unphased section's "done" sub-bucket shows the "ready to
-  // archive" dot — progress-driven. In the phase-done lane, done means
-  // "user marked done" and MAY have unfinished tasks, so no dot.
+  // Progress-derived "ready to archive" dot only for the Unphased section's
+  // done sub-bucket. Phase-done cards may have partial progress by design
+  // (see Progress-Independent Phase Placement); no dot there.
   const showReadyDot = slot === "unphased-done";
 
-  // Archive button in the phase-done lane and the Unphased-done sub-bucket.
-  const showArchiveInSlot = slot === "done" || slot === "unphased-done";
+  // Archive button in the phase-done lane and the Unphased-done sub-bucket,
+  // but never for needs-human cards.
+  const showArchiveInSlot = !isNeedsHuman && (slot === "done" || slot === "unphased-done");
 
-  // Start button visibility: any phase lane except done, or any Unphased
-  // sub-bucket except unphased-done. Plus the existing gates (agents
-  // configured, no active job, non-verify work remaining).
+  // Start button: any non-done slot, unless the card is escalated.
   const startEligibleSlot =
     slot === "proposed" ||
     slot === "coded" ||
     slot === "reviewed" ||
     slot === "unphased-todo" ||
     slot === "unphased-inprogress";
-  const showStartArea = hasAgents && startEligibleSlot && !job;
+  const showStartArea = hasAgents && startEligibleSlot && !job && !isNeedsHuman;
 
-  const isNeedsHuman = slot === "needs-human";
   return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      className={`kanban-card${isDragging ? " dragging" : ""}${isNeedsHuman ? " needs-human" : " draggable"}`}
-    >
+    <div className={`kanban-card${isNeedsHuman ? " needs-human" : ""}`}>
       <Link
         to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
         className="kanban-card-link"
@@ -533,7 +436,6 @@ function ChangeCard({
           <AgentBadge job={job} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
-          <PhaseControl change={change} />
         </div>
         {isNeedsHuman && change.needsHumanQuestion ? (
           <p className="kanban-card-intent kanban-card-question">
@@ -644,38 +546,6 @@ function ChangeCard({
   );
 }
 
-/**
- * Waiting-duration indicator for a needs-human card. Computed at render
- * time from `escalatedAt`; the value re-derives on every render, so
- * `Date.now()` here doesn't require timer state (the surrounding
- * `change-updated` broadcasts drive re-renders often enough for
- * hour-granularity readouts to feel live).
- */
-function WaitBadge({ escalatedAt, priorPhase }: { escalatedAt: string; priorPhase?: string }) {
-  const t = Date.parse(escalatedAt);
-  const label = Number.isFinite(t) ? formatWait(Date.now() - t) : "?";
-  const title = priorPhase
-    ? `Escalated ${label} ago from ${priorPhase}`
-    : `Escalated ${label} ago`;
-  return (
-    <span className="kanban-wait-badge" title={title}>
-      ⏳ {label}
-    </span>
-  );
-}
-
-function formatWait(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "?";
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
 function AgentBadge({ job }: { job?: JobSummary }) {
   if (!job) return null;
   if (job.status === "running") {
@@ -708,58 +578,43 @@ function AgentBadge({ job }: { job?: JobSummary }) {
   return <span className="agent-badge fail" title={`exit ${job.exitCode ?? "?"}`}>✗ failed</span>;
 }
 
+/**
+ * Waiting-duration indicator for a needs-human card. Computed at render
+ * time from `escalatedAt`; the value re-derives on every render, so
+ * `Date.now()` here doesn't require timer state (WS `change-updated`
+ * broadcasts arrive often enough for hour-granularity readouts).
+ */
+function WaitBadge({ escalatedAt, priorPhase }: { escalatedAt: string; priorPhase?: string }) {
+  const t = Date.parse(escalatedAt);
+  const label = Number.isFinite(t) ? formatWait(Date.now() - t) : "?";
+  const title = priorPhase
+    ? `Escalated ${label} ago from ${priorPhase}`
+    : `Escalated ${label} ago`;
+  return (
+    <span className="kanban-wait-badge" title={title}>
+      ⏳ {label}
+    </span>
+  );
+}
+
+function formatWait(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "?";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
+
 function isMergeable(job: JobSummary): boolean {
   return (
     job.status === "completed" ||
     job.status === "crashed" ||
     job.status === "cancelled" ||
     job.status === "orphaned"
-  );
-}
-
-/**
- * Per-card phase transition control. Kept as the secondary,
- * keyboard-accessible affordance beside the primary drag-between-lanes
- * gesture (see the spec's "Manual Phase Transitions In The UI"
- * requirement).
- */
-function PhaseControl({ change }: { change: Change }) {
-  const pushToast = useStore((s) => s.pushToast);
-  const current = change.phase;
-  const [pending, setPending] = useState(false);
-
-  const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = e.target.value;
-    if (!next || next === current) return;
-    if (!(PHASES as readonly string[]).includes(next)) return;
-    setPending(true);
-    try {
-      await setChangePhase(change.id, next as Phase);
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : String(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const currentIsKnown = isPhase(current);
-  return (
-    <select
-      className="kanban-phase-select"
-      value={currentIsKnown ? (current as Phase) : ""}
-      onChange={onChange}
-      disabled={pending}
-      onClick={(e) => e.stopPropagation()}
-      title="Change workflow phase"
-      aria-label={`Phase for ${change.id}`}
-    >
-      {!currentIsKnown && <option value="">— unphased —</option>}
-      {PHASES.map((p) => (
-        <option key={p} value={p}>
-          {p}
-        </option>
-      ))}
-    </select>
   );
 }
 

@@ -39,18 +39,21 @@ export type Change = {
   hasOutcome: boolean;
   /** Explicit workflow phase persisted in `.openspec.yaml`. Undefined =
    *  unphased (renders in the Kanban's legacy fallback section). Landed by
-   *  add-phase-state-machine. `needs-human` (from add-needs-human-phase)
-   *  is included in the type union but its lane is rendered separately. */
+   *  add-phase-state-machine. `needs-human` is a valid value but never
+   *  places a card in a dedicated lane — see the notes on `priorPhase`. */
   phase?: import("./phases.js").PersistedPhase;
   /** The phase to restore when a `needs-human` escalation is answered.
-   *  Populated only while `phase === "needs-human"`. See add-needs-human-phase. */
+   *  Populated only while `phase === "needs-human"`. The Kanban also
+   *  reads this to place the card in its "home" lane (falling back to
+   *  `proposed` when missing). */
   priorPhase?: import("./phases.js").PersistedPhase;
-  /** ISO 8601 timestamp of the escalation; used by the needs-human lane to
-   *  sort cards by wait time. Populated only while `phase === "needs-human"`. */
+  /** ISO 8601 timestamp of the escalation. Populated only while
+   *  `phase === "needs-human"`. Kanban card renders it as a WaitBadge
+   *  (`⏳ Nh` elapsed) in the head. */
   escalatedAt?: string;
-  /** First-line H1 of `needs-human.md`, surfaced on the Kanban card in the
-   *  needs-human lane. Populated only while `phase === "needs-human"` AND
-   *  the artifact exists on disk. See add-needs-human-phase. */
+  /** First-line H1 of `needs-human.md`, surfaced on the Kanban card as
+   *  the escalation question. Populated only while
+   *  `phase === "needs-human"` AND the artifact exists on disk. */
   needsHumanQuestion?: string;
 };
 
