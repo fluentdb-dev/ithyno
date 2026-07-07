@@ -384,11 +384,20 @@ export class AgentRunner {
       }
     }
 
-    const resolved = this.registry.resolve(def, {
-      change_id: changeId,
-      worktree_path: worktreePath,
-      branch,
-    });
+    let resolved;
+    try {
+      resolved = this.registry.resolve(def, {
+        change_id: changeId,
+        worktree_path: worktreePath,
+        branch,
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        status: 400,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
     // revert-agent-pty-layers: translate `initialInput` into a `-p
     // "<initialInput>"` CLI arg (Claude Code's non-interactive mode).
     // User-supplied `-p` wins — don't double it up.
@@ -396,7 +405,7 @@ export class AgentRunner {
     if (resolved.initialInput !== undefined && !finalArgs.includes("-p")) {
       finalArgs.unshift("-p", resolved.initialInput);
     }
-    console.log(`[runner] spawn ${def.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
+    console.log(`[runner] spawn ${resolved.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
 
     const id = this.newId();
     const job: Job = {
@@ -418,7 +427,7 @@ export class AgentRunner {
     // prompts. The prior PTY layer + xterm.js + input-relay chain was
     // reverted because `-p` makes them all unnecessary. See
     // openspec/changes/archive/…-revert-agent-pty-layers.
-    const child = spawnChild(def.command, finalArgs, {
+    const child = spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
       env: { ...process.env, ...resolved.env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -433,7 +442,7 @@ export class AgentRunner {
     // until completion. Showing the resolved command line up front means
     // the transcript has visible context immediately (what was requested,
     // even if the result takes a while).
-    const spawnLine = `$ ${def.command}${finalArgs.length ? " " + finalArgs.map(quoteArg).join(" ") : ""}\n\n`;
+    const spawnLine = `$ ${resolved.command}${finalArgs.length ? " " + finalArgs.map(quoteArg).join(" ") : ""}\n\n`;
     pushOutput(job, { stream: "stdout", chunk: spawnLine, ts: Date.now() });
     this.emit({ type: "agent-job-output", jobId: id, chunk: spawnLine, stream: "stdout" });
 
