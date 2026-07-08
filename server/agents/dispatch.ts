@@ -6,6 +6,7 @@ import matter from "gray-matter";
 import type { AgentRegistry, AgentDef } from "./registry.js";
 import { runtimeLabel } from "./registry.js";
 import type { AgentRunner, Job } from "./runner.js";
+import type { ReviewArtifact } from "./review-parser.js";
 
 /**
  * Role-driven dispatch: pick an agent from `agents.yaml` matching the
@@ -28,8 +29,10 @@ export type DispatchResult = {
   exitCode?: number;
   stdoutTail?: string;
   artifactPaths?: string[];
-  // Structured verdict is intentionally omitted here — Phase 3.5
-  // (add-review-artifact) will layer it on top by parsing review.md.
+  /** Parsed review.md verdict when the underlying job produced one.
+   *  Undefined when the job is not a review, or when parsing failed.
+   *  Landed by add-review-artifact. */
+  verdict?: ReviewArtifact;
 };
 
 export type SelectorError = {
@@ -271,13 +274,14 @@ export async function dispatch(
         status: "timeout",
         stdoutTail: j ? stdoutTail(j) : undefined,
         artifactPaths: j?.artifactPaths ?? [],
+        verdict: j?.verdict,
       },
     };
   }
 
   // Normal termination: runner's finish() awaits the artifact scan before
-  // flipping status, so job.artifactPaths is set atomically alongside the
-  // terminal status by the time waitForJobCompletion returns.
+  // flipping status, so job.artifactPaths / verdict are set atomically
+  // alongside the terminal status by the time waitForJobCompletion returns.
   return {
     ok: true,
     result: {
@@ -288,6 +292,7 @@ export async function dispatch(
       exitCode: outcome.exitCode ?? undefined,
       stdoutTail: stdoutTail(outcome),
       artifactPaths: outcome.artifactPaths ?? [],
+      verdict: outcome.verdict,
     },
   };
 }

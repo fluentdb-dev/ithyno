@@ -9,6 +9,7 @@ import { WorktreePool } from "./pool.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
 import { listOrphanWorktrees } from "./adopt-orphans.js";
 import { listChangeArtifacts } from "./artifact-scan.js";
+import { parseReview, type ReviewArtifact } from "./review-parser.js";
 import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
 import { parseTasks } from "../parser/tasks.js";
@@ -51,6 +52,11 @@ export type JobSummary = {
    *  the runner at finish; undefined while the job is running or when
    *  the job is an adopted orphan. */
   artifactPaths?: string[];
+  /** Parsed `review.md` when the job produced one and its frontmatter
+   *  validated against the schema. Undefined otherwise (non-review
+   *  jobs, malformed frontmatter, missing file). Landed by
+   *  add-review-artifact. */
+  verdict?: ReviewArtifact;
 };
 
 export type Job = JobSummary & {
@@ -515,6 +521,14 @@ export class AgentRunner {
         job.artifactPaths = await listChangeArtifacts(worktreePath, changeId);
       } catch {
         job.artifactPaths = [];
+      }
+      // If a review.md landed in the change dir, parse it into a
+      // structured verdict so the dispatch endpoint (and downstream
+      // Manager loop) can consume it without re-reading the file.
+      // Landed by add-review-artifact.
+      if (job.artifactPaths?.some((p) => p.endsWith("/review.md"))) {
+        const parsed = await parseReview(this.projectRoot, changeId);
+        if (parsed) job.verdict = parsed;
       }
       job.status = status;
       // Emit the last-known worktree progress so the client keeps the

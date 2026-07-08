@@ -74,11 +74,15 @@ Optional flags: `--runtime=<name>` and `--prompt-suffix="<text>"`.
 
    - Chosen agent name and runtime
    - Status and exit code
-   - For each artifact path: read the file if it looks like a review
-     artifact (`review.md`) or escalation artifact (`needs-human.md`) and
-     extract the verdict / question. (Structured `verdict` field arrives
-     in Phase 3.5 `add-review-artifact`; until then, the caller parses the
-     file directly.)
+   - **When `verdict` is present** (a review-role job that wrote a valid
+     `review.md`), read `verdict.verdict` (`"pass"` or `"needs-rework"`),
+     `verdict.findings[]`, and optional `verdict.summary` directly from
+     the response — do NOT re-read `review.md`. Ithyno has already
+     parsed and schema-validated the artifact. Report the verdict and
+     per-finding `{severity, file?, line?, message}` to the caller.
+   - When `verdict` is absent, list `artifactPaths[]` and (for
+     escalation artifacts) read `needs-human.md` directly. Any other
+     artifact type is opaque to Ithyno.
    - For `status: "failed"` or `status: "timeout"`, include the last
      ~1KB of `stdoutTail` and the exit code so the Manager can decide
      whether to retry / escalate / abort.
