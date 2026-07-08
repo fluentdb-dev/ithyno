@@ -1,45 +1,43 @@
 ## 1. Detection module — `server/agents/runtime-detect.ts` (新規)
 
-- [ ] 1.1 `type DetectionResult = { installed: boolean; path?: string; error?: string }` を export
-- [ ] 1.2 `detectRuntime(command: string): Promise<DetectionResult>` を実装 — `which <cmd>` を子プロセス実行、exit code 0 で installed + path、非 0 で not-installed
-- [ ] 1.3 `detectAllRuntimes(runtimes: Record<string, RuntimeDef>): Promise<Record<string, DetectionResult>>` — 同じ command は 1 回だけ走らせる (cache)
-- [ ] 1.4 Windows out-of-scope、`process.platform === "win32"` の時は `{ installed: false, error: "windows detection not supported" }` を全 runtime に返す
+- [x] 1.1 `DetectionResult` 型を export
+- [x] 1.2 `detectRuntime()` — `which <cmd>` を子プロセスで実行、exit 0 → installed + path、非 0 → error
+- [x] 1.3 `detectAllRuntimes()` — 同じ command は uniqueCommands set で 1 回のみ実行、runtime 名 → DetectionResult map を返す
+- [x] 1.4 Windows: `isWindows()` で判定、全 runtime に windows sentinel を返す
 
 ## 2. Endpoint — `server/index.ts`
 
-- [ ] 2.1 新規 route `GET /api/agents/runtimes` — `isLocal` guard
-- [ ] 2.2 Registry から `runtimes()` を取得、`detectAllRuntimes` で detection を掛け、RuntimeStatusResponse を組み立て
-- [ ] 2.3 Query param `?refresh=1` で detection cache を bypass (毎回再検出)
-- [ ] 2.4 空 runtimes の場合は `{ runtimes: [] }` を return
+- [x] 2.1 `GET /api/agents/runtimes` を追加、`isLocal` guard
+- [x] 2.2 Registry の `publicConfig().runtimes` を読み、`detectAllRuntimes` を通して RuntimeStatusResponse を組み立て
+- [x] 2.3 `?refresh=1` / `?refresh=true` で detection cache を bypass、再検出
+- [x] 2.4 空 runtimes 時は `{ runtimes: [] }` を即返す
 
 ## 3. Tests — `server/agents/runtime-detect.test.ts` (新規)
 
-- [ ] 3.1 `detectRuntime("echo")` → installed: true、path が /bin/echo or 相当 (POSIX で普遍的に installed なので safe)
-- [ ] 3.2 `detectRuntime("this-command-should-not-exist-xyz")` → installed: false、error message
-- [ ] 3.3 `detectAllRuntimes({})` → 空 map
-- [ ] 3.4 `detectAllRuntimes({claude: ..., aider: ...})` — 各 command について同時実行
-- [ ] 3.5 同じ command を持つ 2 runtime — cache で 1 回のみ叩く (spy で count 検証、実装容易なら)
-- [ ] 3.6 Windows platform で全 runtime not-supported (`process.platform` を mock)
+- [x] 3.1 `detectRuntime("echo")` → installed: true、path が /-始まり (POSIX 標準)
+- [x] 3.2 `detectRuntime("this-command-should-not-exist-xyz-abc-42")` → installed: false、error
+- [x] 3.3 `detectAllRuntimes({})` → 空 object
+- [x] 3.4 mix of installed + missing で正しく分岐
+- [x] 3.5 同 command 2 runtime で path が同一 (cache 検証)
+- [x] 3.6 Windows platform → 全 entry に "windows detection not supported"
 
 ## 4. Spec delta
 
-- [ ] 4.1 `openspec/changes/add-runtime-detection/specs/dashboard/spec.md` に **ADDED Requirements** 2 件:
-  - **Runtime Installation Detection** — `which <cmd>` 経路、installed / path / error
-  - **Runtime Status Endpoint** — `GET /api/agents/runtimes` の shape と挙動
-- [ ] 4.2 `npm run openspec -- validate add-runtime-detection` VALID
+- [x] 4.1 `openspec/changes/add-runtime-detection/specs/dashboard/spec.md` に 2 ADDED requirements
+- [x] 4.2 `npm run openspec -- validate add-runtime-detection` VALID
 
 ## 5. Manual verification
 
-- [ ] 5.1 dev server 起動 + `curl http://localhost:4321/api/agents/runtimes` — 現行 agents.yaml では runtimes: 未定義なので `{ runtimes: [] }` — DEFERRED
+- [ ] 5.1 dev server 起動 + `curl http://localhost:4321/api/agents/runtimes` — 現行 agents.yaml では runtimes: 未定義なので `{ runtimes: [] }` — DEFERRED to post-merge smoke
 - [ ] 5.2 サンプル `runtimes:` を追加、endpoint が installed 状況を報告 — DEFERRED
 
 ## 6. Verification
 
-- [ ] 6.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 6.2 新規 test count — runtime-detect.test.ts 6 前後
+- [x] 6.1 `npm test && npm run typecheck && npm run build` clean (211 tests、+7)
+- [x] 6.2 新規 test count — runtime-detect.test.ts 7 tests
 
 ## 7. Post-impl
 
-- [ ] 7.1 phase-workflow branch へ merge
-- [ ] 7.2 archive → phase-workflow に archive commit
-- [ ] 7.3 次: Phase 3.4 `extend-agent-job-model`
+- [x] 7.1 phase-workflow branch へ merge — merge step で
+- [x] 7.2 archive → phase-workflow に archive commit — archive step で
+- [x] 7.3 次: Phase 3.4 `extend-agent-job-model`

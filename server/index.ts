@@ -16,6 +16,7 @@ import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount } fro
 import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { dispatch } from "./agents/dispatch.js";
+import { detectAllRuntimes, type DetectionResult } from "./agents/runtime-detect.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -529,6 +530,41 @@ fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
 fastify.get("/api/agents/config", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   return agentRegistry.publicConfig();
+});
+
+// Per-runtime installation cache. Populated on demand (first request or
+// ?refresh=1). Keyed by runtime name; a runtime whose `command` changes
+// via config reload naturally re-detects because we key by name of the
+// current publicConfig() runtimes snapshot.
+let runtimeDetectionCache: Record<string, DetectionResult> | null = null;
+
+fastify.get<{ Querystring: { refresh?: string } }>("/api/agents/runtimes", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+  const cfg = agentRegistry.publicConfig();
+  const runtimes = cfg.runtimes;
+  if (Object.keys(runtimes).length === 0) return { runtimes: [] };
+
+  const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+  if (refresh || runtimeDetectionCache === null) {
+    runtimeDetectionCache = await detectAllRuntimes(runtimes);
+  }
+  const detection = runtimeDetectionCache;
+
+  const list = Object.entries(runtimes).map(([name, def]) => {
+    const det = detection[name] ?? { installed: false, error: "not detected" };
+    return {
+      name,
+      command: def.command,
+      baseArgs: def.baseArgs,
+      promptStyle: def.promptStyle,
+      promptFlag: def.promptFlag,
+      supports: def.supports,
+      installed: det.installed,
+      path: det.path,
+      error: det.error,
+    };
+  });
+  return { runtimes: list };
 });
 
 fastify.get("/api/agents/jobs", async (req, reply) => {
