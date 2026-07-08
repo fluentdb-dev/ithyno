@@ -186,6 +186,9 @@ export type JobSummary = {
   role: string;
   runtime: string;
   artifactPaths?: string[];
+  /** add-review-artifact: parsed review.md verdict when the job
+   *  produced one, otherwise undefined. */
+  verdict?: import("./reviewTypes").ReviewArtifact;
 };
 
 export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
