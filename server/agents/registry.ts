@@ -496,3 +496,15 @@ export class AgentRegistry {
     return { command, args, env, initialInput };
   }
 }
+
+/**
+ * Human-readable runtime label for an agent. Runtime-backed agents carry
+ * the runtime name; legacy `command + args` agents get the literal
+ * "legacy". Used by the Job model (`add-agent-role-field` extension in
+ * `extend-agent-job-model`) so downstream UIs can display the runtime
+ * without a null-check.
+ */
+export function runtimeLabel(agent: AgentDef): string {
+  return agent.runtime ?? "legacy";
+}
+

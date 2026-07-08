@@ -3,11 +3,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRegistry } from "./registry.js";
+import { AgentRegistry, runtimeLabel } from "./registry.js";
 import {
   selectAgent,
   resolveChangeTags,
-  runtimeLabel,
   stdoutTail,
   waitForJobCompletion,
 } from "./dispatch.js";

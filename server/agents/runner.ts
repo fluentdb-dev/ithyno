@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
+import { runtimeLabel } from "./registry.js";
 import { WorktreePool } from "./pool.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
 import { listOrphanWorktrees } from "./adopt-orphans.js";
+import { listChangeArtifacts } from "./artifact-scan.js";
 import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
 import { parseTasks } from "../parser/tasks.js";
@@ -35,6 +37,20 @@ export type JobSummary = {
    *  clients that fetch /api/agents/jobs see the current number without
    *  needing to wait for the WS `worktree-progress-updated` event. */
   worktreeProgress?: Progress;
+  /** Workflow role of the spawning agent — "code" / "review" / "verify" /
+   *  "apply" for agents.yaml-declared agents, or "orphan" for adopted
+   *  jobs. Set once at spawn time, never mutated. Landed by
+   *  `extend-agent-job-model`. */
+  role: string;
+  /** Runtime label — runtime name for runtime-backed agents, "legacy"
+   *  for command+args agents, "unknown" for orphan-adopted jobs. Set
+   *  once at spawn time, never mutated. */
+  runtime: string;
+  /** Paths (relative to project root) of files created or modified
+   *  inside `openspec/changes/<changeId>/` during the job. Populated by
+   *  the runner at finish; undefined while the job is running or when
+   *  the job is an adopted orphan. */
+  artifactPaths?: string[];
 };
 
 export type Job = JobSummary & {
@@ -123,6 +139,8 @@ export class AgentRunner {
         status: "orphaned",
         startedAt,
         output: [],
+        role: "orphan",
+        runtime: "unknown",
       };
       this.jobs.set(jobId, job);
       this.locks.set(orphan.changeId, jobId);
@@ -207,6 +225,8 @@ export class AgentRunner {
         startedAt,
         output: [],
         fromPool: true,
+        role: "orphan",
+        runtime: "unknown",
       };
       this.jobs.set(jobId, job);
       this.locks.set(changeId, jobId);
@@ -418,6 +438,8 @@ export class AgentRunner {
       startedAt: Date.now(),
       output: [],
       fromPool,
+      role: def.role,
+      runtime: runtimeLabel(def),
     };
     this.jobs.set(id, job);
     this.locks.set(changeId, id);
@@ -479,12 +501,22 @@ export class AgentRunner {
       },
     });
 
-    const finish = (status: JobStatus, exitCode: number | null) => {
-      job.status = status;
+    const finish = async (status: JobStatus, exitCode: number | null) => {
       job.finishedAt = Date.now();
       job.exitCode = exitCode;
       this.locks.delete(changeId);
       this.processes.delete(id);
+      // Scan the worktree for artifacts produced inside the change dir
+      // BEFORE flipping status. Consumers that poll `job.status !==
+      // "running"` as the "done" signal need `artifactPaths` visible
+      // atomically alongside the terminal status. Landed by
+      // extend-agent-job-model.
+      try {
+        job.artifactPaths = await listChangeArtifacts(worktreePath, changeId);
+      } catch {
+        job.artifactPaths = [];
+      }
+      job.status = status;
       // Emit the last-known worktree progress so the client keeps the
       // right number on screen while the user reviews the finished job.
       if (job.lastWorktreeProgress) {
@@ -524,7 +556,7 @@ export class AgentRunner {
         : job.status;
       console.log(`[runner] exit ${changeId} status=${finalStatus} code=${code} signal=${signal}`);
       if (job.status === "running") {
-        finish(finalStatus, code);
+        void finish(finalStatus, code);
       }
     });
 
