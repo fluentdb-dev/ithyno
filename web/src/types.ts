@@ -181,6 +181,11 @@ export type JobSummary = {
   finishedAt?: number;
   exitCode?: number | null;
   worktreeProgress?: Progress;
+  // extend-agent-job-model: server sets these three at spawn / finish.
+  // Client mirror of server/agents/runner.ts's JobSummary — hand-synced.
+  role: string;
+  runtime: string;
+  artifactPaths?: string[];
 };
 
 export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };

@@ -2,10 +2,9 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
 import matter from "gray-matter";
 import type { AgentRegistry, AgentDef } from "./registry.js";
+import { runtimeLabel } from "./registry.js";
 import type { AgentRunner, Job } from "./runner.js";
 
 /**
@@ -18,8 +17,6 @@ import type { AgentRunner, Job } from "./runner.js";
  * The Manager (Phase 4's `/opsx:apply` claude session) will call the HTTP
  * endpoint via Bash + curl from within its Claude Code session.
  */
-
-const execFileP = promisify(execFile);
 
 export type DispatchStatus = "completed" | "failed" | "cancelled" | "timeout" | "running";
 
@@ -115,15 +112,6 @@ export async function resolveChangeTags(
   }
 }
 
-/**
- * The `runtime` label reported on the DispatchResult. Runtime-backed
- * agents carry the runtime name; legacy agents (command + args) get the
- * literal "legacy".
- */
-export function runtimeLabel(agent: AgentDef): string {
-  return agent.runtime ?? "legacy";
-}
-
 export type DispatchInput = {
   role: string;
   changeId: string;
@@ -160,31 +148,6 @@ export async function waitForJobCompletion(
   }
   runner.cancel(jobId);
   return "timeout";
-}
-
-/**
- * Enumerate artifact files newly created (untracked) or modified inside
- * the change's directory since the branch was checked out. Uses
- * `git status --porcelain` in the change's worktree.
- */
-export async function listChangeArtifacts(
-  worktreePath: string,
-  changeId: string,
-): Promise<string[]> {
-  try {
-    const { stdout } = await execFileP("git", ["-C", worktreePath, "status", "--porcelain"]);
-    const lines = stdout.split("\n").filter((l) => l.length > 0);
-    const prefix = `openspec/changes/${changeId}/`;
-    const out: string[] = [];
-    for (const l of lines) {
-      // Format: "XY <path>" where XY is the two-char status field
-      const path = l.slice(3);
-      if (path.startsWith(prefix)) out.push(path);
-    }
-    return out;
-  } catch {
-    return [];
-  }
 }
 
 /** Trim job.output to the last N bytes of concatenated stdout for the
@@ -294,12 +257,11 @@ export async function dispatch(
 
   const outcome = await waitForJobCompletion(runner, startedJob.id, timeoutMs);
   if (outcome === "timeout") {
-    // Best-effort: pull the current job snapshot for its worktree path
-    // and stdout tail, then report timeout.
+    // Timeout path: the runner's cancel() flipped status, and its finish()
+    // hook (invoked by the child's exit handler) is what populates
+    // artifactPaths. Read whatever is present; may be undefined if
+    // finish() has not settled yet.
     const j = runner.getJob(startedJob.id);
-    const artifactPaths = j
-      ? await listChangeArtifacts(j.worktreePath, input.changeId)
-      : [];
     return {
       ok: true,
       result: {
@@ -308,12 +270,14 @@ export async function dispatch(
         runtime,
         status: "timeout",
         stdoutTail: j ? stdoutTail(j) : undefined,
-        artifactPaths,
+        artifactPaths: j?.artifactPaths ?? [],
       },
     };
   }
 
-  const artifactPaths = await listChangeArtifacts(outcome.worktreePath, input.changeId);
+  // Normal termination: runner's finish() awaits the artifact scan before
+  // flipping status, so job.artifactPaths is set atomically alongside the
+  // terminal status by the time waitForJobCompletion returns.
   return {
     ok: true,
     result: {
@@ -323,7 +287,7 @@ export async function dispatch(
       status: mapStatusToDispatch(outcome.status),
       exitCode: outcome.exitCode ?? undefined,
       stdoutTail: stdoutTail(outcome),
-      artifactPaths,
+      artifactPaths: outcome.artifactPaths ?? [],
     },
   };
 }
