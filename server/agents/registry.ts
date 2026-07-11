@@ -441,7 +441,17 @@ export class AgentRegistry {
   resolve(
     def: AgentDef,
     vars: { change_id: string; worktree_path: string; branch: string },
-  ): { command: string; args: string[]; env: Record<string, string>; initialInput?: string } {
+  ): {
+    command: string;
+    args: string[];
+    env: Record<string, string>;
+    initialInput?: string;
+    /** Where the runtime expects initialInput. For legacy agents this is
+     *  `"cli-arg"` (retain the historical Claude-Code `-p <prompt>`
+     *  promotion). Runtime-backed agents surface their declared prompt
+     *  style so the runner routes the prompt to the right channel. */
+    initialInputMode: "cli-arg" | "stdin";
+  } {
     const replace = (s: string): string =>
       s
         .replace(/\$\{change_id\}/g, vars.change_id)
@@ -454,6 +464,7 @@ export class AgentRegistry {
 
     let command: string;
     let args: string[];
+    let initialInputMode: "cli-arg" | "stdin" = "cli-arg";
 
     if (def.runtime !== undefined) {
       // Runtime-backed shape.
@@ -477,6 +488,7 @@ export class AgentRegistry {
         // are present, the explicit initialInput wins (backward-compat
         // for agents authored before this change).
         if (initialInput === undefined) initialInput = resolvedPrompt;
+        initialInputMode = "stdin";
       } else if (runtime.promptStyle === "file") {
         throw new Error(
           `runtime '${def.runtime}' uses promptStyle: file which is not yet supported`,
@@ -493,7 +505,7 @@ export class AgentRegistry {
       args = (def.args ?? []).map(replace);
     }
 
-    return { command, args, env, initialInput };
+    return { command, args, env, initialInput, initialInputMode };
   }
 }
 

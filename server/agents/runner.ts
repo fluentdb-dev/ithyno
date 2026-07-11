@@ -418,17 +418,29 @@ export class AgentRunner {
         branch,
       });
     } catch (err) {
+      // Clean up before returning — otherwise a misconfigured runtime
+      // (unknown runtime name, promptStyle:file) leaks a worktree or
+      // pool slot on every dispatch attempt.
+      await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch, fromPool);
       return {
         ok: false,
         status: 400,
         reason: err instanceof Error ? err.message : String(err),
       };
     }
-    // revert-agent-pty-layers: translate `initialInput` into a `-p
-    // "<initialInput>"` CLI arg (Claude Code's non-interactive mode).
-    // User-supplied `-p` wins — don't double it up.
+    // Translate `initialInput` into either a `-p "<prompt>"` CLI arg
+    // (Claude Code's non-interactive mode; the default for legacy
+    // agents) or a stdin write (for runtimes that declared
+    // promptStyle: stdin). User-supplied `-p` in args wins for the
+    // cli-arg path — don't double it up.
     const finalArgs = [...resolved.args];
-    if (resolved.initialInput !== undefined && !finalArgs.includes("-p")) {
+    const useStdinForPrompt =
+      resolved.initialInputMode === "stdin" && resolved.initialInput !== undefined;
+    if (
+      resolved.initialInputMode === "cli-arg" &&
+      resolved.initialInput !== undefined &&
+      !finalArgs.includes("-p")
+    ) {
       finalArgs.unshift("-p", resolved.initialInput);
     }
     console.log(`[runner] spawn ${resolved.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
@@ -455,12 +467,20 @@ export class AgentRunner {
     // prompts. The prior PTY layer + xterm.js + input-relay chain was
     // reverted because `-p` makes them all unnecessary. See
     // openspec/changes/archive/…-revert-agent-pty-layers.
+    //
+    // stdin is only piped when the runtime declared promptStyle: stdin;
+    // otherwise it stays "ignore" (the reverted PTY chain's decision).
     const child = spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
       env: { ...process.env, ...resolved.env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });
     this.processes.set(id, child);
+    if (useStdinForPrompt && child.stdin) {
+      // The registry.resolve() stdin branch guarantees initialInput is
+      // set when useStdinForPrompt is true.
+      child.stdin.end(resolved.initialInput ?? "");
+    }
 
     this.emit({ type: "agent-job-started", job: stripOutput(job) });
 
@@ -507,16 +527,20 @@ export class AgentRunner {
       },
     });
 
-    const finish = async (status: JobStatus, exitCode: number | null) => {
+    let finalized = false;
+    const finalize = async (status: JobStatus, exitCode: number | null) => {
+      // Idempotent — the exit handler can race with cancel/timeout and
+      // both may try to finalize; the first one wins.
+      if (finalized) return;
+      finalized = true;
       job.finishedAt = Date.now();
       job.exitCode = exitCode;
-      this.locks.delete(changeId);
       this.processes.delete(id);
       // Scan the worktree for artifacts produced inside the change dir
-      // BEFORE flipping status. Consumers that poll `job.status !==
-      // "running"` as the "done" signal need `artifactPaths` visible
-      // atomically alongside the terminal status. Landed by
-      // extend-agent-job-model.
+      // BEFORE flipping status or releasing the lock. Consumers that
+      // poll `job.status !== "running"` as the "done" signal need
+      // `artifactPaths` visible atomically alongside the terminal
+      // status. Landed by extend-agent-job-model.
       try {
         job.artifactPaths = await listChangeArtifacts(worktreePath, changeId);
       } catch {
@@ -525,9 +549,10 @@ export class AgentRunner {
       // If a review.md landed in the change dir, parse it into a
       // structured verdict so the dispatch endpoint (and downstream
       // Manager loop) can consume it without re-reading the file.
-      // Landed by add-review-artifact.
+      // Landed by add-review-artifact. Read from the WORKTREE — the
+      // branch is not yet merged so review.md only exists there.
       if (job.artifactPaths?.some((p) => p.endsWith("/review.md"))) {
-        const parsed = await parseReview(this.projectRoot, changeId);
+        const parsed = await parseReview(worktreePath, changeId);
         if (parsed) job.verdict = parsed;
       }
       job.status = status;
@@ -543,7 +568,7 @@ export class AgentRunner {
       }
       // Pool-leased worktree: return the slot to the pool. Failure just
       // logs — the slot self-quarantines and won't be handed out again.
-      // Fire-and-forget so finish() stays sync-shaped like before.
+      // Fire-and-forget so finalize() stays sync-shaped like before.
       if (job.fromPool) {
         void this.pool.release(worktreePath).catch((err) => {
           console.error(
@@ -559,22 +584,68 @@ export class AgentRunner {
       // Disposal happens in removeJobExternally itself.
       // Landed by add-worktree-external-discard-detection.
       this.emit({ type: "agent-job-finished", jobId: id, status, exitCode });
+      // Release the lock LAST — a concurrent runner.run(changeId, ...)
+      // must see either "job in progress" or a fully-populated finished
+      // job, never a partially-finalized one.
+      this.locks.delete(changeId);
     };
 
     child.on("exit", (code, signal) => {
       // SIGTERM handling: when we called cancel() we already flipped status,
       // so respect the existing flag; otherwise infer from code/signal.
       const isSigterm = signal === "SIGTERM";
-      const finalStatus = job.status === "running"
-        ? (isSigterm ? "cancelled" : code === 0 ? "completed" : "crashed")
-        : job.status;
+      const inferredStatus: JobStatus = isSigterm
+        ? "cancelled"
+        : code === 0
+          ? "completed"
+          : "crashed";
+      // If cancel() flipped status to "cancelled" before the child
+      // reaped, honor that decision; otherwise use the exit-inferred
+      // status. Always call finalize() — the review-artifact scan,
+      // pool release, and agent-job-finished emit all belong on
+      // cancelled/crashed transitions too.
+      const finalStatus = job.status === "running" ? inferredStatus : job.status;
       console.log(`[runner] exit ${changeId} status=${finalStatus} code=${code} signal=${signal}`);
-      if (job.status === "running") {
-        void finish(finalStatus, code);
-      }
+      void finalize(finalStatus, code);
     });
 
     return { ok: true, job: stripOutput(job) };
+  }
+
+  /** Roll back a partially-set-up job when registry.resolve() throws
+   *  after the worktree is already created / the pool slot is already
+   *  leased. Without this, misconfigured runtimes leak worktrees on
+   *  every dispatch. Failures are logged, not rethrown — the caller is
+   *  already returning an error to the client. */
+  private async cleanupWorktreeOnEarlyReturn(
+    worktreePath: string,
+    branch: string,
+    fromPool: boolean,
+  ): Promise<void> {
+    if (fromPool) {
+      await this.pool.release(worktreePath).catch((err) => {
+        console.error(
+          `[runner] pool release (early return) failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      return;
+    }
+    try {
+      await execFile("git", ["worktree", "remove", "--force", worktreePath], {
+        cwd: this.projectRoot,
+      });
+    } catch (err) {
+      console.error(
+        `[runner] worktree remove (early return) failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      await execFile("git", ["branch", "-D", branch], { cwd: this.projectRoot });
+    } catch (err) {
+      console.error(
+        `[runner] branch delete (early return) failed for ${branch}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   cancel(id: string): { ok: boolean; reason?: string } {

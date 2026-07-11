@@ -29,7 +29,10 @@ export function isRunningOrPending(job?: JobSummary): boolean {
 /**
  * Filter the workspace's changes down to those that are ready to be started:
  *  - at least one agent is available
- *  - the change is not fully done
+ *  - the change is not fully done — by phase OR by progress. Phase is
+ *    authoritative under Progress-Independent Phase Placement, so a card
+ *    the Manager has flipped to `phase: done` is NEVER startable, even
+ *    if tasks.md still has unchecked items.
  *  - implementation work remains (non-verify tasks unchecked)
  *  - no worktree job is currently running for it
  *
@@ -43,6 +46,7 @@ export function startableCandidates(
 ): Change[] {
   if (agents.length === 0) return [];
   return changes.filter((c) => {
+    if (c.phase === "done") return false;
     const isDone = c.progress.total > 0 && c.progress.done === c.progress.total;
     if (isDone) return false;
     if (!hasNonVerifyWork(c.tasks)) return false;

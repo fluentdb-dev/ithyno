@@ -119,7 +119,6 @@ export type DispatchInput = {
   role: string;
   changeId: string;
   runtime?: string;
-  promptSuffix?: string;
   wait?: boolean;
   timeoutMs?: number;
 };
@@ -154,16 +153,24 @@ export async function waitForJobCompletion(
 }
 
 /** Trim job.output to the last N bytes of concatenated stdout for the
- *  DispatchResult response. */
+ *  DispatchResult response. Byte-accurate (`maxBytes` is UTF-8 bytes,
+ *  not JS code units) and linear-time (no per-iteration string concat).
+ *  Mid-codepoint splits fall to Node's Buffer→string decoder, which
+ *  replaces the incomplete leading bytes with U+FFFD. */
 export function stdoutTail(job: Job, maxBytes = 4096): string {
-  let total = "";
+  const chunks: string[] = [];
+  let bytes = 0;
   for (let i = job.output.length - 1; i >= 0; i--) {
     const line = job.output[i];
     if (line.stream !== "stdout") continue;
-    total = line.chunk + total;
-    if (Buffer.byteLength(total, "utf8") >= maxBytes) break;
+    chunks.push(line.chunk);
+    bytes += Buffer.byteLength(line.chunk, "utf8");
+    if (bytes >= maxBytes) break;
   }
-  return total.slice(-maxBytes);
+  const raw = chunks.reverse().join("");
+  const buf = Buffer.from(raw, "utf8");
+  if (buf.byteLength <= maxBytes) return raw;
+  return buf.subarray(buf.byteLength - maxBytes).toString("utf8");
 }
 
 function mapStatusToDispatch(jobStatus: string): DispatchStatus {

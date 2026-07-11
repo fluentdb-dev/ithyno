@@ -145,8 +145,26 @@ export function parseNeedsHumanContent(raw: string, changeId: string): NeedsHuma
     }
   }
 
-  // Split remaining body into ## sections. We only care about "## Context"
-  // and "## Answer"; any others are ignored.
+  // Find the footer separator. The footer is the LAST `---` that is
+  // immediately followed (allowing blank lines) by an `answered:` line.
+  // Any earlier `---` is treated as body content — otherwise an answer
+  // that uses a markdown horizontal rule gets truncated.
+  const footerRe = /^answered:\s*(true|false)\s*$/i;
+  let footerSeparatorIdx = -1;
+  for (let i = lines.length - 1; i >= cursor; i--) {
+    if (lines[i] !== "---") continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (t === "") continue;
+      if (footerRe.test(t)) footerSeparatorIdx = i;
+      break;
+    }
+    if (footerSeparatorIdx !== -1) break;
+  }
+
+  // Split body up to (but excluding) the footer separator into ## sections.
+  // If no footer was found, treat the entire remaining input as body.
+  const bodyEnd = footerSeparatorIdx === -1 ? lines.length : footerSeparatorIdx;
   let context: string | null = null;
   let answer: string | null = null;
   let currentSection: "context" | "answer" | null = null;
@@ -157,15 +175,8 @@ export function parseNeedsHumanContent(raw: string, changeId: string): NeedsHuma
     if (currentSection === "context") context = body;
     else if (currentSection === "answer") answer = body;
   };
-  for (; cursor < lines.length; cursor++) {
-    const line = lines[cursor];
-    if (line === "---") {
-      commit();
-      currentSection = null;
-      currentLines = [];
-      cursor++;
-      break;
-    }
+  for (let i = cursor; i < bodyEnd; i++) {
+    const line = lines[i];
     if (line.startsWith("## ")) {
       commit();
       const heading = line.slice(3).trim().toLowerCase();
@@ -177,17 +188,20 @@ export function parseNeedsHumanContent(raw: string, changeId: string): NeedsHuma
     }
     if (currentSection) currentLines.push(line);
   }
+  commit();
 
-  // Footer: search remaining lines for `answered: <bool>`. Tolerate absence.
+  // Footer: read `answered: <bool>` from lines after the separator.
+  // Tolerate absence.
   let answered = false;
   let sawFooter = false;
-  for (; cursor < lines.length; cursor++) {
-    const line = lines[cursor].trim();
-    const m = /^answered:\s*(true|false)\s*$/i.exec(line);
-    if (m) {
-      answered = m[1].toLowerCase() === "true";
-      sawFooter = true;
-      break;
+  if (footerSeparatorIdx !== -1) {
+    for (let i = footerSeparatorIdx + 1; i < lines.length; i++) {
+      const m = footerRe.exec(lines[i].trim());
+      if (m) {
+        answered = m[1].toLowerCase() === "true";
+        sawFooter = true;
+        break;
+      }
     }
   }
   if (!sawFooter) {

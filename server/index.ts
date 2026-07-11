@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { resolveOpenspecDir, scanWorkspace, parseChange, changeIdForPath } from "./parser/workspace.js";
 import { parseSpec } from "./parser/spec.js";
 import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
@@ -132,7 +132,15 @@ if (openspecDir) {
         // a no-op — we've already restored on the first event. When the
         // guard passes and the footer reads `answered: true`, run the same
         // restore path the /answer API uses.
-        if (event !== "unlink" && filePath.endsWith("/needs-human.md")) {
+        //
+        // Match on basename (cross-platform: chokidar uses `\` on Windows)
+        // AND require the file lives directly at
+        // `openspec/changes/<changeId>/needs-human.md` (not a subdir with
+        // a coincidentally-named template file).
+        const isDirectNeedsHuman =
+          basename(filePath) === "needs-human.md" &&
+          dirname(filePath) === join(openspecDir, "changes", changeId);
+        if (event !== "unlink" && isDirectNeedsHuman) {
           const raw = await readSidecar(PROJECT_ROOT, changeId);
           const cur = extractSidecarFields(raw, changeId);
           if (cur.phase === NEEDS_HUMAN) {
@@ -143,7 +151,7 @@ if (openspecDir) {
                 phase: restored,
                 priorPhase: undefined,
                 escalatedAt: undefined,
-              });
+              }, watcher ?? undefined);
             }
           }
         }
@@ -199,7 +207,13 @@ const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadca
 // this init and misses the one-shot `agent-job-started` events.
 // See add-orphan-worktree-adoption.
 await agentRunner.adoptOrphanWorktrees();
-void agentRegistry.startWatching();
+// Reset the runtime-detection cache whenever agents.yaml reloads —
+// otherwise a newly-declared runtime silently reports installed:false
+// (or a renamed runtime's command isn't re-probed) until the user
+// forces a refresh from the UI.
+void agentRegistry.startWatching(() => {
+  clearRuntimeDetectionCache();
+});
 
 process.on("SIGINT", () => {
   agentRunner.shutdown();
@@ -443,7 +457,12 @@ fastify.post<{ Params: { id: string }; Body: PhasePostBody }>(
       });
     }
 
-    await writeSidecar(PROJECT_ROOT, req.params.id, { phase: requested });
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: requested },
+      watcher ?? undefined,
+    );
 
     const change = await parseChange(openspecDir, req.params.id);
     broadcast({ type: "change-updated", changeId: req.params.id, change });
@@ -480,11 +499,12 @@ fastify.post<{ Params: { id: string }; Body: EscalatePostBody }>(
     const priorPhase = current.phase ?? "proposed";
     const escalatedAt = new Date().toISOString();
     await writeNeedsHuman(PROJECT_ROOT, req.params.id, question, context);
-    await writeSidecar(PROJECT_ROOT, req.params.id, {
-      phase: NEEDS_HUMAN,
-      priorPhase,
-      escalatedAt,
-    });
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: NEEDS_HUMAN, priorPhase, escalatedAt },
+      watcher ?? undefined,
+    );
 
     const change = await parseChange(openspecDir, req.params.id);
     broadcast({ type: "change-updated", changeId: req.params.id, change });
@@ -514,11 +534,12 @@ fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
     // Restore prior phase; clear escalation fields (undefined DELETES them
     // via the writeSidecar contract).
     const restored = current.priorPhase ?? "proposed";
-    await writeSidecar(PROJECT_ROOT, req.params.id, {
-      phase: restored,
-      priorPhase: undefined,
-      escalatedAt: undefined,
-    });
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: restored, priorPhase: undefined, escalatedAt: undefined },
+      watcher ?? undefined,
+    );
 
     const change = await parseChange(openspecDir, req.params.id);
     broadcast({ type: "change-updated", changeId: req.params.id, change });
@@ -533,10 +554,13 @@ fastify.get("/api/agents/config", async (req, reply) => {
 });
 
 // Per-runtime installation cache. Populated on demand (first request or
-// ?refresh=1). Keyed by runtime name; a runtime whose `command` changes
-// via config reload naturally re-detects because we key by name of the
-// current publicConfig() runtimes snapshot.
+// ?refresh=1). Reset when agents.yaml reloads (registered above via
+// startWatching) so a fresh detection runs on the next request — this
+// covers both new runtimes and command changes on existing ones.
 let runtimeDetectionCache: Record<string, DetectionResult> | null = null;
+function clearRuntimeDetectionCache(): void {
+  runtimeDetectionCache = null;
+}
 
 fastify.get<{ Querystring: { refresh?: string } }>("/api/agents/runtimes", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
@@ -583,7 +607,6 @@ type DispatchBody = {
   role?: unknown;
   changeId?: unknown;
   runtime?: unknown;
-  promptSuffix?: unknown;
   wait?: unknown;
   timeoutMs?: unknown;
 };
@@ -595,7 +618,6 @@ fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) 
   const role = typeof b.role === "string" ? b.role : "";
   const changeId = typeof b.changeId === "string" ? b.changeId : "";
   const runtime = typeof b.runtime === "string" ? b.runtime : undefined;
-  const promptSuffix = typeof b.promptSuffix === "string" ? b.promptSuffix : undefined;
   const wait = typeof b.wait === "boolean" ? b.wait : true;
   const timeoutMs = typeof b.timeoutMs === "number" ? b.timeoutMs : undefined;
 
@@ -607,7 +629,6 @@ fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) 
     role,
     changeId,
     runtime,
-    promptSuffix,
     wait,
     timeoutMs,
   });
