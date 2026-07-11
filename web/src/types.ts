@@ -156,10 +156,47 @@ export type TagDetail = {
 export type AgentPublic = {
   name: string;
   description?: string;
-  command: string;
-  args: string[];
+  /** Legacy shape (command + args). Present on legacy agents; absent on
+   *  runtime-backed agents (add-runtime-abstraction). */
+  command?: string;
+  args?: string[];
   hasEnv: boolean;
   initialInput?: string;
+  /** Runtime-backed shape (runtime + prompt). Present on
+   *  runtime-backed agents; absent on legacy. */
+  runtime?: string;
+  prompt?: string;
+  /** Phase 1 (add-agent-role-field) metadata. */
+  role: string;
+  specialties: string[];
+  concurrency: number;
+  dedicated: boolean;
+};
+
+// ---- Runtime detection (add-runtime-detection Phase 3.3) -------------------
+export type RuntimePromptStyle = "cli-arg" | "stdin" | "file";
+export type RuntimeDiffStrategy = "git" | "aider-native" | "none";
+export type RuntimeSupports = {
+  interactive: boolean;
+  artifactOutput: boolean;
+  diff: RuntimeDiffStrategy;
+};
+
+/** Server-side RuntimeDef mirror — see server/agents/registry.ts. */
+export type RuntimeDefPublic = {
+  name: string;
+  command: string;
+  baseArgs: string[];
+  promptStyle: RuntimePromptStyle;
+  promptFlag?: string;
+  supports: RuntimeSupports;
+  installed: boolean;
+  path?: string;
+  error?: string;
+};
+
+export type RuntimeStatusResponse = {
+  runtimes: RuntimeDefPublic[];
 };
 
 export type AgentConfigResponse = {

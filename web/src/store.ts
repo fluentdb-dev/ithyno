@@ -7,6 +7,7 @@ import {
   fetchTagIndex,
   fetchAgentConfig,
   fetchAgentJobs,
+  fetchAgentRuntimes,
   fetchGitConfig,
   fetchGitStatus,
   checkAuth,
@@ -24,6 +25,7 @@ import type {
   JobSummary,
   OutputLine,
   Progress,
+  RuntimeStatusResponse,
   SpecDomain,
   TagIndex,
   Task,
@@ -58,6 +60,11 @@ type Store = {
   tagIndexStale: boolean;
   agents: AgentPublic[];
   agentConfigError: string | null;
+  /** Runtimes declared in agents.yaml plus their `which <cmd>`
+   *  install status. Null before the first fetch. Landed by
+   *  add-agents-tab-live-panel. */
+  runtimes: RuntimeStatusResponse | null;
+  runtimesError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
   /** Per-change live progress derived from the running job's worktree
@@ -83,6 +90,7 @@ type Store = {
   openDocPath: (path: string | null) => Promise<void>;
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
+  loadRuntimes: (refresh?: boolean) => Promise<void>;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -160,6 +168,8 @@ export const useStore = create<Store>((set, get) => ({
   tagIndexStale: false,
   agents: [],
   agentConfigError: null,
+  runtimes: null,
+  runtimesError: null,
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
@@ -172,6 +182,14 @@ export const useStore = create<Store>((set, get) => ({
       set({ agents: cfg.agents, agentConfigError: cfg.ok ? null : cfg.error ?? "config error" });
     } catch (err) {
       set({ agentConfigError: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  loadRuntimes: async (refresh = false) => {
+    try {
+      const runtimes = await fetchAgentRuntimes(refresh);
+      set({ runtimes, runtimesError: null });
+    } catch (err) {
+      set({ runtimesError: err instanceof Error ? err.message : String(err) });
     }
   },
   loadJobs: async () => {

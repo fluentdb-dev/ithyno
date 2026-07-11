@@ -10,6 +10,7 @@ import type {
   GitStatus,
   Job,
   JobSummary,
+  RuntimeStatusResponse,
   TagDetail,
   TagIndex,
   ToggleResponse,
@@ -224,6 +225,19 @@ export async function commitChangeProposal(id: string): Promise<{ commitHash: st
 export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
   const res = await fetch("/api/agents/config");
   if (!res.ok) throw new Error(`GET /api/agents/config failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Fetch runtime declarations from `agents.yaml` alongside their
+ * `which <cmd>` installation status. Pass `refresh: true` to bypass the
+ * server-side cache and force re-detection (useful after installing a
+ * previously-missing runtime). See add-runtime-detection (Phase 3.3).
+ */
+export async function fetchAgentRuntimes(refresh = false): Promise<RuntimeStatusResponse> {
+  const url = refresh ? "/api/agents/runtimes?refresh=1" : "/api/agents/runtimes";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GET /api/agents/runtimes failed: ${res.status}`);
   return res.json();
 }
 
