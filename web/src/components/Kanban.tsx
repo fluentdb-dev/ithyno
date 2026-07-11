@@ -408,8 +408,15 @@ function ChangeCard({
   const showReadyDot = slot === "unphased-done";
 
   // Archive button in the phase-done lane and the Unphased-done sub-bucket,
-  // but never for needs-human cards.
-  const showArchiveInSlot = !isNeedsHuman && (slot === "done" || slot === "unphased-done");
+  // but never for needs-human cards, and never while a job is still running
+  // in the worktree — clicking Archive on a running job would try to merge
+  // an uncommitted worktree and either fail mid-merge or capture partial
+  // agent state.
+  const jobStillRunning = job?.status === "running";
+  const showArchiveInSlot =
+    !isNeedsHuman &&
+    !jobStillRunning &&
+    (slot === "done" || slot === "unphased-done");
 
   // Start button: any non-done slot, unless the card is escalated.
   const startEligibleSlot =

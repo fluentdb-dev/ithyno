@@ -28,23 +28,40 @@ export async function listChangeArtifacts(
   changeId: string,
 ): Promise<string[]> {
   try {
+    // `-z` gives us NUL-separated output with no quoting — the default
+    // porcelain format wraps paths containing spaces / non-ASCII in
+    // double quotes with C-style escapes, which the naive slice(3)
+    // parser cannot decode. `-z` also splits renames into two entries
+    // (new path first, then a second NUL-terminated old path) so we
+    // can capture the new-side destination.
+    //
     // `--untracked-files=all` expands untracked directories to their
-    // individual files. Without it, `git status --porcelain` collapses
-    // an entirely-new directory into a single "?? dir/" entry, which
-    // hides the review.md / needs-human.md we're trying to discover.
+    // individual files; without it a fresh `openspec/changes/<id>/`
+    // dir collapses to `?? <dir>/` and hides review.md.
     const { stdout } = await execFileP("git", [
       "-C",
       worktreePath,
       "status",
       "--porcelain",
+      "-z",
       "--untracked-files=all",
     ]);
-    const lines = stdout.split("\n").filter((l) => l.length > 0);
     const prefix = `openspec/changes/${changeId}/`;
     const out: string[] = [];
-    for (const l of lines) {
-      // Format: "XY <path>" where XY is the two-char status field.
-      const path = l.slice(3);
+    // Each entry is `XY <path>\0` (2-char status + space + path). Rename
+    // entries append a second `\0<old-path>\0` — we consume both and
+    // keep only the new (destination) path.
+    const entries = stdout.split("\0");
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry.length < 3) continue;
+      const status = entry.slice(0, 2);
+      const path = entry.slice(3);
+      const isRename = status.startsWith("R") || status.startsWith("C");
+      if (isRename) {
+        // Skip the old-path entry that follows a rename/copy record.
+        i += 1;
+      }
       if (path.startsWith(prefix)) out.push(path);
     }
     return out;

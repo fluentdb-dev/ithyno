@@ -11,7 +11,17 @@ export type ExecutionPickerProps = {
   terminalDisabledReason: PickerReason;
   worktreeAvailable: boolean;
   worktreeDisabledReason: PickerReason;
-  firstAgent: { name: string; command: string; args: string[] } | undefined;
+  firstAgent:
+    | {
+        name: string;
+        /** Present on legacy agents; undefined on runtime-backed. */
+        command?: string;
+        /** Present on legacy agents; undefined on runtime-backed. */
+        args?: string[];
+        /** Present on runtime-backed agents; undefined on legacy. */
+        runtime?: string;
+      }
+    | undefined;
   onCancel: () => void;
   onPick: (mode: "worktree" | "terminal", save: boolean) => void | Promise<void>;
   onOpenGitPanel: () => void;
@@ -84,9 +94,13 @@ export function ExecutionPicker({
               <code>git worktree add .worktrees/{change.id} -b agent/{change.id}</code>{" "}
               then spawn{" "}
               {firstAgent ? (
-                <code>
-                  {firstAgent.command} {firstAgent.args.join(" ")}
-                </code>
+                firstAgent.command ? (
+                  <code>
+                    {firstAgent.command} {(firstAgent.args ?? []).join(" ")}
+                  </code>
+                ) : (
+                  <code>runtime: {firstAgent.runtime ?? "unknown"}</code>
+                )
               ) : (
                 <em>an agent from agents.yaml</em>
               )}

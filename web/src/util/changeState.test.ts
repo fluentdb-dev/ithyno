@@ -4,7 +4,16 @@ import { startableCandidates } from "./changeState";
 import type { AgentPublic, Change, JobSummary, TaskList } from "../types";
 
 const agents: AgentPublic[] = [
-  { name: "claude", command: "claude", args: ["/opsx:apply", "${change_id}"], hasEnv: false },
+  {
+    name: "claude",
+    command: "claude",
+    args: ["/opsx:apply", "${change_id}"],
+    hasEnv: false,
+    role: "code",
+    specialties: [],
+    concurrency: 1,
+    dedicated: true,
+  },
 ];
 
 function tasks(sections: Array<{ title: string; done: number; total: number }>): TaskList {

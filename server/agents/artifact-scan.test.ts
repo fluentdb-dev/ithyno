@@ -67,4 +67,40 @@ describe("listChangeArtifacts", () => {
     const paths = await listChangeArtifacts("/nonexistent/path/that/should/not/exist", "add-foo");
     expect(paths).toEqual([]);
   });
+
+  skipOnWindows("captures the new-side path of a rename into the change dir", async () => {
+    // Regression: the old porcelain parser (`slice(3)` on newline-split
+    // output) mangled `R  old -> new` lines, so review.md that arrived
+    // via a rename was silently dropped from artifactPaths.
+    await initGit(dir);
+    const changeDir = join(dir, "openspec", "changes", "add-foo");
+    mkdirSync(changeDir, { recursive: true });
+    writeFileSync(join(changeDir, "review-draft.md"), "draft\n");
+    await execFile("git", ["-C", dir, "add", "-A"]);
+    await execFile("git", ["-C", dir, "commit", "-m", "seed", "-q"]);
+    // Rename the draft into review.md — porcelain will emit
+    // `R  <old> -> <new>` (or `-z`'s NUL-separated equivalent).
+    await execFile("git", [
+      "-C",
+      dir,
+      "mv",
+      "openspec/changes/add-foo/review-draft.md",
+      "openspec/changes/add-foo/review.md",
+    ]);
+    const paths = await listChangeArtifacts(dir, "add-foo");
+    expect(paths).toContain("openspec/changes/add-foo/review.md");
+    expect(paths).not.toContain("openspec/changes/add-foo/review-draft.md");
+  });
+
+  skipOnWindows("handles paths that would be quoted in porcelain v1", async () => {
+    // Regression: porcelain v1 wraps paths containing spaces/non-ASCII
+    // in double quotes with C-style escapes; the old `slice(3) +
+    // startsWith` parser failed both cases. `-z` sidesteps quoting.
+    await initGit(dir);
+    const changeDir = join(dir, "openspec", "changes", "add-foo");
+    mkdirSync(changeDir, { recursive: true });
+    writeFileSync(join(changeDir, "note with spaces.md"), "hello");
+    const paths = await listChangeArtifacts(dir, "add-foo");
+    expect(paths).toContain("openspec/changes/add-foo/note with spaces.md");
+  });
 });

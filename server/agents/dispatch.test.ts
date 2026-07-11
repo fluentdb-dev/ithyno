@@ -314,6 +314,17 @@ describe("stdoutTail", () => {
     expect(t.length).toBe(1000);
     expect(t).toMatch(/^x+$/);
   });
+
+  it("caps by UTF-8 byte count, not JS char count", () => {
+    // Regression: the old implementation measured bytes but sliced by
+    // code units, so multibyte output overshot maxBytes by up to ~4×.
+    const job = mkJob();
+    job.output.length = 0;
+    // "あ" is 3 UTF-8 bytes each. 500 chars = 1500 bytes.
+    job.output.push({ stream: "stdout", chunk: "あ".repeat(500), ts: 0 });
+    const t = stdoutTail(job, 300);
+    expect(Buffer.byteLength(t, "utf8")).toBeLessThanOrEqual(300);
+  });
 });
 
 describe("waitForJobCompletion (polling)", () => {

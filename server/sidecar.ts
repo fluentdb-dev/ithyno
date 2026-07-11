@@ -4,6 +4,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { isPersistedPhase, type PersistedPhase } from "./phases.js";
+import { sha1 } from "./util/hash.js";
+
+/** Minimal shape of the sync watcher — enough for writeSidecar to
+ *  suppress the echo of its own writes without depending on the full
+ *  Watcher class. */
+export interface SidecarWatcherHook {
+  recordWrite(filePath: string, hash: string): void;
+}
 
 /**
  * Read / write for per-change `openspec/changes/<id>/.openspec.yaml`.
@@ -101,11 +109,17 @@ export function extractSidecarFields(
  * mentioned in `patch` are preserved verbatim. Keys explicitly set to
  * `undefined` in `patch` are DELETED (this is how the answer path clears
  * `priorPhase` / `escalatedAt`).
+ *
+ * Pass `watcher` to suppress the chokidar echo of the write we just
+ * performed — without it, every server-driven sidecar mutation triggers
+ * a duplicate `change-updated` broadcast (and, for needs-human, can
+ * re-fire the auto-restore hook against its own write).
  */
 export async function writeSidecar(
   projectRoot: string,
   changeId: string,
   patch: Record<string, unknown>,
+  watcher?: SidecarWatcherHook,
 ): Promise<void> {
   const existing = await readSidecar(projectRoot, changeId);
   const merged: Record<string, unknown> = { ...existing };
@@ -114,5 +128,7 @@ export async function writeSidecar(
     else merged[key] = value;
   }
   const yaml = stringifyYaml(merged);
-  await writeFile(sidecarPath(projectRoot, changeId), yaml, "utf8");
+  const path = sidecarPath(projectRoot, changeId);
+  await writeFile(path, yaml, "utf8");
+  watcher?.recordWrite(path, sha1(yaml));
 }

@@ -64,4 +64,31 @@ describe("parseNeedsHumanContent", () => {
     const doc = parseNeedsHumanContent(raw, "sample");
     expect(doc.answered).toBe(true);
   });
+
+  it("preserves inline `---` horizontal rules in the answer body", () => {
+    // Regression: the old parser committed the current section on any
+    // bare `---`, so an answer containing a markdown horizontal rule
+    // was truncated at the first `---` and the second paragraph was
+    // silently dropped on save via appendAnswer.
+    const raw = [
+      "# Q?",
+      "",
+      "## Answer",
+      "",
+      "first paragraph",
+      "",
+      "---",
+      "",
+      "second paragraph",
+      "",
+      "---",
+      "answered: true",
+      "",
+    ].join("\n");
+    const doc = parseNeedsHumanContent(raw, "sample");
+    expect(doc.answered).toBe(true);
+    expect(doc.answer).toBe(
+      ["first paragraph", "", "---", "", "second paragraph"].join("\n"),
+    );
+  });
 });
