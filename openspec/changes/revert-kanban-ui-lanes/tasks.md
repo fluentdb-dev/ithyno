@@ -38,12 +38,12 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 8.2 UI: Kanban が **3 列** (TODO / IN-PROGRESS / DONE) のみ表示、5 列 (PROPOSED/CODED/REVIEWED/DONE/UNPHASED) にはなっていない
-- [ ] 8.3 UI: WaitBadge / needs-human の card アクセント表示が **消えている** (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS が hit しない)
-- [ ] 8.4 UI: `+ New Change` が TODO 列 header、`Start ▾` が IN-PROGRESS 列 header に配置される (top toolbar ではない)
-- [ ] 8.5 UI: Card 上部の badge が phase 由来ではなく agent job 由来のみ
+- [ ] 8.2 UI: Kanban renders **exactly 3 columns** (TODO / IN-PROGRESS / DONE) — no 5-column PROPOSED/CODED/REVIEWED/DONE/UNPHASED layout
+- [ ] 8.3 UI: WaitBadge and needs-human card accent styling are gone (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS no longer applied to any card)
+- [ ] 8.4 UI: `+ New Change` is in the TODO column header; `Start ▾` is in the IN-PROGRESS column header (NOT in a top-of-board toolbar)
+- [ ] 8.5 UI: Card head badges come from the agent job, never from `change.phase`
 
 ## 9. Post-impl
 
 - [x] 9.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 9.2 archive → phase-workflow に archive commit — user が 8.2 確認後に実施
+- [ ] 9.2 archive → user runs `/ithy-opsx:archive` after confirming 8.2–8.5

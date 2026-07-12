@@ -17,14 +17,14 @@
 ## 4. Verification
 
 - [x] 4.1 `npm test && npm run typecheck && npm run build` clean (no tests touched — text-only)
-- [ ] 4.2 UI: Manager section の header が **`Manager (not configured in agents.yaml): claude --continue`** (以前の `Manager (fallback):` ではない)
-- [ ] 4.3 UI: 説明行が **`Currently running the built-in default startup command.`** (以前の `Source: hardcoded default` ではない)
-- [ ] 4.4 UI: `ITHYNO_TERMINAL_STARTUP=aider` 設定 + 再起動 → 説明行が `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
-- [ ] 4.5 UI: Terminal panel 全部閉じた idle 状態 → `will run the built-in default until you declare one.` (以前の `hardcoded default` ではない)
-- [ ] 4.6 API: 内部 shape (`fallbackSource: "declared" | "env" | "default"`) は変わっていない (curl `/api/manager/status` で確認)
+- [ ] 4.2 UI: the Manager section header reads **`Manager (not configured in agents.yaml): claude --continue`** (NOT the old `Manager (fallback):`)
+- [ ] 4.3 UI: the explanation line reads **`Currently running the built-in default startup command.`** (NOT the old `Source: hardcoded default`)
+- [ ] 4.4 UI: with `ITHYNO_TERMINAL_STARTUP=aider` and the server restarted, the explanation line reads `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
+- [ ] 4.5 UI: the Idle-state message reads `will run the built-in default until you declare one.` (NOT the old `hardcoded default`)
+- [ ] 4.6 API: the internal `fallbackSource` values (`"declared" | "env" | "default"`) are unchanged (verified via `curl /api/manager/status`)
 
 ## 5. Post-impl
 
 - [x] 5.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 5.2 archive → user が 4.2 を確認後に実施
+- [ ] 5.2 archive → user runs `/ithy-opsx:archive` after confirming 4.2–4.6
 - [x] 5.3 rebuild dist so the UI on :55910 picks up the new copy — via post-archive build

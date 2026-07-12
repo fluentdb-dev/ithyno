@@ -41,17 +41,17 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (233 → 240 tests; +7 kebab-case validation)
-- [ ] 9.2 UI: Agents タブの Configured (idle) 各 row に `[Edit]` `[Delete]` ボタン表示
-- [ ] 9.3 UI: Configured (idle) セクション下部に `[+ Add agent]` ボタン表示
-- [ ] 9.4 UI: `[Edit]` クリック → modal 開く。name field が **disabled** (灰色)、他 field 編集可能
-- [ ] 9.5 UI: Modal を Save (5.3 endpoint 存在時) → toast「Saved to agents.yaml」→ modal 閉じる → row が新値で refresh
-- [ ] 9.6 UI: Modal を Save (5.3 未 landed 時) → toast に「Phase 5.3 not landed」のヒントが出て modal 開いたまま
-- [ ] 9.7 UI: `[Delete]` クリック → 確認ダイアログ「Delete agent <name>?」→ Confirm → row 消える
-- [ ] 9.8 UI: `[+ Add agent]` クリック → modal 開く。name field が **editable** (白)、role が code (default)
-- [ ] 9.9 UI: Modal で name に空 or uppercase / concurrency に 0 → inline validation エラー、Save disabled
+- [ ] 9.2 UI: every Configured (idle) row shows `[Edit]` and `[Delete]` buttons
+- [ ] 9.3 UI: a `[+ Add agent]` button appears below the Configured (idle) section
+- [ ] 9.4 UI: clicking `[Edit]` opens the modal with the `name` field disabled (grey); all other fields editable
+- [ ] 9.5 UI: with 5.3 landed, Save produces toast "Saved to agents.yaml", closes the modal, and the row refreshes with the new values
+- [ ] 9.6 UI: with 5.3 NOT landed (404 from the endpoint), Save surfaces a toast pointing at Phase 5.3 and keeps the modal open
+- [ ] 9.7 UI: clicking `[Delete]` opens a confirmation dialog "Delete agent <name>?"; Confirm removes the row
+- [ ] 9.8 UI: clicking `[+ Add agent]` opens the modal with the `name` field editable (white) and role defaulted to `code`
+- [ ] 9.9 UI: entering an empty / UPPERCASE name or concurrency `0` shows inline validation errors and blocks Save
 
 ## 10. Post-impl
 
 - [x] 10.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 10.2 archive → user が 9.2 を確認後に実施
-- [ ] 10.3 Manual smoke — 9.2 と統合 (deferred 記述は削除)
+- [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.9
+- [ ] 10.3 Manual smoke — merged into 9.2–9.9

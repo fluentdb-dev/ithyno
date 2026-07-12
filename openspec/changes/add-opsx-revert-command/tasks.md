@@ -28,17 +28,17 @@
 
 - [x] 4.1 Manual dry-read of the skill against the recent `revert-kanban-ui-lanes` flow — every hand-typed step there maps to a numbered step in the skill
 - [x] 4.2 `npm test && npm run typecheck && npm run build` clean (test count 233 unchanged; no code changes)
-- [ ] 4.3 Skill: `/opsx:revert <scope>` invoke → preflight (repo state / git identity / openspec CLI) が走る
-- [ ] 4.4 Skill: 対象 requirement の pick prompt が出る
-- [ ] 4.5 Skill: Case α/β 自動分類が正しい
-- [ ] 4.6 Skill: `openspec new change revert-<scope>` が実行され proposal.md / delta / tasks.md が生成される
-- [ ] 4.7 Skill: 現行 spec に PENDING annotation が挿入される
-- [ ] 4.8 Skill: Case α なら archived target proposal.md に REVERTED annotation が挿入される
-- [ ] 4.9 Skill: `openspec validate` が VALID を返す
-- [ ] 4.10 Skill: 一切 git commit / archive を触らないことを確認
+- [ ] 4.3 Skill: invoke `/opsx:revert <scope>` in Claude Code — preflight (repo state / git identity / openspec CLI) runs
+- [ ] 4.4 Skill: target-requirement pick prompt appears
+- [ ] 4.5 Skill: Case α / β classification is correct per target
+- [ ] 4.6 Skill: `openspec new change revert-<scope>` runs and generates proposal.md / delta / tasks.md
+- [ ] 4.7 Skill: PENDING annotation is inserted into the current spec for each targeted requirement
+- [ ] 4.8 Skill: For Case α, REVERTED annotation is inserted at the top of each archived target's proposal.md
+- [ ] 4.9 Skill: `openspec validate` reports VALID
+- [ ] 4.10 Skill: no `git commit`, no `openspec archive`, no destructive git action is taken
 
 ## 5. Post-impl
 
 - [x] 5.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 5.2 archive → user が 4.3 を確認後に実施
+- [ ] 5.2 archive → user runs `/ithy-opsx:archive` after confirming 4.3–4.10
 - [ ] 5.3 Use `/opsx:revert` for the next revert (if any) to shake out edge cases — deferred until the next revert opportunity

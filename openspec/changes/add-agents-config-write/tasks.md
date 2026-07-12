@@ -39,15 +39,15 @@
 ## 6. Verification
 
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (240 → 257 tests)
-- [ ] 6.2 UI (5.2 と end-to-end): Modal で agent の role を変えて Save → HTTP 200、agents.yaml の該当 entry が新値に、他 entry / `runtimes:` / `worktreePool:` は byte-identical に保持
-- [ ] 6.3 UI: + Add agent → 新 name (kebab-case) → Save → HTTP 200、agents.yaml に entry 追加、Configured (idle) に新 row 出現
-- [ ] 6.4 UI: Delete → confirm → HTTP 200、agents.yaml から entry 削除、Configured (idle) から row 消える
-- [ ] 6.5 API: 存在しない name で Delete API 叩く (curl) → 404 + `agent '<name>' not found`
-- [ ] 6.6 API: 不正 payload (concurrency=0 / mixed shape) → 400 + inline error、agents.yaml は無変更
-- [ ] 6.7 API: atomic write — 意図的に mid-write でサーバー kill → `.tmp` は残るが agents.yaml は old のまま
+- [ ] 6.2 UI (end-to-end with 5.2): change an agent's role in the modal and Save → HTTP 200, the entry in agents.yaml carries the new role, unrelated entries and `runtimes:` / `worktreePool:` survive byte-identical
+- [ ] 6.3 UI: `+ Add agent` with a new kebab-case name → Save → HTTP 200, a new entry appears in agents.yaml and a new row appears in Configured (idle)
+- [ ] 6.4 UI: Delete → confirm → HTTP 200, the entry is removed from agents.yaml and the row disappears from Configured (idle)
+- [ ] 6.5 API: `curl` a delete with a missing name → 404 with `agent '<name>' not found`
+- [ ] 6.6 API: `curl` a malformed payload (concurrency=0 / mixed shape) → 400 with an inline error message; agents.yaml stays unchanged
+- [ ] 6.7 API: atomic write — kill the server mid-write; `.tmp` may remain but agents.yaml is byte-identical to the pre-write state
 
 ## 7. Post-impl
 
 - [x] 7.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 7.2 archive → user が 6.2 を確認後に実施
-- [ ] 7.3 Manual smoke — 6.2 と統合
+- [ ] 7.2 archive → user runs `/ithy-opsx:archive` after confirming 6.2–6.7
+- [ ] 7.3 Manual smoke — merged into 6.2–6.7
