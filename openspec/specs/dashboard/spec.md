@@ -686,6 +686,86 @@ variant.
 - **WHEN** a client POSTs a phase for a change id that does not exist on disk
 - **THEN** the server responds 404
 
+### Requirement: Kanban Phase Swim Lanes
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> 看板は TODO / IN-PROGRESS / DONE の 3 列のみ、という原則に反するため削除予定。
+> Server-side phase state (sidecar / API) は残る。
+
+The Kanban SHALL render one swim lane per active phase in pipeline
+order (`proposed`, `coded`, `reviewed`, `done`) and SHALL place each
+change that has a valid phase into the corresponding lane.
+
+#### Scenario: phased changes appear in their lane
+- **GIVEN** changes with phases `proposed`, `coded`, and `done`
+- **WHEN** the Kanban renders
+- **THEN** four lanes are shown in pipeline order and each change appears in the lane matching its phase
+
+#### Scenario: no lanes for reserved phases
+- **WHEN** the Kanban renders
+- **THEN** no `validated` or `verified` lane is displayed regardless of state
+
+#### Scenario: unknown phase string degrades safely
+- **GIVEN** a change whose reported phase is a string outside the active enum
+- **WHEN** the Kanban renders
+- **THEN** the change is displayed in the unphased fallback section and the board does not crash
+
+### Requirement: Legacy Fallback For Unphased Changes
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> phase lane 廃止に伴い Unphased fallback セクションも不要 (全 card が単一の
+> 進捗ベース 3 列に入る)。
+
+The Kanban SHALL render changes that have no phase in a collapsed
+"Unphased" section that groups them using the pre-existing
+todo / inprogress / done bucketing, and SHALL allow the user to opt a
+change into the phase system by dragging its card into a phase lane.
+
+#### Scenario: unphased change renders as before
+- **GIVEN** a change directory with no `phase:` sidecar key
+- **WHEN** the Kanban renders
+- **THEN** the change appears in the Unphased section in the same todo/inprogress/done bucket the previous 3-column layout would have assigned
+
+#### Scenario: opting in via drag
+- **GIVEN** an unphased card in the Unphased section
+- **WHEN** the user drags it into the `proposed` lane
+- **THEN** the phase API is called with `proposed`, the sidecar gains a `phase:` key, and the card moves into the lane
+
+#### Scenario: empty fallback section
+- **GIVEN** every change has a phase
+- **WHEN** the Kanban renders
+- **THEN** the Unphased section is hidden or rendered empty-collapsed without occupying lane space
+
+### Requirement: Progress-Independent Phase Placement
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> phase lane 廃止で card 配置は task progress のみで決まる。この要件の raison d'être が消失。
+
+The Kanban SHALL place each phased change into the swim lane matching
+its `change.phase` value regardless of its task-progress state. A
+change in the `done` lane MAY have unfinished tasks; a change in the
+`proposed` lane MAY have every task ticked. Only the Unphased fallback
+section MAY consult the pre-existing `bucketize`-style todo /
+inprogress / done grouping.
+
+#### Scenario: phased change with incomplete tasks stays in its lane
+- **GIVEN** a change with `phase: done` and `progress.done < progress.total`
+- **WHEN** the Kanban renders
+- **THEN** the change appears in the `done` phase lane, not in a progress-derived "in-progress" location
+- **AND** the card's progress bar visibly shows the incomplete state
+
+#### Scenario: phased change with all tasks ticked stays in its lane
+- **GIVEN** a change with `phase: proposed` and `progress.done === progress.total > 0`
+- **WHEN** the Kanban renders
+- **THEN** the change appears in the `proposed` phase lane, not in a progress-derived "ready to archive" location
+- **AND** the card SHALL NOT show the "ready to archive" dot that the legacy 3-column DONE column used
+
+#### Scenario: unphased section may consult progress
+- **GIVEN** an unphased change
+- **WHEN** the Kanban renders it inside the Unphased section
+- **THEN** the section MAY sub-group the change under todo / inprogress / done using the pre-existing bucketing rules
+- **AND** this sub-grouping SHALL be strictly local to the Unphased section (no phased card ever consults progress for its top-level lane placement)
+
 ### Requirement: Needs-Human Escalation State
 The system SHALL support a phase-agnostic `needs-human` state that
 any change can enter from any phase (or from the unphased state),
@@ -1354,582 +1434,4 @@ Each recent-job row SHALL display a verdict badge when the underlying job's `ver
 - **GIVEN** a finished code-role job with no `verdict` field
 - **WHEN** the row renders
 - **THEN** no verdict badge is displayed
-
-### Requirement: Revert Slash Command
-
-The project SHALL provide a `/opsx:revert <scope>` slash command that a
-worker or user runs inside Claude Code to open a Case α or Case β
-revert change under the naming convention `revert-<scope>`. The
-command SHALL enforce the PENDING annotation and (Case α only)
-REVERTED annotation conventions documented in `CLAUDE.md` and
-`.claude/skills/openspec-flow/SKILL.md`.
-
-Concretely, when invoked, the command SHALL:
-
-1. Take an optional `<scope>` argument (kebab-case). If omitted, the
-   command SHALL prompt the user for a scope description and derive
-   the kebab-case id from it (same pattern as `/opsx:propose`).
-2. Prompt the user for the target requirement(s) to revert. Multiple
-   targets per capability are allowed; multiple capabilities are
-   allowed.
-3. For each target, classify Case α (target's ADDED delta has already
-   reached `openspec/specs/<capability>/spec.md`) or Case β (target
-   still in-flight in `openspec/changes/<target-id>/`).
-4. Run `openspec new change revert-<scope>` and populate:
-   - `proposal.md` with a `## Why` narrative and a `## Targets`
-     list citing each target by id and its Case α / β classification;
-   - `specs/<capability>/spec.md` with `## REMOVED Requirements` or
-     `## MODIFIED Requirements` sections (Case α) or
-     `## ADDED Requirements` describing the post-revert baseline
-     (Case β);
-   - `tasks.md` with a checklist of standard revert steps
-     (spec deltas, impl reverts, target annotations, verification).
-5. Insert `> ⚠️ **PENDING REMOVAL** by [revert-<scope>](path)` (or
-   `PENDING MODIFICATION`) directly beneath the affected
-   `### Requirement:` heading in the current
-   `openspec/specs/<capability>/spec.md` for every target.
-6. For Case α only, insert `> **REVERTED** by [revert-<scope>](path)`
-   (or `PARTIALLY REVERTED` when only a subset of the target's
-   requirements is affected) at the top of every archived target's
-   `proposal.md`, immediately after the closing frontmatter delimiter.
-7. Run `npm run openspec -- validate revert-<scope>` and report the
-   result. If invalid, the command SHALL surface the error and
-   stop before any git action.
-
-The command SHALL NOT invoke `git commit`, `openspec archive`, or
-any destructive action — the resulting change goes through the
-standard `/opsx:apply` → `/ithy-opsx:archive` flow like any other.
-
-#### Scenario: `/opsx:revert kanban-ui-lanes` (Case α, no argument prompt)
-- **GIVEN** `openspec/specs/dashboard/spec.md` contains a landed
-  requirement `Kanban Phase Swim Lanes`
-- **AND** the user has determined they want to revert it
-- **WHEN** the user invokes `/opsx:revert kanban-ui-lanes` and confirms
-  the target selection
-- **THEN** `openspec/changes/revert-kanban-ui-lanes/proposal.md`,
-  `specs/dashboard/spec.md`, and `tasks.md` are created;
-  a PENDING REMOVAL blockquote is inserted directly under
-  `### Requirement: Kanban Phase Swim Lanes` in the current spec;
-  the archived target proposal is annotated with a REVERTED blockquote;
-  and `openspec validate revert-kanban-ui-lanes` reports VALID.
-
-#### Scenario: Case β target — archived-target archive procedure
-- **GIVEN** an in-flight change `openspec/changes/add-foo/` that has
-  not yet been archived
-- **WHEN** the user invokes `/opsx:revert foo` and picks the in-flight
-  change as the target
-- **THEN** the command SHALL follow the "Reverted-target archive
-  (Case β)" procedure documented in
-  `.claude/skills/openspec-flow/SKILL.md` — the target's
-  `outcome.md` is rewritten to point at the revert, its
-  `specs/` directory is deleted, and the revert's delta uses ADDED
-  headers describing the post-revert baseline
-
-#### Scenario: Command aborts on validation failure
-- **GIVEN** the user typed an invalid scope containing a slash
-- **WHEN** the command runs `openspec new change`
-- **THEN** the CLI's error surfaces to the user
-- **AND** no PENDING or REVERTED annotations are inserted anywhere
-
-### Requirement: Agents Config Edit Modal
-
-The Agents tab's Configured (idle) section SHALL render an `Edit`
-button on every row. Clicking `Edit` SHALL open a modal
-populated with the row's current agent configuration. The modal
-SHALL expose these fields:
-
-- **name** — kebab-case validated; disabled (read-only) when
-  editing an existing agent
-- **role** — dropdown: `code`, `review`, `verify`, `manager`,
-  `other`
-- **shape** — toggle between **legacy** (`command` + `args[]`)
-  and **runtime-backed** (`runtime` + `prompt`); the modal SHALL
-  hide the fields of the non-active shape
-- **runtime** — dropdown populated from the `runtimes` state
-  (from `/api/agents/runtimes`), rendered only in
-  runtime-backed shape
-- **command** and **args** — text inputs, rendered only in legacy
-  shape; args entered as one whitespace-separated string
-- **prompt** — multi-line textarea
-- **specialties** — comma-separated tag input
-- **concurrency** — number input, min 1
-- **dedicated** — checkbox; unchecked means pool mode
-
-The modal SHALL have a `Save` button and a `Cancel` button.
-`Save` SHALL POST to `/api/agents/config` (Phase 5.3 endpoint);
-on 404 or any other failure it SHALL surface a toast with the
-underlying error. On success, the modal SHALL close and the
-Agents tab SHALL refresh its agents state via `loadAgents()`.
-
-#### Scenario: Edit button opens modal prefilled from row
-- **GIVEN** a Configured (idle) row for agent `claude` with
-  `role: code`, `runtime: claude`, `prompt: /opsx:apply ${change_id}`
-- **WHEN** the user clicks `Edit` on that row
-- **THEN** the modal opens with `name = "claude"` (disabled),
-  `role = "code"`, shape toggled to runtime-backed,
-  `runtime = "claude"`, and `prompt = "/opsx:apply ${change_id}"`
-
-#### Scenario: Shape toggle swaps visible fields
-- **GIVEN** the modal is open with shape set to runtime-backed
-- **WHEN** the user toggles shape to legacy
-- **THEN** the runtime dropdown is hidden
-- **AND** the command and args inputs are shown
-
-#### Scenario: Save surfaces a toast on 404 (5.3 not yet landed)
-- **GIVEN** Phase 5.3 has not landed and `/api/agents/config`
-  returns 404
-- **WHEN** the user clicks Save
-- **THEN** a toast is shown with a hint about the missing
-  endpoint
-- **AND** the modal does NOT close (the user's edits are
-  preserved)
-
-### Requirement: Agents Config Delete Confirmation
-
-Every row in the Configured (idle) section SHALL render a
-`Delete` button next to `Edit`. Clicking `Delete` SHALL open a
-confirmation dialog naming the agent (e.g., "Delete agent
-`claude`? This removes it from agents.yaml."). Confirming SHALL
-POST a delete-shaped request to `/api/agents/config`; canceling
-SHALL close the dialog with no side effects.
-
-#### Scenario: Delete asks before acting
-- **GIVEN** the Configured (idle) section shows agent `reviewer`
-- **WHEN** the user clicks `Delete` on that row
-- **THEN** a confirmation dialog opens naming `reviewer`
-- **AND** no network request is issued until Confirm is clicked
-
-#### Scenario: Cancel keeps the agent
-- **GIVEN** the delete confirmation dialog is open for `reviewer`
-- **WHEN** the user clicks Cancel
-- **THEN** the dialog closes
-- **AND** the row for `reviewer` remains in the Configured section
-
-### Requirement: Agents Config Add Button
-
-Below the Configured (idle) section the tab SHALL render a
-`+ Add agent` button. Clicking it SHALL open the same modal
-described under Agents Config Edit Modal, but with:
-
-- `name` field editable (not disabled) and empty
-- all other fields empty or at their default values
-- shape defaulting to legacy
-
-Save behavior mirrors the Edit modal.
-
-#### Scenario: Add opens an empty editable modal
-- **WHEN** the user clicks `+ Add agent`
-- **THEN** the modal opens with `name = ""` (editable), all other
-  fields empty or default, shape set to legacy
-
-#### Scenario: Add is hidden when the section is missing
-- **GIVEN** the Configured (idle) section is hidden because
-  `agents.length === 0` AND `agentConfigError` is present
-- **WHEN** the tab renders
-- **THEN** the `+ Add agent` button is NOT shown (the error
-  banner takes precedence; the user resolves the parse error
-  before adding)
-
-### Requirement: Agents Config Write Endpoint
-
-The system SHALL expose `POST /api/agents/config` accepting a
-JSON body that is either an upsert or a delete:
-
-```json
-{ "action": "upsert",
-  "name": "<kebab-case>",
-  "role": "<one of the accepted role values>",
-  "command": "<string; required for legacy shape>",
-  "args": ["<string>", ...],
-  "runtime": "<string; required for runtime-backed shape>",
-  "prompt": "<string; optional for runtime-backed>",
-  "specialties": ["<string>", ...],
-  "concurrency": <integer ≥ 1>,
-  "dedicated": <boolean>,
-  "description": "<optional string>"
-}
-```
-
-or
-
-```json
-{ "action": "delete", "name": "<kebab-case>" }
-```
-
-The handler SHALL:
-
-- gate on `isLocal(req.socket.remoteAddress)` and the existing
-  CSRF hook (return `403` when either fails);
-- validate the payload against the same `AgentDef` shape rules the
-  loader uses (name is kebab-case; exactly one of legacy vs
-  runtime-backed shape; concurrency ≥ 1) and return `400` with an
-  informative error message if the payload is malformed;
-- atomically write the modified `agents.yaml` — write to a
-  sibling `.tmp` file first, then rename over the original in a
-  single syscall so a crash mid-write leaves either the old file or
-  the new file, never partial YAML;
-- preserve unrelated top-level keys (`runtimes:`, `worktreePool:`,
-  and any unknown keys) byte-intent via a parse → merge → serialize
-  round-trip;
-- return `{ "ok": true }` on success (`200`);
-- rely on the existing agents.yaml file watcher to trigger the
-  registry reload; the handler SHALL NOT invoke `agentRegistry.load()`
-  directly.
-
-#### Scenario: upsert on existing agent overwrites in place
-- **GIVEN** `agents.yaml` contains an agent `claude` with `role: code`
-- **WHEN** a client POSTs `{ action: "upsert", name: "claude", role: "review", ... }`
-- **THEN** the response is `{ ok: true }` (200)
-- **AND** the file's `agents:` list contains one entry named `claude`
-  with `role: review` and no duplicate `claude` entry
-- **AND** the top-level `runtimes:` key and any other unrelated keys
-  survive byte-intent
-
-#### Scenario: upsert on missing name creates a new agent
-- **GIVEN** `agents.yaml` does not contain any agent named `reviewer`
-- **WHEN** a client POSTs `{ action: "upsert", name: "reviewer", role: "review", command: "claude", args: [], ... }`
-- **THEN** the response is `{ ok: true }` (200)
-- **AND** the file's `agents:` list has a new entry named `reviewer`
-  at the end
-
-#### Scenario: delete removes the entry
-- **GIVEN** `agents.yaml` contains `claude` and `reviewer`
-- **WHEN** a client POSTs `{ action: "delete", name: "reviewer" }`
-- **THEN** the response is `{ ok: true }` (200)
-- **AND** the file's `agents:` list contains only `claude`
-
-#### Scenario: delete on missing name returns 404
-- **GIVEN** `agents.yaml` contains only `claude`
-- **WHEN** a client POSTs `{ action: "delete", name: "nonexistent" }`
-- **THEN** the response is `404` with `{ error: "agent 'nonexistent' not found" }`
-- **AND** the file is unchanged
-
-#### Scenario: malformed payload rejected without writing
-- **GIVEN** a POST body missing the `action` discriminator, or with
-  `concurrency: 0`, or with both `command` and `runtime` set
-- **WHEN** the handler processes it
-- **THEN** the response is `400` with an error message naming the
-  first-failed field
-- **AND** `agents.yaml` is byte-identical to before the request
-
-#### Scenario: non-local request rejected
-- **GIVEN** a POST from a non-loopback source
-- **WHEN** the handler is invoked
-- **THEN** the response is `403` with `{ error: "local only" }`
-- **AND** `agents.yaml` is byte-identical to before the request
-
-### Requirement: Manager Role In agents.yaml
-
-The system SHALL accept `role: manager` as a first-class value on
-entries in the `agents:` list of `agents.yaml`. A manager-role entry
-SHALL use the legacy shape (`command` + optional `args[]`); the
-runtime-backed shape (`runtime` + `prompt`) SHALL be rejected at
-load time with an error message pointing at the manager entry. A
-manager-role entry MAY carry an optional `initialInput: string` that
-the Terminal panel injects into the PTY after launch (e.g.
-`/opsx:manage`).
-
-The `agents.yaml` validator SHALL accept zero or one manager-role
-entry. When two or more are present, the loader SHALL fail with an
-error naming the second manager-role entry's index.
-
-#### Scenario: Single manager entry loads
-- **GIVEN** `agents.yaml` with one entry: `name: primary-manager, role: manager, command: claude, args: [--continue]`
-- **WHEN** the registry loads
-- **THEN** the entry appears in the loaded agents list with `role: "manager"`
-- **AND** `registry.managerAgent()` returns that entry
-
-#### Scenario: Runtime-backed manager rejected
-- **GIVEN** `agents.yaml` with `name: m, role: manager, runtime: claude, prompt: /opsx:manage`
-- **WHEN** the registry loads
-- **THEN** the registry reports a validation error naming the manager entry
-- **AND** the last-known-good agents cache is preserved
-
-#### Scenario: Zero manager entries is not an error
-- **GIVEN** `agents.yaml` with only worker (role != manager) entries
-- **WHEN** the registry loads
-- **THEN** the load succeeds
-- **AND** `registry.managerAgent()` returns `null`
-
-#### Scenario: Multiple manager entries fail load
-- **GIVEN** `agents.yaml` with two `role: manager` entries
-- **WHEN** the registry loads
-- **THEN** the load fails with an error message naming the second entry
-- **AND** `registry.managerAgent()` on the last-known-good config returns the previous state (empty or the single prior manager)
-
-### Requirement: Terminal Panel Uses Declared Manager
-
-The server SHALL determine the embedded Terminal panel's PTY
-startup command in the following priority order when a fresh
-session is spawned:
-
-1. The first `role: manager` entry from `agents.yaml`
-   (`registry.managerAgent()`), using its `command`, `args`, and
-   `initialInput`.
-2. The `ITHYNO_TERMINAL_STARTUP` environment variable, treated as
-   a single shell string.
-3. The hardcoded default `claude --continue`.
-
-The server SHALL emit the resolved `initialInput` (if any) into
-the PTY's stdin after the child has started, so the Manager can
-receive an auto-injected line like `/opsx:manage` without user
-input.
-
-#### Scenario: Manager entry takes precedence over env var and default
-- **GIVEN** `agents.yaml` has a manager entry `command: aider, args: []` AND `ITHYNO_TERMINAL_STARTUP=claude --continue` is set
-- **WHEN** a fresh PTY session is opened
-- **THEN** the child process is `aider`
-- **AND** the env-var value is NOT used
-
-#### Scenario: Env var fallback when no manager entry
-- **GIVEN** `agents.yaml` has no manager entry AND `ITHYNO_TERMINAL_STARTUP=aider` is set
-- **WHEN** a fresh PTY session is opened
-- **THEN** the child process is `aider`
-
-#### Scenario: Hardcoded default when neither manager entry nor env var
-- **GIVEN** `agents.yaml` has no manager entry AND `ITHYNO_TERMINAL_STARTUP` is not set
-- **WHEN** a fresh PTY session is opened
-- **THEN** the child process is `claude` with `--continue`
-
-#### Scenario: initialInput is auto-injected
-- **GIVEN** the resolved manager entry has `initialInput: /opsx:manage`
-- **WHEN** the PTY is spawned
-- **THEN** after the child starts, the string `/opsx:manage\n` is written to its stdin
-
-#### Scenario: Missing initialInput is a no-op
-- **GIVEN** the resolved manager entry has no `initialInput` field
-- **WHEN** the PTY is spawned
-- **THEN** nothing is written to stdin after start; the user sees the Manager's normal prompt
-
-### Requirement: Agents Config Modal Includes InitialInput Field
-
-The Agents tab config modal SHALL expose an `initialInput` textarea
-field, editable in both Add and Edit modes and for both legacy and
-runtime-backed shapes. The field's placeholder SHALL be
-role-dependent so users see a sensible hint:
-
-- `manager` role → `"/opsx:manage"`
-- `code` role → `"/ithy-opsx:apply ${change_id}"`
-- other roles → `"Optional prompt injected on spawn"`
-
-On Save, an empty value SHALL omit the field from the resulting
-`agents.yaml` entry (matches the loader's optional-field handling).
-
-#### Scenario: Edit opens with existing initialInput populated
-- **GIVEN** an agent with `initialInput: "/opsx:manage"`
-- **WHEN** the user clicks Edit on that row
-- **THEN** the modal's initialInput textarea shows `/opsx:manage`
-
-#### Scenario: Placeholder changes with role
-- **GIVEN** the modal is open with role=code
-- **WHEN** the user changes role to manager
-- **THEN** the initialInput placeholder becomes `/opsx:manage`
-- **AND** the current value (if any) is preserved
-
-#### Scenario: Empty initialInput is not persisted
-- **GIVEN** the user Adds an agent with an empty initialInput field
-- **WHEN** Save round-trips through the write endpoint
-- **THEN** the resulting agents.yaml entry has NO `initialInput` key
-
-### Requirement: Agents Config Manager Delete Rejected
-
-The Agents tab SHALL NOT render a `Delete` button on a row whose
-agent has `role: "manager"`. The `POST /api/agents/config` endpoint
-SHALL respond `400` with `{ error: "manager agents cannot be
-deleted from the UI; edit agents.yaml directly to remove" }` when a
-`{ action: "delete" }` payload targets a manager-role entry. The
-Edit button SHALL remain available so the manager can be
-reconfigured or its role changed to a non-manager value (which
-implicitly makes it eligible for deletion on a subsequent request).
-
-#### Scenario: Manager row has no Delete button
-- **GIVEN** a Configured (idle) row for an agent with `role: manager`
-- **WHEN** the Agents tab renders
-- **THEN** no `Delete` button appears on that row
-- **AND** the `Edit` button IS present
-
-#### Scenario: Non-manager row keeps its Delete button
-- **GIVEN** a Configured (idle) row for an agent with `role: code`
-- **WHEN** the Agents tab renders
-- **THEN** the `Delete` button is present as before
-
-#### Scenario: Server rejects delete on a manager entry
-- **GIVEN** `agents.yaml` contains `name: primary-manager, role: manager`
-- **WHEN** a client POSTs `{ action: "delete", name: "primary-manager" }`
-- **THEN** the response is `400` with the error message above
-- **AND** `agents.yaml` is byte-identical to before
-
-#### Scenario: Server delete on a non-manager entry is unaffected
-- **GIVEN** `agents.yaml` contains `name: coder, role: code`
-- **WHEN** a client POSTs `{ action: "delete", name: "coder" }`
-- **THEN** the response is `200` with `{ ok: true }` (as per Phase 5.3's Agents Config Write Endpoint)
-
-### Requirement: Manager Singleton Enforcement
-
-The Agents tab's Add-mode modal SHALL omit `manager` from its role
-dropdown when at least one manager-role agent already exists in the
-loaded registry. Edit mode is NOT affected — a user Editing the
-existing manager keeps `manager` selectable so they can change
-other fields without losing role. Additionally, `POST /api/agents/config`
-SHALL respond `400` with `{ error: "only one role: manager entry is
-allowed" }` when an upsert payload with `role: manager` and a name
-different from any existing manager entry is submitted.
-
-#### Scenario: Add modal hides manager when one exists
-- **GIVEN** `agents.yaml` contains one entry with `role: manager`
-- **WHEN** the user clicks `+ Add agent`
-- **THEN** the modal's role dropdown does NOT include `manager`
-
-#### Scenario: Add modal offers manager when none exists
-- **GIVEN** `agents.yaml` contains only role=code and role=review entries
-- **WHEN** the user clicks `+ Add agent`
-- **THEN** the modal's role dropdown includes `manager`
-
-#### Scenario: Edit modal keeps manager selectable for the existing manager
-- **GIVEN** an agent with `role: manager` exists AND the user clicks Edit on that row
-- **WHEN** the modal renders
-- **THEN** the role dropdown includes `manager` (currently selected)
-- **AND** the user MAY change it to another role (which frees `manager` for a subsequent Add)
-
-#### Scenario: Server rejects upsert that would create a second manager
-- **GIVEN** `agents.yaml` has one entry `name: primary, role: manager`
-- **WHEN** a client POSTs `{ action: "upsert", name: "secondary", role: "manager", command: "claude", args: [] }`
-- **THEN** the response is `400` with `{ error: "only one role: manager entry is allowed" }`
-- **AND** `agents.yaml` is byte-identical to before
-
-#### Scenario: Server accepts editing the existing manager
-- **GIVEN** `agents.yaml` has one entry `name: primary, role: manager, command: claude`
-- **WHEN** a client POSTs `{ action: "upsert", name: "primary", role: "manager", command: "aider", args: [] }`
-- **THEN** the response is `200` with `{ ok: true }`
-- **AND** the file's manager entry has `command: aider`
-
-### Requirement: Manager Status Endpoint
-
-The server SHALL expose `GET /api/manager/status` returning the
-current resolved Manager configuration and whether the embedded
-Terminal panel is currently open. The response body SHALL be JSON
-of shape:
-
-```json
-{
-  "agentEntry": AgentPublic | null,
-  "resolvedStartup": string | null,
-  "initialInput": string | null,
-  "fallbackSource": "declared" | "env" | "default",
-  "terminalActive": boolean
-}
-```
-
-- `agentEntry`: the first `role: manager` entry from the loaded
-  registry, or `null` when none is declared.
-- `resolvedStartup`: the string that would be typed into a fresh
-  PTY session, derived from `ptyStartup()`'s priority chain
-  (declared manager → `ITHYNO_TERMINAL_STARTUP` env → hardcoded
-  `claude --continue`). `null` only when the env override is
-  explicitly set to empty string (raw shell mode).
-- `initialInput`: the auto-inject line resolved by the same chain,
-  or `null` when none applies.
-- `fallbackSource`: which stage of the chain provided the values —
-  `"declared"` when `agentEntry !== null`, `"env"` when
-  `ITHYNO_TERMINAL_STARTUP` is set, `"default"` otherwise.
-- `terminalActive`: `true` when at least one PTY session is
-  currently open (from the existing `activeTerminalCount()`).
-
-The endpoint SHALL apply the same `isLocal` gate as the other
-agents.yaml-related endpoints and return `403` for non-loopback
-callers.
-
-#### Scenario: declared entry surfaces from registry
-- **GIVEN** `agents.yaml` has `name: primary, role: manager, command: claude, args: [--continue]`
-- **WHEN** a client GETs `/api/manager/status`
-- **THEN** the response contains `agentEntry` with `name: "primary"`
-- **AND** `resolvedStartup` is `"claude --continue"`
-- **AND** `fallbackSource` is `"declared"`
-
-#### Scenario: env variable fills the fallback
-- **GIVEN** no manager entry in agents.yaml AND `ITHYNO_TERMINAL_STARTUP=aider` is set
-- **WHEN** a client GETs the endpoint
-- **THEN** `agentEntry` is `null`
-- **AND** `resolvedStartup` is `"aider"`
-- **AND** `fallbackSource` is `"env"`
-
-#### Scenario: hardcoded default fills the fallback
-- **GIVEN** no manager entry in agents.yaml AND `ITHYNO_TERMINAL_STARTUP` is unset
-- **WHEN** a client GETs the endpoint
-- **THEN** `resolvedStartup` is `"claude --continue"`
-- **AND** `fallbackSource` is `"default"`
-
-#### Scenario: terminalActive reflects live PTY count
-- **GIVEN** at least one embedded terminal is open
-- **WHEN** a client GETs the endpoint
-- **THEN** `terminalActive` is `true`
-
-#### Scenario: non-local caller denied
-- **WHEN** a non-loopback client GETs the endpoint
-- **THEN** the response is `403` with `{ error: "local only" }`
-
-### Requirement: Agents Tab Manager Section
-
-The Agents tab SHALL render a dedicated `Manager` section between
-the Runtimes section and the Live section. The section SHALL render
-exactly one of three states based on `GET /api/manager/status`:
-
-1. **Declared**: `agentEntry !== null`. The section SHALL render a
-   row for the manager showing name, `MANAGER` role badge,
-   `resolvedStartup` (typewriter-styled `command args…`), and the
-   `initialInput` (if any). The row SHALL have an `Edit` button
-   opening the AgentConfigModal in Edit mode. NO `Delete` button.
-
-2. **Not configured**: `agentEntry === null` AND
-   `terminalActive === true`. The section SHALL render a muted
-   card containing:
-   - `Manager (not configured in agents.yaml):
-     <resolvedStartup>` — the typewriter command line
-   - A short explanation of what's running: `Currently running the
-     built-in default startup command.` when
-     `fallbackSource === "default"`, or `Currently running the
-     command from ITHYNO_TERMINAL_STARTUP.` when `"env"`.
-   - A `[Declare in agents.yaml]` button opening the
-     AgentConfigModal in Add mode with `role: "manager"`,
-     `command`, `args`, and `initialInput` prefilled from the
-     resolved values.
-
-3. **Idle**: `agentEntry === null` AND `terminalActive === false`.
-   The section SHALL render a muted empty state:
-   `No manager declared. Opening a change view launches the
-   Terminal panel, which will run the built-in default until you
-   declare one.` No button.
-
-The section SHALL be present on the tab regardless of state —
-`resolvedStartup: null` is the only case where the section MAY be
-suppressed (empty-string env override; raw shell mode).
-
-The Configured (idle) section SHALL filter out `role: manager`
-entries so a declared Manager appears in the Manager section only,
-not both.
-
-#### Scenario: Declared manager appears in the Manager section
-- **GIVEN** `agents.yaml` has a `role: manager` entry
-- **WHEN** the Agents tab renders
-- **THEN** the Manager section shows the entry with an `Edit` button
-- **AND** the Configured (idle) section does NOT list that entry
-
-#### Scenario: Not-configured state shows what's currently running
-- **GIVEN** no manager entry AND the Terminal panel is open
-- **WHEN** the Agents tab renders
-- **THEN** the Manager section shows `Manager (not configured in agents.yaml): claude --continue`
-- **AND** an explanation line reads `Currently running the built-in default startup command.`
-- **AND** a `[Declare in agents.yaml]` button is visible
-
-#### Scenario: Declare button prefills the modal
-- **GIVEN** the Not-configured state is shown
-- **WHEN** the user clicks `[Declare in agents.yaml]`
-- **THEN** the AgentConfigModal opens in Add mode
-- **AND** role is preselected to `manager`
-- **AND** command / args / initialInput are prefilled from the resolved values
-
-#### Scenario: Idle state when no manager and no terminal
-- **GIVEN** no manager entry AND no Terminal panel is currently open
-- **WHEN** the Agents tab renders
-- **THEN** the Manager section renders the muted empty state with no CTA
 
