@@ -2,10 +2,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useStore } from "../store";
-import { cancelAgentJob } from "../api";
-import type { AgentPublic, JobSummary, RuntimeDefPublic } from "../types";
+import { cancelAgentJob, saveAgentConfig } from "../api";
+import type {
+  AgentConfigPayload,
+  AgentPublic,
+  JobSummary,
+  RuntimeDefPublic,
+} from "../types";
 import { DiffView } from "../components/DiffView";
 import { AgentOutputView } from "../components/AgentOutputView";
+import { AgentConfigModal } from "../components/AgentConfigModal";
 
 /**
  * Agents tab. Four sections in reading order:
@@ -30,9 +36,39 @@ export function Agents() {
   const loadAgents = useStore((s) => s.loadAgents);
   const loadJobs = useStore((s) => s.loadJobs);
   const loadRuntimes = useStore((s) => s.loadRuntimes);
+  const pushToast = useStore((s) => s.pushToast);
   const [searchParams] = useSearchParams();
   const focusedJobId = searchParams.get("job");
   const focusedTab = (searchParams.get("tab") as "output" | "diff" | null) ?? undefined;
+
+  // Config editor state (Phase 5.2):
+  //   null    — no modal open
+  //   "new"   — Add mode (empty modal)
+  //   Agent   — Edit mode (prefilled with the seed agent)
+  const [editing, setEditing] = useState<AgentPublic | "new" | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<AgentPublic | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleSave = async (payload: AgentConfigPayload) => {
+    await saveAgentConfig(payload);
+    setEditing(null);
+    pushToast("info", "Saved to agents.yaml");
+    await loadAgents();
+  };
+
+  const handleDelete = async (agent: AgentPublic) => {
+    setBusy(true);
+    try {
+      await saveAgentConfig({ action: "delete", name: agent.name });
+      setConfirmingDelete(null);
+      pushToast("info", `Deleted agent ${agent.name}`);
+      await loadAgents();
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     void loadAgents();
@@ -87,9 +123,23 @@ export function Agents() {
         ) : (
           <ul className="agents-list">
             {idleAgents.map((a) => (
-              <AgentRow key={a.name} agent={a} />
+              <AgentRow
+                key={a.name}
+                agent={a}
+                onEdit={() => setEditing(a)}
+                onDelete={() => setConfirmingDelete(a)}
+              />
             ))}
           </ul>
+        )}
+        {!agentConfigError && (
+          <button
+            type="button"
+            className="action-btn ghost agents-add-btn"
+            onClick={() => setEditing("new")}
+          >
+            + Add agent
+          </button>
         )}
       </section>
 
@@ -105,6 +155,55 @@ export function Agents() {
             ))
         )}
       </section>
+
+      {editing && (
+        <AgentConfigModal
+          seed={editing}
+          runtimes={runtimes?.runtimes ?? []}
+          onCancel={() => setEditing(null)}
+          onSubmit={handleSave}
+        />
+      )}
+
+      {confirmingDelete && (
+        <DeleteConfirmDialog
+          agent={confirmingDelete}
+          busy={busy}
+          onConfirm={() => void handleDelete(confirmingDelete)}
+          onCancel={() => setConfirmingDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteConfirmDialog({
+  agent,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  agent: AgentPublic;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Delete agent — {agent.name}</h3>
+        <p>
+          This removes <code>{agent.name}</code> from <code>agents.yaml</code>.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="danger" onClick={onConfirm} disabled={busy}>
+            {busy ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -173,7 +272,15 @@ function RuntimeRow({ runtime }: { runtime: RuntimeDefPublic }) {
   );
 }
 
-function AgentRow({ agent }: { agent: AgentPublic }) {
+function AgentRow({
+  agent,
+  onEdit,
+  onDelete,
+}: {
+  agent: AgentPublic;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const isRuntimeBacked = !!agent.runtime;
   return (
     <li className="agent-row">
@@ -187,6 +294,14 @@ function AgentRow({ agent }: { agent: AgentPublic }) {
       )}
       {agent.description && <span className="muted">— {agent.description}</span>}
       {agent.dedicated === false && <span className="muted">· pool</span>}
+      <span className="agent-row-actions">
+        <button type="button" className="action-btn ghost" onClick={onEdit}>
+          Edit
+        </button>
+        <button type="button" className="action-btn ghost" onClick={onDelete}>
+          Delete
+        </button>
+      </span>
     </li>
   );
 }

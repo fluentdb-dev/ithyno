@@ -199,6 +199,32 @@ export type RuntimeStatusResponse = {
   runtimes: RuntimeDefPublic[];
 };
 
+/** Write shape sent by AgentConfigModal to `POST /api/agents/config`.
+ *  Phase 5.2 defines the client mirror; Phase 5.3 lands the endpoint.
+ *  Delete is expressed as `{ action: "delete", name }` for a compact
+ *  API surface — the write endpoint dispatches on `action`. */
+export type AgentConfigPayload =
+  | {
+      action: "upsert";
+      /** Kebab-case; when editing an existing agent this must match
+       *  the row being edited. When adding, this must not already
+       *  exist server-side. */
+      name: string;
+      role: string;
+      /** Legacy shape. `command` is required for legacy; `args` may
+       *  be empty. */
+      command?: string;
+      args?: string[];
+      /** Runtime-backed shape. Mutually exclusive with `command`. */
+      runtime?: string;
+      prompt?: string;
+      specialties: string[];
+      concurrency: number;
+      dedicated: boolean;
+      description?: string;
+    }
+  | { action: "delete"; name: string };
+
 export type AgentConfigResponse = {
   ok: boolean;
   error?: string;

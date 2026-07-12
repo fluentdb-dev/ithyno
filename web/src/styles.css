@@ -1161,6 +1161,88 @@ a:hover {
 .agent-row:last-child {
   border-bottom: none;
 }
+.agent-row-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Agents tab: + Add agent button (add-agents-config-ui Phase 5.2) */
+.agents-add-btn {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* Agent config modal (add-agents-config-ui Phase 5.2) */
+.agent-config-modal {
+  max-width: 560px;
+  width: 92vw;
+}
+.agent-config-modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.agent-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.agent-config-field > span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.agent-config-field input[type="text"],
+.agent-config-field input[type="number"],
+.agent-config-field select,
+.agent-config-field textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.agent-config-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.agent-config-field-inline input[type="number"] {
+  width: 80px;
+}
+.agent-config-shape {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 0;
+}
+.agent-config-shape legend {
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.agent-config-shape label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 2px 0;
+}
+.agent-config-error {
+  color: var(--danger, #b91c1c);
+  font-size: 11px;
+}
+.agent-config-server-error {
+  color: var(--danger, #b91c1c);
+  background: color-mix(in oklab, var(--danger, #b91c1c) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--danger, #b91c1c) 40%, transparent);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
 
 /* Runtimes section (add-agents-tab-live-panel Phase 5.1) */
 .runtimes-section {
