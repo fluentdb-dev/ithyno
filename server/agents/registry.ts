@@ -177,7 +177,10 @@ function validateRuntimes(raw: unknown): Record<string, RuntimeDef> {
   return out;
 }
 
-function validateAgents(raw: unknown): AgentDef[] {
+/** Exported for `config-writer` (Phase 5.3: add-agents-config-write)
+ *  so `POST /api/agents/config` can reject bad payloads against the
+ *  same shape rules the loader enforces. */
+export function validateAgents(raw: unknown): AgentDef[] {
   if (!raw || typeof raw !== "object") throw new Error("agents.yaml must be an object");
   const list = (raw as { agents?: unknown }).agents;
   if (!Array.isArray(list)) throw new Error("agents.yaml: `agents` must be a list");
