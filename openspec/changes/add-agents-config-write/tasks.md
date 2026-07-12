@@ -39,9 +39,16 @@
 ## 6. Verification
 
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (240 → 257 tests)
+- [ ] 6.2 UI 手動確認 (user, end-to-end with 5.2):
+  - [ ] a. Modal で agent の role を変えて Save → HTTP 200、agents.yaml の該当 entry が新値に、他 entry / `runtimes:` / `worktreePool:` は byte-identical に保持
+  - [ ] b. + Add agent → 新 name (kebab-case) → Save → HTTP 200、agents.yaml に entry 追加、Configured (idle) に新 row 出現
+  - [ ] c. Delete → confirm → HTTP 200、agents.yaml から entry 削除、Configured (idle) から row 消える
+  - [ ] d. 存在しない name で Delete API 叩く (curl) → 404 + `agent '<name>' not found`
+  - [ ] e. 不正 payload (concurrency=0 / mixed shape) → 400 + inline error、agents.yaml は無変更
+  - [ ] f. atomic write: 意図的に mid-write でサーバー kill → `.tmp` は残るが agents.yaml は old のまま
 
 ## 7. Post-impl
 
 - [x] 7.1 phase-workflow へ merge (worktree flow) — via merge step
-- [x] 7.2 archive → phase-workflow に archive commit — via archive step
-- [ ] 7.3 Manual smoke deferred — needs `npm run dev` to observe an end-to-end edit round-trip; will run once we manually verify Phase 5 (5.1 + 5.2 + 5.3 together)
+- [ ] 7.2 archive → user が 6.2 を確認後に実施
+- [ ] 7.3 Manual smoke — 6.2 と統合

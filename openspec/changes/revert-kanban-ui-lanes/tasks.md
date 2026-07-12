@@ -38,9 +38,13 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean
-- [x] 8.2 Manual smoke deferred — needs `npm run dev` to observe the 3-column board
+- [ ] 8.2 UI 手動確認 (user):
+  - [ ] a. Kanban が **3 列** (TODO / IN-PROGRESS / DONE) のみ表示、5 列 (PROPOSED/CODED/REVIEWED/DONE/UNPHASED) にはなっていない
+  - [ ] b. WaitBadge / needs-human の card アクセント表示が **消えている** (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS が hit しない)
+  - [ ] c. `+ New Change` が TODO 列 header、`Start ▾` が IN-PROGRESS 列 header に配置される (top toolbar ではない)
+  - [ ] d. Card 上部の badge が phase 由来ではなく agent job 由来のみ
 
 ## 9. Post-impl
 
 - [x] 9.1 phase-workflow へ merge (worktree flow) — via merge step
-- [x] 9.2 archive → phase-workflow に archive commit — via archive step
+- [ ] 9.2 archive → phase-workflow に archive commit — user が 8.2 確認後に実施

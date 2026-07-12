@@ -39,10 +39,19 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean (273 tests unchanged)
+- [ ] 8.2 UI 手動確認 (user, サーバー再起動が必要 — 新 endpoint /api/manager/status):
+  - [ ] a. Agents タブに **Manager section** が Runtimes と Live の間に出現
+  - [ ] b. `agents.yaml` に `role: manager` 無し + Terminal panel 開いている場合: Not-configured 状態 (`Manager (not configured in agents.yaml): claude --continue` + explanation + `[Declare in agents.yaml]` button)
+  - [ ] c. `[Declare in agents.yaml]` クリック → AgentConfigModal が Add mode で開く。role が `manager` prefill、command=`claude`、args=`[--continue]`、name field は空 (editable)
+  - [ ] d. name を入力 → Save → Manager section が Declared 状態に切替 (row 表示、Edit only、Delete 無し)
+  - [ ] e. Configured (idle) section から declared manager が **消えている** (フィルタ効いてる)
+  - [ ] f. Terminal panel を全部閉じる → Idle 状態のメッセージ表示 (`No manager declared. Opening a change view launches the Terminal panel...`)
+  - [ ] g. 環境変数 `ITHYNO_TERMINAL_STARTUP=aider` を設定してサーバー再起動 → Not-configured 状態の resolvedStartup が `aider`、explanation が `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
+  - [ ] h. curl で non-loopback から `/api/manager/status` → 403
 
 ## 9. Post-impl
 
 - [x] 9.1 phase-workflow へ merge (worktree flow) — via merge step
-- [x] 9.2 archive → phase-workflow に archive commit — via archive step
+- [ ] 9.2 archive → user が 8.2 を確認後に実施
 - [x] 9.3 rebuild dist so the UI on :55910 picks up the new bundle — via post-archive build
-- [ ] 9.4 puppeteer verify — deferred; will run once user confirms hard reload behavior
+- [ ] 9.4 puppeteer verify — user 確認後に自動セットで補完

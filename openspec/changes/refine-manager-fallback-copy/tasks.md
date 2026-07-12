@@ -17,9 +17,15 @@
 ## 4. Verification
 
 - [x] 4.1 `npm test && npm run typecheck && npm run build` clean (no tests touched — text-only)
+- [ ] 4.2 UI 手動確認 (user, `role: manager` 無 + Terminal panel 開いている状態):
+  - [ ] a. Manager section の header が **`Manager (not configured in agents.yaml): claude --continue`** (以前の `Manager (fallback):` ではない)
+  - [ ] b. 説明行が **`Currently running the built-in default startup command.`** (以前の `Source: hardcoded default` ではない)
+  - [ ] c. `ITHYNO_TERMINAL_STARTUP=aider` 設定 + 再起動 → 説明行が `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
+  - [ ] d. Terminal panel 全部閉じた idle 状態 → `will run the built-in default until you declare one.` (以前の `hardcoded default` ではない)
+  - [ ] e. 内部 API (`fallbackSource: "declared" | "env" | "default"`) は変わっていない (curl `/api/manager/status` で確認)
 
 ## 5. Post-impl
 
 - [x] 5.1 phase-workflow へ merge (worktree flow) — via merge step
-- [x] 5.2 archive → phase-workflow に archive commit — via archive step
+- [ ] 5.2 archive → user が 4.2 を確認後に実施
 - [x] 5.3 rebuild dist so the UI on :55910 picks up the new copy — via post-archive build

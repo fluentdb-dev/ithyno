@@ -41,9 +41,18 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (233 → 240 tests; +7 kebab-case validation)
+- [ ] 9.2 UI 手動確認 (user):
+  - [ ] a. Agents タブの Configured (idle) 各 row に `[Edit]` `[Delete]` ボタン表示
+  - [ ] b. Configured (idle) セクション下部に `[+ Add agent]` ボタン表示
+  - [ ] c. `[Edit]` クリック → modal 開く。name field が **disabled** (灰色)、他 field 編集可能
+  - [ ] d. Modal を Save → toast「Saved to agents.yaml」→ modal 閉じる → row が新値で refresh (5.3 endpoint 存在時)
+  - [ ] e. Modal を Save (5.3 未 landed 時) → toast に「Phase 5.3 not landed」のヒントが出て modal 開いたまま
+  - [ ] f. `[Delete]` クリック → 確認ダイアログ「Delete agent <name>?」→ Confirm → row 消える
+  - [ ] g. `[+ Add agent]` クリック → modal 開く。name field が **editable** (白)、role が code (default)
+  - [ ] h. Modal で name に空 or uppercase / concurrency に 0 → inline validation エラー、Save disabled
 
 ## 10. Post-impl
 
 - [x] 10.1 phase-workflow へ merge (worktree flow) — via merge step
-- [x] 10.2 archive → phase-workflow に archive commit — via archive step
-- [ ] 10.3 Manual smoke deferred until Phase 5.3 lands the write endpoint
+- [ ] 10.2 archive → user が 9.2 を確認後に実施
+- [ ] 10.3 Manual smoke — 9.2 と統合 (deferred 記述は削除)
