@@ -687,6 +687,11 @@ variant.
 - **THEN** the server responds 404
 
 ### Requirement: Kanban Phase Swim Lanes
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> 看板は TODO / IN-PROGRESS / DONE の 3 列のみ、という原則に反するため削除予定。
+> Server-side phase state (sidecar / API) は残る。
+
 The Kanban SHALL render one swim lane per active phase in pipeline
 order (`proposed`, `coded`, `reviewed`, `done`) and SHALL place each
 change that has a valid phase into the corresponding lane.
@@ -706,6 +711,11 @@ change that has a valid phase into the corresponding lane.
 - **THEN** the change is displayed in the unphased fallback section and the board does not crash
 
 ### Requirement: Legacy Fallback For Unphased Changes
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> phase lane 廃止に伴い Unphased fallback セクションも不要 (全 card が単一の
+> 進捗ベース 3 列に入る)。
+
 The Kanban SHALL render changes that have no phase in a collapsed
 "Unphased" section that groups them using the pre-existing
 todo / inprogress / done bucketing, and SHALL allow the user to opt a
@@ -727,6 +737,9 @@ change into the phase system by dragging its card into a phase lane.
 - **THEN** the Unphased section is hidden or rendered empty-collapsed without occupying lane space
 
 ### Requirement: Progress-Independent Phase Placement
+
+> ⚠️ **PENDING REMOVAL** by [revert-kanban-ui-lanes](../../changes/revert-kanban-ui-lanes/):
+> phase lane 廃止で card 配置は task progress のみで決まる。この要件の raison d'être が消失。
 
 The Kanban SHALL place each phased change into the swim lane matching
 its `change.phase` value regardless of its task-progress state. A

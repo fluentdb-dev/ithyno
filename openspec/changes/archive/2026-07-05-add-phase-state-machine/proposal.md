@@ -2,6 +2,12 @@
 tags: [feature/workflow, feature/kanban, screen/kanban, area/server, area/web]
 ---
 
+> **PARTIALLY REVERTED** by [revert-kanban-ui-lanes](../2026-07-12-revert-kanban-ui-lanes/) —
+> Kanban UI portion: `Kanban Phase Swim Lanes` と `Legacy Fallback For Unphased Changes` は
+> 「看板 = 3 列のみ」原則により removed。Server-side (`Phase Persistence In Change Sidecar`,
+> `Phase Transition API`) は Manager / worker が使うのでそのまま。
+> `Manual Phase Transitions In The UI` は先行 [revert-active-phase-ui](../2026-07-07-revert-active-phase-ui/) で削除済み。
+
 ## Why
 
 The multi-agent redesign (Phase 3+) needs a shared notion of where each

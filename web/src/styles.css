@@ -624,28 +624,23 @@ a:hover {
   display: block;
 }
 
-/* Kanban board */
+/* Kanban board — 3 columns: TODO / IN-PROGRESS / DONE. Phase state is a
+   Manager-internal concern and is NOT rendered on the board (see
+   revert-kanban-ui-lanes). */
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-top: 18px;
 }
-/* Phase-first layout: 4 phase lanes (proposed, coded, reviewed, done). */
-.kanban-board-phases {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 0; /* the toolbar above provides the gap */
-}
 @media (max-width: 900px) {
-  .kanban-board,
-  .kanban-board-phases {
+  .kanban-board {
     grid-template-columns: 1fr;
   }
 }
 
 /* Top-of-board toolbar. Carries "+ New Change" and the parallel Start
-   launcher — at 4-lane widths the PROPOSED lane header would overflow
-   with these embedded, so they float above the board. */
+   launcher above the board. */
 .kanban-toolbar {
   display: flex;
   gap: 10px;
@@ -656,85 +651,6 @@ a:hover {
 }
 .kanban-toolbar .kanban-add {
   font-size: 12px;
-}
-
-/* Escalation-state markers. needs-human cards live in their priorPhase
-   lane; the WaitBadge and italic question line make them visible without
-   a dedicated strip. */
-.kanban-wait-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: color-mix(in oklab, var(--accent) 18%, transparent);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-.kanban-card.needs-human {
-  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
-}
-.kanban-card-question {
-  font-style: italic;
-  color: var(--text);
-}
-
-/* Unphased section spans all lane columns as a full-width row below. */
-.kanban-unphased {
-  grid-column: 1 / -1;
-  background: var(--panel);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.kanban-unphased-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.kanban-unphased-head h3 {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.kanban-unphased-hint {
-  font-size: 11px;
-  color: var(--muted);
-}
-.kanban-unphased-body {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .kanban-unphased-body {
-    grid-template-columns: 1fr;
-  }
-}
-.kanban-unphased-sub {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.kanban-unphased-sub h4 {
-  margin: 0 0 4px;
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 .kanban-col {
   background: var(--panel);

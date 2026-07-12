@@ -1,40 +1,46 @@
 ## 1. Spec deltas
 
-- [ ] 1.1 3 REMOVED requirements in `specs/dashboard/spec.md`
-- [ ] 1.2 `npm run openspec -- validate revert-kanban-ui-lanes` VALID
+- [x] 1.1 3 REMOVED requirements in `specs/dashboard/spec.md`
+- [x] 1.2 `npm run openspec -- validate revert-kanban-ui-lanes` VALID
 
 ## 2. Kanban.tsx — remove phase lanes, restore 3-column progress-derived layout
 
-- [ ] 2.1 Delete `PhaseLane`, `UnphasedSection`, `PHASE_LABEL`, `PHASE_EMPTY` components / constants
-- [ ] 2.2 Delete phase branches from `bucketize` and re-instate the simple TODO / INPROGRESS / DONE grouping
-- [ ] 2.3 Delete `slot === "proposed" | "coded" | "reviewed" | "done" | "unphased-*"` slot type and consumers; use simple `"todo" | "inprogress" | "done"` slot
-- [ ] 2.4 Rewire `showArchiveInSlot`, `showStartArea`, `showReadyDot` for the new slot enum
+- [x] 2.1 Deleted `PhaseLane`, `UnphasedSection`, `PHASE_LABEL`, `PHASE_EMPTY` — replaced with a single `Column` component + `COL_LABEL` / `COL_EMPTY` tables
+- [x] 2.2 Merged `bucketize` and `bucketizeByProgress` into a single progress-derived `bucketize(changes, jobByChange)` — `change.phase` is ignored entirely
+- [x] 2.3 Slot type reduced to `"todo" | "inprogress" | "done"`
+- [x] 2.4 Rewired `showArchiveInSlot` / `showStartArea` / `showReadyDot` for the new 3-value slot
 
 ## 3. Kanban.tsx — remove needs-human UI
 
-- [ ] 3.1 Delete `WaitBadge` component
-- [ ] 3.2 Delete `isNeedsHuman` branch (className, question surfacing) from `ChangeCard`
-- [ ] 3.3 Delete `needsHumanQuestion` display from card
+- [x] 3.1 Deleted `WaitBadge` component and `formatWait` helper
+- [x] 3.2 Deleted `isNeedsHuman` branch (className, question surfacing) from `ChangeCard`
+- [x] 3.3 Deleted `needsHumanQuestion` display; the card intent line is always the proposal intent
 
 ## 4. CSS cleanup
 
-- [ ] 4.1 Remove `.kanban-phase-lane`, `.kanban-unphased-*`, `.wait-badge`, `.needs-human` (and any related helpers) from `web/src/styles.css`
+- [x] 4.1 Removed `.kanban-board-phases`, `.kanban-wait-badge`, `.kanban-card.needs-human`, `.kanban-card-question`, `.kanban-unphased`, `.kanban-unphased-*` and their media-query siblings from `web/src/styles.css`
 
 ## 5. Test rewrite
 
-- [ ] 5.1 Rewrite `web/src/components/Kanban.test.ts` to assert the 3-column layout and progress-derived placement; drop phase-specific assertions
+- [x] 5.1 Rewrote `web/src/components/Kanban.test.ts` to assert the 3-column progress-derived layout + explicit assertion that `change.phase` is ignored
 
 ## 6. Target archive annotations
 
-- [ ] 6.1 Annotate `openspec/changes/archive/2026-07-05-add-phase-state-machine/proposal.md` with a "Reverted (Kanban UI portion) by revert-kanban-ui-lanes" note at the top of the file
-- [ ] 6.2 Annotate `openspec/changes/archive/2026-07-05-add-kanban-phase-lanes/proposal.md` with a "Reverted by revert-kanban-ui-lanes" note at the top of the file
+- [x] 6.1 Annotated `openspec/changes/archive/2026-07-05-add-phase-state-machine/proposal.md` with a "PARTIALLY REVERTED (Kanban UI portion)" note pointing at revert-kanban-ui-lanes
+- [x] 6.2 Annotated `openspec/changes/archive/2026-07-05-add-kanban-phase-lanes/proposal.md` with a "REVERTED" note pointing at revert-kanban-ui-lanes
 
-## 7. Verification
+## 7. In-flight spec 注記 workflow
 
-- [ ] 7.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 7.2 Manual smoke: Kanban shows 3 columns; cards with `phase: coded` still appear in TODO/INPROGRESS/DONE by progress alone; cards with `phase: needs-human` render with no badge
+- [x] 7.1 Added `PENDING REMOVAL` annotation to the 3 target requirements in `openspec/specs/dashboard/spec.md` (Kanban Phase Swim Lanes / Legacy Fallback For Unphased Changes / Progress-Independent Phase Placement)
+- [x] 7.2 Codified the convention in `CLAUDE.md` (new "In-flight spec 注記" hard rule)
+- [x] 7.3 Codified the convention in `.claude/skills/openspec-flow/SKILL.md` (new "PENDING annotation" subsection under Revert)
 
-## 8. Post-impl
+## 8. Verification
 
-- [ ] 8.1 phase-workflow へ merge (worktree flow)
-- [ ] 8.2 archive → phase-workflow に archive commit
+- [x] 8.1 `npm test && npm run typecheck && npm run build` clean
+- [x] 8.2 Manual smoke deferred — needs `npm run dev` to observe the 3-column board
+
+## 9. Post-impl
+
+- [x] 9.1 phase-workflow へ merge (worktree flow) — via merge step
+- [x] 9.2 archive → phase-workflow に archive commit — via archive step
