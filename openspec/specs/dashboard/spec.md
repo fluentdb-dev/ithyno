@@ -1620,6 +1620,10 @@ The handler SHALL:
 
 ### Requirement: Manager Role In agents.yaml
 
+> ⚠️ **PENDING MODIFICATION** by [refine-agents-config-modal](../../changes/refine-agents-config-modal/):
+> "zero, one, or many" は Manager が singleton であるべきという原則に合わないので "zero or one" に狭める。
+> UI 側では `+ Add agent` で既に manager がいれば `manager` role を dropdown から除外、server 側では 2 個目の manager upsert を 400 で reject する。
+
 The system SHALL accept `role: manager` as a first-class value on
 entries in the `agents:` list of `agents.yaml`. A manager-role
 entry SHALL use the legacy shape (`command` + optional `args[]`);
