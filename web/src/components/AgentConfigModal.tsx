@@ -19,7 +19,7 @@ type Shape = "legacy" | "runtime";
 const KEBAB_RE = /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/;
 
 type Props = {
-  /** `null` = edit mode with a starting agent (name field disabled);
+  /** `AgentPublic` = edit mode with the row's data (name field disabled);
    *  `"new"` = add mode (name field editable + empty defaults). */
   seed: AgentPublic | "new";
   runtimes: RuntimeDefPublic[];
@@ -27,6 +27,12 @@ type Props = {
    *  `manager` from the role dropdown in Add mode so users can't
    *  create a second one (Manager singleton, refine-agents-config-modal). */
   existingManagerName: string | null;
+  /** Optional Add-mode prefill (add-agents-tab-manager-section):
+   *  populate all form fields except `name` from this seed while
+   *  still treating the modal as Add mode. Ignored when `seed` is
+   *  an existing agent. Used by the Manager section's "Declare in
+   *  agents.yaml" shortcut. */
+  addModePrefill?: AgentPublic | null;
   onCancel: () => void;
   onSubmit: (payload: AgentConfigPayload) => Promise<void>;
 };
@@ -35,11 +41,19 @@ export function AgentConfigModal({
   seed,
   runtimes,
   existingManagerName,
+  addModePrefill,
   onCancel,
   onSubmit,
 }: Props) {
   const isAdd = seed === "new";
-  const initial = useMemo(() => deriveInitialForm(seed), [seed]);
+  const initial = useMemo(() => {
+    if (seed === "new" && addModePrefill) {
+      // Prefill but keep name empty + editable — the point of Add
+      // mode is that the user picks the name.
+      return { ...deriveInitialForm(addModePrefill), name: "" };
+    }
+    return deriveInitialForm(seed);
+  }, [seed, addModePrefill]);
   const [form, setForm] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

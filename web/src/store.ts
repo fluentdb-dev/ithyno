@@ -8,6 +8,7 @@ import {
   fetchAgentConfig,
   fetchAgentJobs,
   fetchAgentRuntimes,
+  fetchManagerStatus,
   fetchGitConfig,
   fetchGitStatus,
   checkAuth,
@@ -23,6 +24,7 @@ import type {
   GitConfig,
   JobStatus,
   JobSummary,
+  ManagerStatus,
   OutputLine,
   Progress,
   RuntimeStatusResponse,
@@ -65,6 +67,11 @@ type Store = {
    *  add-agents-tab-live-panel. */
   runtimes: RuntimeStatusResponse | null;
   runtimesError: string | null;
+  /** Resolved Manager status — declared entry, running fallback, or
+   *  idle (no terminal, no declaration). Null before the first fetch.
+   *  Landed by add-agents-tab-manager-section. */
+  managerStatus: ManagerStatus | null;
+  managerStatusError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
   /** Per-change live progress derived from the running job's worktree
@@ -91,6 +98,7 @@ type Store = {
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
   loadRuntimes: (refresh?: boolean) => Promise<void>;
+  loadManagerStatus: () => Promise<void>;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -170,6 +178,8 @@ export const useStore = create<Store>((set, get) => ({
   agentConfigError: null,
   runtimes: null,
   runtimesError: null,
+  managerStatus: null,
+  managerStatusError: null,
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
@@ -190,6 +200,14 @@ export const useStore = create<Store>((set, get) => ({
       set({ runtimes, runtimesError: null });
     } catch (err) {
       set({ runtimesError: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  loadManagerStatus: async () => {
+    try {
+      const managerStatus = await fetchManagerStatus();
+      set({ managerStatus, managerStatusError: null });
+    } catch (err) {
+      set({ managerStatusError: err instanceof Error ? err.message : String(err) });
     }
   },
   loadJobs: async () => {
