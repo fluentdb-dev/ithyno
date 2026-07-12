@@ -254,26 +254,26 @@ function ManagerSection({
     );
   }
 
-  // Fallback state: no declared entry BUT the Terminal panel is open,
-  // so something is actually running.
+  // "Not configured" state: no role: manager entry BUT the Terminal
+  // panel is open, so something is actually running. Say that plainly.
   if (status.terminalActive) {
-    const sourceLabel =
+    const explanation =
       status.fallbackSource === "env"
-        ? "environment variable ITHYNO_TERMINAL_STARTUP"
-        : "hardcoded default";
+        ? "Currently running the command from ITHYNO_TERMINAL_STARTUP."
+        : "Currently running the built-in default startup command.";
     const prefill = fallbackToPrefillAgent(status);
     return (
       <section className="agents-section manager-section">
         <h3>Manager</h3>
         <div className="manager-fallback-card">
           <div>
-            <strong>Manager (fallback):</strong>{" "}
+            <strong>Manager (not configured in agents.yaml):</strong>{" "}
             <code className="manager-startup">{status.resolvedStartup ?? "(none)"}</code>
           </div>
           {status.initialInput && (
             <div className="muted">initialInput: {status.initialInput}</div>
           )}
-          <div className="muted">Source: {sourceLabel}</div>
+          <div className="muted">{explanation}</div>
           <div style={{ marginTop: 8 }}>
             <button
               type="button"
@@ -294,7 +294,7 @@ function ManagerSection({
       <h3>Manager</h3>
       <p className="empty">
         No manager declared. Opening a change view launches the Terminal
-        panel, which will run the hardcoded default until you declare one.
+        panel, which will run the built-in default until you declare one.
       </p>
     </section>
   );
