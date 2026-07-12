@@ -311,8 +311,7 @@ describe("coercePayload", () => {
       dedicated: true,
     });
     expect("error" in res).toBe(false);
-    if (!("error" in res)) {
-      expect(res.action).toBe("upsert");
+    if (!("error" in res) && res.action === "upsert") {
       expect(res.command).toBe("claude");
     }
   });

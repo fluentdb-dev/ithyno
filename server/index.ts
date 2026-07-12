@@ -896,7 +896,7 @@ ptyWss.on("connection", async (ws) => {
   const cwd = openspecDir
     ? resolve(openspecDir, "..") // project root, not openspec/ itself
     : PROJECT_ROOT;
-  const result = await attachPtyToSocket(ws, { cwd });
+  const result = await attachPtyToSocket(ws, { cwd, registry: agentRegistry });
   if (!result.ok) {
     try {
       ws.send(`\r\n[ithyno] terminal unavailable: ${result.reason}\r\n`);

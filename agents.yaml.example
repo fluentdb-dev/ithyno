@@ -24,6 +24,25 @@
 # permission grant — every write lands under `.worktrees/<change-id>/`.
 
 agents:
+  # ---------- Manager (role: manager) ---------------------------------------
+  # The interactive REPL that runs in the embedded Terminal panel. Different
+  # from workers (below): the Manager is spawned into a real PTY and takes
+  # user input, while workers run headless via the runner's `-p` mode.
+  #
+  # If no `role: manager` entry is declared, the Terminal panel falls back
+  # to `ITHYNO_TERMINAL_STARTUP` env var and then to `claude --continue`.
+  # Uncomment to make your Manager choice explicit in the config.
+  # See add-manager-agent-config for the full priority chain.
+  #
+  # Runtime-backed shape (runtime + prompt) is NOT accepted for managers.
+  #
+  # - name: primary-manager
+  #   role: manager
+  #   command: claude
+  #   args: ["--continue"]
+  #   initialInput: "/opsx:manage"     # auto-injected after the REPL boots
+
+  # ---------- Workers (role: code / review / verify) ------------------------
   # Default Claude entry — uses `/ithy-opsx:apply` so the agent branch ends
   # with the implementation committed. The wrapping skill delegates to
   # `/opsx:apply` for the actual work, then adds one `git commit` at the
