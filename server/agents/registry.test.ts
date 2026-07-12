@@ -319,3 +319,78 @@ agents:
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
   });
 });
+
+describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
+  it("returns null when no manager-role entry exists", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    expect(reg.managerAgent()).toBeNull();
+  });
+
+  it("returns the first manager-role entry when one is declared", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+    initialInput: /opsx:manage
+  - name: coder
+    role: code
+    command: claude
+    args: [-p]
+`,
+    );
+    const m = reg.managerAgent();
+    expect(m).not.toBeNull();
+    expect(m!.name).toBe("primary");
+    expect(m!.command).toBe("claude");
+    expect(m!.args).toEqual(["--continue"]);
+    expect(m!.initialInput).toBe("/opsx:manage");
+  });
+
+  it("returns the first (by file order) when multiple manager entries exist", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: first-mgr
+    role: manager
+    command: claude
+    args: [--continue]
+  - name: second-mgr
+    role: manager
+    command: aider
+    args: []
+`,
+    );
+    const m = reg.managerAgent();
+    expect(m!.name).toBe("first-mgr");
+  });
+
+  it("rejects a runtime-backed manager at load", async () => {
+    const reg = await loadWith(
+      `runtimes:
+  claude:
+    command: claude
+    baseArgs: []
+    promptStyle: cli-arg
+    supports:
+      interactive: true
+      artifactOutput: true
+      diff: git
+agents:
+  - name: bad-mgr
+    role: manager
+    runtime: claude
+    prompt: /opsx:manage
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/manager/);
+  });
+});

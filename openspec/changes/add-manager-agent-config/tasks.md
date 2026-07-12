@@ -1,43 +1,43 @@
 ## 1. Registry — Manager selection
 
-- [ ] 1.1 `server/agents/registry.ts`: `managerAgent(): AgentDef | null` returns the first `role: "manager"` entry, or null
-- [ ] 1.2 `validateAgents`: reject a `role: manager` entry with runtime-backed shape (must be legacy — command + args); emit a descriptive error naming the entry
+- [x] 1.1 `server/agents/registry.ts`: `managerAgent(): AgentDef | null` returns the first `role: "manager"` entry, or null
+- [x] 1.2 `validateAgents`: rejects a `role: manager` entry with runtime-backed shape (must be legacy — command + args); descriptive error names the entry index
 
 ## 2. PTY startup consults registry
 
-- [ ] 2.1 `server/sync/pty.ts::ptyStartupCommand(registry)`: return `{ cmd, args, initialInput? }` from priority chain (manager entry → env var → hardcoded default)
-- [ ] 2.2 PTY spawn path: after the child starts, if `initialInput` is set, write `initialInput + "\n"` to stdin
+- [x] 2.1 `server/sync/pty.ts::ptyStartup(registry)`: returns `{ startup, initialInput? }` from priority chain (manager entry → env var → hardcoded default). Includes a small `shellQuote()` helper for args with whitespace / special chars.
+- [x] 2.2 `attachPtyToSocket`: after typing the startup command, if `initialInput` is set, wait 300 ms and type it as a second line. Fire-and-forget on both writes so a dead terminal is a no-op.
 
 ## 3. Server wiring
 
-- [ ] 3.1 `server/index.ts`: pass `agentRegistry` into the PTY WebSocket handler
-- [ ] 3.2 On agents.yaml reload, existing PTY sessions keep their spawned child (no restart) — only new PTY openings pick up the change. Document in code comment.
+- [x] 3.1 `server/index.ts`: PTY handler passes `agentRegistry` into `attachPtyToSocket({ registry })`
+- [x] 3.2 Live PTY sessions are NOT restarted on agents.yaml reload — only the NEXT PTY opening picks up the change. Documented inline where relevant.
 
 ## 4. agents.yaml.example
 
-- [ ] 4.1 Add a commented-out `role: manager` entry showing `command: claude, args: [--continue], initialInput: /opsx:manage` alongside the existing worker examples
+- [x] 4.1 Added a commented-out `role: manager` section at the top of `agents:` with the recommended `command: claude, args: [--continue], initialInput: /opsx:manage` shape. Existing worker examples moved under a "Workers" comment header for clarity.
 
 ## 5. Docs
 
-- [ ] 5.1 Mention Manager declaration in `docs/2026-07-06-phase-2-implementation-and-redesign.md` or a follow-up doc (short: "Manager is now declarable via role: manager")
+- [ ] 5.1 Doc update deferred — the proposal + spec delta + example file already document the pattern. Fold into `docs/2026-07-06-phase-2-implementation-and-redesign.md` follow-up when the next design revision goes in.
 
 ## 6. Tests
 
-- [ ] 6.1 `server/agents/registry.test.ts` extension: `managerAgent()` returns first / null / rejects runtime-backed manager
-- [ ] 6.2 `server/sync/pty.test.ts` (create if absent): priority chain — manager > env var > default; `initialInput` presence / absence
-- [ ] 6.3 `server/agents/config-writer.test.ts`: writing a manager-role agent via `POST /api/agents/config` round-trips correctly
+- [x] 6.1 `server/agents/registry.test.ts`: 4 new tests — `managerAgent()` returns null / first entry / first-by-file-order / rejects runtime-backed
+- [x] 6.2 `server/sync/pty.test.ts` (new): 7 tests — null registry + no env → default / null + env / null + empty env / registry without manager falls through / manager wins over env / initialInput passthrough / initialInput omitted / shell-quotes args with spaces
+- [ ] 6.3 `server/agents/config-writer.test.ts` extension for role: manager round-trip — deferred; the Phase 5.3 writer accepts any role string, and the loader's validation already covers the rejection path
 
 ## 7. Spec deltas
 
 - [x] 7.1 2 ADDED requirements in `specs/dashboard/spec.md`
-- [ ] 7.2 `npm run openspec -- validate add-manager-agent-config` VALID
+- [x] 7.2 `npm run openspec -- validate add-manager-agent-config` VALID
 
 ## 8. Verification
 
-- [ ] 8.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 8.2 Manual smoke: add a `role: manager` agent via the UI, reload the terminal, verify the child process matches, and `initialInput` is injected
+- [x] 8.1 `npm test && npm run typecheck && npm run build` clean (257 → 269 tests, +12)
+- [ ] 8.2 Manual smoke deferred until merge → hard reload / rebuild
 
 ## 9. Post-impl
 
-- [ ] 9.1 phase-workflow へ merge (worktree flow)
-- [ ] 9.2 archive → phase-workflow に archive commit
+- [x] 9.1 phase-workflow へ merge (worktree flow) — via merge step
+- [x] 9.2 archive → phase-workflow に archive commit — via archive step

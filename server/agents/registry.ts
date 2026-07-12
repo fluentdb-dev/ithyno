@@ -252,6 +252,17 @@ export function validateAgents(raw: unknown): AgentDef[] {
       role = o.role;
     }
 
+    // Manager agents run interactively in the embedded PTY, not via
+    // the runner's `-p` mode. Runtime-backed shape doesn't have an
+    // "interactive" promptStyle yet, so reject it explicitly rather
+    // than let a broken runtime-backed manager into the config.
+    // See add-manager-agent-config.
+    if (role === "manager" && runtimeShape) {
+      throw new Error(
+        `agents[${i}]: role: manager requires the legacy shape (command + args); runtime-backed managers are not yet supported`,
+      );
+    }
+
     let specialties: string[] = [];
     if (o.specialties !== undefined) {
       if (!Array.isArray(o.specialties)) {
@@ -422,6 +433,17 @@ export class AgentRegistry {
 
   find(name: string): AgentDef | null {
     return this.cache.agents.find((a) => a.name === name) ?? null;
+  }
+
+  /**
+   * The first agent declared with `role: manager`, or `null` if none.
+   * The embedded Terminal panel uses this to pick its PTY startup command
+   * (add-manager-agent-config). Zero manager entries is not an error —
+   * the caller falls back to the ITHYNO_TERMINAL_STARTUP env var and
+   * then a hardcoded default.
+   */
+  managerAgent(): AgentDef | null {
+    return this.cache.agents.find((a) => a.role === "manager") ?? null;
   }
 
   /** All configured runtimes (name → def). Empty when no runtimes: section
