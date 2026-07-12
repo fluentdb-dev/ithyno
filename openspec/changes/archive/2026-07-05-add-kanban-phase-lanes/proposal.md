@@ -2,6 +2,11 @@
 tags: [kanban, phase-workflow, ui, dnd-kit]
 ---
 
+> **REVERTED** by [revert-kanban-ui-lanes](../2026-07-12-revert-kanban-ui-lanes/) —
+> 看板 = TODO/IN-PROGRESS/DONE の 3 列のみ、という原則に反していた。
+> Phase lane / Unphased fallback / Progress-Independent Phase Placement
+> の 3 要件はいずれも spec から removed。Server-side phase state (sidecar / API) は残る。
+
 ## Why
 
 `add-phase-state-machine` shipped the phase substrate — persistence in

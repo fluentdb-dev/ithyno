@@ -389,6 +389,32 @@ Reverting a past change is a first-class workflow variant. It has
 its own naming convention and disposition rules, formalized by
 `add-revert-workflow`.
 
+### PENDING annotation (Hard rule for MODIFIED / REMOVED deltas)
+
+At **propose time** for any change carrying a MODIFIED or REMOVED
+delta against a landed requirement, insert a one-line notice directly
+under that requirement's heading in the current
+`openspec/specs/<capability>/spec.md`:
+
+```md
+### Requirement: <name>
+
+> ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
+
+<existing body — untouched>
+```
+
+Rationale: between propose and archive the spec still shows the
+requirement as if it were authoritative. Any agent / session reading
+the spec in that window follows the doomed requirement without
+seeing the pending revert. The annotation vanishes automatically at
+archive time (REMOVED requirement disappears; MODIFIED requirement
+gets its body replaced from the delta).
+
+Not needed for pure ADDED (the requirement does not yet exist in
+the current spec). Also not needed for changes that only touch
+non-spec artifacts (impl, tests, docs).
+
 ### Naming
 
 - Revert change id: `revert-<scope>` where scope names the
