@@ -16,6 +16,7 @@ import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount } fro
 import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { dispatch } from "./agents/dispatch.js";
+import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
 import { detectAllRuntimes, type DetectionResult } from "./agents/runtime-detect.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
@@ -551,6 +552,25 @@ fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
 fastify.get("/api/agents/config", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   return agentRegistry.publicConfig();
+});
+
+// Write endpoint (Phase 5.3: add-agents-config-write). Accepts an upsert
+// or delete payload from the Agents tab modal and atomically rewrites
+// agents.yaml. The registry's file watcher picks up the change and
+// reloads on its own — no manual load() here.
+fastify.post("/api/agents/config", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const coerced = coercePayload(req.body);
+  if ("error" in coerced) {
+    return reply.code(400).send({ error: coerced.error });
+  }
+  const result = await applyAgentConfigPayload(PROJECT_ROOT, coerced);
+  if (!result.ok) {
+    return reply.code(result.status).send({ error: result.error });
+  }
+  return { ok: true };
 });
 
 // Per-runtime installation cache. Populated on demand (first request or
