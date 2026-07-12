@@ -1870,6 +1870,9 @@ callers.
 
 ### Requirement: Agents Tab Manager Section
 
+> ⚠️ **PENDING MODIFICATION** by [refine-manager-fallback-copy](../../changes/refine-manager-fallback-copy/):
+> "fallback" は user 向け語彙として不明瞭。Not-configured 状態のヘッダー / 説明文をより平易な表現へ差し替える。
+
 The Agents tab SHALL render a dedicated `Manager` section between
 the Runtimes section and the Live section. The section SHALL render
 exactly one of three states based on `GET /api/manager/status`:
