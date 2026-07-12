@@ -37,6 +37,9 @@ export type UpsertPayload = {
   concurrency: number;
   dedicated: boolean;
   description?: string;
+  /** Optional prompt line injected on spawn — Manager PTY or worker
+   *  `-p` arg. Round-trips through agents.yaml as-is. */
+  initialInput?: string;
 };
 
 export type DeletePayload = {
@@ -101,6 +104,12 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   };
   if (typeof o.description === "string" && o.description.length > 0) {
     payload.description = o.description;
+  }
+  if (o.initialInput !== undefined) {
+    if (typeof o.initialInput !== "string") {
+      return { error: "initialInput must be a string" };
+    }
+    if (o.initialInput.length > 0) payload.initialInput = o.initialInput;
   }
   if (legacy) {
     if (typeof o.command !== "string" || !o.command) {
@@ -177,10 +186,38 @@ export async function applyAgentConfigPayload(
     if (idx === -1) {
       return { ok: false, status: 404, error: `agent '${payload.name}' not found` };
     }
+    // refine-agents-config-modal: Manager row is edit-only. Deleting the
+    // Manager from the UI silently disables the Terminal panel's
+    // auto-launch, which is a footgun. Users who really want to remove
+    // it can hand-edit agents.yaml.
+    const target = list[idx] as Record<string, unknown> | undefined;
+    if (target && target.role === "manager") {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          "manager agents cannot be deleted from the UI; edit agents.yaml directly to remove",
+      };
+    }
     list.splice(idx, 1);
   } else {
     // upsert
     const idx = findAgentIndex(list, payload.name);
+    // refine-agents-config-modal: Manager is a singleton. Reject a
+    // second manager upsert (name differs from the existing manager's
+    // name); editing the existing manager (same name) is fine.
+    if (payload.role === "manager") {
+      const existingManagerIdx = list.findIndex(
+        (e) => e && typeof e === "object" && (e as Record<string, unknown>).role === "manager",
+      );
+      if (existingManagerIdx !== -1 && existingManagerIdx !== idx) {
+        return {
+          ok: false,
+          status: 400,
+          error: "only one role: manager entry is allowed",
+        };
+      }
+    }
     const entry = renderAgentYamlEntry(payload);
     if (idx === -1) {
       list.push(entry);
@@ -231,6 +268,7 @@ function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
     dedicated: p.dedicated,
   };
   if (p.description !== undefined) entry.description = p.description;
+  if (p.initialInput !== undefined) entry.initialInput = p.initialInput;
   if (p.command !== undefined) {
     entry.command = p.command;
     entry.args = p.args ?? [];

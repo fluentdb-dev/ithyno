@@ -184,7 +184,7 @@ export function validateAgents(raw: unknown): AgentDef[] {
   if (!raw || typeof raw !== "object") throw new Error("agents.yaml must be an object");
   const list = (raw as { agents?: unknown }).agents;
   if (!Array.isArray(list)) throw new Error("agents.yaml: `agents` must be a list");
-  return list.map((a, i) => {
+  const agents = list.map((a, i) => {
     if (!a || typeof a !== "object") throw new Error(`agents[${i}] must be an object`);
     const o = a as Record<string, unknown>;
     if (typeof o.name !== "string" || !o.name) throw new Error(`agents[${i}].name is required`);
@@ -307,6 +307,20 @@ export function validateAgents(raw: unknown): AgentDef[] {
       dedicated,
     };
   });
+
+  // Manager singleton — refine-agents-config-modal. A second entry
+  // would silently be ignored by the Terminal panel (which picks
+  // the first), so surface it as a load-time error naming the offender.
+  const managerIndexes: number[] = [];
+  agents.forEach((a, i) => {
+    if (a.role === "manager") managerIndexes.push(i);
+  });
+  if (managerIndexes.length > 1) {
+    throw new Error(
+      `agents[${managerIndexes[1]}]: only one role: manager entry is allowed (first at agents[${managerIndexes[0]}])`,
+    );
+  }
+  return agents;
 }
 
 const KNOWN_POOL_KEYS = new Set(["max", "namePrefix", "cleanupBetweenJobs"]);

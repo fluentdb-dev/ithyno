@@ -227,6 +227,113 @@ describe("applyAgentConfigPayload — delete", () => {
   });
 });
 
+describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-modal)", () => {
+  it("rejects delete on a manager entry with 400", async () => {
+    const seedYaml = [
+      "agents:",
+      "  - name: primary",
+      "    role: manager",
+      "    command: claude",
+      "    args: [--continue]",
+      "",
+    ].join("\n");
+    await seed(seedYaml);
+    const res = await applyAgentConfigPayload(dir, {
+      action: "delete",
+      name: "primary",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.status).toBe(400);
+      expect(res.error).toMatch(/cannot be deleted/i);
+    }
+    // File untouched.
+    const raw = await readFile(join(dir, "agents.yaml"), "utf8");
+    expect(raw).toBe(seedYaml);
+  });
+
+  it("rejects upsert that would create a second manager with 400", async () => {
+    const seedYaml = [
+      "agents:",
+      "  - name: primary",
+      "    role: manager",
+      "    command: claude",
+      "    args: [--continue]",
+      "",
+    ].join("\n");
+    await seed(seedYaml);
+    const res = await applyAgentConfigPayload(dir, {
+      action: "upsert",
+      name: "secondary",
+      role: "manager",
+      command: "aider",
+      args: [],
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.status).toBe(400);
+      expect(res.error).toMatch(/only one role: manager/i);
+    }
+    const raw = await readFile(join(dir, "agents.yaml"), "utf8");
+    expect(raw).toBe(seedYaml);
+  });
+
+  it("accepts upsert on the existing manager (same name)", async () => {
+    await seed(
+      [
+        "agents:",
+        "  - name: primary",
+        "    role: manager",
+        "    command: claude",
+        "    args: [--continue]",
+        "",
+      ].join("\n"),
+    );
+    const res = await applyAgentConfigPayload(dir, {
+      action: "upsert",
+      name: "primary",
+      role: "manager",
+      command: "aider",
+      args: [],
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    });
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    const agents = doc.agents as Array<Record<string, unknown>>;
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ name: "primary", command: "aider" });
+  });
+
+  it("round-trips initialInput field on upsert", async () => {
+    await seed("agents: []\n");
+    const res = await applyAgentConfigPayload(dir, {
+      action: "upsert",
+      name: "primary",
+      role: "manager",
+      command: "claude",
+      args: ["--continue"],
+      initialInput: "/opsx:manage",
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    });
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    const agents = doc.agents as Array<Record<string, unknown>>;
+    expect(agents[0]).toMatchObject({
+      name: "primary",
+      role: "manager",
+      command: "claude",
+      initialInput: "/opsx:manage",
+    });
+  });
+});
+
 describe("atomic write", () => {
   it("does not leave a .tmp sibling after success", async () => {
     await seed("agents: []\n");

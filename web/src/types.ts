@@ -222,6 +222,12 @@ export type AgentConfigPayload =
       concurrency: number;
       dedicated: boolean;
       description?: string;
+      /** Optional prompt line injected on spawn. For Manager entries
+       *  (role: manager) this is typed into the PTY after the shell
+       *  boots the runtime. For worker entries it's translated into
+       *  `-p <initialInput>` by the runner. See add-manager-agent-config
+       *  and add-agent-initial-input. */
+      initialInput?: string;
     }
   | { action: "delete"; name: string };
 
