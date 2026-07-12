@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type {
+  AgentConfigPayload,
   AgentConfigResponse,
   Change,
   DiffPayload,
@@ -226,6 +227,25 @@ export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
   const res = await fetch("/api/agents/config");
   if (!res.ok) throw new Error(`GET /api/agents/config failed: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Write agents.yaml via `POST /api/agents/config`. The endpoint lands
+ * in Phase 5.3 (`add-agents-config-write`) — until then a 404 is
+ * expected. Callers should surface a toast with a hint about the
+ * missing endpoint.
+ */
+export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/agents/config",
+    payload,
+  );
+  if (status === 404) {
+    throw new Error(
+      "POST /api/agents/config is not implemented yet (Phase 5.3: add-agents-config-write). The UI is ready but the server write endpoint has not landed.",
+    );
+  }
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
 /**
