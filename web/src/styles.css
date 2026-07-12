@@ -639,19 +639,6 @@ a:hover {
   }
 }
 
-/* Top-of-board toolbar. Carries "+ New Change" and the parallel Start
-   launcher above the board. */
-.kanban-toolbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: flex-end;
-  margin-top: 18px;
-  margin-bottom: 8px;
-}
-.kanban-toolbar .kanban-add {
-  font-size: 12px;
-}
 .kanban-col {
   background: var(--panel);
   border: 1px solid var(--border);

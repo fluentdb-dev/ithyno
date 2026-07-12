@@ -190,27 +190,35 @@ export function KanbanBoard({
 
   return (
     <>
-      <div className="kanban-toolbar">
-        <button className="primary kanban-add" onClick={onNewChange}>
-          + New Change
-        </button>
-        <ParallelStartLauncher
-          changes={changes}
-          jobByChange={jobByChange}
-          startImplementation={startImplementation}
-        />
-      </div>
       <div className="kanban-board">
-        {columns.map((slot) => (
-          <Column
-            key={slot}
-            title={COL_LABEL[slot]}
-            count={buckets[slot].length}
-            emptyText={COL_EMPTY[slot]}
-          >
-            {buckets[slot].map((c) => renderCard(c, slot))}
-          </Column>
-        ))}
+        {columns.map((slot) => {
+          // Spec: TODO column carries "+ New Change"; IN-PROGRESS carries
+          // the parallel Start launcher (add-parallel-start-launcher's
+          // "IN-PROGRESS Column Start Launcher" requirement).
+          const headerAction =
+            slot === "todo" ? (
+              <button className="primary kanban-add" onClick={onNewChange}>
+                + New Change
+              </button>
+            ) : slot === "inprogress" ? (
+              <ParallelStartLauncher
+                changes={changes}
+                jobByChange={jobByChange}
+                startImplementation={startImplementation}
+              />
+            ) : null;
+          return (
+            <Column
+              key={slot}
+              title={COL_LABEL[slot]}
+              count={buckets[slot].length}
+              emptyText={COL_EMPTY[slot]}
+              headerAction={headerAction}
+            >
+              {buckets[slot].map((c) => renderCard(c, slot))}
+            </Column>
+          );
+        })}
       </div>
 
       {pending && (
@@ -248,11 +256,13 @@ function Column({
   title,
   count,
   emptyText,
+  headerAction,
   children,
 }: {
   title: string;
   count: number;
   emptyText: string;
+  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -261,6 +271,7 @@ function Column({
         <h3>
           {title} <span className="kanban-col-count">{count}</span>
         </h3>
+        {headerAction}
       </header>
       <div className="kanban-col-body">
         {count === 0 ? <p className="empty kanban-empty">{emptyText}</p> : children}
