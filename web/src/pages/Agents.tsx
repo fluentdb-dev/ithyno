@@ -7,6 +7,7 @@ import type {
   AgentConfigPayload,
   AgentPublic,
   JobSummary,
+  ManagerStatus,
   RuntimeDefPublic,
 } from "../types";
 import { DiffView } from "../components/DiffView";
@@ -33,9 +34,11 @@ export function Agents() {
   const agentConfigError = useStore((s) => s.agentConfigError);
   const runtimes = useStore((s) => s.runtimes);
   const runtimesError = useStore((s) => s.runtimesError);
+  const managerStatus = useStore((s) => s.managerStatus);
   const loadAgents = useStore((s) => s.loadAgents);
   const loadJobs = useStore((s) => s.loadJobs);
   const loadRuntimes = useStore((s) => s.loadRuntimes);
+  const loadManagerStatus = useStore((s) => s.loadManagerStatus);
   const pushToast = useStore((s) => s.pushToast);
   const [searchParams] = useSearchParams();
   const focusedJobId = searchParams.get("job");
@@ -46,6 +49,7 @@ export function Agents() {
   //   "new"   — Add mode (empty modal)
   //   Agent   — Edit mode (prefilled with the seed agent)
   const [editing, setEditing] = useState<AgentPublic | "new" | null>(null);
+  const [addModePrefill, setAddModePrefill] = useState<AgentPublic | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<AgentPublic | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -74,16 +78,20 @@ export function Agents() {
     void loadAgents();
     void loadJobs();
     void loadRuntimes();
-  }, [loadAgents, loadJobs, loadRuntimes]);
+    void loadManagerStatus();
+  }, [loadAgents, loadJobs, loadRuntimes, loadManagerStatus]);
 
   const sorted = [...jobs].sort((a, b) => b.startedAt - a.startedAt);
   const active = sorted.filter((j) => j.status === "running");
   const finished = sorted.filter((j) => j.status !== "running");
 
   // Configured (idle): agents from agents.yaml that do NOT have a
-  // currently-running job. Match by name.
+  // currently-running job AND are not the Manager (Manager gets its
+  // own section per add-agents-tab-manager-section). Match by name.
   const runningAgentNames = new Set(active.map((j) => j.agentName));
-  const idleAgents = agents.filter((a) => !runningAgentNames.has(a.name));
+  const idleAgents = agents.filter(
+    (a) => !runningAgentNames.has(a.name) && a.role !== "manager",
+  );
 
   // Manager singleton (refine-agents-config-modal). Used by the modal
   // to hide the `manager` role option in Add mode when one already
@@ -103,6 +111,15 @@ export function Agents() {
         runtimes={runtimes?.runtimes ?? null}
         error={runtimesError}
         onRefresh={() => void loadRuntimes(true)}
+      />
+
+      <ManagerSection
+        status={managerStatus}
+        onEdit={(agent) => setEditing(agent)}
+        onDeclare={(prefill) => {
+          setAddModePrefill(prefill);
+          setEditing("new");
+        }}
       />
 
       <section className="agents-section">
@@ -167,8 +184,15 @@ export function Agents() {
           seed={editing}
           runtimes={runtimes?.runtimes ?? []}
           existingManagerName={existingManagerName}
-          onCancel={() => setEditing(null)}
-          onSubmit={handleSave}
+          addModePrefill={addModePrefill}
+          onCancel={() => {
+            setEditing(null);
+            setAddModePrefill(null);
+          }}
+          onSubmit={async (payload) => {
+            await handleSave(payload);
+            setAddModePrefill(null);
+          }}
         />
       )}
 
@@ -182,6 +206,117 @@ export function Agents() {
       )}
     </div>
   );
+}
+
+function ManagerSection({
+  status,
+  onEdit,
+  onDeclare,
+}: {
+  status: ManagerStatus | null;
+  onEdit: (agent: AgentPublic) => void;
+  onDeclare: (prefill: AgentPublic) => void;
+}) {
+  if (status === null) {
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <p className="empty">Loading manager status…</p>
+      </section>
+    );
+  }
+
+  // Declared state: agents.yaml has a role: manager entry.
+  if (status.agentEntry) {
+    const a = status.agentEntry;
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <ul className="agents-list">
+          <li className="agent-row">
+            <span className="agent-name">{a.name}</span>
+            <span className="job-role-badge">MANAGER</span>
+            {status.resolvedStartup && (
+              <code className="manager-startup">{status.resolvedStartup}</code>
+            )}
+            {status.initialInput && (
+              <span className="muted">initialInput: {status.initialInput}</span>
+            )}
+            {a.description && <span className="muted">— {a.description}</span>}
+            <span className="agent-row-actions">
+              <button type="button" className="action-btn ghost" onClick={() => onEdit(a)}>
+                Edit
+              </button>
+            </span>
+          </li>
+        </ul>
+      </section>
+    );
+  }
+
+  // Fallback state: no declared entry BUT the Terminal panel is open,
+  // so something is actually running.
+  if (status.terminalActive) {
+    const sourceLabel =
+      status.fallbackSource === "env"
+        ? "environment variable ITHYNO_TERMINAL_STARTUP"
+        : "hardcoded default";
+    const prefill = fallbackToPrefillAgent(status);
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <div className="manager-fallback-card">
+          <div>
+            <strong>Manager (fallback):</strong>{" "}
+            <code className="manager-startup">{status.resolvedStartup ?? "(none)"}</code>
+          </div>
+          {status.initialInput && (
+            <div className="muted">initialInput: {status.initialInput}</div>
+          )}
+          <div className="muted">Source: {sourceLabel}</div>
+          <div style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="action-btn ghost"
+              onClick={() => onDeclare(prefill)}
+            >
+              Declare in agents.yaml
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Idle state: no manager declared, no terminal open.
+  return (
+    <section className="agents-section manager-section">
+      <h3>Manager</h3>
+      <p className="empty">
+        No manager declared. Opening a change view launches the Terminal
+        panel, which will run the hardcoded default until you declare one.
+      </p>
+    </section>
+  );
+}
+
+/** Parse `resolvedStartup` ("claude --continue") into an AgentPublic-shaped
+ *  prefill for the Declare-in-agents.yaml modal. Naive whitespace split
+ *  is fine for the common case; users can adjust in the modal. */
+function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
+  const parts = (status.resolvedStartup ?? "").trim().split(/\s+/).filter(Boolean);
+  const [command, ...args] = parts;
+  return {
+    name: "",
+    role: "manager",
+    command: command ?? "",
+    args,
+    hasEnv: false,
+    initialInput: status.initialInput ?? undefined,
+    specialties: [],
+    concurrency: 1,
+    dedicated: true,
+  };
 }
 
 function DeleteConfirmDialog({

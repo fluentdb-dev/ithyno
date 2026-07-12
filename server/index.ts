@@ -12,7 +12,7 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { dispatch } from "./agents/dispatch.js";
@@ -571,6 +571,50 @@ fastify.post("/api/agents/config", async (req, reply) => {
     return reply.code(result.status).send({ error: result.error });
   }
   return { ok: true };
+});
+
+// Manager status endpoint (add-agents-tab-manager-section). Reflects
+// the actual resolved PTY startup — so the Agents tab can be honest
+// about what's running, even when no role:manager entry exists.
+fastify.get("/api/manager/status", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const managerEntry = agentRegistry.managerAgent();
+  const resolved = ptyStartup(agentRegistry);
+  let fallbackSource: "declared" | "env" | "default";
+  if (managerEntry) {
+    fallbackSource = "declared";
+  } else if (process.env.ITHYNO_TERMINAL_STARTUP !== undefined) {
+    fallbackSource = "env";
+  } else {
+    fallbackSource = "default";
+  }
+  // Public projection of the manager agent — mirror what /api/agents/config
+  // returns for individual agents (strip env, add hasEnv).
+  const agentEntry = managerEntry
+    ? {
+        name: managerEntry.name,
+        description: managerEntry.description,
+        command: managerEntry.command,
+        args: managerEntry.args,
+        hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
+        initialInput: managerEntry.initialInput,
+        runtime: managerEntry.runtime,
+        prompt: managerEntry.prompt,
+        role: managerEntry.role,
+        specialties: managerEntry.specialties,
+        concurrency: managerEntry.concurrency,
+        dedicated: managerEntry.dedicated,
+      }
+    : null;
+  return {
+    agentEntry,
+    resolvedStartup: resolved.startup || null,
+    initialInput: resolved.initialInput ?? null,
+    fallbackSource,
+    terminalActive: activeTerminalCount() > 0,
+  };
 });
 
 // Per-runtime installation cache. Populated on demand (first request or

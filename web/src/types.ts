@@ -199,6 +199,17 @@ export type RuntimeStatusResponse = {
   runtimes: RuntimeDefPublic[];
 };
 
+/** Manager section source-of-truth (add-agents-tab-manager-section).
+ *  Reflects the resolved PTY startup so the tab can be honest about
+ *  what's actually running, even when no `role: manager` entry exists. */
+export type ManagerStatus = {
+  agentEntry: AgentPublic | null;
+  resolvedStartup: string | null;
+  initialInput: string | null;
+  fallbackSource: "declared" | "env" | "default";
+  terminalActive: boolean;
+};
+
 /** Write shape sent by AgentConfigModal to `POST /api/agents/config`.
  *  Phase 5.2 defines the client mirror; Phase 5.3 lands the endpoint.
  *  Delete is expressed as `{ action: "delete", name }` for a compact

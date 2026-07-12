@@ -11,6 +11,7 @@ import type {
   GitStatus,
   Job,
   JobSummary,
+  ManagerStatus,
   RuntimeStatusResponse,
   TagDetail,
   TagIndex,
@@ -235,6 +236,18 @@ export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
  * expected. Callers should surface a toast with a hint about the
  * missing endpoint.
  */
+/**
+ * Fetch the resolved Manager status (add-agents-tab-manager-section):
+ * the `role: manager` agents.yaml entry if declared, plus the actual
+ * PTY startup command that would run and whether the Terminal panel
+ * is currently open. Powers the Manager section on the Agents tab.
+ */
+export async function fetchManagerStatus(): Promise<ManagerStatus> {
+  const res = await fetch("/api/manager/status");
+  if (!res.ok) throw new Error(`GET /api/manager/status failed: ${res.status}`);
+  return res.json();
+}
+
 export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void> {
   const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
     "/api/agents/config",
