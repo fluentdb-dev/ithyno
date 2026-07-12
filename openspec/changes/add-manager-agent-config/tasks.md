@@ -35,13 +35,12 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean (257 → 269 tests, +12)
-- [ ] 8.2 サーバー再起動 + 手動確認 (user):
-  - [ ] a. agents.yaml に `role: manager` の entry を追加 (or UI から `[Declare in agents.yaml]` で作成) → dev server 再起動
-  - [ ] b. 新しく Terminal panel を開く (別 change を開くなど) → 宣言した `command args` で child が spawn される (今 hardcoded `claude --continue` の場合と同じ挙動なら OK)
-  - [ ] c. Manager entry に `initialInput: /opsx:manage` を追加 → Terminal 開くと自動で `/opsx:manage` が type される (auto-inject、300ms delay 後)
-  - [ ] d. agents.yaml に 2 個目の `role: manager` を追加 → server 起動 log にエラー (`only one role: manager entry is allowed`) が出る
-  - [ ] e. agents.yaml に `role: manager` + `runtime:` shape の entry → server 起動 log にエラー (`runtime-backed managers are not yet supported`)
-  - [ ] f. Manager 未 declare + `ITHYNO_TERMINAL_STARTUP=aider` set → Terminal panel で `aider` が起動 (env fallback 効いている)
+- [ ] 8.2 UI: agents.yaml に `role: manager` の entry を追加 (or UI から `[Declare in agents.yaml]` で作成) → dev server 再起動
+- [ ] 8.3 PTY: 新しく Terminal panel を開く (別 change を開くなど) → 宣言した `command args` で child が spawn される
+- [ ] 8.4 PTY: Manager entry に `initialInput: /opsx:manage` を追加 → Terminal 開くと自動で `/opsx:manage` が type される (auto-inject、300ms delay 後)
+- [ ] 8.5 Loader: agents.yaml に 2 個目の `role: manager` を追加 → server 起動 log にエラー (`only one role: manager entry is allowed`) が出る
+- [ ] 8.6 Loader: agents.yaml に `role: manager` + `runtime:` shape の entry → server 起動 log にエラー (`runtime-backed managers are not yet supported`)
+- [ ] 8.7 Fallback: Manager 未 declare + `ITHYNO_TERMINAL_STARTUP=aider` set → Terminal panel で `aider` が起動 (env fallback 効いている)
 
 ## 9. Post-impl
 

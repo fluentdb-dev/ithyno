@@ -39,13 +39,12 @@
 ## 6. Verification
 
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (240 → 257 tests)
-- [ ] 6.2 UI 手動確認 (user, end-to-end with 5.2):
-  - [ ] a. Modal で agent の role を変えて Save → HTTP 200、agents.yaml の該当 entry が新値に、他 entry / `runtimes:` / `worktreePool:` は byte-identical に保持
-  - [ ] b. + Add agent → 新 name (kebab-case) → Save → HTTP 200、agents.yaml に entry 追加、Configured (idle) に新 row 出現
-  - [ ] c. Delete → confirm → HTTP 200、agents.yaml から entry 削除、Configured (idle) から row 消える
-  - [ ] d. 存在しない name で Delete API 叩く (curl) → 404 + `agent '<name>' not found`
-  - [ ] e. 不正 payload (concurrency=0 / mixed shape) → 400 + inline error、agents.yaml は無変更
-  - [ ] f. atomic write: 意図的に mid-write でサーバー kill → `.tmp` は残るが agents.yaml は old のまま
+- [ ] 6.2 UI (5.2 と end-to-end): Modal で agent の role を変えて Save → HTTP 200、agents.yaml の該当 entry が新値に、他 entry / `runtimes:` / `worktreePool:` は byte-identical に保持
+- [ ] 6.3 UI: + Add agent → 新 name (kebab-case) → Save → HTTP 200、agents.yaml に entry 追加、Configured (idle) に新 row 出現
+- [ ] 6.4 UI: Delete → confirm → HTTP 200、agents.yaml から entry 削除、Configured (idle) から row 消える
+- [ ] 6.5 API: 存在しない name で Delete API 叩く (curl) → 404 + `agent '<name>' not found`
+- [ ] 6.6 API: 不正 payload (concurrency=0 / mixed shape) → 400 + inline error、agents.yaml は無変更
+- [ ] 6.7 API: atomic write — 意図的に mid-write でサーバー kill → `.tmp` は残るが agents.yaml は old のまま
 
 ## 7. Post-impl
 

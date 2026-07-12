@@ -39,15 +39,14 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean (273 tests unchanged)
-- [ ] 8.2 UI 手動確認 (user, サーバー再起動が必要 — 新 endpoint /api/manager/status):
-  - [ ] a. Agents タブに **Manager section** が Runtimes と Live の間に出現
-  - [ ] b. `agents.yaml` に `role: manager` 無し + Terminal panel 開いている場合: Not-configured 状態 (`Manager (not configured in agents.yaml): claude --continue` + explanation + `[Declare in agents.yaml]` button)
-  - [ ] c. `[Declare in agents.yaml]` クリック → AgentConfigModal が Add mode で開く。role が `manager` prefill、command=`claude`、args=`[--continue]`、name field は空 (editable)
-  - [ ] d. name を入力 → Save → Manager section が Declared 状態に切替 (row 表示、Edit only、Delete 無し)
-  - [ ] e. Configured (idle) section から declared manager が **消えている** (フィルタ効いてる)
-  - [ ] f. Terminal panel を全部閉じる → Idle 状態のメッセージ表示 (`No manager declared. Opening a change view launches the Terminal panel...`)
-  - [ ] g. 環境変数 `ITHYNO_TERMINAL_STARTUP=aider` を設定してサーバー再起動 → Not-configured 状態の resolvedStartup が `aider`、explanation が `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
-  - [ ] h. curl で non-loopback から `/api/manager/status` → 403
+- [ ] 8.2 UI: Agents タブに **Manager section** が Runtimes と Live の間に出現
+- [ ] 8.3 UI: `agents.yaml` に `role: manager` 無し + Terminal panel 開いている場合、Not-configured 状態 (`Manager (not configured in agents.yaml): claude --continue` + explanation + `[Declare in agents.yaml]` button) が表示
+- [ ] 8.4 UI: `[Declare in agents.yaml]` クリック → AgentConfigModal が Add mode で開く。role が `manager` prefill、command=`claude`、args=`[--continue]`、name field は空 (editable)
+- [ ] 8.5 UI: name を入力 → Save → Manager section が Declared 状態に切替 (row 表示、Edit only、Delete 無し)
+- [ ] 8.6 UI: Configured (idle) section から declared manager が **消えている** (フィルタ効いてる)
+- [ ] 8.7 UI: Terminal panel を全部閉じる → Idle 状態のメッセージ表示 (`No manager declared. Opening a change view launches the Terminal panel...`)
+- [ ] 8.8 UI: 環境変数 `ITHYNO_TERMINAL_STARTUP=aider` を設定してサーバー再起動 → Not-configured 状態の resolvedStartup が `aider`、explanation が `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
+- [ ] 8.9 API: curl で non-loopback から `/api/manager/status` → 403
 
 ## 9. Post-impl
 

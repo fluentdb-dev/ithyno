@@ -49,16 +49,15 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (269 → 273 tests, +4)
-- [ ] 9.2 UI 手動確認 (user):
-  - [ ] a. Modal に `initialInput` textarea が表示される。placeholder は role=manager で `/opsx:manage`、role=code で `/ithy-opsx:apply ${change_id}`
-  - [ ] b. Modal で initialInput を編集 → Save → agents.yaml の該当 entry に `initialInput:` key が追加される
-  - [ ] c. initialInput を空にして Save → agents.yaml から `initialInput:` key が消える
-  - [ ] d. Modal で role を manager に変える → shape radio の "Runtime-backed" が **disabled**、ヒント `runtime-backed managers are not yet supported` が表示
-  - [ ] e. Manager が既に declared 状態で `[+ Add agent]` → Modal の role dropdown から `manager` が **選択肢に無い**
-  - [ ] f. Manager row の Edit ボタン → Modal 開くと role dropdown に `manager` は残っている (現 Manager 編集用)
-  - [ ] g. Manager row に **Delete ボタンが無い** (Edit のみ)
-  - [ ] h. curl で `POST /api/agents/config` に `{action: delete, name: <manager-name>}` → 400 + `manager agents cannot be deleted from the UI...`
-  - [ ] i. curl で 2 個目の manager upsert (別 name) → 400 + `only one role: manager entry is allowed`
+- [ ] 9.2 UI: Modal に `initialInput` textarea が表示される。placeholder は role=manager で `/opsx:manage`、role=code で `/ithy-opsx:apply ${change_id}`
+- [ ] 9.3 UI: Modal で initialInput を編集 → Save → agents.yaml の該当 entry に `initialInput:` key が追加される
+- [ ] 9.4 UI: initialInput を空にして Save → agents.yaml から `initialInput:` key が消える
+- [ ] 9.5 UI: Modal で role を manager に変える → shape radio の "Runtime-backed" が **disabled**、ヒント `runtime-backed managers are not yet supported` が表示
+- [ ] 9.6 UI: Manager が既に declared 状態で `[+ Add agent]` → Modal の role dropdown から `manager` が **選択肢に無い**
+- [ ] 9.7 UI: Manager row の Edit ボタン → Modal 開くと role dropdown に `manager` は残っている (現 Manager 編集用)
+- [ ] 9.8 UI: Manager row に **Delete ボタンが無い** (Edit のみ)
+- [ ] 9.9 API: curl で `POST /api/agents/config` に `{action: delete, name: <manager-name>}` → 400 + `manager agents cannot be deleted from the UI...`
+- [ ] 9.10 API: curl で 2 個目の manager upsert (別 name) → 400 + `only one role: manager entry is allowed`
 
 ## 10. Post-impl
 

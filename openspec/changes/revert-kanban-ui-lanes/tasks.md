@@ -38,11 +38,10 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 8.2 UI 手動確認 (user):
-  - [ ] a. Kanban が **3 列** (TODO / IN-PROGRESS / DONE) のみ表示、5 列 (PROPOSED/CODED/REVIEWED/DONE/UNPHASED) にはなっていない
-  - [ ] b. WaitBadge / needs-human の card アクセント表示が **消えている** (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS が hit しない)
-  - [ ] c. `+ New Change` が TODO 列 header、`Start ▾` が IN-PROGRESS 列 header に配置される (top toolbar ではない)
-  - [ ] d. Card 上部の badge が phase 由来ではなく agent job 由来のみ
+- [ ] 8.2 UI: Kanban が **3 列** (TODO / IN-PROGRESS / DONE) のみ表示、5 列 (PROPOSED/CODED/REVIEWED/DONE/UNPHASED) にはなっていない
+- [ ] 8.3 UI: WaitBadge / needs-human の card アクセント表示が **消えている** (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS が hit しない)
+- [ ] 8.4 UI: `+ New Change` が TODO 列 header、`Start ▾` が IN-PROGRESS 列 header に配置される (top toolbar ではない)
+- [ ] 8.5 UI: Card 上部の badge が phase 由来ではなく agent job 由来のみ
 
 ## 9. Post-impl
 

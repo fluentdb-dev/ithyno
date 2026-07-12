@@ -28,15 +28,14 @@
 
 - [x] 4.1 Manual dry-read of the skill against the recent `revert-kanban-ui-lanes` flow — every hand-typed step there maps to a numbered step in the skill
 - [x] 4.2 `npm test && npm run typecheck && npm run build` clean (test count 233 unchanged; no code changes)
-- [ ] 4.3 Skill 実動作確認 (user, 次の revert 時):
-  - [ ] a. Claude Code で `/opsx:revert <scope>` を invoke → preflight (repo state / git identity / openspec CLI) が走る
-  - [ ] b. 対象 requirement の pick prompt が出る
-  - [ ] c. Case α/β 自動分類が正しい
-  - [ ] d. `openspec new change revert-<scope>` が実行され proposal.md / delta / tasks.md が生成される
-  - [ ] e. 現行 spec に PENDING annotation が挿入される
-  - [ ] f. Case α なら archived target proposal.md に REVERTED annotation が挿入される
-  - [ ] g. `openspec validate` が VALID を返す
-  - [ ] h. 一切 git commit / archive を触らないことを確認
+- [ ] 4.3 Skill: `/opsx:revert <scope>` invoke → preflight (repo state / git identity / openspec CLI) が走る
+- [ ] 4.4 Skill: 対象 requirement の pick prompt が出る
+- [ ] 4.5 Skill: Case α/β 自動分類が正しい
+- [ ] 4.6 Skill: `openspec new change revert-<scope>` が実行され proposal.md / delta / tasks.md が生成される
+- [ ] 4.7 Skill: 現行 spec に PENDING annotation が挿入される
+- [ ] 4.8 Skill: Case α なら archived target proposal.md に REVERTED annotation が挿入される
+- [ ] 4.9 Skill: `openspec validate` が VALID を返す
+- [ ] 4.10 Skill: 一切 git commit / archive を触らないことを確認
 
 ## 5. Post-impl
 

@@ -41,15 +41,14 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (233 → 240 tests; +7 kebab-case validation)
-- [ ] 9.2 UI 手動確認 (user):
-  - [ ] a. Agents タブの Configured (idle) 各 row に `[Edit]` `[Delete]` ボタン表示
-  - [ ] b. Configured (idle) セクション下部に `[+ Add agent]` ボタン表示
-  - [ ] c. `[Edit]` クリック → modal 開く。name field が **disabled** (灰色)、他 field 編集可能
-  - [ ] d. Modal を Save → toast「Saved to agents.yaml」→ modal 閉じる → row が新値で refresh (5.3 endpoint 存在時)
-  - [ ] e. Modal を Save (5.3 未 landed 時) → toast に「Phase 5.3 not landed」のヒントが出て modal 開いたまま
-  - [ ] f. `[Delete]` クリック → 確認ダイアログ「Delete agent <name>?」→ Confirm → row 消える
-  - [ ] g. `[+ Add agent]` クリック → modal 開く。name field が **editable** (白)、role が code (default)
-  - [ ] h. Modal で name に空 or uppercase / concurrency に 0 → inline validation エラー、Save disabled
+- [ ] 9.2 UI: Agents タブの Configured (idle) 各 row に `[Edit]` `[Delete]` ボタン表示
+- [ ] 9.3 UI: Configured (idle) セクション下部に `[+ Add agent]` ボタン表示
+- [ ] 9.4 UI: `[Edit]` クリック → modal 開く。name field が **disabled** (灰色)、他 field 編集可能
+- [ ] 9.5 UI: Modal を Save (5.3 endpoint 存在時) → toast「Saved to agents.yaml」→ modal 閉じる → row が新値で refresh
+- [ ] 9.6 UI: Modal を Save (5.3 未 landed 時) → toast に「Phase 5.3 not landed」のヒントが出て modal 開いたまま
+- [ ] 9.7 UI: `[Delete]` クリック → 確認ダイアログ「Delete agent <name>?」→ Confirm → row 消える
+- [ ] 9.8 UI: `[+ Add agent]` クリック → modal 開く。name field が **editable** (白)、role が code (default)
+- [ ] 9.9 UI: Modal で name に空 or uppercase / concurrency に 0 → inline validation エラー、Save disabled
 
 ## 10. Post-impl
 
