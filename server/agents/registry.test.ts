@@ -354,7 +354,7 @@ describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
     expect(m!.initialInput).toBe("/opsx:manage");
   });
 
-  it("returns the first (by file order) when multiple manager entries exist", async () => {
+  it("rejects two manager entries at load (refine-agents-config-modal)", async () => {
     const reg = await loadWith(
       `agents:
   - name: first-mgr
@@ -367,8 +367,12 @@ describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
     args: []
 `,
     );
-    const m = reg.managerAgent();
-    expect(m!.name).toBe("first-mgr");
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(/only one role: manager/i);
+      expect(cfg.error).toContain("agents[1]");
+    }
   });
 
   it("rejects a runtime-backed manager at load", async () => {

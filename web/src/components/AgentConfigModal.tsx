@@ -23,11 +23,21 @@ type Props = {
    *  `"new"` = add mode (name field editable + empty defaults). */
   seed: AgentPublic | "new";
   runtimes: RuntimeDefPublic[];
+  /** Name of the currently-configured manager, if any. Used to hide
+   *  `manager` from the role dropdown in Add mode so users can't
+   *  create a second one (Manager singleton, refine-agents-config-modal). */
+  existingManagerName: string | null;
   onCancel: () => void;
   onSubmit: (payload: AgentConfigPayload) => Promise<void>;
 };
 
-export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) {
+export function AgentConfigModal({
+  seed,
+  runtimes,
+  existingManagerName,
+  onCancel,
+  onSubmit,
+}: Props) {
   const isAdd = seed === "new";
   const initial = useMemo(() => deriveInitialForm(seed), [seed]);
   const [form, setForm] = useState(initial);
@@ -42,6 +52,27 @@ export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) 
   }, [initial]);
 
   const runtimeOptions = runtimes.map((r) => r.name);
+
+  // Manager singleton: hide "manager" from Add-mode dropdown when
+  // another manager already exists. Edit mode keeps it selectable so
+  // the current Manager can be reconfigured without changing its role.
+  const isEditingManager = seed !== "new" && seed.role === "manager";
+  const availableRoles = ROLE_OPTIONS.filter((r) => {
+    if (r !== "manager") return true;
+    if (isEditingManager) return true; // editing self — allowed
+    return existingManagerName === null; // add-mode: only when no manager yet
+  });
+
+  // Manager runtime-backed shape is rejected at load; keep the modal
+  // in sync so users don't hit a Save-time error.
+  const shapeLockedToLegacy = form.role === "manager";
+
+  const initialInputPlaceholder =
+    form.role === "manager"
+      ? "/opsx:manage"
+      : form.role === "code"
+        ? "/ithy-opsx:apply ${change_id}"
+        : "Optional prompt injected on spawn";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +102,7 @@ export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) 
       concurrency: form.concurrency,
       dedicated: form.dedicated,
       description: form.description.trim() || undefined,
+      initialInput: form.initialInput.trim() || undefined,
       ...(form.shape === "legacy"
         ? {
             command: form.command.trim(),
@@ -117,9 +149,18 @@ export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) 
             <span>Role</span>
             <select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              onChange={(e) => {
+                const next = e.target.value;
+                // Auto-force legacy shape when role becomes manager
+                // (matches loader-side rejection).
+                setForm({
+                  ...form,
+                  role: next,
+                  shape: next === "manager" ? "legacy" : form.shape,
+                });
+              }}
             >
-              {ROLE_OPTIONS.map((r) => (
+              {availableRoles.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
@@ -138,15 +179,27 @@ export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) 
               />
               Legacy (command + args)
             </label>
-            <label>
+            <label
+              title={
+                shapeLockedToLegacy
+                  ? "runtime-backed managers are not yet supported"
+                  : undefined
+              }
+            >
               <input
                 type="radio"
                 name="shape"
                 checked={form.shape === "runtime"}
+                disabled={shapeLockedToLegacy}
                 onChange={() => setForm({ ...form, shape: "runtime" })}
               />
               Runtime-backed (runtime + prompt)
             </label>
+            {shapeLockedToLegacy && (
+              <span className="agent-config-error">
+                runtime-backed managers are not yet supported
+              </span>
+            )}
           </fieldset>
 
           {form.shape === "legacy" ? (
@@ -203,6 +256,18 @@ export function AgentConfigModal({ seed, runtimes, onCancel, onSubmit }: Props) 
               </label>
             </>
           )}
+
+          <label className="agent-config-field">
+            <span>
+              initial input <span className="muted">(optional prompt injected on spawn)</span>
+            </span>
+            <textarea
+              value={form.initialInput}
+              rows={2}
+              onChange={(e) => setForm({ ...form, initialInput: e.target.value })}
+              placeholder={initialInputPlaceholder}
+            />
+          </label>
 
           <label className="agent-config-field">
             <span>Specialties (comma-separated)</span>
@@ -275,6 +340,7 @@ type FormState = {
   concurrency: number;
   dedicated: boolean;
   description: string;
+  initialInput: string;
 };
 
 function deriveInitialForm(seed: AgentPublic | "new"): FormState {
@@ -291,6 +357,7 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       concurrency: 1,
       dedicated: true,
       description: "",
+      initialInput: "",
     };
   }
   const isRuntimeBacked = !!seed.runtime;
@@ -306,5 +373,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     concurrency: seed.concurrency,
     dedicated: seed.dedicated,
     description: seed.description ?? "",
+    initialInput: seed.initialInput ?? "",
   };
 }

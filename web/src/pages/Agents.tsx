@@ -85,6 +85,12 @@ export function Agents() {
   const runningAgentNames = new Set(active.map((j) => j.agentName));
   const idleAgents = agents.filter((a) => !runningAgentNames.has(a.name));
 
+  // Manager singleton (refine-agents-config-modal). Used by the modal
+  // to hide the `manager` role option in Add mode when one already
+  // exists, and by the row to hide the Delete button on the manager.
+  const existingManager = agents.find((a) => a.role === "manager") ?? null;
+  const existingManagerName = existingManager?.name ?? null;
+
   return (
     <div className="agents-page">
       <h2>Agents</h2>
@@ -160,6 +166,7 @@ export function Agents() {
         <AgentConfigModal
           seed={editing}
           runtimes={runtimes?.runtimes ?? []}
+          existingManagerName={existingManagerName}
           onCancel={() => setEditing(null)}
           onSubmit={handleSave}
         />
@@ -282,6 +289,11 @@ function AgentRow({
   onDelete: () => void;
 }) {
   const isRuntimeBacked = !!agent.runtime;
+  // Manager row is edit-only (refine-agents-config-modal). Deleting the
+  // Manager from the UI silently disables the Terminal panel's
+  // auto-launch — a footgun. Users who really want to remove it can
+  // hand-edit agents.yaml.
+  const canDelete = agent.role !== "manager";
   return (
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
@@ -298,9 +310,11 @@ function AgentRow({
         <button type="button" className="action-btn ghost" onClick={onEdit}>
           Edit
         </button>
-        <button type="button" className="action-btn ghost" onClick={onDelete}>
-          Delete
-        </button>
+        {canDelete && (
+          <button type="button" className="action-btn ghost" onClick={onDelete}>
+            Delete
+          </button>
+        )}
       </span>
     </li>
   );
