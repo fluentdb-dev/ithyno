@@ -1870,9 +1870,6 @@ callers.
 
 ### Requirement: Agents Tab Manager Section
 
-> ⚠️ **PENDING MODIFICATION** by [refine-manager-fallback-copy](../../changes/refine-manager-fallback-copy/):
-> "fallback" は user 向け語彙として不明瞭。Not-configured 状態のヘッダー / 説明文をより平易な表現へ差し替える。
-
 The Agents tab SHALL render a dedicated `Manager` section between
 the Runtimes section and the Live section. The section SHALL render
 exactly one of three states based on `GET /api/manager/status`:
@@ -1883,14 +1880,15 @@ exactly one of three states based on `GET /api/manager/status`:
    `initialInput` (if any). The row SHALL have an `Edit` button
    opening the AgentConfigModal in Edit mode. NO `Delete` button.
 
-2. **Fallback**: `agentEntry === null` AND
+2. **Not configured**: `agentEntry === null` AND
    `terminalActive === true`. The section SHALL render a muted
    card containing:
-   - `Manager (fallback): <resolvedStartup>` — the typewriter
-     command line
-   - `Source:` label — `hardcoded default` when
-     `fallbackSource === "default"`, or `environment variable
-     ITHYNO_TERMINAL_STARTUP` when `"env"`
+   - `Manager (not configured in agents.yaml):
+     <resolvedStartup>` — the typewriter command line
+   - A short explanation of what's running: `Currently running the
+     built-in default startup command.` when
+     `fallbackSource === "default"`, or `Currently running the
+     command from ITHYNO_TERMINAL_STARTUP.` when `"env"`.
    - A `[Declare in agents.yaml]` button opening the
      AgentConfigModal in Add mode with `role: "manager"`,
      `command`, `args`, and `initialInput` prefilled from the
@@ -1899,7 +1897,7 @@ exactly one of three states based on `GET /api/manager/status`:
 3. **Idle**: `agentEntry === null` AND `terminalActive === false`.
    The section SHALL render a muted empty state:
    `No manager declared. Opening a change view launches the
-   Terminal panel, which will run the hardcoded default until you
+   Terminal panel, which will run the built-in default until you
    declare one.` No button.
 
 The section SHALL be present on the tab regardless of state —
@@ -1916,15 +1914,15 @@ not both.
 - **THEN** the Manager section shows the entry with an `Edit` button
 - **AND** the Configured (idle) section does NOT list that entry
 
-#### Scenario: Fallback state shows the actual running command
-- **GIVEN** no manager entry AND the Terminal panel is open (Home page reached)
+#### Scenario: Not-configured state shows what's currently running
+- **GIVEN** no manager entry AND the Terminal panel is open
 - **WHEN** the Agents tab renders
-- **THEN** the Manager section shows `Manager (fallback): claude --continue`
-- **AND** the Source line names the hardcoded default
+- **THEN** the Manager section shows `Manager (not configured in agents.yaml): claude --continue`
+- **AND** an explanation line reads `Currently running the built-in default startup command.`
 - **AND** a `[Declare in agents.yaml]` button is visible
 
 #### Scenario: Declare button prefills the modal
-- **GIVEN** the Fallback state is shown
+- **GIVEN** the Not-configured state is shown
 - **WHEN** the user clicks `[Declare in agents.yaml]`
 - **THEN** the AgentConfigModal opens in Add mode
 - **AND** role is preselected to `manager`
