@@ -41,7 +41,7 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (233 → 240 tests; +7 kebab-case validation)
-- [ ] 9.2 UI: every Configured (idle) row shows `[Edit]` and `[Delete]` buttons
+- [x] 9.2 UI: every Configured (idle) row shows `[Edit]` and `[Delete]` buttons
 - [ ] 9.3 UI: a `[+ Add agent]` button appears below the Configured (idle) section
 - [ ] 9.4 UI: clicking `[Edit]` opens the modal with the `name` field disabled (grey); all other fields editable
 - [ ] 9.5 UI: with 5.3 landed, Save produces toast "Saved to agents.yaml", closes the modal, and the row refreshes with the new values
@@ -49,9 +49,11 @@
 - [ ] 9.7 UI: clicking `[Delete]` opens a confirmation dialog "Delete agent <name>?"; Confirm removes the row
 - [ ] 9.8 UI: clicking `[+ Add agent]` opens the modal with the `name` field editable (white) and role defaulted to `code`
 - [ ] 9.9 UI: entering an empty / UPPERCASE name or concurrency `0` shows inline validation errors and blocks Save
+- [ ] 9.10 UI: the `Specialties` field label reads `Specialties (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)` — makes the semantic explicit
+- [ ] 9.11 UI: the `Initial input` field label reads `(auto-injected on spawn — worker: prepended as -p <value>; manager: typed into the PTY after boot)` — explains where the value is delivered per role
 
 ## 10. Post-impl
 
 - [x] 10.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.9
+- [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.11
 - [ ] 10.3 Manual smoke — merged into 9.2–9.9

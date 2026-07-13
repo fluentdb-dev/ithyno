@@ -279,7 +279,10 @@ export function AgentConfigModal({
 
           <label className="agent-config-field">
             <span>
-              initial input <span className="muted">(optional prompt injected on spawn)</span>
+              Initial input{" "}
+              <span className="muted">
+                (auto-injected on spawn — worker: prepended as `-p &lt;value&gt;`; manager: typed into the PTY after boot)
+              </span>
             </span>
             <textarea
               value={form.initialInput}
@@ -290,12 +293,17 @@ export function AgentConfigModal({
           </label>
 
           <label className="agent-config-field">
-            <span>Specialties (comma-separated)</span>
+            <span>
+              Specialties{" "}
+              <span className="muted">
+                (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)
+              </span>
+            </span>
             <input
               type="text"
               value={form.specialties}
               onChange={(e) => setForm({ ...form, specialties: e.target.value })}
-              placeholder="e.g. area/web, security"
+              placeholder="e.g. area/web, feature/ui"
             />
           </label>
 
