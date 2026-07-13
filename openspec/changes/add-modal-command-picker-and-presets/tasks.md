@@ -16,11 +16,12 @@
 
 ## 4. Presets — initial entries
 
-- [ ] 4.1 `claude`: code / review / verify / manager — `--dangerously-skip-permissions -p /opsx:{apply,review,verify} ${change_id}` (worker); `--continue` + `/opsx:manage` (manager)
-- [ ] 4.2 `aider`: code — `--yes-always` + `Implement OpenSpec change ${change_id}`
+- [ ] 4.1 `claude`: `args: ["--dangerously-skip-permissions"]` + `initialInput: "/opsx:{apply,review,verify} ${change_id}"` per worker role (runner prepends `-p`); `manager`: `args: ["--continue"]` + `initialInput: "/opsx:manage"`
+- [ ] 4.2 `aider`: `args: ["--yes-always"]` + `initialInput: "Implement OpenSpec change ${change_id}"` for code
 - [ ] 4.3 `codex`: TODO stub (flags unknown at ship time)
-- [ ] 4.4 `gh` (copilot): code — `copilot suggest` + prompt as initialInput
+- [ ] 4.4 `gh` (copilot): `args: ["copilot", "suggest"]` + prompt as initialInput for code
 - [ ] 4.5 `agy` (antigravity): TODO stub (flags unknown at ship time)
+- [ ] 4.6 Preset invariant — args MUST NOT include `-p` for `promptStyle: cli-arg` runtimes; the runner's auto-`-p`-unshift is what delivers the prompt to the CLI. Test this invariant in `agent-cli-presets.test.ts`
 
 ## 5. CSS
 
@@ -48,7 +49,8 @@
 - [ ] 8.8 UI: `command="/opt/homebrew/bin/claude"` also matches the `claude` preset (basename lookup)
 - [ ] 8.9 UI: `command="myscript"` shows no preset button
 - [ ] 8.10 UI: `command="agy"` preset button label includes `TODO fill flags`
-- [ ] 8.11 API: `curl` a non-loopback POST to `/api/system/pick-executable` → 403
+- [ ] 8.11 UI: switching the Modal to Runtime-backed shape hides the preset button (Legacy-only affordance)
+- [ ] 8.12 API: `curl` a non-loopback POST to `/api/system/pick-executable` → 403
 
 ## 9. Post-impl
 

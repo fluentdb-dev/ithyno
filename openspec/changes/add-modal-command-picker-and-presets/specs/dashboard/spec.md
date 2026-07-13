@@ -73,19 +73,32 @@ surface a generic toast.
 
 ### Requirement: Agents Config Modal Args Presets
 
+Presets in this Modal SHALL apply ONLY to the Legacy shape
+(`command + args + initialInput`). The Runtime-backed shape
+(`runtime + prompt`) does not need presets: the `runtimes:` block
+in `agents.yaml` already carries the `command`, `baseArgs`,
+`promptStyle`, and `promptFlag` for each declared runtime, so an
+agent picking a runtime automatically inherits those values via
+`registry.resolve()`.
+
 The AgentConfigModal SHALL maintain a client-side preset table
 keyed by `(commandBasename, role)`. Supported commandBasenames are
 `claude`, `aider`, `codex`, `gh`, and `agy`. Each preset SHALL be
 of shape `{ args: string[]; initialInput?: string }`.
 
-When the current `command` and `role` values match a preset (via
-`path.basename(command)` lookup — full paths like
-`/opt/homebrew/bin/claude` and bare names like `claude` both
-match), the modal SHALL render an inline `[Use preset for <cmd>
-/ <role>]` button below the args field. Clicking the button SHALL
-replace the `args` and `initialInput` fields with the preset
-values. Displaying the button SHALL NOT auto-apply — the user's
-existing edits stay untouched until an explicit click.
+The preset button SHALL render **only while the Legacy shape is
+active in the Modal**. When the shape is Runtime-backed, no preset
+button SHALL appear (regardless of command / role); the runtime
+dropdown is the equivalent affordance.
+
+When the shape is Legacy AND the current `command` and `role`
+values match a preset (via `path.basename(command)` lookup — full
+paths like `/opt/homebrew/bin/claude` and bare names like `claude`
+both match), the modal SHALL render an inline `[Use preset for
+<cmd> / <role>]` button below the args field. Clicking the button
+SHALL replace the `args` and `initialInput` fields with the
+preset values. Displaying the button SHALL NOT auto-apply — the
+user's existing edits stay untouched until an explicit click.
 
 Preset entries whose flags are unknown at ship time SHALL carry a
 visible `TODO` marker in the button label (e.g., `[Use preset for
@@ -108,11 +121,25 @@ a stub.
 - **THEN** the preset button reads `[Use preset for claude / review]`
 
 #### Scenario: Clicking replaces args and initialInput
-- **GIVEN** the preset for `(claude, code)` is `{ args: ["--dangerously-skip-permissions", "-p"], initialInput: "/opsx:apply ${change_id}" }`
+- **GIVEN** the preset for `(claude, code)` is `{ args: ["--dangerously-skip-permissions"], initialInput: "/opsx:apply ${change_id}" }`
 - **AND** the user has typed `--verbose` into the args field
 - **WHEN** the user clicks the preset button
-- **THEN** the args field's value becomes `--dangerously-skip-permissions -p`
+- **THEN** the args field's value becomes `--dangerously-skip-permissions`
 - **AND** the initialInput field's value becomes `/opsx:apply ${change_id}`
+
+#### Scenario: Preset shapes respect the Legacy-mode -p invariant
+- **GIVEN** a Legacy-shape preset for a CLI that accepts prompts via `-p <value>` (e.g., `claude`)
+- **WHEN** the preset table is queried
+- **THEN** its `args` value MUST NOT contain `-p`
+- **AND** the prompt value MUST be delivered via `initialInput`
+- **AND** the runner's auto-`-p`-unshift path is what places the flag into the spawn arguments at runtime
+- **NOTE**: Runtime-backed shape does not go through this preset table — its `-p` is declared once in the `runtimes:` block via `promptFlag`.
+
+#### Scenario: No preset button in Runtime-backed shape
+- **GIVEN** the modal has shape set to Runtime-backed with runtime=`claude` and role=`code`
+- **WHEN** the modal renders
+- **THEN** no `[Use preset for ...]` button appears
+- **AND** the runtime dropdown is the sole affordance for picking a CLI's canonical flags
 
 #### Scenario: TODO stub preset labels itself
 - **GIVEN** the preset for `(agy, code)` is a stub with unknown flags
