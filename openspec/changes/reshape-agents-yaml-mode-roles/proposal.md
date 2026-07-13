@@ -52,6 +52,12 @@ The `runtimes:` section keeps its role as a **shared-defaults registry**: agents
 
 13. The `initialInput` field SHALL be removed. Instead, the Modal SHALL render a per-role prompt textarea for each role in `roles` (labeled "Prompt for role: `<role>`"), with the resolution-order chain shown below each field.
 
+13a. **Manager-specific field visibility** — When `roles` includes `manager`, the Modal SHALL hide the fields whose values are structurally fixed for Manager entries (Roles multi-select, Mode toggle, Runtime dropdown, Specialties, Concurrency, Dedicated). Those values are force-set on submit (`roles: ["manager"]`, `mode: "live-shell"`, `specialties: []`, `concurrency: 1`, `dedicated: true`), and no `runtime` field is emitted. A "MANAGER" tag SHALL appear next to the modal title.
+
+13b. **Advanced options collapse** — The Modal SHALL group the non-essential fields (Runtime, Specialties, Concurrency, Dedicated, Description) behind a `[▸ Advanced options]` disclosure. The section starts collapsed on Add mode and on Edit-mode entries whose Advanced fields all hold their defaults; otherwise it starts expanded.
+
+13c. **Scroll** — The Modal SHALL cap its height at `90vh` with the form body scrolling and the title + action buttons pinned.
+
 ### Preset table
 
 14. `add-modal-command-picker-and-presets` SHALL be reshaped: presets become per-CLI defaults that populate `command`, `args`, and `prompts` (for known roles) on a fresh agent. The preset table gains no per-role variants — one preset per CLI covers all roles by populating the `prompts` map.
@@ -67,6 +73,7 @@ The `runtimes:` section keeps its role as a **shared-defaults registry**: agents
 21. **ADDED**: `Agent Mode Field`.
 22. **ADDED**: `Agent Roles Array`.
 23. **ADDED**: `Per-Role Prompt Resolution`.
+24. **ADDED**: `Agents Config Modal Layout Ergonomics` (Manager-specific field visibility, Advanced options disclosure, scroll behavior).
 
 ## Impact
 

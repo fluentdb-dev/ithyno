@@ -34,6 +34,9 @@
 - [x] 4.5 `AgentConfigModal.tsx` — runtime dropdown becomes "— none (specify command below) —" as the empty option; when set, `command` and `args` inputs show inherited-value placeholder text
 - [x] 4.6 Manager singleton in Modal — the `manager` option in the `roles` multi-select is hidden when another agent already declares it, unless the current agent being edited IS that agent (same logic as pre-reshape, ported to multi-select)
 - [x] 4.7 Manager mode enforcement in Modal — if `manager` ∈ `roles`, forces `mode: live-shell` via a `useEffect` (disables the single-prompt radio) with a helper text explaining why
+- [x] 4.8 Manager-specific field visibility — when `roles` includes `manager`, hide Roles multi-select / Mode toggle / Runtime dropdown / Specialties / Concurrency / Dedicated; force `roles: ["manager"]`, `mode: "live-shell"`, `specialties: []`, `concurrency: 1`, `dedicated: true` on submit; render a "MANAGER" tag next to the modal title; render Prompts fieldset as singular
+- [x] 4.9 Advanced options collapse — Runtime / Specialties / Concurrency / Dedicated / Description grouped behind a `[▸ Advanced options]` disclosure; collapsed by default; auto-expands on Edit-mode when any of those fields holds a non-default value; toggle preserves form state
+- [x] 4.10 Modal scroll — `max-height: 90vh` on `.agent-config-modal`; `overflow-y: auto` on the form body; title and action buttons stay pinned
 
 ## 5. agents.yaml.example
 
@@ -56,7 +59,7 @@
 
 ## 8. Spec deltas
 
-- [x] 8.1 3 ADDED + 6 MODIFIED requirements in `specs/dashboard/spec.md`
+- [x] 8.1 4 ADDED (`Agent Mode Field`, `Agent Roles Array`, `Per-Role Prompt Resolution`, `Agents Config Modal Layout Ergonomics`) + 6 MODIFIED requirements in `specs/dashboard/spec.md`
 - [x] 8.2 `npm run openspec -- validate reshape-agents-yaml-mode-roles` VALID
 - [x] 8.3 PENDING annotations on all 6 MODIFIED requirements in `openspec/specs/dashboard/spec.md`
 

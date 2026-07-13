@@ -67,6 +67,17 @@ export function AgentConfigModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Advanced fields (Runtime, Specialties, Concurrency, Dedicated,
+  // Description) start collapsed to reduce visual noise. Any non-default
+  // value on those fields auto-expands the section on open so users
+  // editing existing agents can see what they're editing.
+  const hasNonDefaultAdvanced =
+    !!initial.runtime ||
+    !!initial.specialties ||
+    initial.concurrency !== 1 ||
+    initial.dedicated !== true ||
+    !!initial.description;
+  const [showAdvanced, setShowAdvanced] = useState(hasNonDefaultAdvanced);
 
   useEffect(() => {
     setForm(initial);
@@ -154,18 +165,30 @@ export function AgentConfigModal({
       if (trimmed && form.roles.includes(role)) prompts[role] = trimmed;
     }
 
+    // Manager entries have hard-coded shape constraints — the UI doesn't
+    // ask about mode/roles/specialties/concurrency/dedicated because the
+    // Manager only makes sense one way. Force those values here.
+    const managerLocked = includesManager;
+    const effectiveRoles = managerLocked ? ["manager"] : form.roles;
+    const effectiveMode = managerLocked ? "live-shell" : form.mode;
+    const effectiveSpecialties = managerLocked
+      ? []
+      : form.specialties
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+    const effectiveConcurrency = managerLocked ? 1 : form.concurrency;
+    const effectiveDedicated = managerLocked ? true : form.dedicated;
+
     const payload: AgentConfigPayload = {
       action: "upsert",
       name: form.name.trim(),
-      roles: form.roles,
-      mode: form.mode,
+      roles: effectiveRoles,
+      mode: effectiveMode,
       prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
-      specialties: form.specialties
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0),
-      concurrency: form.concurrency,
-      dedicated: form.dedicated,
+      specialties: effectiveSpecialties,
+      concurrency: effectiveConcurrency,
+      dedicated: effectiveDedicated,
       description: form.description.trim() || undefined,
     };
     if (form.command.trim()) {
@@ -175,7 +198,10 @@ export function AgentConfigModal({
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
     }
-    if (form.runtime) payload.runtime = form.runtime;
+    // Manager entries never reference a runtime (they always spawn the
+    // command directly in the PTY panel — no shared-defaults inheritance
+    // makes sense for the interactive session).
+    if (!managerLocked && form.runtime) payload.runtime = form.runtime;
 
     setSubmitting(true);
     setError(null);
@@ -191,7 +217,14 @@ export function AgentConfigModal({
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal agent-config-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{isAdd ? "Add agent" : `Edit agent — ${form.name}`}</h3>
+        <h3>
+          {isAdd ? "Add agent" : `Edit agent — ${form.name}`}
+          {includesManager && (
+            <span className="agent-config-manager-tag" title="Manager entry — one PTY session, always live-shell">
+              Manager
+            </span>
+          )}
+        </h3>
         <form onSubmit={submit}>
           <label className="agent-config-field">
             <span>Name</span>
@@ -200,98 +233,87 @@ export function AgentConfigModal({
               value={form.name}
               disabled={!isAdd}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. reviewer"
+              placeholder={includesManager ? "e.g. primary-manager" : "e.g. reviewer"}
             />
             {fieldErrors.name && <span className="agent-config-error">{fieldErrors.name}</span>}
           </label>
 
-          <fieldset className="agent-config-field agent-config-roles-multi">
-            <legend>
-              Roles{" "}
-              <span className="muted">
-                (dispatch labels this agent can receive — pick one or more)
-              </span>
-            </legend>
-            <div className="agent-config-role-chips">
-              {availableRoles.map((r) => {
-                const selected = form.roles.includes(r);
-                return (
-                  <label
-                    key={r}
-                    className={
-                      selected
-                        ? "agent-config-role-chip agent-config-role-chip-on"
-                        : "agent-config-role-chip"
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleRole(r)}
-                    />
-                    {r}
-                  </label>
-                );
-              })}
-            </div>
-            {fieldErrors.roles && (
-              <span className="agent-config-error">{fieldErrors.roles}</span>
-            )}
-          </fieldset>
+          {/* Manager entries: Roles / Mode / Runtime are fixed and hidden.
+              Roles is always [manager], Mode is always live-shell, and
+              Manager never inherits from a runtime block. Workers show
+              all three. */}
+          {!includesManager && (
+            <fieldset className="agent-config-field agent-config-roles-multi">
+              <legend>
+                Roles{" "}
+                <span className="muted">
+                  (dispatch labels this agent can receive — pick one or more)
+                </span>
+              </legend>
+              <div className="agent-config-role-chips">
+                {availableRoles.map((r) => {
+                  const selected = form.roles.includes(r);
+                  return (
+                    <label
+                      key={r}
+                      className={
+                        selected
+                          ? "agent-config-role-chip agent-config-role-chip-on"
+                          : "agent-config-role-chip"
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleRole(r)}
+                      />
+                      {r}
+                    </label>
+                  );
+                })}
+              </div>
+              {fieldErrors.roles && (
+                <span className="agent-config-error">{fieldErrors.roles}</span>
+              )}
+            </fieldset>
+          )}
 
-          <fieldset className="agent-config-field agent-config-mode">
-            <legend>Mode</legend>
-            <label>
-              <input
-                type="radio"
-                name="mode"
-                checked={form.mode === "single-prompt"}
-                disabled={modeLockedToLiveShell}
-                onChange={() => setForm({ ...form, mode: "single-prompt" })}
-              />
-              single-prompt{" "}
-              <span className="muted">
-                (headless spawn, `-p &lt;prompt&gt;`, exits on completion — Worker)
-              </span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mode"
-                checked={form.mode === "live-shell"}
-                onChange={() => setForm({ ...form, mode: "live-shell" })}
-              />
-              live-shell{" "}
-              <span className="muted">
-                (PTY session, prompt typed into stdin, stays alive — Manager)
-              </span>
-            </label>
-            {modeLockedToLiveShell && (
-              <span className="agent-config-hint">
-                Manager roles require live-shell mode.
-              </span>
-            )}
-          </fieldset>
+          {!includesManager && (
+            <fieldset className="agent-config-field agent-config-mode">
+              <legend>Mode</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="mode"
+                  checked={form.mode === "single-prompt"}
+                  disabled={modeLockedToLiveShell}
+                  onChange={() => setForm({ ...form, mode: "single-prompt" })}
+                />
+                single-prompt{" "}
+                <span className="muted">
+                  (headless spawn, `-p &lt;prompt&gt;`, exits on completion — Worker)
+                </span>
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="mode"
+                  checked={form.mode === "live-shell"}
+                  onChange={() => setForm({ ...form, mode: "live-shell" })}
+                />
+                live-shell{" "}
+                <span className="muted">
+                  (PTY session, prompt typed into stdin, stays alive — Manager)
+                </span>
+              </label>
+              {modeLockedToLiveShell && (
+                <span className="agent-config-hint">
+                  Manager roles require live-shell mode.
+                </span>
+              )}
+            </fieldset>
+          )}
 
-          <label className="agent-config-field">
-            <span>
-              Runtime{" "}
-              <span className="muted">
-                (optional — inherit command / args / prompts from a `runtimes:` entry)
-              </span>
-            </span>
-            <select
-              value={form.runtime}
-              onChange={(e) => setForm({ ...form, runtime: e.target.value })}
-            >
-              <option value="">— none (specify command below) —</option>
-              {runtimeOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </label>
 
           <label className="agent-config-field">
             <span>Command</span>
@@ -325,10 +347,21 @@ export function AgentConfigModal({
 
           <fieldset className="agent-config-field agent-config-prompts">
             <legend>
-              Prompts{" "}
-              <span className="muted">
-                (per-role override — leave blank to use runtime or built-in default)
-              </span>
+              {includesManager ? (
+                <>
+                  Prompt{" "}
+                  <span className="muted">
+                    (typed into the PTY after Manager boots — leave blank for the built-in <code>/opsx:manage</code>)
+                  </span>
+                </>
+              ) : (
+                <>
+                  Prompts{" "}
+                  <span className="muted">
+                    (per-role override — leave blank to use runtime or built-in default)
+                  </span>
+                </>
+              )}
             </legend>
             {form.roles.map((role) => {
               const resolved = resolvedPromptForRole(role);
@@ -361,53 +394,98 @@ export function AgentConfigModal({
             })}
           </fieldset>
 
-          <label className="agent-config-field">
-            <span>
-              Specialties{" "}
-              <span className="muted">
-                (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)
-              </span>
-            </span>
-            <input
-              type="text"
-              value={form.specialties}
-              onChange={(e) => setForm({ ...form, specialties: e.target.value })}
-              placeholder="e.g. area/web, feature/ui"
-            />
-          </label>
+          {/* Advanced options — collapsed by default. Runtime, Specialties,
+              Concurrency, Dedicated, Description. Manager entries only
+              expose Description (the rest are irrelevant). */}
+          <div className="agent-config-advanced">
+            <button
+              type="button"
+              className="agent-config-advanced-toggle"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              {showAdvanced ? "▾" : "▸"} Advanced options
+            </button>
+            {showAdvanced && (
+              <div className="agent-config-advanced-body">
+                {!includesManager && (
+                  <label className="agent-config-field">
+                    <span>
+                      Runtime{" "}
+                      <span className="muted">
+                        (optional — inherit command / args / prompts from a `runtimes:` entry)
+                      </span>
+                    </span>
+                    <select
+                      value={form.runtime}
+                      onChange={(e) => setForm({ ...form, runtime: e.target.value })}
+                    >
+                      <option value="">— none (specify command below) —</option>
+                      {runtimeOptions.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
-          <label className="agent-config-field agent-config-field-inline">
-            <span>Concurrency</span>
-            <input
-              type="number"
-              min={1}
-              value={form.concurrency}
-              onChange={(e) =>
-                setForm({ ...form, concurrency: Number(e.target.value) || 0 })
-              }
-            />
-            {fieldErrors.concurrency && (
-              <span className="agent-config-error">{fieldErrors.concurrency}</span>
+                {!includesManager && (
+                  <label className="agent-config-field">
+                    <span>
+                      Specialties{" "}
+                      <span className="muted">
+                        (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)
+                      </span>
+                    </span>
+                    <input
+                      type="text"
+                      value={form.specialties}
+                      onChange={(e) => setForm({ ...form, specialties: e.target.value })}
+                      placeholder="e.g. area/web, feature/ui"
+                    />
+                  </label>
+                )}
+
+                {!includesManager && (
+                  <label className="agent-config-field agent-config-field-inline">
+                    <span>Concurrency</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={form.concurrency}
+                      onChange={(e) =>
+                        setForm({ ...form, concurrency: Number(e.target.value) || 0 })
+                      }
+                    />
+                    {fieldErrors.concurrency && (
+                      <span className="agent-config-error">{fieldErrors.concurrency}</span>
+                    )}
+                  </label>
+                )}
+
+                {!includesManager && (
+                  <label className="agent-config-field agent-config-field-inline">
+                    <input
+                      type="checkbox"
+                      checked={form.dedicated}
+                      onChange={(e) => setForm({ ...form, dedicated: e.target.checked })}
+                    />
+                    <span>Dedicated (unchecked = pool mode)</span>
+                  </label>
+                )}
+
+                <label className="agent-config-field">
+                  <span>Description (optional)</span>
+                  <input
+                    type="text"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  />
+                </label>
+              </div>
             )}
-          </label>
-
-          <label className="agent-config-field agent-config-field-inline">
-            <input
-              type="checkbox"
-              checked={form.dedicated}
-              onChange={(e) => setForm({ ...form, dedicated: e.target.checked })}
-            />
-            <span>Dedicated (unchecked = pool mode)</span>
-          </label>
-
-          <label className="agent-config-field">
-            <span>Description (optional)</span>
-            <input
-              type="text"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          </label>
+          </div>
 
           {error && <div className="agent-config-server-error">⚠ {error}</div>}
 

@@ -118,6 +118,90 @@ as today's `Runtime-Backed Agents`).
 - **WHEN** the client dispatches `{ role: "other", changeId: "add-foo" }`
 - **THEN** the dispatch fails with a "no prompt configured for role other" error
 
+### Requirement: Agents Config Modal Layout Ergonomics
+
+The AgentConfigModal SHALL adapt its layout to the entry being edited
+and to the size of the containing viewport so users can complete the
+form without hunting for irrelevant controls or scrolling behind the
+Save button.
+
+**Manager-specific field visibility.** When the entry's `roles`
+contains `manager`, the Modal SHALL hide the fields whose values are
+fixed for Manager entries and cannot be usefully changed:
+
+- The **Roles** multi-select SHALL be hidden; `roles` is force-set to
+  `["manager"]` on submit.
+- The **Mode** toggle SHALL be hidden; `mode` is force-set to
+  `"live-shell"` on submit.
+- The **Runtime** dropdown SHALL be hidden; Manager entries never
+  inherit from a `runtimes:` block (the interactive PTY session
+  doesn't compose meaningfully with shared-defaults inheritance).
+- **Specialties**, **Concurrency**, and **Dedicated** SHALL be hidden;
+  they are force-set to `[]`, `1`, and `true` respectively on submit
+  because Manager is a singleton PTY that doesn't participate in
+  dispatch routing, concurrency limits, or worktree pools.
+- A **Manager** tag SHALL appear next to the modal title so the user
+  can see at a glance that they're editing the Manager row.
+- The Prompts fieldset SHALL render as singular ("Prompt") with a
+  Manager-specific hint ("typed into the PTY after Manager boots").
+
+Worker entries (any `roles` without `manager`) SHALL render all
+fields normally.
+
+**Advanced options — collapsible.** The Modal SHALL group the
+non-essential fields (Runtime, Specialties, Concurrency, Dedicated,
+Description) behind a `[▸ Advanced options]` disclosure. The section
+SHALL start **collapsed** on Add mode and on Edit-mode entries whose
+Advanced fields all hold their defaults. When any of those fields
+holds a non-default value at open time, the section SHALL start
+**expanded** so the user sees what they're editing. The disclosure
+toggle SHALL preserve the current form state across expand / collapse
+transitions (no field reset).
+
+**Scroll.** The Modal SHALL cap its height at `90vh` and SHALL make
+its form body scrollable. The Modal title and the Cancel / Save
+action row SHALL remain pinned (non-scrolling) so the user can
+always dismiss or submit without scrolling.
+
+#### Scenario: Manager Modal hides worker-only fields
+- **GIVEN** the user opens the Modal on the existing Manager entry (or via the Manager section's `[Declare in agents.yaml]` shortcut)
+- **WHEN** the Modal renders
+- **THEN** the Roles multi-select, Mode toggle, Runtime dropdown, Specialties input, Concurrency input, and Dedicated checkbox are ALL absent from the visible form
+- **AND** a "MANAGER" tag appears next to the modal title
+- **AND** the Prompts fieldset legend reads "Prompt" (singular) with a manager-specific hint
+
+#### Scenario: Manager Modal submits with fixed values
+- **GIVEN** the Manager Modal is open with only Name, Command, Args, and Prompt visible
+- **WHEN** the user fills in `name: primary`, `command: claude`, `args: --continue`, `prompt: /opsx:manage`, and clicks Save
+- **THEN** the payload sent to `/api/agents/config` includes `roles: ["manager"]`, `mode: "live-shell"`, `specialties: []`, `concurrency: 1`, `dedicated: true`
+- **AND** the payload does NOT include a `runtime` field
+
+#### Scenario: Worker Modal shows all fields
+- **GIVEN** the user opens the Modal on a worker entry with `roles: [code]`
+- **WHEN** the Modal renders
+- **THEN** the Roles multi-select, Mode toggle, and (inside the Advanced disclosure) Runtime, Specialties, Concurrency, Dedicated, and Description are all present
+
+#### Scenario: Advanced options start collapsed on Add mode
+- **GIVEN** the user clicks `+ Add agent` (no existing agent seed)
+- **WHEN** the Modal renders
+- **THEN** the Advanced options section is collapsed; only its `[▸ Advanced options]` toggle is visible
+
+#### Scenario: Advanced options auto-expand for non-default edits
+- **GIVEN** an existing agent has `specialties: [area/web]` (a non-default value)
+- **WHEN** the user opens the Modal via Edit on that row
+- **THEN** the Advanced options section renders expanded so the specialties field is visible on open
+
+#### Scenario: Advanced options toggle preserves state
+- **GIVEN** the Advanced options section is expanded and the user has typed `concurrency: 3`
+- **WHEN** the user clicks the toggle to collapse, then clicks it again to expand
+- **THEN** the concurrency input still reads `3` (state is not reset by the toggle)
+
+#### Scenario: Modal scrolls when content exceeds viewport
+- **GIVEN** the user opens the Modal on a tall viewport where all fields fit at once
+- **WHEN** the viewport is resized short enough that the fields would overflow
+- **THEN** the Modal title stays pinned at the top and the Cancel / Save row stays pinned at the bottom
+- **AND** the middle form section becomes scrollable so every field remains reachable
+
 ## MODIFIED Requirements
 
 ### Requirement: Runtime Definitions In agents.yaml
