@@ -22,7 +22,6 @@ import type {
  */
 
 const ROLE_OPTIONS = ["code", "review", "verify", "manager", "other"] as const;
-const KEBAB_RE = /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/;
 
 const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
   code: "/opsx:apply ${change_id}",
@@ -32,17 +31,20 @@ const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
 };
 
 type Props = {
-  /** `AgentPublic` = edit mode with the row's data (name field disabled);
-   *  `"new"` = add mode (name field editable + empty defaults). */
+  /** `AgentPublic` = edit mode with the row's data;
+   *  `"new"` = add mode (fields default; name auto-generated on submit). */
   seed: AgentPublic | "new";
   runtimes: RuntimeDefPublic[];
+  /** Existing agent names — used by the Add-mode auto-namer to avoid
+   *  collisions (appends `-2`, `-3`, ... on conflict). */
+  existingNames: string[];
   /** Name of the currently-configured manager, if any. Used to hide
    *  `manager` from the roles multi-select in Add mode so users can't
    *  create a second one (Manager singleton). */
   existingManagerName: string | null;
   /** Optional Add-mode prefill (add-agents-tab-manager-section):
-   *  populate all form fields except `name` from this seed while still
-   *  treating the modal as Add mode. */
+   *  populate all form fields from this seed while still treating the
+   *  modal as Add mode. */
   addModePrefill?: AgentPublic | null;
   onCancel: () => void;
   onSubmit: (payload: AgentConfigPayload) => Promise<void>;
@@ -51,6 +53,7 @@ type Props = {
 export function AgentConfigModal({
   seed,
   runtimes,
+  existingNames,
   existingManagerName,
   addModePrefill,
   onCancel,
@@ -59,6 +62,8 @@ export function AgentConfigModal({
   const isAdd = seed === "new";
   const initial = useMemo(() => {
     if (seed === "new" && addModePrefill) {
+      // Prefill from Manager section shortcut. Keep name empty — the
+      // auto-namer at submit time picks "manager".
       return { ...deriveInitialForm(addModePrefill), name: "" };
     }
     return deriveInitialForm(seed);
@@ -92,9 +97,20 @@ export function AgentConfigModal({
   // Add-mode entry point for `manager`. Edit mode on the existing manager
   // keeps `manager` selectable so the user can reconfigure without losing
   // the role.
+  //
+  // Defensive access: `seed.roles` may be undefined when the server hasn't
+  // yet restarted with the reshape's registry changes — fall back to the
+  // deprecated scalar `seed.role` in that case so the Modal renders
+  // instead of crashing during hydration.
   const isEditingManager =
-    seed !== "new" && seed.roles.includes("manager");
-  const isDeclaringManager = !!addModePrefill?.roles?.includes("manager");
+    seed !== "new" &&
+    (Array.isArray(seed.roles)
+      ? seed.roles.includes("manager")
+      : seed.role === "manager");
+  const isDeclaringManager =
+    Array.isArray(addModePrefill?.roles)
+      ? addModePrefill!.roles.includes("manager")
+      : addModePrefill?.role === "manager";
   const managerSelectable =
     isEditingManager || isDeclaringManager || existingManagerName === null;
   const availableRoles = ROLE_OPTIONS.filter(
@@ -144,9 +160,8 @@ export function AgentConfigModal({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (isAdd && !KEBAB_RE.test(form.name)) {
-      errs.name = "kebab-case letters, digits and hyphens only (e.g. reviewer)";
-    }
+    // Name is not user-typed anymore — auto-generated on submit. No
+    // per-field validation needed.
     if (form.roles.length === 0) {
       errs.roles = "at least one role required";
     }
@@ -179,10 +194,20 @@ export function AgentConfigModal({
           .filter((s) => s.length > 0);
     const effectiveConcurrency = managerLocked ? 1 : form.concurrency;
     const effectiveDedicated = managerLocked ? true : form.dedicated;
+    // Name resolution:
+    //   - Edit mode: keep the seed's name (form.name is preloaded from it)
+    //   - Add mode + Manager: force "manager" (singleton, no collision)
+    //   - Add mode + Worker: auto-derived from runtime/command + role,
+    //     de-duplicated against existingNames
+    const effectiveName = !isAdd
+      ? form.name.trim()
+      : managerLocked
+        ? "manager"
+        : autoNameForWorker(form, existingNames);
 
     const payload: AgentConfigPayload = {
       action: "upsert",
-      name: form.name.trim(),
+      name: effectiveName,
       roles: effectiveRoles,
       mode: effectiveMode,
       prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
@@ -218,7 +243,11 @@ export function AgentConfigModal({
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal agent-config-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
-          {isAdd ? "Add agent" : `Edit agent — ${form.name}`}
+          {isAdd
+            ? `Add agent — ${
+                includesManager ? "manager" : autoNameForWorker(form, existingNames)
+              }`
+            : `Edit agent — ${form.name}`}
           {includesManager && (
             <span className="agent-config-manager-tag" title="Manager entry — one PTY session, always live-shell">
               Manager
@@ -226,17 +255,6 @@ export function AgentConfigModal({
           )}
         </h3>
         <form onSubmit={submit}>
-          <label className="agent-config-field">
-            <span>Name</span>
-            <input
-              type="text"
-              value={form.name}
-              disabled={!isAdd}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder={includesManager ? "e.g. primary-manager" : "e.g. reviewer"}
-            />
-            {fieldErrors.name && <span className="agent-config-error">{fieldErrors.name}</span>}
-          </label>
 
           {/* Manager entries: Roles / Mode / Runtime are fixed and hidden.
               Roles is always [manager], Mode is always live-shell, and
@@ -517,6 +535,44 @@ type FormState = {
   description: string;
 };
 
+/**
+ * Derive a worker agent's name from its form state. Never called for
+ * Manager (which is hard-coded to "manager") and never called in Edit
+ * mode (which keeps the seed's name). Result is guaranteed kebab-case
+ * and unique against `existingNames` (collision → `-2`, `-3`, ...).
+ */
+function autoNameForWorker(form: FormState, existingNames: string[]): string {
+  const commandBase = form.command
+    ? kebabify(
+        form.command
+          .trim()
+          .split(/[/\\]/)
+          .pop()!
+          .replace(/\.(exe|bat|cmd|sh)$/i, ""),
+      )
+    : "";
+  const base = form.runtime || commandBase || form.roles[0] || "agent";
+  const soleRole =
+    form.roles.length === 1 && form.roles[0] !== base ? form.roles[0] : "";
+  const candidate = kebabify(soleRole ? `${base}-${soleRole}` : base) || "agent";
+  return uniquify(candidate, existingNames);
+}
+
+function kebabify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function uniquify(candidate: string, existingNames: string[]): string {
+  if (!existingNames.includes(candidate)) return candidate;
+  let n = 2;
+  while (existingNames.includes(`${candidate}-${n}`)) n++;
+  return `${candidate}-${n}`;
+}
+
 function deriveInitialForm(seed: AgentPublic | "new"): FormState {
   if (seed === "new") {
     return {
@@ -533,17 +589,35 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       description: "",
     };
   }
+  // Defensive read: the server may still be running the pre-reshape
+  // registry, in which case `roles` / `mode` / `prompts` are undefined
+  // on the wire. Fall back to the deprecated scalar fields so the Modal
+  // renders instead of throwing during hydration.
+  const rolesFromSeed =
+    Array.isArray(seed.roles) && seed.roles.length > 0
+      ? [...seed.roles]
+      : seed.role
+        ? [seed.role]
+        : ["code"];
+  const modeFromSeed =
+    seed.mode ?? (rolesFromSeed.includes("manager") ? "live-shell" : "single-prompt");
+  const promptsFromSeed: Record<string, string> = { ...(seed.prompts ?? {}) };
+  if (Object.keys(promptsFromSeed).length === 0 && seed.initialInput) {
+    promptsFromSeed[rolesFromSeed[0]] = seed.initialInput;
+  } else if (Object.keys(promptsFromSeed).length === 0 && seed.prompt) {
+    promptsFromSeed[rolesFromSeed[0]] = seed.prompt;
+  }
   return {
     name: seed.name,
-    roles: seed.roles.length > 0 ? [...seed.roles] : ["code"],
-    mode: seed.mode ?? (seed.roles.includes("manager") ? "live-shell" : "single-prompt"),
+    roles: rolesFromSeed,
+    mode: modeFromSeed,
     command: seed.command ?? "",
     args: (seed.args ?? []).join(" "),
     runtime: seed.runtime ?? "",
-    prompts: { ...(seed.prompts ?? {}) },
-    specialties: seed.specialties.join(", "),
-    concurrency: seed.concurrency,
-    dedicated: seed.dedicated,
+    prompts: promptsFromSeed,
+    specialties: (seed.specialties ?? []).join(", "),
+    concurrency: seed.concurrency ?? 1,
+    dedicated: seed.dedicated ?? true,
     description: seed.description ?? "",
   };
 }

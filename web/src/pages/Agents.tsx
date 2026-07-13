@@ -88,15 +88,21 @@ export function Agents() {
   // Configured (idle): agents from agents.yaml that do NOT have a
   // currently-running job AND are not the Manager (Manager gets its
   // own section per add-agents-tab-manager-section). Match by name.
+  // Defensive helper: server may still be running the pre-reshape
+  // registry, which returns agents without `roles[]`. Fall back to the
+  // deprecated scalar `role` field so the UI doesn't crash mid-render.
+  const isManager = (a: AgentPublic): boolean =>
+    Array.isArray(a.roles) ? a.roles.includes("manager") : a.role === "manager";
+
   const runningAgentNames = new Set(active.map((j) => j.agentName));
   const idleAgents = agents.filter(
-    (a) => !runningAgentNames.has(a.name) && !a.roles.includes("manager"),
+    (a) => !runningAgentNames.has(a.name) && !isManager(a),
   );
 
   // Manager singleton (refine-agents-config-modal). Used by the modal
   // to hide the `manager` role option in Add mode when one already
   // exists, and by the row to hide the Delete button on the manager.
-  const existingManager = agents.find((a) => a.roles.includes("manager")) ?? null;
+  const existingManager = agents.find(isManager) ?? null;
   const existingManagerName = existingManager?.name ?? null;
 
   return (
@@ -183,6 +189,7 @@ export function Agents() {
         <AgentConfigModal
           seed={editing}
           runtimes={runtimes?.runtimes ?? []}
+          existingNames={agents.map((a) => a.name)}
           existingManagerName={existingManagerName}
           addModePrefill={addModePrefill}
           onCancel={() => {
@@ -432,15 +439,23 @@ function AgentRow({
   // Manager from the UI silently disables the Terminal panel's
   // auto-launch — a footgun. Users who really want to remove it can
   // hand-edit agents.yaml.
-  const canDelete = !agent.roles.includes("manager");
+  // Defensive: pre-reshape server returns agents without roles[]/mode.
+  const rolesDisplay =
+    Array.isArray(agent.roles) && agent.roles.length > 0
+      ? agent.roles.join(", ")
+      : (agent.role ?? "code");
+  const modeDisplay = agent.mode ?? "single-prompt";
+  const canDelete = Array.isArray(agent.roles)
+    ? !agent.roles.includes("manager")
+    : agent.role !== "manager";
   return (
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
-      <span className="job-role-badge">{agent.roles.join(", ")}</span>
+      <span className="job-role-badge">{rolesDisplay}</span>
       <span className="job-runtime-badge">
         runtime: {isRuntimeBacked ? agent.runtime : "legacy"}
       </span>
-      <span className="job-mode-badge muted">mode: {agent.mode}</span>
+      <span className="job-mode-badge muted">mode: {modeDisplay}</span>
       {agent.specialties.length > 0 && (
         <span className="muted">specialties: [{agent.specialties.join(", ")}]</span>
       )}

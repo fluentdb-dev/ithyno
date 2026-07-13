@@ -125,6 +125,24 @@ and to the size of the containing viewport so users can complete the
 form without hunting for irrelevant controls or scrolling behind the
 Save button.
 
+**Name field removed — auto-generated.** The Modal SHALL NOT expose
+`name` as a user-editable input, because the value is fixed once
+saved (rename is not supported through the UI). Instead:
+
+- **Edit mode** — the modal title reads `Edit agent — <name>`; `name`
+  is preserved from the seed and never mutated by the form.
+- **Add mode + Manager** — `name` is force-set to the literal `manager`
+  on submit (Manager is a singleton; no collision is possible).
+- **Add mode + Worker** — `name` is derived from the current form
+  state via a client-side auto-namer: base is the `runtime` value
+  when set, else the `command` basename (extension stripped, kebab-
+  cased), else the sole role, else the literal `agent`. When the
+  agent has a single role that differs from the base, `-<role>` is
+  appended. Collisions against existing agent names are resolved by
+  appending `-2`, `-3`, ... until unique. The modal title displays
+  the pending auto-name as `Add agent — <auto-name>` so the user
+  sees what will be saved.
+
 **Manager-specific field visibility.** When the entry's `roles`
 contains `manager`, the Modal SHALL hide the fields whose values are
 fixed for Manager entries and cannot be usefully changed:
@@ -162,6 +180,39 @@ transitions (no field reset).
 its form body scrollable. The Modal title and the Cancel / Save
 action row SHALL remain pinned (non-scrolling) so the user can
 always dismiss or submit without scrolling.
+
+#### Scenario: Edit-mode title shows the fixed name
+- **GIVEN** the user clicks Edit on an agent named `claude-worker`
+- **WHEN** the Modal renders
+- **THEN** the title reads `Edit agent — claude-worker`
+- **AND** no editable input for `name` appears in the form
+
+#### Scenario: Manager Add force-sets name to "manager"
+- **GIVEN** the Manager section shows `[Declare in agents.yaml]` because no Manager exists
+- **WHEN** the user clicks the shortcut and clicks Save on the Modal
+- **THEN** the payload sent to `/api/agents/config` has `name: "manager"`
+
+#### Scenario: Worker Add derives name from command + role
+- **GIVEN** the user clicks `+ Add agent`, types `claude` into command, and keeps `roles: [code]`
+- **WHEN** the Modal renders
+- **THEN** the title reads `Add agent — claude-code`
+- **AND** clicking Save sends `name: "claude-code"` in the payload
+
+#### Scenario: Worker Add uses runtime when set
+- **GIVEN** the user picks runtime `aider` and roles `[code]`
+- **WHEN** the Modal renders
+- **THEN** the title reads `Add agent — aider-code`
+
+#### Scenario: Worker Add omits role suffix when base equals role
+- **GIVEN** the user leaves command empty and picks runtime `code` with roles `[code]`
+- **WHEN** the Modal renders
+- **THEN** the title reads `Add agent — code` (no `-code` suffix)
+
+#### Scenario: Auto-namer resolves collisions with numeric suffix
+- **GIVEN** an agent named `claude-code` already exists
+- **AND** the user starts Adding a new agent that would auto-name to `claude-code`
+- **WHEN** the Modal renders
+- **THEN** the title reads `Add agent — claude-code-2`
 
 #### Scenario: Manager Modal hides worker-only fields
 - **GIVEN** the user opens the Modal on the existing Manager entry (or via the Manager section's `[Declare in agents.yaml]` shortcut)
