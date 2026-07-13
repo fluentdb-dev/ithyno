@@ -673,6 +673,7 @@ type DispatchBody = {
   runtime?: unknown;
   wait?: unknown;
   timeoutMs?: unknown;
+  sessionId?: unknown;
 };
 fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
@@ -684,6 +685,7 @@ fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) 
   const runtime = typeof b.runtime === "string" ? b.runtime : undefined;
   const wait = typeof b.wait === "boolean" ? b.wait : true;
   const timeoutMs = typeof b.timeoutMs === "number" ? b.timeoutMs : undefined;
+  const sessionId = typeof b.sessionId === "string" && b.sessionId.length > 0 ? b.sessionId : undefined;
 
   if (changeId && !isSafeChangeId(changeId)) {
     return reply.code(400).send({ error: "invalid change id" });
@@ -695,6 +697,7 @@ fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) 
     runtime,
     wait,
     timeoutMs,
+    sessionId,
   });
   if (!outcome.ok) {
     const body: Record<string, unknown> = { error: outcome.error };

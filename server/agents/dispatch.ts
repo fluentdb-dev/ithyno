@@ -7,6 +7,7 @@ import type { AgentRegistry, AgentDef } from "./registry.js";
 import { runtimeLabel } from "./registry.js";
 import type { AgentRunner, Job } from "./runner.js";
 import type { ReviewArtifact } from "./review-parser.js";
+import { getOrCreateSessionId } from "./session-store.js";
 
 /**
  * Role-driven dispatch: pick an agent from `agents.yaml` matching the
@@ -124,6 +125,10 @@ export type DispatchInput = {
   runtime?: string;
   wait?: boolean;
   timeoutMs?: number;
+  /** Explicit session correlation override — when non-empty, wins over
+   *  the change-scoped session store lookup. See
+   *  add-session-id-template-var. */
+  sessionId?: string;
 };
 
 export const DEFAULT_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
@@ -217,6 +222,17 @@ export async function dispatch(
     };
   }
 
+  // Resolve session correlation BEFORE change-existence validation per
+  // add-session-id-template-var. Body-supplied `sessionId` wins; else
+  // getOrCreateSessionId mints (and persists) a stable per-change id.
+  // The lookup deliberately runs before the changeDir check so the
+  // sessions.json entry is created even for orphan changeIds — user
+  // may clean up sessions.json manually if desired.
+  const resolvedSessionId =
+    input.sessionId && input.sessionId.length > 0
+      ? input.sessionId
+      : await getOrCreateSessionId(projectRoot, input.changeId);
+
   const changeDir = join(projectRoot, "openspec", "changes", input.changeId);
   if (!existsSync(changeDir)) {
     return { ok: false, status: 404, error: `change '${input.changeId}' not found` };
@@ -247,7 +263,12 @@ export async function dispatch(
   }
   const agent = selection.agent;
 
-  const runResult = await runner.run(input.changeId, agent.name, input.role);
+  const runResult = await runner.run(
+    input.changeId,
+    agent.name,
+    input.role,
+    resolvedSessionId,
+  );
   if (!runResult.ok) {
     return { ok: false, status: runResult.status, error: runResult.reason };
   }

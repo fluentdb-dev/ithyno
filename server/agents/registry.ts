@@ -703,7 +703,17 @@ export class AgentRegistry {
    */
   resolve(
     def: AgentDef,
-    vars: { change_id: string; worktree_path: string; branch: string },
+    vars: {
+      change_id: string;
+      worktree_path: string;
+      branch: string;
+      /** Optional per-dispatch session ID substituted for `${session_id}`
+       *  in args, env, and per-role prompts. When absent or empty, the
+       *  token is replaced with the literal empty string (matches the
+       *  always-defined convention of the other vars).
+       *  See add-session-id-template-var. */
+      session_id?: string;
+    },
     role?: string,
   ): {
     command: string;
@@ -717,11 +727,13 @@ export class AgentRegistry {
      *  PTY after boot. */
     initialInputMode: "cli-arg" | "stdin" | "pty";
   } {
+    const sessionId = vars.session_id ?? "";
     const replace = (s: string): string =>
       s
         .replace(/\$\{change_id\}/g, vars.change_id)
         .replace(/\$\{worktree_path\}/g, vars.worktree_path)
-        .replace(/\$\{branch\}/g, vars.branch);
+        .replace(/\$\{branch\}/g, vars.branch)
+        .replace(/\$\{session_id\}/g, sessionId);
 
     const dispatchedRole = role ?? def.roles[0];
     const env: Record<string, string> = {};

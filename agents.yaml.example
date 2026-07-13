@@ -31,6 +31,12 @@
 #   ${change_id}     — the OpenSpec change id
 #   ${worktree_path} — absolute path to the agent's git worktree
 #   ${branch}        — the agent branch ("agent/<change-id>")
+#   ${session_id}    — change-scoped session id for conversation grouping
+#                      (persisted at .ithyno/sessions.json; stable across
+#                      server restarts; empty string when unavailable).
+#                      Useful with Claude Code's `--session <id>` or
+#                      `gh copilot`'s equivalent flag.
+#                      Example: args: [--session, "${session_id}"]
 #
 # ─── Backward compatibility ────────────────────────────────────────────────
 #

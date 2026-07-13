@@ -47,6 +47,12 @@ export type JobSummary = {
    *  for command+args agents, "unknown" for orphan-adopted jobs. Set
    *  once at spawn time, never mutated. */
   runtime: string;
+  /** Optional session correlation id — the value substituted for
+   *  `${session_id}` in the agent's args / env / prompts. Populated
+   *  at spawn time from dispatch's session resolution. Orphan-adopted
+   *  jobs leave this undefined (no dispatch context).
+   *  Landed by add-session-id-template-var. */
+  sessionId?: string;
   /** Paths (relative to project root) of files created or modified
    *  inside `openspec/changes/<changeId>/` during the job. Populated by
    *  the runner at finish; undefined while the job is running or when
@@ -347,8 +353,18 @@ export class AgentRunner {
    *
    * `dispatchedRole` defaults to the agent's first declared role for
    * back-compat with the pre-reshape single-role dispatch path.
+   *
+   * `sessionId` (add-session-id-template-var) is the value substituted
+   * for `${session_id}` in the agent's args / env / prompts and also
+   * recorded on the resulting Job for correlation. Optional; empty /
+   * undefined resolves to the empty string in the template pass.
    */
-  async run(changeId: string, agentName: string, dispatchedRole?: string): Promise<
+  async run(
+    changeId: string,
+    agentName: string,
+    dispatchedRole?: string,
+    sessionId?: string,
+  ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
   > {
@@ -428,6 +444,7 @@ export class AgentRunner {
           change_id: changeId,
           worktree_path: worktreePath,
           branch,
+          session_id: sessionId,
         },
         effectiveRole,
       );
@@ -466,6 +483,7 @@ export class AgentRunner {
       fromPool,
       role: effectiveRole,
       runtime: runtimeLabel(def),
+      sessionId: sessionId && sessionId.length > 0 ? sessionId : undefined,
     };
     this.jobs.set(id, job);
     this.locks.set(changeId, id);
