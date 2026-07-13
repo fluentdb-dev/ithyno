@@ -1200,23 +1200,73 @@ a:hover {
 .agent-config-field-inline input[type="number"] {
   width: 80px;
 }
-.agent-config-shape {
+.agent-config-shape,
+.agent-config-mode,
+.agent-config-roles-multi,
+.agent-config-prompts {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px;
   margin: 0;
 }
-.agent-config-shape legend {
+.agent-config-shape legend,
+.agent-config-mode legend,
+.agent-config-roles-multi legend,
+.agent-config-prompts legend {
   padding: 0 6px;
   font-size: 11px;
   color: var(--muted);
 }
-.agent-config-shape label {
+.agent-config-shape label,
+.agent-config-mode label {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   margin: 2px 0;
+}
+.agent-config-role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.agent-config-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--bg);
+}
+.agent-config-role-chip input[type="checkbox"] {
+  margin: 0;
+}
+.agent-config-role-chip-on {
+  background: color-mix(in oklab, var(--accent, #2563eb) 15%, transparent);
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 60%, var(--border));
+}
+.agent-config-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.agent-config-prompt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0;
+}
+.agent-config-prompt-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.agent-config-prompt-chain-hint {
+  font-size: 10px;
+  font-style: italic;
 }
 .agent-config-error {
   color: var(--danger, #b91c1c);

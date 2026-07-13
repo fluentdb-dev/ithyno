@@ -62,7 +62,10 @@ export function selectAgent(registry: AgentRegistry, query: SelectQuery): Select
     // `publicConfig` strips env; treat the shape as AgentDef for role /
     // specialties / runtime matching (these fields are preserved).
     const def = a as unknown as AgentDef;
-    if (def.role !== query.role) continue;
+    // Multi-role support: match dispatch role against agent.roles[].
+    // Single-role legacy agents still work because normalization
+    // produces roles = [scalarRole].
+    if (!def.roles.includes(query.role)) continue;
 
     const spec = def.specialties ?? [];
     const isWildcard =
@@ -244,7 +247,7 @@ export async function dispatch(
   }
   const agent = selection.agent;
 
-  const runResult = await runner.run(input.changeId, agent.name);
+  const runResult = await runner.run(input.changeId, agent.name, input.role);
   if (!runResult.ok) {
     return { ok: false, status: runResult.status, error: runResult.reason };
   }

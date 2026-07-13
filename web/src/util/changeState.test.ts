@@ -10,6 +10,8 @@ const agents: AgentPublic[] = [
     args: ["/opsx:apply", "${change_id}"],
     hasEnv: false,
     role: "code",
+    roles: ["code"],
+    mode: "single-prompt",
     specialties: [],
     concurrency: 1,
     dedicated: true,

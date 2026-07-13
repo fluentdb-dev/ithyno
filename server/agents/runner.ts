@@ -339,7 +339,16 @@ export class AgentRunner {
     return stripOutput(all[0]);
   }
 
-  async run(changeId: string, agentName: string): Promise<
+  /**
+   * Spawn an agent for a change. `dispatchedRole` — the role that was
+   * requested by the caller — is threaded through so the job's `role`
+   * field reflects the specific dispatch (multi-role agents produce
+   * different jobs for `code` vs `review` vs `verify`).
+   *
+   * `dispatchedRole` defaults to the agent's first declared role for
+   * back-compat with the pre-reshape single-role dispatch path.
+   */
+  async run(changeId: string, agentName: string, dispatchedRole?: string): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
   > {
@@ -410,13 +419,18 @@ export class AgentRunner {
       }
     }
 
+    const effectiveRole = dispatchedRole ?? def.roles[0];
     let resolved;
     try {
-      resolved = this.registry.resolve(def, {
-        change_id: changeId,
-        worktree_path: worktreePath,
-        branch,
-      });
+      resolved = this.registry.resolve(
+        def,
+        {
+          change_id: changeId,
+          worktree_path: worktreePath,
+          branch,
+        },
+        effectiveRole,
+      );
     } catch (err) {
       // Clean up before returning — otherwise a misconfigured runtime
       // (unknown runtime name, promptStyle:file) leaks a worktree or
@@ -428,21 +442,15 @@ export class AgentRunner {
         reason: err instanceof Error ? err.message : String(err),
       };
     }
-    // Translate `initialInput` into either a `-p "<prompt>"` CLI arg
-    // (Claude Code's non-interactive mode; the default for legacy
-    // agents) or a stdin write (for runtimes that declared
-    // promptStyle: stdin). User-supplied `-p` in args wins for the
-    // cli-arg path — don't double it up.
+    // registry.resolve() now inlines cli-arg prompts into `args` at resolve
+    // time (so the runner doesn't need to know about promptFlag). For
+    // stdin-styled runtimes we still pipe stdin. For live-shell agents
+    // (mode: "pty") the runner spawns headless anyway because Manager
+    // PTY handling lives in the separate embedded-terminal panel — the
+    // dispatched-code path here never enters live-shell mode.
     const finalArgs = [...resolved.args];
     const useStdinForPrompt =
       resolved.initialInputMode === "stdin" && resolved.initialInput !== undefined;
-    if (
-      resolved.initialInputMode === "cli-arg" &&
-      resolved.initialInput !== undefined &&
-      !finalArgs.includes("-p")
-    ) {
-      finalArgs.unshift("-p", resolved.initialInput);
-    }
     console.log(`[runner] spawn ${resolved.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
 
     const id = this.newId();
@@ -456,7 +464,7 @@ export class AgentRunner {
       startedAt: Date.now(),
       output: [],
       fromPool,
-      role: def.role,
+      role: effectiveRole,
       runtime: runtimeLabel(def),
     };
     this.jobs.set(id, job);

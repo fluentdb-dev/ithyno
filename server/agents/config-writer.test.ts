@@ -33,9 +33,11 @@ async function readBack(): Promise<Record<string, unknown>> {
 const legacyClaude: AgentConfigPayload = {
   action: "upsert",
   name: "claude",
-  role: "code",
+  roles: ["code"],
+  mode: "single-prompt",
   command: "claude",
-  args: ["--dangerously-skip-permissions", "-p", "/opsx:apply ${change_id}"],
+  args: ["--dangerously-skip-permissions"],
+  prompts: { code: "/opsx:apply ${change_id}" },
   specialties: [],
   concurrency: 1,
   dedicated: true,
@@ -44,9 +46,10 @@ const legacyClaude: AgentConfigPayload = {
 const runtimeReviewer: AgentConfigPayload = {
   action: "upsert",
   name: "reviewer",
-  role: "review",
+  roles: ["review"],
+  mode: "single-prompt",
   runtime: "claude",
-  prompt: "/opsx:review ${change_id}",
+  prompts: { review: "/opsx:review ${change_id}" },
   specialties: ["area/web"],
   concurrency: 2,
   dedicated: false,
@@ -59,7 +62,7 @@ describe("applyAgentConfigPayload — upsert", () => {
     expect(res).toEqual({ ok: true });
     const doc = await readBack();
     expect(doc.agents).toEqual([
-      expect.objectContaining({ name: "claude", role: "code", command: "claude" }),
+      expect.objectContaining({ name: "claude", roles: ["code"], command: "claude" }),
     ]);
   });
 
@@ -94,13 +97,13 @@ describe("applyAgentConfigPayload — upsert", () => {
     );
     const res = await applyAgentConfigPayload(dir, {
       ...legacyClaude,
-      role: "review",
+      roles: ["review"],
     });
     expect(res).toEqual({ ok: true });
     const doc = await readBack();
     const agents = doc.agents as Array<Record<string, unknown>>;
     expect(agents.map((a) => a.name)).toEqual(["alpha", "claude", "beta"]);
-    expect(agents[1]).toMatchObject({ name: "claude", role: "review", command: "claude" });
+    expect(agents[1]).toMatchObject({ name: "claude", roles: ["review"], command: "claude" });
   });
 
   it("preserves unrelated top-level keys (runtimes, worktreePool, unknown)", async () => {
@@ -145,7 +148,7 @@ describe("applyAgentConfigPayload — upsert", () => {
     expect(agents[0]).toMatchObject({
       name: "reviewer",
       runtime: "claude",
-      prompt: "/opsx:review ${change_id}",
+      prompts: { review: "/opsx:review ${change_id}" },
       dedicated: false,
     });
     // Legacy fields must not leak into a runtime-backed entry.
@@ -158,17 +161,30 @@ describe("applyAgentConfigPayload — upsert", () => {
     // The coerce step lets this through (both concurrency+dedicated are
     // present) but the loader's exhaustiveness check should reject a
     // mangled shape — bypass coerce to test the guard.
+    // Post reshape-agents-yaml-mode-roles: command + runtime are not
+    // mutually exclusive anymore (runtime is optional shared-defaults).
+    // Instead exercise an unknown-runtime rejection which the loader
+    // still catches. (The bogus type-cast bypasses TS.)
     const bogus = {
       action: "upsert" as const,
       name: "bad",
-      role: "code",
-      command: "cmd",
-      runtime: "claude", // simultaneously legacy AND runtime-backed
+      roles: ["code"],
+      mode: "single-prompt" as const,
+      runtime: "does-not-exist",
       specialties: [],
       concurrency: 1,
       dedicated: true,
     };
-    const res = await applyAgentConfigPayload(dir, bogus as AgentConfigPayload);
+    // Note: applyAgentConfigPayload's validateAgents wraps normalizeAgent
+    // which does NOT validate the runtime reference (that happens at
+    // resolve() time). So this actually will pass validation. Use a
+    // different structural error to test the loader guard instead:
+    // an empty roles array.
+    const reallyBogus = {
+      ...bogus,
+      roles: [] as string[],
+    };
+    const res = await applyAgentConfigPayload(dir, reallyBogus as AgentConfigPayload);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(400);
     // File untouched.
@@ -265,7 +281,8 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
     const res = await applyAgentConfigPayload(dir, {
       action: "upsert",
       name: "secondary",
-      role: "manager",
+      roles: ["manager"],
+      mode: "live-shell",
       command: "aider",
       args: [],
       specialties: [],
@@ -275,7 +292,7 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.status).toBe(400);
-      expect(res.error).toMatch(/only one role: manager/i);
+      expect(res.error).toMatch(/only one agent may include 'manager'/i);
     }
     const raw = await readFile(join(dir, "agents.yaml"), "utf8");
     expect(raw).toBe(seedYaml);
@@ -295,7 +312,8 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
     const res = await applyAgentConfigPayload(dir, {
       action: "upsert",
       name: "primary",
-      role: "manager",
+      roles: ["manager"],
+      mode: "live-shell",
       command: "aider",
       args: [],
       specialties: [],
@@ -309,15 +327,16 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
     expect(agents[0]).toMatchObject({ name: "primary", command: "aider" });
   });
 
-  it("round-trips initialInput field on upsert", async () => {
+  it("round-trips prompts field on upsert", async () => {
     await seed("agents: []\n");
     const res = await applyAgentConfigPayload(dir, {
       action: "upsert",
       name: "primary",
-      role: "manager",
+      roles: ["manager"],
+      mode: "live-shell",
       command: "claude",
       args: ["--continue"],
-      initialInput: "/opsx:manage",
+      prompts: { manager: "/opsx:manage" },
       specialties: [],
       concurrency: 1,
       dedicated: true,
@@ -327,9 +346,10 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
     const agents = doc.agents as Array<Record<string, unknown>>;
     expect(agents[0]).toMatchObject({
       name: "primary",
-      role: "manager",
+      roles: ["manager"],
+      mode: "live-shell",
       command: "claude",
-      initialInput: "/opsx:manage",
+      prompts: { manager: "/opsx:manage" },
     });
   });
 });
@@ -356,7 +376,8 @@ describe("coercePayload", () => {
     const res = coercePayload({
       action: "upsert",
       name: "BadName",
-      role: "code",
+      roles: ["code"],
+      mode: "single-prompt",
       command: "cmd",
       args: [],
       specialties: [],
@@ -370,7 +391,8 @@ describe("coercePayload", () => {
     const res = coercePayload({
       action: "upsert",
       name: "foo",
-      role: "code",
+      roles: ["code"],
+      mode: "single-prompt",
       command: "cmd",
       args: [],
       specialties: [],
@@ -380,25 +402,25 @@ describe("coercePayload", () => {
     expect(res).toEqual({ error: expect.stringMatching(/concurrency/i) });
   });
 
-  it("rejects mixed legacy + runtime shape", () => {
+  it("rejects missing mode", () => {
     const res = coercePayload({
       action: "upsert",
       name: "foo",
-      role: "code",
+      roles: ["code"],
       command: "cmd",
-      runtime: "claude",
       specialties: [],
       concurrency: 1,
       dedicated: true,
     });
-    expect(res).toEqual({ error: expect.stringMatching(/mix/i) });
+    expect(res).toEqual({ error: expect.stringMatching(/mode/i) });
   });
 
-  it("rejects a payload with neither shape declared", () => {
+  it("rejects a payload with neither command nor runtime", () => {
     const res = coercePayload({
       action: "upsert",
       name: "foo",
-      role: "code",
+      roles: ["code"],
+      mode: "single-prompt",
       specialties: [],
       concurrency: 1,
       dedicated: true,
@@ -406,11 +428,27 @@ describe("coercePayload", () => {
     expect(res).toEqual({ error: expect.stringMatching(/either/i) });
   });
 
-  it("accepts a valid legacy payload", () => {
+  it("rejects manager role without live-shell mode", () => {
+    const res = coercePayload({
+      action: "upsert",
+      name: "foo",
+      roles: ["manager"],
+      mode: "single-prompt",
+      command: "claude",
+      args: ["--continue"],
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    });
+    expect(res).toEqual({ error: expect.stringMatching(/live-shell/i) });
+  });
+
+  it("accepts scalar 'role' as sugar for 'roles: [role]' (grace period)", () => {
     const res = coercePayload({
       action: "upsert",
       name: "claude",
       role: "code",
+      mode: "single-prompt",
       command: "claude",
       args: ["-p", "/opsx:apply"],
       specialties: [],
@@ -419,7 +457,27 @@ describe("coercePayload", () => {
     });
     expect("error" in res).toBe(false);
     if (!("error" in res) && res.action === "upsert") {
-      expect(res.command).toBe("claude");
+      expect(res.roles).toEqual(["code"]);
+    }
+  });
+
+  it("accepts a valid new-schema payload", () => {
+    const res = coercePayload({
+      action: "upsert",
+      name: "claude",
+      roles: ["code", "review", "verify"],
+      mode: "single-prompt",
+      runtime: "claude",
+      prompts: { code: "/opsx:apply ${change_id}" },
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    });
+    expect("error" in res).toBe(false);
+    if (!("error" in res) && res.action === "upsert") {
+      expect(res.roles).toEqual(["code", "review", "verify"]);
+      expect(res.mode).toBe("single-prompt");
+      expect(res.prompts).toEqual({ code: "/opsx:apply ${change_id}" });
     }
   });
 

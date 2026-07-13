@@ -865,6 +865,8 @@ so duplicate file-watch fires are no-ops).
 
 ### Requirement: Runtime Definitions In agents.yaml
 
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): adds optional `prompts:` map on runtime entries as shared per-role defaults.
+
 The system SHALL accept a `runtimes:` section in `agents.yaml` that
 declares reusable runtime configurations. Each entry SHALL define
 `command`, `baseArgs`, `promptStyle`, optional `promptFlag`, and a
@@ -898,6 +900,8 @@ banner in the dashboard.
 - **THEN** the load succeeds and `runtimes` is an empty object; legacy agents continue to function
 
 ### Requirement: Runtime-Backed Agents
+
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): removes `shape` split; runner branches on `mode` instead; runtime reference becomes an optional shared-defaults inheritance rather than a shape marker.
 
 The system SHALL support runtime-backed agent definitions that use
 `runtime` + `prompt` fields as an alternative to `command` + `args`.
@@ -946,6 +950,8 @@ SHALL be rejected at load time.
 
 ### Requirement: Backward Compatibility With Command-Based Agents
 
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): extends backward compatibility to cover normalization of scalar `role`, `initialInput`, and bare `runtime + prompt` into the new `mode + roles + prompts` schema, with load-time warnings.
+
 Agents that use the pre-Phase-3 `command` + `args` shape SHALL continue
 to spawn and resolve identically to their behavior before this change.
 The registry SHALL treat `command` + `args` agents and `runtime` +
@@ -963,6 +969,8 @@ The registry SHALL treat `command` + `args` agents and `runtime` +
 - **THEN** both agents are listed in `publicConfig()` and each resolves independently via its own path
 
 ### Requirement: Role-Based Agent Dispatch API
+
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): request `role` remains scalar, but selection matches it against each candidate agent's `roles[]` array via contains-check.
 
 The server SHALL expose `POST /api/agents/dispatch` — a role-driven,
 local-only endpoint that selects a matching agent from `agents.yaml`,
@@ -1000,6 +1008,8 @@ paths generated inside the change directory.
 - **THEN** the server starts the job and returns immediately with `{ jobId, status: "running" }`; the caller SHALL poll `/api/agents/jobs/:id` for completion
 
 ### Requirement: Agent Selection By Role And Specialties
+
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): filter (a) now performs `agent.roles.includes(request.role)` instead of matching the scalar `agent.role`.
 
 The dispatch selector SHALL filter agents from `agents.yaml` by
 matching (a) the request `role`, (b) an intersection between the
@@ -1115,6 +1125,8 @@ using any cached results.
 - **THEN** the server re-runs detection and reports the current state
 
 ### Requirement: Job Model Includes Role And Runtime
+
+> ⚠️ **PENDING MODIFIED** by [reshape-agents-yaml-mode-roles](../../changes/reshape-agents-yaml-mode-roles/): job `role` becomes the dispatched role (scalar) even when the source agent has multiple roles; runtime label logic unchanged.
 
 Every agent job SHALL carry `role: string` and `runtime: string` fields set at spawn time. The runner SHALL populate `role` from the agent definition's `role` field, `runtime` from the runtime name for runtime-backed agents, and `runtime = "legacy"` for command-based agents. For jobs synthesized by orphan adoption where no agent definition is available, the runner SHALL set `role = "orphan"` and `runtime = "unknown"`. These fields SHALL NOT change during the job's lifetime.
 

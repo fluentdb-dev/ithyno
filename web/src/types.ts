@@ -153,24 +153,38 @@ export type TagDetail = {
 };
 
 // ---- agent-runner ----------------------------------------------------------
+export type AgentMode = "single-prompt" | "live-shell";
+
 export type AgentPublic = {
   name: string;
   description?: string;
-  /** Legacy shape (command + args). Present on legacy agents; absent on
-   *  runtime-backed agents (add-runtime-abstraction). */
+  /** Direct command. Optional — omitted when the entry inherits from a
+   *  runtime. */
   command?: string;
   args?: string[];
   hasEnv: boolean;
-  initialInput?: string;
-  /** Runtime-backed shape (runtime + prompt). Present on
-   *  runtime-backed agents; absent on legacy. */
+  /** Optional runtime reference — shared-defaults inheritance. */
   runtime?: string;
-  prompt?: string;
-  /** Phase 1 (add-agent-role-field) metadata. */
-  role: string;
+  /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
+  mode: AgentMode;
+  /** Dispatch labels. Always non-empty. Single-role legacy agents have
+   *  `roles.length === 1`. */
+  roles: string[];
+  /** Per-role prompt overrides. When absent, the runtime's prompts map
+   *  and built-in defaults kick in. */
+  prompts?: Record<string, string>;
   specialties: string[];
   concurrency: number;
   dedicated: boolean;
+
+  // ---- deprecated read aliases (populated by the loader from the
+  // normalized fields for downstream consumers that predate the reshape) ----
+  /** Deprecated. Equals `roles[0]`. */
+  role: string;
+  /** Deprecated. Populated from `prompts[roles[0]]`. */
+  initialInput?: string;
+  /** Deprecated. Populated from `prompts[roles[0]]`. */
+  prompt?: string;
 };
 
 // ---- Runtime detection (add-runtime-detection Phase 3.3) -------------------
@@ -189,6 +203,9 @@ export type RuntimeDefPublic = {
   baseArgs: string[];
   promptStyle: RuntimePromptStyle;
   promptFlag?: string;
+  /** Per-role prompt defaults inherited by agents that reference this
+   *  runtime. See reshape-agents-yaml-mode-roles. */
+  prompts?: Record<string, string>;
   supports: RuntimeSupports;
   installed: boolean;
   path?: string;
@@ -211,9 +228,8 @@ export type ManagerStatus = {
 };
 
 /** Write shape sent by AgentConfigModal to `POST /api/agents/config`.
- *  Phase 5.2 defines the client mirror; Phase 5.3 lands the endpoint.
- *  Delete is expressed as `{ action: "delete", name }` for a compact
- *  API surface — the write endpoint dispatches on `action`. */
+ *  Post-reshape (reshape-agents-yaml-mode-roles): the payload speaks the
+ *  new `mode + roles + prompts` schema. */
 export type AgentConfigPayload =
   | {
       action: "upsert";
@@ -221,24 +237,23 @@ export type AgentConfigPayload =
        *  the row being edited. When adding, this must not already
        *  exist server-side. */
       name: string;
-      role: string;
-      /** Legacy shape. `command` is required for legacy; `args` may
-       *  be empty. */
+      /** Dispatch labels. Non-empty. */
+      roles: string[];
+      /** Spawn mode. `single-prompt` for headless workers; `live-shell`
+       *  for interactive Manager. Manager roles require `live-shell`. */
+      mode: AgentMode;
+      /** Per-role prompt overrides. Runtime and built-in defaults kick
+       *  in for absent entries. */
+      prompts?: Record<string, string>;
+      /** Optional direct command. When omitted, `runtime` must be set. */
       command?: string;
       args?: string[];
-      /** Runtime-backed shape. Mutually exclusive with `command`. */
+      /** Optional runtime reference — shared defaults inheritance. */
       runtime?: string;
-      prompt?: string;
       specialties: string[];
       concurrency: number;
       dedicated: boolean;
       description?: string;
-      /** Optional prompt line injected on spawn. For Manager entries
-       *  (role: manager) this is typed into the PTY after the shell
-       *  boots the runtime. For worker entries it's translated into
-       *  `-p <initialInput>` by the runner. See add-manager-agent-config
-       *  and add-agent-initial-input. */
-      initialInput?: string;
     }
   | { action: "delete"; name: string };
 

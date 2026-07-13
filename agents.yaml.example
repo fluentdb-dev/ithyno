@@ -1,81 +1,120 @@
 # ithyno agent registry.
 #
-# Copy this file to `agents.yaml` at the project root and edit. The dashboard
-# loads it on startup and again whenever the file changes. With no agents
-# defined (or no `agents.yaml`), the Kanban Run button is hidden.
+# Copy this file to `agents.yaml` at the project root and edit. The
+# dashboard loads it on startup and again whenever the file changes.
+# With no agents defined (or no `agents.yaml`), the Kanban Run button is
+# hidden.
 #
-# Template variables available in `args`, `env`, and `initialInput`:
-#   ${change_id}     — the OpenSpec change id (e.g. "add-task-filter")
+# ─── Schema (post reshape-agents-yaml-mode-roles) ──────────────────────────
+#
+# Every agent entry has:
+#   name           kebab-case identifier
+#   mode           "single-prompt" (headless -p spawn) | "live-shell" (PTY)
+#   roles          non-empty list of dispatch labels: code, review, verify,
+#                  manager, other (or your own custom role names)
+#   command        (or reference `runtime:` for shared defaults)
+#   args           command-line arguments
+#   prompts        optional per-role prompt override
+#                  (falls back to runtime.prompts → built-in defaults)
+#   specialties    tag prefixes used for dispatch routing (empty = any)
+#   concurrency    max parallel jobs (default 1)
+#   dedicated      per-change worktree vs pool (default true)
+#
+# Built-in per-role prompt defaults (used when neither `agent.prompts.<role>`
+# nor `runtime.prompts.<role>` is set):
+#   code    → /opsx:apply ${change_id}
+#   review  → /opsx:review ${change_id}
+#   verify  → /opsx:verify ${change_id}
+#   manager → /opsx:manage
+#
+# Template variables available inside prompts, args, and env:
+#   ${change_id}     — the OpenSpec change id
 #   ${worktree_path} — absolute path to the agent's git worktree
 #   ${branch}        — the agent branch ("agent/<change-id>")
 #
-# Spawning is `child_process.spawn(command, args, { cwd: worktree_path, env,
-# stdio: ["ignore", "pipe", "pipe"] })`. Agents run headless (no TTY); Claude
-# Code and friends should be invoked in their non-interactive `-p` mode so
-# they print plain lines to stdout and exit cleanly.
+# ─── Backward compatibility ────────────────────────────────────────────────
 #
-# `initialInput` (optional) — when set, the runner prepends `-p
-# "<initialInput>"` to `args` at spawn time (unless `args` already contains
-# `-p`, in which case the user's explicit configuration wins). This is the
-# recommended way to hand the CLI its opening task without hard-coding the
-# `-p` flag in `args`.
+# Old shapes still load with a warning:
+#   role: <name>              → normalized to roles: [<name>]
+#   initialInput: <string>    → folded into prompts.<sole-role>
+#   runtime + prompt          → normalized to prompts.<sole-role>
+# Legacy `role: coder` is mapped to `code`.
+
+# ─── Optional shared-defaults registry ─────────────────────────────────────
+# Runtimes let multiple agents inherit the same command / args / prompt
+# defaults. An agent that specifies `runtime: <name>` picks up all of
+# these unless it overrides them locally.
 #
-# Worktree isolation limits the blast radius of `-p` mode's implicit
-# permission grant — every write lands under `.worktrees/<change-id>/`.
+# runtimes:
+#   claude:
+#     command: claude
+#     baseArgs: [--dangerously-skip-permissions]
+#     promptStyle: cli-arg              # cli-arg | stdin | file (file: reserved)
+#     promptFlag: -p                    # inlined before the resolved prompt
+#     prompts:
+#       code: "/opsx:apply ${change_id}"
+#       review: "/opsx:review ${change_id}"
+#       verify: "/opsx:verify ${change_id}"
+#       manager: "/opsx:manage"
+#     supports:
+#       interactive: true
+#       artifactOutput: true
+#       diff: git
 
 agents:
-  # ---------- Manager (role: manager) ---------------------------------------
-  # The interactive REPL that runs in the embedded Terminal panel. Different
-  # from workers (below): the Manager is spawned into a real PTY and takes
-  # user input, while workers run headless via the runner's `-p` mode.
+  # ---------- Manager (mode: live-shell) ------------------------------------
+  # The interactive REPL that runs in the embedded Terminal panel. Manager
+  # agents MUST have `mode: live-shell`. At most one Manager may be declared.
   #
-  # If no `role: manager` entry is declared, the Terminal panel falls back
-  # to `ITHYNO_TERMINAL_STARTUP` env var and then to `claude --continue`.
-  # Uncomment to make your Manager choice explicit in the config.
-  # See add-manager-agent-config for the full priority chain.
-  #
-  # Runtime-backed shape (runtime + prompt) is NOT accepted for managers.
+  # If no Manager is declared, the Terminal panel falls back to
+  # `ITHYNO_TERMINAL_STARTUP` env var and then to `claude --continue`.
   #
   # - name: primary-manager
-  #   role: manager
+  #   mode: live-shell
+  #   roles: [manager]
   #   command: claude
   #   args: ["--continue"]
-  #   initialInput: "/opsx:manage"     # auto-injected after the REPL boots
+  #   prompts:
+  #     manager: "/opsx:manage"
 
-  # ---------- Workers (role: code / review / verify) ------------------------
-  # Default Claude entry — uses `/ithy-opsx:apply` so the agent branch ends
-  # with the implementation committed. The wrapping skill delegates to
-  # `/opsx:apply` for the actual work, then adds one `git commit` at the
-  # end. See `.claude/skills/ithy-opsx-apply/SKILL.md`.
-  #
-  # Prefer this over the bare `/opsx:apply` unless you have a reason (e.g.
-  # you drive commits some other way, or you want the archive skill's
-  # safety-net commit step to be the single point of commit).
+  # ---------- Workers (mode: single-prompt) ---------------------------------
+  # Default Claude entry — uses `/ithy-opsx:apply` so the agent branch
+  # ends with the implementation committed. The wrapping skill delegates
+  # to `/opsx:apply` for the actual work, then adds one `git commit` at
+  # the end. See `.claude/skills/ithy-opsx-apply/SKILL.md`.
   - name: claude
     description: Implements the change using Claude Code via /ithy-opsx:apply (adds a commit at end).
+    mode: single-prompt
+    roles: [code]
     command: claude
-    args: []
-    initialInput: "/ithy-opsx:apply ${change_id}"
+    args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]
 
-  # Add more agents as you need them — any local CLI works.
+  # Multi-role example: one CLI covers code + review + verify. Dispatched
+  # role determines which built-in prompt fires (or override via prompts).
+  #
+  # - name: claude-all-in-one
+  #   mode: single-prompt
+  #   roles: [code, review, verify]
+  #   command: claude
+  #   args: ["--dangerously-skip-permissions"]
+  #   # No explicit prompts → per-role built-in defaults fire.
+
+  # Runtime-referenced example: shares defaults from the `runtimes:` block.
+  #
+  # - name: claude-reviewer
+  #   mode: single-prompt
+  #   roles: [review]
+  #   runtime: claude
+  #   # Inherits command, baseArgs, promptStyle, promptFlag, and prompts
+  #   # from `runtimes.claude`. Override any locally if needed.
+
+  # Aider example — different CLI, different prompt style.
   # - name: aider
-  #   description: Implements with Aider.
+  #   mode: single-prompt
+  #   roles: [code]
   #   command: aider
   #   args: ["--yes-always"]
-  #   initialInput: "Implement OpenSpec change ${change_id}"
+  #   prompts:
+  #     code: "Implement OpenSpec change ${change_id}"
   #   env:
   #     OPENAI_API_KEY: "..."
-  #
-  # Bare non-committing Claude — the archive skill's safety net catches
-  # the commit at merge time. Use this if you want the "single commit at
-  # archive" flow rather than "commit at implement + commit at archive."
-  # - name: claude-plain
-  #   command: claude
-  #   args: []
-  #   initialInput: "/opsx:apply ${change_id}"
-  #
-  # An alternative shape for Claude that uses print mode instead of stdin.
-  # Works today but is more coupled to the Claude CLI's flag surface.
-  # - name: claude-print
-  #   command: claude
-  #   args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]

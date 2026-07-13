@@ -4,42 +4,38 @@ import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { validateAgents } from "./registry.js";
+import type { AgentMode } from "./registry.js";
 
 /**
- * Server-side writer for `agents.yaml` mutations invoked by the
- * Agents tab (Phase 5.3: add-agents-config-write).
+ * Server-side writer for `agents.yaml` mutations invoked by the Agents tab.
  *
- * The client sends an upsert or delete payload; this module:
- *   1. Reads the current agents.yaml (or starts with `{ agents: [] }`
- *      when the file is missing).
- *   2. Applies the mutation on the `agents:` list.
- *   3. Validates the resulting shape via the loader's own validator,
- *      so a bad payload throws BEFORE the write hits disk.
- *   4. Atomically writes via a sibling `.tmp` file + rename — a crash
- *      mid-write leaves either the old file or the new file, never
- *      partial YAML.
- *   5. Preserves unrelated top-level keys (`runtimes:`,
- *      `worktreePool:`, unknown keys) byte-intent via a
- *      parse → merge → serialize round-trip.
+ * Post-reshape (openspec/changes/reshape-agents-yaml-mode-roles): the
+ * upsert payload speaks the new schema (`mode`, `roles`, `prompts`) but
+ * the writer still round-trips legacy top-level keys and any existing
+ * old-shape entries untouched. The loader's normalizer handles reading
+ * the mixed file back.
  */
 
 const KEBAB_RE = /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/;
+const AGENT_MODES: readonly AgentMode[] = ["single-prompt", "live-shell"];
 
 export type UpsertPayload = {
   action: "upsert";
   name: string;
-  role: string;
+  /** New schema: dispatch labels. Must be non-empty. */
+  roles: string[];
+  /** New schema: spawn mode. */
+  mode: AgentMode;
+  /** New schema: per-role prompt overrides. Runtime-inherited defaults
+   *  and built-in defaults kick in when a role's entry is absent. */
+  prompts?: Record<string, string>;
   command?: string;
   args?: string[];
   runtime?: string;
-  prompt?: string;
   specialties: string[];
   concurrency: number;
   dedicated: boolean;
   description?: string;
-  /** Optional prompt line injected on spawn — Manager PTY or worker
-   *  `-p` arg. Round-trips through agents.yaml as-is. */
-  initialInput?: string;
 };
 
 export type DeletePayload = {
@@ -69,8 +65,32 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   if (!KEBAB_RE.test(name)) {
     return { error: "name must be kebab-case (letters, digits, hyphens; no leading digit or hyphen)" };
   }
-  const role = typeof o.role === "string" ? o.role : "";
-  if (!role) return { error: "role is required" };
+
+  // roles[] — required, non-empty. Also accept a scalar `role` for a
+  // grace period so intermediate versions of the client don't 400.
+  let roles: string[] | null = null;
+  if (Array.isArray(o.roles)) {
+    const out: string[] = [];
+    for (const r of o.roles) {
+      if (typeof r !== "string" || !r) return { error: "roles must be non-empty strings" };
+      out.push(r);
+    }
+    if (out.length === 0) return { error: "roles must contain at least one role" };
+    roles = out;
+  } else if (typeof o.role === "string" && o.role) {
+    roles = [o.role];
+  }
+  if (!roles) return { error: "roles is required (non-empty array of strings)" };
+
+  // mode — required.
+  const mode = typeof o.mode === "string" ? o.mode : "";
+  if (!AGENT_MODES.includes(mode as AgentMode)) {
+    return { error: `mode must be one of ${AGENT_MODES.join(", ")}` };
+  }
+  if (roles.includes("manager") && mode !== "live-shell") {
+    return { error: "roles containing 'manager' require mode: live-shell" };
+  }
+
   const specialties = coerceStringArray(o.specialties);
   if (specialties === null) return { error: "specialties must be an array of strings" };
   const concurrency = Number(o.concurrency);
@@ -79,25 +99,34 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   }
   const dedicated = typeof o.dedicated === "boolean" ? o.dedicated : true;
 
-  const hasCommand = o.command !== undefined;
-  const hasArgs = o.args !== undefined;
-  const hasRuntime = o.runtime !== undefined;
-  const hasPrompt = o.prompt !== undefined;
-  const legacy = hasCommand || hasArgs;
-  const runtimeBacked = hasRuntime || hasPrompt;
-  if (legacy && runtimeBacked) {
-    return {
-      error: "cannot mix legacy (command/args) and runtime-backed (runtime/prompt) fields",
-    };
+  // Command / runtime — at least one must be set.
+  const hasCommand = typeof o.command === "string" && o.command.length > 0;
+  const hasRuntime = typeof o.runtime === "string" && (o.runtime as string).length > 0;
+  if (!hasCommand && !hasRuntime) {
+    return { error: "must declare either 'command' or 'runtime'" };
   }
-  if (!legacy && !runtimeBacked) {
-    return { error: "must declare either (command + args) or (runtime + prompt)" };
+
+  // prompts — optional map<role, string>.
+  let prompts: Record<string, string> | undefined;
+  if (o.prompts !== undefined && o.prompts !== null) {
+    if (typeof o.prompts !== "object" || Array.isArray(o.prompts)) {
+      return { error: "prompts must be an object mapping role → template" };
+    }
+    const out: Record<string, string> = {};
+    for (const [role, val] of Object.entries(o.prompts as Record<string, unknown>)) {
+      if (!role) return { error: "prompts: role name must be non-empty" };
+      if (typeof val !== "string") return { error: `prompts.${role} must be a string` };
+      if (val.length > 0) out[role] = val;
+    }
+    if (Object.keys(out).length > 0) prompts = out;
   }
 
   const payload: UpsertPayload = {
     action: "upsert",
     name,
-    role,
+    roles,
+    mode: mode as AgentMode,
+    prompts,
     specialties,
     concurrency,
     dedicated,
@@ -105,29 +134,14 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   if (typeof o.description === "string" && o.description.length > 0) {
     payload.description = o.description;
   }
-  if (o.initialInput !== undefined) {
-    if (typeof o.initialInput !== "string") {
-      return { error: "initialInput must be a string" };
-    }
-    if (o.initialInput.length > 0) payload.initialInput = o.initialInput;
-  }
-  if (legacy) {
-    if (typeof o.command !== "string" || !o.command) {
-      return { error: "command is required for legacy shape" };
-    }
+  if (hasCommand) {
+    payload.command = o.command as string;
     const args = coerceStringArray(o.args ?? []);
     if (args === null) return { error: "args must be an array of strings" };
-    payload.command = o.command;
     payload.args = args;
-  } else {
-    if (typeof o.runtime !== "string" || !o.runtime) {
-      return { error: "runtime is required for runtime-backed shape" };
-    }
-    payload.runtime = o.runtime;
-    if (o.prompt !== undefined) {
-      if (typeof o.prompt !== "string") return { error: "prompt must be a string" };
-      if (o.prompt.length > 0) payload.prompt = o.prompt;
-    }
+  }
+  if (hasRuntime) {
+    payload.runtime = o.runtime as string;
   }
   return payload;
 }
@@ -151,8 +165,7 @@ function coerceStringArray(v: unknown): string[] | null {
 
 /** Read the current agents.yaml as a raw object, apply the mutation,
  *  validate the result via the loader's own agent-shape rules, and
- *  atomically write. Returns a discriminated result so the handler
- *  can translate 404 vs 400 cleanly. */
+ *  atomically write. */
 export async function applyAgentConfigPayload(
   projectRoot: string,
   payload: AgentConfigPayload,
@@ -186,12 +199,11 @@ export async function applyAgentConfigPayload(
     if (idx === -1) {
       return { ok: false, status: 404, error: `agent '${payload.name}' not found` };
     }
-    // refine-agents-config-modal: Manager row is edit-only. Deleting the
-    // Manager from the UI silently disables the Terminal panel's
-    // auto-launch, which is a footgun. Users who really want to remove
-    // it can hand-edit agents.yaml.
+    // Manager row is edit-only. Deleting the Manager from the UI silently
+    // disables the Terminal panel's auto-launch — a footgun. Users who
+    // really want to remove it can hand-edit agents.yaml.
     const target = list[idx] as Record<string, unknown> | undefined;
-    if (target && target.role === "manager") {
+    if (target && isManagerEntry(target)) {
       return {
         ok: false,
         status: 400,
@@ -203,18 +215,17 @@ export async function applyAgentConfigPayload(
   } else {
     // upsert
     const idx = findAgentIndex(list, payload.name);
-    // refine-agents-config-modal: Manager is a singleton. Reject a
-    // second manager upsert (name differs from the existing manager's
-    // name); editing the existing manager (same name) is fine.
-    if (payload.role === "manager") {
-      const existingManagerIdx = list.findIndex(
-        (e) => e && typeof e === "object" && (e as Record<string, unknown>).role === "manager",
-      );
+    // Manager singleton — reject a second manager upsert (name differs).
+    if (payload.roles.includes("manager")) {
+      const existingManagerIdx = list.findIndex((e) => {
+        if (!e || typeof e !== "object") return false;
+        return isManagerEntry(e as Record<string, unknown>);
+      });
       if (existingManagerIdx !== -1 && existingManagerIdx !== idx) {
         return {
           ok: false,
           status: 400,
-          error: "only one role: manager entry is allowed",
+          error: "only one agent may include 'manager' in roles",
         };
       }
     }
@@ -229,8 +240,8 @@ export async function applyAgentConfigPayload(
   const next: Record<string, unknown> = { ...doc, agents: list };
 
   // Loader-level shape check on the whole result. This rejects e.g. an
-  // upsert that produces a legacy+runtime mix or a missing required
-  // field even if the coerce step let it through.
+  // upsert that produces a Manager mode conflict, or a runtime reference
+  // to an undeclared runtime.
   try {
     validateAgents(next);
   } catch (err) {
@@ -256,26 +267,34 @@ function findAgentIndex(list: unknown[], name: string): number {
   return -1;
 }
 
-/** Build the raw YAML-mapping-compatible object for an upsert payload.
- *  Only sets fields that were provided; the loader supplies its own
- *  defaults on read. */
+/** True if the entry is a manager under either the new (`roles: [...]`
+ *  contains "manager") or old (`role: "manager"` scalar) shape. */
+function isManagerEntry(entry: Record<string, unknown>): boolean {
+  if (entry.role === "manager") return true;
+  if (Array.isArray(entry.roles) && entry.roles.includes("manager")) return true;
+  return false;
+}
+
+/** Build the YAML-mapping-compatible object for an upsert. Emits the
+ *  new-schema fields (mode / roles / prompts); does not preserve any
+ *  legacy fields that may have been on the prior entry. */
 function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
   const entry: Record<string, unknown> = {
     name: p.name,
-    role: p.role,
+    mode: p.mode,
+    roles: p.roles,
     specialties: p.specialties,
     concurrency: p.concurrency,
     dedicated: p.dedicated,
   };
   if (p.description !== undefined) entry.description = p.description;
-  if (p.initialInput !== undefined) entry.initialInput = p.initialInput;
   if (p.command !== undefined) {
     entry.command = p.command;
     entry.args = p.args ?? [];
   }
-  if (p.runtime !== undefined) {
-    entry.runtime = p.runtime;
-    if (p.prompt !== undefined) entry.prompt = p.prompt;
+  if (p.runtime !== undefined) entry.runtime = p.runtime;
+  if (p.prompts !== undefined && Object.keys(p.prompts).length > 0) {
+    entry.prompts = p.prompts;
   }
   return entry;
 }

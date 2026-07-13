@@ -193,7 +193,7 @@ describe("runtime-backed agent validation", () => {
     expect(a!.prompt).toBe("/opsx:apply ${change_id}");
   });
 
-  it("rejects mixing runtime + command", async () => {
+  it("accepts runtime + local command override (post reshape: runtime is optional shared defaults)", async () => {
     const reg = await loadWith(
       yamlWith({
         runtimes: `runtimes:
@@ -202,18 +202,20 @@ describe("runtime-backed agent validation", () => {
     promptStyle: cli-arg
     supports: { interactive: true, artifactOutput: true, diff: git }
 `,
-        agents: `  - name: bad
+        agents: `  - name: mixed
     runtime: claude
     command: aider
 `,
       }),
     );
     const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/cannot mix legacy .* and runtime-backed/);
+    expect(cfg.ok).toBe(true);
+    const a = cfg.agents.find((x) => x.name === "mixed")!;
+    expect(a.command).toBe("aider");
+    expect(a.runtime).toBe("claude");
   });
 
-  it("rejects mixing runtime + args", async () => {
+  it("accepts runtime + local args override", async () => {
     const reg = await loadWith(
       yamlWith({
         runtimes: `runtimes:
@@ -222,19 +224,19 @@ describe("runtime-backed agent validation", () => {
     promptStyle: cli-arg
     supports: { interactive: true, artifactOutput: true, diff: git }
 `,
-        agents: `  - name: bad
+        agents: `  - name: mixed
     runtime: claude
-    prompt: p
     args: [x]
 `,
       }),
     );
     const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/cannot mix legacy .* and runtime-backed/);
+    expect(cfg.ok).toBe(true);
+    const a = cfg.agents.find((x) => x.name === "mixed")!;
+    expect(a.args).toEqual(["x"]);
   });
 
-  it("rejects runtime without prompt", async () => {
+  it("accepts runtime without prompt (falls back to runtime.prompts → built-in)", async () => {
     const reg = await loadWith(
       yamlWith({
         runtimes: `runtimes:
@@ -243,17 +245,16 @@ describe("runtime-backed agent validation", () => {
     promptStyle: cli-arg
     supports: { interactive: true, artifactOutput: true, diff: git }
 `,
-        agents: `  - name: bad
+        agents: `  - name: bare
     runtime: claude
 `,
       }),
     );
     const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.prompt is required/);
+    expect(cfg.ok).toBe(true);
   });
 
-  it("rejects prompt without runtime", async () => {
+  it("rejects legacy prompt without runtime (bare 'prompt' has no shape to fold into)", async () => {
     const reg = await loadWith(
       `agents:
   - name: bad
@@ -262,9 +263,8 @@ describe("runtime-backed agent validation", () => {
     );
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(false);
-    // The agent has prompt but no runtime — validation takes the
-    // runtime-backed branch and complains about the missing runtime name.
-    expect(cfg.error).toMatch(/agents\[0\]\.runtime/);
+    // No command AND no runtime — must declare either.
+    expect(cfg.error).toMatch(/must declare either/);
   });
 
   it("rejects an agent with neither shape", async () => {
@@ -391,27 +391,12 @@ describe("resolve — runtime-backed", () => {
     expect(r.initialInput).toBe("Review add-baz");
   });
 
-  it("stdin: explicit initialInput wins over prompt", async () => {
-    const reg = await loadWith(
-      yamlWith({
-        runtimes: `runtimes:
-  copilot:
-    command: gh
-    baseArgs: [copilot, suggest]
-    promptStyle: stdin
-    supports: { interactive: false, artifactOutput: false, diff: none }
-`,
-        agents: `  - name: copilot-with-init
-    runtime: copilot
-    prompt: prompt-value \${change_id}
-    initialInput: explicit \${change_id}
-`,
-      }),
-    );
-    const def = reg.find("copilot-with-init")!;
-    const r = reg.resolve(def, { change_id: "add-y", worktree_path: "/w", branch: "b" });
-    expect(r.initialInput).toBe("explicit add-y");
-  });
+  // Obsoleted by reshape-agents-yaml-mode-roles: `initialInput` and
+  // `prompt` are both folded into the `prompts.<role>` map at load time,
+  // with `prompt` winning when both are set. Users should specify
+  // `prompts` directly instead. The old "initialInput wins" behavior no
+  // longer applies.
+  it.skip("stdin: explicit initialInput wins over prompt (obsolete)", async () => {});
 
   it("template substitution inside baseArgs and prompt", async () => {
     const reg = await loadWith(

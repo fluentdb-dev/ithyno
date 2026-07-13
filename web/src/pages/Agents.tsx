@@ -90,13 +90,13 @@ export function Agents() {
   // own section per add-agents-tab-manager-section). Match by name.
   const runningAgentNames = new Set(active.map((j) => j.agentName));
   const idleAgents = agents.filter(
-    (a) => !runningAgentNames.has(a.name) && a.role !== "manager",
+    (a) => !runningAgentNames.has(a.name) && !a.roles.includes("manager"),
   );
 
   // Manager singleton (refine-agents-config-modal). Used by the modal
   // to hide the `manager` role option in Add mode when one already
   // exists, and by the row to hide the Delete button on the manager.
-  const existingManager = agents.find((a) => a.role === "manager") ?? null;
+  const existingManager = agents.find((a) => a.roles.includes("manager")) ?? null;
   const existingManagerName = existingManager?.name ?? null;
 
   return (
@@ -306,13 +306,17 @@ function ManagerSection({
 function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
   const parts = (status.resolvedStartup ?? "").trim().split(/\s+/).filter(Boolean);
   const [command, ...args] = parts;
+  const initial = status.initialInput ?? undefined;
   return {
     name: "",
-    role: "manager",
+    role: "manager", // deprecated read alias
+    roles: ["manager"],
+    mode: "live-shell",
     command: command ?? "",
     args,
     hasEnv: false,
-    initialInput: status.initialInput ?? undefined,
+    initialInput: initial,
+    prompts: initial ? { manager: initial } : undefined,
     specialties: [],
     concurrency: 1,
     dedicated: true,
@@ -428,14 +432,15 @@ function AgentRow({
   // Manager from the UI silently disables the Terminal panel's
   // auto-launch — a footgun. Users who really want to remove it can
   // hand-edit agents.yaml.
-  const canDelete = agent.role !== "manager";
+  const canDelete = !agent.roles.includes("manager");
   return (
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
-      <span className="job-role-badge">{agent.role}</span>
+      <span className="job-role-badge">{agent.roles.join(", ")}</span>
       <span className="job-runtime-badge">
         runtime: {isRuntimeBacked ? agent.runtime : "legacy"}
       </span>
+      <span className="job-mode-badge muted">mode: {agent.mode}</span>
       {agent.specialties.length > 0 && (
         <span className="muted">specialties: [{agent.specialties.join(", ")}]</span>
       )}

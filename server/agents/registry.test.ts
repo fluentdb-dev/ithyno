@@ -40,7 +40,11 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(true);
     expect(cfg.agents).toHaveLength(1);
-    expect(cfg.agents[0].role).toBe("coder");
+    // Post reshape: default role is `code` (canonical). Pre-reshape
+    // default was `coder` — the normalizer maps `coder → code`.
+    expect(cfg.agents[0].role).toBe("code");
+    expect(cfg.agents[0].roles).toEqual(["code"]);
+    expect(cfg.agents[0].mode).toBe("single-prompt");
     expect(cfg.agents[0].specialties).toEqual([]);
     expect(cfg.agents[0].concurrency).toBe(1);
   });
@@ -51,7 +55,8 @@ describe("AgentRegistry role / specialties / concurrency", () => {
   - name: reviewer-web
     command: claude
     args: []
-    role: reviewer
+    roles: [review]
+    mode: single-prompt
     specialties: [area/web, feature/ui]
     concurrency: 2
 `,
@@ -59,7 +64,8 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(true);
     const a = cfg.agents[0];
-    expect(a.role).toBe("reviewer");
+    expect(a.roles).toEqual(["review"]);
+    expect(a.mode).toBe("single-prompt");
     expect(a.specialties).toEqual(["area/web", "feature/ui"]);
     expect(a.concurrency).toBe(2);
   });
@@ -305,7 +311,7 @@ agents:
   - name: reviewer-web
     command: claude
     args: ["/opsx:apply", "\${change_id}"]
-    role: reviewer
+    role: review
     specialties: [area/server]
 `,
     );
@@ -316,6 +322,8 @@ agents:
       worktree_path: "/w/add-foo",
       branch: "agent/add-foo",
     });
+    // Post reshape: command-only agents own their args entirely — no
+    // auto-append. The user is expected to include the prompt in args.
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
   });
 });
@@ -370,12 +378,12 @@ describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(false);
     if (!cfg.ok) {
-      expect(cfg.error).toMatch(/only one role: manager/i);
+      expect(cfg.error).toMatch(/only one agent may include 'manager'/i);
       expect(cfg.error).toContain("agents[1]");
     }
   });
 
-  it("rejects a runtime-backed manager at load", async () => {
+  it.skip("rejects a runtime-backed manager at load (obsolete: reshape-agents-yaml-mode-roles allows runtime-referenced managers)", async () => {
     const reg = await loadWith(
       `runtimes:
   claude:
