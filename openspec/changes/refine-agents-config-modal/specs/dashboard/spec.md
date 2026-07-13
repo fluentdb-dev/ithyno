@@ -108,30 +108,40 @@ implicitly makes it eligible for deletion on a subsequent request).
 
 ### Requirement: Manager Singleton Enforcement
 
-The Agents tab's Add-mode modal SHALL omit `manager` from its role
-dropdown when at least one manager-role agent already exists in the
-loaded registry. Edit mode is NOT affected — a user Editing the
-existing manager keeps `manager` selectable so they can change
-other fields without losing role. Additionally, `POST /api/agents/config`
-SHALL respond `400` with `{ error: "only one role: manager entry is
-allowed" }` when an upsert payload with `role: manager` and a name
-different from any existing manager entry is submitted.
+The Agents tab's Modal SHALL restrict `manager` in the role
+dropdown to a single well-defined entry point — the Manager
+section's `[Declare in agents.yaml]` shortcut (which opens the
+Modal in Add mode with `role: manager` prefilled). The `+ Add
+agent` button below the Configured (idle) section MUST NEVER
+surface `manager` in its dropdown, regardless of whether a manager
+already exists. Editing the existing manager keeps `manager`
+selectable (so the user can reconfigure it without losing role).
+The rationale is that the Manager is a first-class concept
+represented by its own section; funnelling all manager mutations
+through that section prevents users from confusing Manager
+declaration with worker creation. Additionally, `POST
+/api/agents/config` SHALL respond `400` with `{ error: "only one
+role: manager entry is allowed" }` when an upsert payload with
+`role: manager` and a name different from any existing manager
+entry is submitted.
 
-#### Scenario: Add modal hides manager when one exists
-- **GIVEN** `agents.yaml` contains one entry with `role: manager`
-- **WHEN** the user clicks `+ Add agent`
+#### Scenario: `+ Add agent` never offers manager
+- **GIVEN** `agents.yaml` contains no `role: manager` entry (nor any manager)
+- **WHEN** the user clicks `+ Add agent` below the Configured (idle) section
 - **THEN** the modal's role dropdown does NOT include `manager`
+- **AND** the user is nudged toward the Manager section's `[Declare in agents.yaml]` shortcut
 
-#### Scenario: Add modal offers manager when none exists
-- **GIVEN** `agents.yaml` contains only role=code and role=review entries
-- **WHEN** the user clicks `+ Add agent`
-- **THEN** the modal's role dropdown includes `manager`
+#### Scenario: `[Declare in agents.yaml]` opens the modal with manager available
+- **GIVEN** the Manager section is in the Not-configured state
+- **WHEN** the user clicks `[Declare in agents.yaml]`
+- **THEN** the modal opens in Add mode with role `manager` prefilled AND selectable in the dropdown
+- **AND** the user MAY still switch role to something else (aborting the manager declaration)
 
 #### Scenario: Edit modal keeps manager selectable for the existing manager
 - **GIVEN** an agent with `role: manager` exists AND the user clicks Edit on that row
 - **WHEN** the modal renders
 - **THEN** the role dropdown includes `manager` (currently selected)
-- **AND** the user MAY change it to another role (which frees `manager` for a subsequent Add)
+- **AND** the user MAY change it to another role (which frees `manager` for a subsequent Declare)
 
 #### Scenario: Server rejects upsert that would create a second manager
 - **GIVEN** `agents.yaml` has one entry `name: primary, role: manager`

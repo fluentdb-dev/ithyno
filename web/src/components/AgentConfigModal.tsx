@@ -67,15 +67,21 @@ export function AgentConfigModal({
 
   const runtimeOptions = runtimes.map((r) => r.name);
 
-  // Manager singleton: hide "manager" from Add-mode dropdown when
-  // another manager already exists. Edit mode keeps it selectable so
-  // the current Manager can be reconfigured without changing its role.
+  // The Manager section's `[Declare in agents.yaml]` shortcut is the
+  // ONLY Add-mode entry point for `manager` — `+ Add agent` never
+  // surfaces it. This funnels every Manager mutation through the
+  // Manager section so users don't confuse Manager declaration with
+  // worker creation. Edit mode on the existing manager keeps `manager`
+  // selectable so the user can reconfigure without losing role.
+  // `existingManagerName` is retained on the prop surface but no
+  // longer participates in dropdown filtering — its scope narrows to
+  // helping upstream code decide when to render the Manager section.
   const isEditingManager = seed !== "new" && seed.role === "manager";
-  const availableRoles = ROLE_OPTIONS.filter((r) => {
-    if (r !== "manager") return true;
-    if (isEditingManager) return true; // editing self — allowed
-    return existingManagerName === null; // add-mode: only when no manager yet
-  });
+  const isDeclaringManager = addModePrefill?.role === "manager";
+  const availableRoles = ROLE_OPTIONS.filter(
+    (r) => r !== "manager" || isEditingManager || isDeclaringManager,
+  );
+  void existingManagerName; // referenced for API-stability; see comment above
 
   // Manager runtime-backed shape is rejected at load; keep the modal
   // in sync so users don't hit a Save-time error.

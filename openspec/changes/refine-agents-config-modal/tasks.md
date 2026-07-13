@@ -53,14 +53,15 @@
 - [ ] 9.3 UI: editing `initialInput` and saving adds an `initialInput:` key to the entry in agents.yaml
 - [ ] 9.4 UI: clearing `initialInput` and saving removes the `initialInput:` key from agents.yaml
 - [ ] 9.5 UI: setting role=manager disables the "Runtime-backed" shape radio and shows the hint `runtime-backed managers are not yet supported`
-- [ ] 9.6 UI: with a manager already declared, `[+ Add agent]`'s role dropdown does NOT include `manager`
-- [ ] 9.7 UI: opening Edit on the existing manager keeps `manager` in the role dropdown (so the user can reconfigure it)
-- [ ] 9.8 UI: the manager row shows only `Edit` — no `Delete` button
-- [ ] 9.9 API: `curl POST /api/agents/config` with `{action: "delete", name: "<manager-name>"}` returns 400 with `manager agents cannot be deleted from the UI...`
-- [ ] 9.10 API: `curl` a second `upsert` with `role: manager` and a different name returns 400 with `only one role: manager entry is allowed`
+- [ ] 9.6 UI: `+ Add agent`'s role dropdown NEVER includes `manager` — regardless of whether a manager is already declared. The Manager section's `[Declare in agents.yaml]` shortcut is the only Add-mode path
+- [ ] 9.7 UI: opening Edit on the existing manager keeps `manager` in the role dropdown (so the user can reconfigure it or switch roles)
+- [ ] 9.8 UI: opening the modal via `[Declare in agents.yaml]` keeps `manager` in the dropdown (currently selected via prefill)
+- [ ] 9.9 UI: the manager row shows only `Edit` — no `Delete` button
+- [ ] 9.10 API: `curl POST /api/agents/config` with `{action: "delete", name: "<manager-name>"}` returns 400 with `manager agents cannot be deleted from the UI...`
+- [ ] 9.11 API: `curl` a second `upsert` with `role: manager` and a different name returns 400 with `only one role: manager entry is allowed`
 
 ## 10. Post-impl
 
 - [x] 10.1 phase-workflow へ merge (worktree flow) — via merge step
-- [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.10
+- [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.11
 - [x] 10.3 rebuild dist so the UI on :55910 picks up the new bundle
