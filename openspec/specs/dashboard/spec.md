@@ -1539,9 +1539,20 @@ independent of whether the agent references a `runtime` or specifies
 - `single-prompt` — the runner spawns a headless child, delivers the
   resolved prompt according to the effective `promptStyle` (see
   `Runtime-Backed Agents`), captures stdout, and waits for exit.
-- `live-shell` — the runner spawns a PTY, writes the resolved prompt
-  followed by a newline to the child's stdin after boot, and keeps
-  the session alive until the user detaches or the process exits.
+- `live-shell` — the delivery channel depends on the agent's role:
+  - **Worker** (any `roles` without `manager`) — the runner spawns
+    a headless child with **`stdio: [pipe, pipe, pipe]`** (no PTY),
+    writes the resolved prompt followed by a newline to
+    `child.stdin`, and lets the process run to its own exit. CLIs
+    that strictly require a TTY (Claude Code without `-p`, most
+    REPLs) SHOULD use `single-prompt` instead — worker
+    `live-shell` is intended for CLIs that read prompt input from
+    stdin (aider's `--message-stdin`, custom scripts, gh copilot
+    with piped stdin, ...).
+  - **Manager** (`roles` includes `manager`) — spawned by the
+    embedded Terminal panel's WebSocket handler
+    (`attachPtyToSocket` in `server/sync/pty.ts`) which allocates
+    a real PTY. Runner never dispatches Manager entries directly.
 
 Agents that omit `mode` SHALL be rejected at load time with an error
 identifying the missing field. During load-time normalization of
@@ -1555,10 +1566,16 @@ observable behavior.
 - **WHEN** the runner spawns the agent for change `add-foo`
 - **THEN** the child is spawned with argv `[claude, --dangerously-skip-permissions, -p, /opsx:apply add-foo]` and no PTY is allocated
 
-#### Scenario: mode live-shell spawns PTY
-- **GIVEN** an agent with `mode: live-shell`, `command: claude`, `args: [--continue]`, and a resolved prompt `/opsx:manage`
+#### Scenario: worker mode live-shell spawns headless with stdin piped
+- **GIVEN** a worker agent with `mode: live-shell`, `roles: [code]`, `command: aider`, `args: [--message-stdin]`, and a resolved prompt `Implement add-foo`
 - **WHEN** the runner spawns the agent
-- **THEN** a PTY session starts running `claude --continue` and the string `/opsx:manage\n` is written to its stdin after the boot handshake
+- **THEN** the child is spawned with argv `[aider, --message-stdin]`, `stdio: [pipe, pipe, pipe]`, and `Implement add-foo\n` written to `child.stdin`
+- **AND** no PTY is allocated
+
+#### Scenario: manager mode live-shell handled by Terminal panel
+- **GIVEN** an agent with `roles: [manager]`, `mode: live-shell`, `command: claude`, `args: [--continue]`
+- **WHEN** the user opens the embedded Terminal panel
+- **THEN** `attachPtyToSocket` spawns a real PTY running `claude --continue` — this path is separate from `runner.run()`
 
 #### Scenario: missing mode rejected
 - **GIVEN** an agent that omits the `mode` field entirely and cannot be normalized from a legacy shape

@@ -723,9 +723,13 @@ export class AgentRegistry {
     /** How the resolved initialInput should be delivered to the child.
      *  `"cli-arg"` — runner unshifts `[promptFlag, initialInput]` before
      *  `args`. `"stdin"` — runner writes `initialInput` to child.stdin.
-     *  `"pty"` — live-shell mode; runner types `initialInput` into the
-     *  PTY after boot. */
-    initialInputMode: "cli-arg" | "stdin" | "pty";
+     *
+     *  Manager `mode: live-shell` never goes through resolve() — the
+     *  Terminal panel's `attachPtyToSocket` handles that PTY spawn
+     *  independently via `ptyStartup()`. Worker `mode: live-shell` maps
+     *  to `"stdin"` here (stdin-piped headless spawn); it does NOT open
+     *  a PTY. */
+    initialInputMode: "cli-arg" | "stdin";
   } {
     const sessionId = vars.session_id ?? "";
     const replace = (s: string): string =>
@@ -795,8 +799,11 @@ export class AgentRegistry {
 
     // Wire the prompt into the runner. Behavior by mode:
     //
-    //   - `live-shell` — runner types resolvedPrompt into the PTY after
-    //     boot. `initialInputMode: "pty"`.
+    //   - Worker `mode: live-shell` — runner writes resolvedPrompt to
+    //     child.stdin (no PTY; just stdin-piped headless spawn).
+    //     `initialInputMode: "stdin"`. Manager `mode: live-shell` is
+    //     handled by `attachPtyToSocket` on the Terminal panel WS and
+    //     never reaches this code path.
     //   - `single-prompt` + `promptStyle: stdin` — runner writes
     //     resolvedPrompt to child.stdin. `initialInputMode: "stdin"`.
     //   - `single-prompt` + `promptStyle: cli-arg` — resolve() appends
@@ -817,7 +824,7 @@ export class AgentRegistry {
     // they are treated as fully hand-authored (legacy escape hatch).
     // Users who want per-role prompt delivery set `prompts.<role>` on
     // the agent (or on the runtime they reference).
-    let initialInputMode: "cli-arg" | "stdin" | "pty";
+    let initialInputMode: "cli-arg" | "stdin";
     let initialInput: string | undefined;
     let effectiveArgs = args;
 
@@ -827,7 +834,11 @@ export class AgentRegistry {
           `agent '${def.name}': no prompt configured for role '${dispatchedRole}' (agent.prompts, runtime.prompts, and built-in defaults are all empty)`,
         );
       }
-      initialInputMode = "pty";
+      // Worker `mode: live-shell` — spawn headless with stdin piped and
+      // write the resolved prompt to it. Manager `mode: live-shell` is
+      // handled by attachPtyToSocket (Terminal panel WS), never reaches
+      // this branch.
+      initialInputMode = "stdin";
       initialInput = resolvedPrompt;
     } else if (promptStyle === "stdin") {
       if (resolvedPrompt === undefined) {

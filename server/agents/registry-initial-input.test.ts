@@ -46,7 +46,12 @@ describe("AgentRegistry resolve — per-role prompts", () => {
       "manager",
     );
     expect(r.initialInput).toBe("/opsx:manage add-foo");
-    expect(r.initialInputMode).toBe("pty");
+    // Worker live-shell = stdin delivery (no PTY). Manager PTY handling
+    // lives in attachPtyToSocket and never reaches resolve(). Even if a
+    // caller wires a Manager through resolve() by hand, the return
+    // value now says "stdin" — the semantic is "prompt delivered via
+    // stdin write" rather than "runner opens a PTY".
+    expect(r.initialInputMode).toBe("stdin");
     expect(r.args).toEqual(["--continue"]);
   });
 

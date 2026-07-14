@@ -459,12 +459,17 @@ export class AgentRunner {
         reason: err instanceof Error ? err.message : String(err),
       };
     }
-    // registry.resolve() now inlines cli-arg prompts into `args` at resolve
-    // time (so the runner doesn't need to know about promptFlag). For
-    // stdin-styled runtimes we still pipe stdin. For live-shell agents
-    // (mode: "pty") the runner spawns headless anyway because Manager
-    // PTY handling lives in the separate embedded-terminal panel — the
-    // dispatched-code path here never enters live-shell mode.
+    // registry.resolve() inlines cli-arg prompts into `args` at resolve
+    // time (so the runner doesn't need to know about promptFlag).
+    // Delivery channels for the resolved prompt:
+    //   - `initialInputMode: "cli-arg"` — nothing extra; args carry it.
+    //   - `initialInputMode: "stdin"` — pipe stdin and write the prompt.
+    //     Both stdin-styled runtimes AND workers with `mode: live-shell`
+    //     land here (live-shell = stdin-piped headless spawn; no PTY —
+    //     CLIs that require a TTY like Claude Code should use
+    //     single-prompt instead).
+    // Manager `mode: live-shell` never reaches the runner — Terminal
+    // panel PTY handling lives in `attachPtyToSocket` on the /pty WS.
     const finalArgs = [...resolved.args];
     const useStdinForPrompt =
       resolved.initialInputMode === "stdin" && resolved.initialInput !== undefined;

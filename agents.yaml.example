@@ -9,7 +9,8 @@
 #
 # Every agent entry has:
 #   name           kebab-case identifier
-#   mode           "single-prompt" (headless -p spawn) | "live-shell" (PTY)
+#   mode           "single-prompt" or "live-shell". See below for the
+#                  worker vs manager semantics.
 #   roles          non-empty list of dispatch labels: code, review, verify,
 #                  manager, other (or your own custom role names)
 #   command        (or reference `runtime:` for shared defaults)
@@ -37,6 +38,30 @@
 #                      Value is an RFC 4122 UUID v4 (Claude Code's
 #                      `--session-id <uuid>` requires this format).
 #                      Example: args: [--session-id, "${session_id}"]
+#
+# ─── `mode` semantics ──────────────────────────────────────────────────────
+#
+# `single-prompt` (workers): headless spawn. The resolved prompt is
+#   appended to args as `[promptFlag, prompt]` (default `-p`), unless
+#   args already inline the flag. Best fit for CLIs like Claude Code
+#   whose "print mode" (`-p`) is the non-interactive entry point.
+#
+# `live-shell` (workers): headless spawn with **stdin piped**. The
+#   resolved prompt is written to `child.stdin\n` and stdin is closed.
+#   No PTY. Best fit for CLIs that read prompt input from stdin
+#   (aider `--message-stdin`, gh copilot suggest -stdin, custom
+#   scripts). NOT suitable for CLIs that require a TTY — Claude Code
+#   without `-p` needs a real terminal, so use `single-prompt` for it.
+#   For interactive-TTY workers (e.g. Claude Code with the full
+#   interactive UI so it can /agmsg peers), wrap the command via a
+#   tmux-spawning helper such as agmsg
+#   (https://github.com/fujibee/agmsg) — set `command:` to the wrapper
+#   and let it allocate the PTY inside tmux. The ithyno runner itself
+#   never opens a PTY for workers.
+#
+# `live-shell` (manager): spawned by the Terminal panel WebSocket,
+#   which allocates a real PTY. Manager is a singleton; declared here
+#   with `roles: [manager]`.
 #
 # ─── Backward compatibility ────────────────────────────────────────────────
 #

@@ -245,7 +245,7 @@ export function AgentConfigModal({
               }`
             : `Edit agent — ${form.name}`}
           {includesManager && (
-            <span className="agent-config-manager-tag" title="Manager entry — one PTY session, always live-shell">
+            <span className="agent-config-manager-tag" title="Manager entry — one Terminal-panel PTY session, always live-shell">
               Manager
             </span>
           )}
@@ -306,7 +306,8 @@ export function AgentConfigModal({
                 />
                 single-prompt{" "}
                 <span className="muted">
-                  (headless spawn, `-p &lt;prompt&gt;`, exits on completion — Worker)
+                  (headless spawn; prompt appended to args as `-p
+                  &lt;prompt&gt;`. Best for Claude Code's print mode.)
                 </span>
               </label>
               <label>
@@ -318,7 +319,9 @@ export function AgentConfigModal({
                 />
                 live-shell{" "}
                 <span className="muted">
-                  (PTY session, prompt typed into stdin, stays alive — Manager)
+                  (headless spawn with stdin piped; prompt written to
+                  child.stdin — for CLIs that read stdin, e.g., aider.
+                  NOT suitable for Claude Code without `-p`.)
                 </span>
               </label>
               {modeLockedToLiveShell && (
