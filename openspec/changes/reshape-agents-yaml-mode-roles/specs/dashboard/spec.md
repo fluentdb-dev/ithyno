@@ -96,6 +96,51 @@ After lookup, template substitution SHALL run on the resolved string
 using `${change_id}`, `${worktree_path}`, and `${branch}` (same set
 as today's `Runtime-Backed Agents`).
 
+**Prompt injection into `args` (cli-arg mode).** When the effective
+`promptStyle` is `cli-arg` and the agent's `mode` is `single-prompt`,
+the runner SHALL auto-append `[promptFlag, resolvedPrompt]` to
+`args` (or `[resolvedPrompt]` alone when the runtime declares no
+`promptFlag`) so a CLI like Claude Code receives its prompt on the
+command line. The injection SHALL be gated by two conditions:
+
+- The user's `args` MUST NOT already contain the effective
+  `promptFlag` (default `-p`). If it does, the user has hand-inlined
+  the prompt and injection is skipped to avoid double-delivery.
+- EITHER the prompt was set explicitly at the agent or runtime level
+  (via `agent.prompts.<role>` or `runtimes.<name>.prompts.<role>`)
+  OR the agent references a runtime (whose `baseArgs` represent an
+  incomplete recipe the runner is expected to complete with the
+  prompt). Command-only agents with NO explicit `prompts` map and
+  no runtime reference are treated as fully hand-authored — the
+  runner leaves their `args` alone even when a built-in per-role
+  default would resolve to a value.
+
+This gate preserves the pre-reshape "legacy escape hatch" for
+agents whose `args` field already contains their complete argv,
+while ensuring that migrating an existing agent from
+`initialInput: "…"` to `prompts.<role>: "…"` continues to deliver
+the prompt through the same `-p` mechanism.
+
+#### Scenario: cli-arg mode auto-injects when prompt is explicit
+- **GIVEN** an agent `{ command: claude, args: [--dangerously-skip-permissions], mode: single-prompt, roles: [code], prompts: { code: "/opsx:apply ${change_id}" } }`
+- **WHEN** the runner resolves the agent for change `add-foo`
+- **THEN** the effective args are `[--dangerously-skip-permissions, -p, /opsx:apply add-foo]`
+
+#### Scenario: cli-arg mode auto-injects for runtime-referenced agents
+- **GIVEN** an agent `{ runtime: claude, mode: single-prompt, roles: [code] }` where the runtime declares `baseArgs: [--dangerously-skip-permissions]` and `promptFlag: -p` and no `prompts` map
+- **WHEN** the runner resolves the agent for change `add-foo`
+- **THEN** the effective args are `[--dangerously-skip-permissions, -p, /opsx:apply add-foo]` (built-in default fires because runtime is the "recipe holder")
+
+#### Scenario: cli-arg mode skips injection when args already inline the prompt
+- **GIVEN** an agent `{ command: claude, args: [--dangerously-skip-permissions, -p, /opsx:apply ${change_id}], mode: single-prompt, roles: [code] }` with no `prompts` map
+- **WHEN** the runner resolves the agent for change `add-foo`
+- **THEN** the effective args are `[--dangerously-skip-permissions, -p, /opsx:apply add-foo]` (no double-injection; user hand-inlined the prompt)
+
+#### Scenario: cli-arg mode skips injection for command-only agents without explicit prompts
+- **GIVEN** an agent `{ command: claude, args: [/opsx:apply, ${change_id}], mode: single-prompt, roles: [review] }` with no `prompts` map and no runtime reference
+- **WHEN** the runner resolves the agent for change `add-foo`
+- **THEN** the effective args are `[/opsx:apply, add-foo]` (built-in default for `review` does NOT auto-inject because the agent is command-only and provides no explicit `prompts`)
+
 #### Scenario: agent-level prompt wins over runtime and default
 - **GIVEN** an agent with `runtime: claude` and `prompts.code: "/custom-flow ${change_id}"`
 - **AND** the runtime `claude` has `prompts.code: "/opsx:apply ${change_id}"`

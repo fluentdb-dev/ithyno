@@ -779,9 +779,19 @@ export class AgentRegistry {
       userAuthoredArgs = true;
     }
 
-    // Resolve the prompt for the dispatched role.
-    const promptTemplate = resolvePromptForRole(def, this.cache.runtimes, dispatchedRole);
+    // Resolve the prompt for the dispatched role. Track whether the
+    // resolved value came from an *explicit* source (agent.prompts or
+    // runtime.prompts) vs the built-in-default fallback — used below
+    // to decide whether the cli-arg path should auto-inject the prompt.
+    const agentPrompt = def.prompts?.[dispatchedRole];
+    const runtimePrompt =
+      def.runtime !== undefined
+        ? this.cache.runtimes[def.runtime]?.prompts?.[dispatchedRole]
+        : undefined;
+    const explicitTemplate = agentPrompt ?? runtimePrompt;
+    const promptTemplate = explicitTemplate ?? BUILT_IN_ROLE_PROMPTS[dispatchedRole];
     const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
+    const isExplicitPrompt = explicitTemplate !== undefined;
 
     // Wire the prompt into the runner. Behavior by mode:
     //
@@ -790,12 +800,23 @@ export class AgentRegistry {
     //   - `single-prompt` + `promptStyle: stdin` — runner writes
     //     resolvedPrompt to child.stdin. `initialInputMode: "stdin"`.
     //   - `single-prompt` + `promptStyle: cli-arg` — resolve() appends
-    //     `[promptFlag, resolvedPrompt]` to args (preserving the pre-
-    //     reshape ordering). `initialInputMode: "cli-arg"` + `initialInput`
-    //     left undefined so the runner doesn't double-add.
+    //     `[promptFlag, resolvedPrompt]` to args when the user hasn't
+    //     already inlined the prompt themselves.
     //
-    // For command-only agents whose args are hand-authored, we do NOT
-    // auto-append. Users own their full argv.
+    // Injection gate for cli-arg: append `[promptFlag, prompt]` when
+    //   (a) `resolvedPrompt` is defined, AND
+    //   (b) `args` does NOT already contain the promptFlag (so users
+    //       who hand-authored `args: [..., -p, "..."]` aren't
+    //       double-injected), AND
+    //   (c) EITHER the prompt was set explicitly (agent.prompts or
+    //       runtime.prompts) OR the agent is runtime-referenced (whose
+    //       runtime baseArgs represent an incomplete recipe expecting
+    //       the runner to inject the prompt).
+    //
+    // Command-only agents with NO explicit prompts skip auto-inject —
+    // they are treated as fully hand-authored (legacy escape hatch).
+    // Users who want per-role prompt delivery set `prompts.<role>` on
+    // the agent (or on the runtime they reference).
     let initialInputMode: "cli-arg" | "stdin" | "pty";
     let initialInput: string | undefined;
     let effectiveArgs = args;
@@ -820,10 +841,14 @@ export class AgentRegistry {
       // cli-arg
       initialInputMode = "cli-arg";
       initialInput = undefined;
-      if (!userAuthoredArgs && resolvedPrompt !== undefined) {
+      const shouldInject =
+        resolvedPrompt !== undefined &&
+        (isExplicitPrompt || !userAuthoredArgs) &&
+        !args.includes(promptFlag ?? "-p");
+      if (shouldInject) {
         effectiveArgs = promptFlag
-          ? [...args, promptFlag, resolvedPrompt]
-          : [...args, resolvedPrompt];
+          ? [...args, promptFlag, resolvedPrompt!]
+          : [...args, resolvedPrompt!];
       }
     }
 

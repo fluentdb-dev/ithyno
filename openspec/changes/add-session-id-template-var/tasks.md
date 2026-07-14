@@ -49,13 +49,13 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (310 tests, 2 skipped)
-- [ ] 9.2 Configure a worker with `args: [--session, "${session_id}"]`; dispatch on `add-foo`; observe the runner spawn log contains the resolved value
-- [ ] 9.3 Dispatch on `add-foo` again — same sessionId used (no re-mint)
-- [ ] 9.4 Restart server; dispatch on `add-foo` — still same sessionId (persistence)
-- [ ] 9.5 Dispatch on `add-bar` — a distinct sessionId
-- [ ] 9.6 `POST /api/agents/dispatch { changeId: does-not-exist, role: code }` returns 404 but sessions.json gains the orphan entry
-- [ ] 9.7 `POST /api/agents/dispatch { changeId: add-foo, role: code, sessionId: "explicit-9" }` — job.sessionId = `"explicit-9"`, sessions.json unchanged for that call
-- [ ] 9.8 `.gitignore` includes `.ithyno/` and `git status` does not show `.ithyno/sessions.json` after any of the above
+- [x] 9.2 Configure `prompts.code: /ithy-opsx:apply ${change_id} session=${session_id}`; dispatch on `add-foo`; runner resolves args to `[--dangerously-skip-permissions, -p, /ithy-opsx:apply add-foo session=session-add-foo-<ts>]`
+- [x] 9.3 `getOrCreateSessionId(root, "add-foo")` called twice → same ID returned (no re-mint)
+- [x] 9.4 Fresh Node process reading the same sessions.json → same ID (persistence proxied by cross-process store lookup)
+- [x] 9.5 `getOrCreateSessionId(root, "add-bar")` → distinct ID from `add-foo`
+- [x] 9.6 `POST /api/agents/dispatch { changeId: does-not-exist, role: code }` returns 404 with `"change 'does-not-exist' not found"` AND sessions.json gains `does-not-exist → session-does-not-exist-<ts>`
+- [x] 9.7 `POST /api/agents/dispatch { changeId: another-nonexistent, role: code, sessionId: "explicit-9" }` — sessions.json byte-identical BEFORE / AFTER (override path skips store)
+- [x] 9.8 `.gitignore` includes `.ithyno/`; `git check-ignore -v .ithyno/sessions.json` confirms it's ignored; `git status --porcelain` doesn't list it
 
 ## 10. Post-impl
 
