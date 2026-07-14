@@ -80,7 +80,7 @@
 
 ## 10. Post-impl
 
-- [ ] 10.1 phase-workflow へ merge (worktree flow)
+- [x] 10.1 phase-workflow へ merge (worktree flow) — N/A: implemented directly on phase-workflow, no agent worktree
 - [ ] 10.2 archive → user runs `/ithy-opsx:archive` after confirming 9.2–9.11 in the UI
 - [x] 10.3 rebuild dist so the UI on :55910 picks up the new bundle (build ran clean)
 - [ ] 10.4 Update `docs/ideas/2026-07-13-agent-roles-user-manual-entry.md` — add note that agents can now hold multiple roles
