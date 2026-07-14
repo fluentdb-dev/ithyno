@@ -570,6 +570,12 @@ fastify.post("/api/agents/config", async (req, reply) => {
   if (!result.ok) {
     return reply.code(result.status).send({ error: result.error });
   }
+  // Force a synchronous reload so the immediately-following
+  // `GET /api/agents/config` returns the just-written state. The
+  // fs.watch-based auto-reload on registry.startWatching() is
+  // asynchronous and can race the client's re-fetch on macOS
+  // (rename events sometimes fire after a delay).
+  await agentRegistry.load();
   return { ok: true };
 });
 
