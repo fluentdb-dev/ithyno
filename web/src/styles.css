@@ -1168,6 +1168,13 @@ a:hover {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  /* Anchor to a stable position: top of the viewport with a margin.
+     Prevents the whole dialog from jumping when Advanced expands or
+     collapses (the backdrop's flex-centering would otherwise re-center
+     the modal on its new height). */
+  align-self: flex-start;
+  margin-top: 5vh;
+  min-height: 0;
 }
 .agent-config-modal h3 {
   margin: 0 0 12px;
@@ -1190,10 +1197,24 @@ a:hover {
 .agent-config-modal form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  /* Overflow the middle section, keep header + action buttons pinned. */
+  flex: 1;
+  min-height: 0; /* allow the body child to actually scroll */
+  overflow: hidden;
+}
+.agent-config-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 4px 8px 2px;
+}
+.agent-config-modal .modal-actions {
+  flex: 0 0 auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
 }
 .agent-config-advanced {
   border-top: 1px dashed var(--border);

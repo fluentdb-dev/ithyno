@@ -79,7 +79,6 @@ export function AgentConfigModal({
   const hasNonDefaultAdvanced =
     !!initial.runtime ||
     !!initial.specialties ||
-    initial.concurrency !== 1 ||
     initial.dedicated !== true ||
     !!initial.description;
   const [showAdvanced, setShowAdvanced] = useState(hasNonDefaultAdvanced);
@@ -164,9 +163,6 @@ export function AgentConfigModal({
     // per-field validation needed.
     if (form.roles.length === 0) {
       errs.roles = "at least one role required";
-    }
-    if (!Number.isFinite(form.concurrency) || form.concurrency < 1) {
-      errs.concurrency = "must be an integer ≥ 1";
     }
     if (!form.runtime && !form.command.trim()) {
       errs.command = "pick a runtime OR set a command";
@@ -255,6 +251,7 @@ export function AgentConfigModal({
           )}
         </h3>
         <form onSubmit={submit}>
+          <div className="agent-config-body">
 
           {/* Manager entries: Roles / Mode / Runtime are fixed and hidden.
               Roles is always [manager], Mode is always live-shell, and
@@ -465,22 +462,10 @@ export function AgentConfigModal({
                   </label>
                 )}
 
-                {!includesManager && (
-                  <label className="agent-config-field agent-config-field-inline">
-                    <span>Concurrency</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={form.concurrency}
-                      onChange={(e) =>
-                        setForm({ ...form, concurrency: Number(e.target.value) || 0 })
-                      }
-                    />
-                    {fieldErrors.concurrency && (
-                      <span className="agent-config-error">{fieldErrors.concurrency}</span>
-                    )}
-                  </label>
-                )}
+                {/* Concurrency input hidden — the field is schema-only
+                    (not enforced by runner/dispatch). Value round-trips
+                    via form.concurrency default so existing yaml entries
+                    with `concurrency: N` are preserved on save. */}
 
                 {!includesManager && (
                   <label className="agent-config-field agent-config-field-inline">
@@ -504,6 +489,8 @@ export function AgentConfigModal({
               </div>
             )}
           </div>
+
+          </div>{/* /.agent-config-body — scrollable region ends */}
 
           {error && <div className="agent-config-server-error">⚠ {error}</div>}
 
