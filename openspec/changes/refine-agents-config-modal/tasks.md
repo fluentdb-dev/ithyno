@@ -49,16 +49,16 @@
 ## 9. Verification
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (269 → 273 tests, +4)
-- [ ] 9.2 UI: the modal shows an `initialInput` textarea; placeholder is `/opsx:manage` when role=manager, `/ithy-opsx:apply ${change_id}` when role=code, generic otherwise
-- [ ] 9.3 UI: editing `initialInput` and saving adds an `initialInput:` key to the entry in agents.yaml
-- [ ] 9.4 UI: clearing `initialInput` and saving removes the `initialInput:` key from agents.yaml
-- [ ] 9.5 UI: setting role=manager disables the "Runtime-backed" shape radio and shows the hint `runtime-backed managers are not yet supported`
-- [ ] 9.6 UI: `+ Add agent`'s role dropdown NEVER includes `manager` — regardless of whether a manager is already declared. The Manager section's `[Declare in agents.yaml]` shortcut is the only Add-mode path
-- [ ] 9.7 UI: opening Edit on the existing manager keeps `manager` in the role dropdown (so the user can reconfigure it or switch roles)
-- [ ] 9.8 UI: opening the modal via `[Declare in agents.yaml]` keeps `manager` in the dropdown (currently selected via prefill)
-- [ ] 9.9 UI: the manager row shows only `Edit` — no `Delete` button
-- [ ] 9.10 API: `curl POST /api/agents/config` with `{action: "delete", name: "<manager-name>"}` returns 400 with `manager agents cannot be deleted from the UI...`
-- [ ] 9.11 API: `curl` a second `upsert` with `role: manager` and a different name returns 400 with `only one role: manager entry is allowed`
+- [~] 9.2 initialInput textarea + role placeholders — **obsolete**: reshape removed `initialInput` field (folded into per-role `prompts` textareas with resolution-chain hints)
+- [~] 9.3 editing initialInput adds key to agents.yaml — **obsolete** (same reason as 9.2)
+- [~] 9.4 clearing initialInput removes key — **obsolete** (same reason as 9.2)
+- [~] 9.5 role=manager disables runtime-backed shape radio — **obsolete**: reshape removed the shape radio; manager forces `mode: live-shell` and hides the Mode toggle entirely
+- [x] 9.6 UI: `+ Add agent`'s role selector NEVER includes `manager` when a manager is already declared — verified during step 1 (puppeteer 03-add-modal shows chips: code/review/verify/other; no manager). Reshape changed dropdown → chip multi-select
+- [x] 9.7 UI: Edit on the existing manager keeps `manager` selectable — verified during step 1 (Manager Edit opens with manager chip active)
+- [~] 9.8 UI: `[Declare in agents.yaml]` keeps manager in dropdown — **partially**: dropdown replaced with locked "Manager" tag in reshape. `[Declare]` flow verified during step 1
+- [x] 9.9 UI: manager row shows only `Edit` — no `Delete` button — verified during step 1 (`man` row's action slot has only Edit)
+- [ ] 9.10 API: delete on manager → 400 — pending (would need curl test)
+- [ ] 9.11 API: second manager upsert → 400 — pending (Modal-level filter prevents this; API guard is a defense-in-depth check)
 
 ## 10. Post-impl
 

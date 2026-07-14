@@ -39,14 +39,14 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean (273 tests unchanged)
-- [ ] 8.2 UI: a **Manager** section appears on the Agents tab between Runtimes and Live
-- [ ] 8.3 UI: with no `role: manager` in agents.yaml and the Terminal panel open, the section shows the Not-configured state (`Manager (not configured in agents.yaml): claude --continue` + explanation + `[Declare in agents.yaml]` button)
-- [ ] 8.4 UI: clicking `[Declare in agents.yaml]` opens the AgentConfigModal in Add mode with role prefilled to `manager`, command=`claude`, args=`[--continue]`, and the `name` field empty and editable
-- [ ] 8.5 UI: entering a name and saving switches the Manager section to the Declared state (single row, Edit only, no Delete)
-- [ ] 8.6 UI: the declared manager disappears from the Configured (idle) list (filter is active)
-- [ ] 8.7 UI: closing every Terminal panel leaves the section in the Idle state (`No manager declared. Opening a change view launches the Terminal panel...`)
-- [ ] 8.8 UI: setting `ITHYNO_TERMINAL_STARTUP=aider` and restarting the server makes `resolvedStartup` = `aider` and the explanation = `Currently running the command from ITHYNO_TERMINAL_STARTUP.`
-- [ ] 8.9 API: a `curl` to `/api/manager/status` from a non-loopback address returns 403
+- [x] 8.2 UI: a **Manager** section appears on the Agents tab between Runtimes and Live — verified during step 1 (puppeteer screenshot 02-agents-tab)
+- [ ] 8.3 UI: Not-configured state (no manager) — pending (user has manager declared; needs a fresh setup with no manager to test)
+- [~] 8.4 UI: `[Declare in agents.yaml]` opens Modal prefilled — **partially superseded by reshape**: Modal opens with prefill but Name is auto-generated (no editable input); manager role forced via mode=live-shell + roles=[manager]. Verified during step 1
+- [x] 8.5 UI: entering a name and saving switches to Declared state (Edit only, no Delete) — verified via step 1 (`man` manager row shows Edit only)
+- [x] 8.6 UI: declared manager disappears from Configured (idle) — verified via step 1 (`man` not in idle list)
+- [ ] 8.7 UI: closing every Terminal panel → Idle state message — pending
+- [ ] 8.8 UI: `ITHYNO_TERMINAL_STARTUP=aider` fallback path — pending
+- [ ] 8.9 API: non-loopback → 403 — pending (would need external ip test)
 
 ## 9. Post-impl
 

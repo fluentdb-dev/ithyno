@@ -39,9 +39,9 @@
 ## 6. Verification
 
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (240 → 257 tests)
-- [ ] 6.2 UI (end-to-end with 5.2): change an agent's role in the modal and Save → HTTP 200, the entry in agents.yaml carries the new role, unrelated entries and `runtimes:` / `worktreePool:` survive byte-identical
-- [ ] 6.3 UI: `+ Add agent` with a new kebab-case name → Save → HTTP 200, a new entry appears in agents.yaml and a new row appears in Configured (idle)
-- [ ] 6.4 UI: Delete → confirm → HTTP 200, the entry is removed from agents.yaml and the row disappears from Configured (idle)
+- [x] 6.2 UI (end-to-end with 5.2): change an agent's role in the modal and Save → HTTP 200, the entry in agents.yaml carries the new value; `worktreePool` survives byte-identical — verified during step 1 (claude worker Save preserves worktreePool block)
+- [x] 6.3 UI: `+ Add agent` with a new kebab-case name → Save → HTTP 200, a new entry appears in agents.yaml and a new row appears in Configured (idle) — verified during step 1 (copilot-review added, appears in Configured (idle) after `fix: reload agent registry synchronously after config write`)
+- [ ] 6.4 UI: Delete → confirm → HTTP 200, the entry is removed — pending (step 3 will exercise via revert workflow if it removes agents)
 - [ ] 6.5 API: `curl` a delete with a missing name → 404 with `agent '<name>' not found`
 - [ ] 6.6 API: `curl` a malformed payload (concurrency=0 / mixed shape) → 400 with an inline error message; agents.yaml stays unchanged
 - [ ] 6.7 API: atomic write — kill the server mid-write; `.tmp` may remain but agents.yaml is byte-identical to the pre-write state

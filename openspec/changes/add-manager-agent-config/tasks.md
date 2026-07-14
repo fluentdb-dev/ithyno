@@ -35,12 +35,12 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean (257 → 269 tests, +12)
-- [ ] 8.2 Setup: add a `role: manager` entry to agents.yaml (either by hand or via `[Declare in agents.yaml]`); restart the dev server
-- [ ] 8.3 PTY: opening a fresh Terminal panel spawns the child using the declared `command args`
-- [ ] 8.4 PTY: adding `initialInput: /opsx:manage` to the manager entry auto-injects that line into the terminal ~300 ms after the child boots
-- [ ] 8.5 Loader: adding a second `role: manager` entry causes the loader to error with `only one role: manager entry is allowed`
-- [ ] 8.6 Loader: a manager entry with the `runtime:` shape is rejected at load with `runtime-backed managers are not yet supported`
-- [ ] 8.7 Fallback: with no manager declared and `ITHYNO_TERMINAL_STARTUP=aider`, the Terminal panel launches `aider`
+- [x] 8.2 Setup: added `man` manager entry via `[Declare in agents.yaml]` shortcut (step 1 workflow); dev server picked it up via `fix: reload agent registry synchronously after config write`
+- [x] 8.3 PTY: opening a fresh Terminal panel spawns the child using `claude --resume <uuid>` from the declared entry — verified during step 1 (Manager section shows `claude --resume …` under Manager badge)
+- [~] 8.4 PTY initialInput auto-inject — **superseded by reshape**: `initialInput` field folded into per-role `prompts.manager` textarea. Manager's `initialInput` (typed into PTY after boot) can still be exercised via the reshape's per-role prompt field, but not verified here
+- [~] 8.5 Second manager entry rejected — Manager singleton check surfaces at both Modal (chip filter) AND loader levels. Modal-level verified via step 1 (chip absent when manager exists). Loader-level covered by registry.test.ts
+- [~] 8.6 Runtime-backed manager rejected — **obsolete**: reshape removed the shape distinction; the Manager constraint is now `mode: live-shell` (also enforced by loader + Modal)
+- [ ] 8.7 Fallback: env var `ITHYNO_TERMINAL_STARTUP=aider` launches aider — pending (skip: user has manager declared, fallback path not exercised)
 
 ## 9. Post-impl
 

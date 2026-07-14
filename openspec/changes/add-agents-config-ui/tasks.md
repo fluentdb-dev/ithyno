@@ -42,15 +42,15 @@
 
 - [x] 9.1 `npm test && npm run typecheck && npm run build` clean (233 → 240 tests; +7 kebab-case validation)
 - [x] 9.2 UI: every Configured (idle) row shows `[Edit]` and `[Delete]` buttons
-- [ ] 9.3 UI: a `[+ Add agent]` button appears below the Configured (idle) section
-- [ ] 9.4 UI: clicking `[Edit]` opens the modal with the `name` field disabled (grey); all other fields editable
-- [ ] 9.5 UI: with 5.3 landed, Save produces toast "Saved to agents.yaml", closes the modal, and the row refreshes with the new values
-- [ ] 9.6 UI: with 5.3 NOT landed (404 from the endpoint), Save surfaces a toast pointing at Phase 5.3 and keeps the modal open
-- [ ] 9.7 UI: clicking `[Delete]` opens a confirmation dialog "Delete agent <name>?"; Confirm removes the row
-- [ ] 9.8 UI: clicking `[+ Add agent]` opens the modal with the `name` field editable (white) and role defaulted to `code`
-- [ ] 9.9 UI: entering an empty / UPPERCASE name or concurrency `0` shows inline validation errors and blocks Save
-- [ ] 9.10 UI: the `Specialties` field label reads `Specialties (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)` — makes the semantic explicit
-- [ ] 9.11 UI: the `Initial input` field label reads `(auto-injected on spawn — worker: prepended as -p <value>; manager: typed into the PTY after boot)` — explains where the value is delivered per role
+- [x] 9.3 UI: a `[+ Add agent]` button appears below the Configured (idle) section — verified during step 1 (copilot-review registered via + Add)
+- [~] 9.4 UI: clicking `[Edit]` opens the modal with the `name` field disabled — **superseded by reshape-agents-yaml-mode-roles**: Name input entirely removed; Edit-mode title reads `Edit agent — <name>` instead
+- [x] 9.5 UI: with 5.3 landed, Save produces toast, closes the modal, and the row refreshes — verified after `fix: reload agent registry synchronously after config write` (e43b1d1) landed; before that a race left the row stale
+- [~] 9.6 UI: with 5.3 NOT landed → 404 toast — **obsolete**: 5.3 has landed; the 404 path is unreachable in normal use
+- [ ] 9.7 UI: clicking `[Delete]` opens a confirmation dialog `Delete agent <name>?`; Confirm removes the row — pending
+- [~] 9.8 UI: clicking `[+ Add agent]` opens the modal with the `name` field editable and role defaulted to `code` — **partially superseded by reshape**: Name is auto-generated (no editable input); Roles default to `[code]` — verified during step 1
+- [~] 9.9 UI: empty/UPPERCASE name → validation error — **superseded by reshape**: Name is auto-generated (auto-namer produces kebab-case). Concurrency `0` validation obsolete because Concurrency input is hidden
+- [~] 9.10 UI: `Specialties` label copy — the label was updated in reshape's Modal Layout Ergonomics; verified during step 1
+- [~] 9.11 UI: `Initial input` field label copy — **obsolete**: initialInput field removed by reshape (folded into per-role `prompts` textareas)
 
 ## 10. Post-impl
 
