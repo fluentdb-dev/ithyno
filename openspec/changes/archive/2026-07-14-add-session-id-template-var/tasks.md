@@ -59,6 +59,6 @@
 
 ## 10. Post-impl
 
-- [ ] 10.1 phase-workflow へ merge
+- [x] 10.1 phase-workflow へ merge — N/A: implemented directly on phase-workflow, no agent worktree
 - [ ] 10.2 archive after user verifies 9.2–9.8
 - [x] 10.3 rebuild dist so :55910 picks up the new server bundle (build clean)
