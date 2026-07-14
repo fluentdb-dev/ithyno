@@ -474,6 +474,15 @@ export const useStore = create<Store>((set, get) => ({
         if (s) set({ state: { ...s, gitStatus: msg.gitStatus } });
         if (msg.gitStatus.isRepo) void get().loadGitConfig();
         else set({ gitConfig: null });
+      } else if (msg.type === "agents-updated") {
+        // add-agents-broadcast-on-file-event — server fires this when
+        // agents.yaml changes on disk (external edit OR Modal Save's
+        // fs.watch follow-up). Payload IS the fresh state — no
+        // separate GET needed.
+        set({
+          agents: msg.agents,
+          agentConfigError: msg.ok ? null : msg.error ?? "config error",
+        });
       }
     };
   },

@@ -13,7 +13,7 @@ import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
-import { AgentRegistry } from "./agents/registry.js";
+import { AgentRegistry, type AgentDef, type RuntimeDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { dispatch } from "./agents/dispatch.js";
 import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
@@ -109,7 +109,15 @@ type ServerEvent =
   | { type: "agent-job-finished"; jobId: string; status: JobStatus; exitCode: number | null }
   | { type: "agent-job-removed"; jobId: string; changeId: string }
   | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: { done: number; total: number } }
-  | { type: "git-status-updated"; gitStatus: GitStatus };
+  | { type: "git-status-updated"; gitStatus: GitStatus }
+  | {
+      type: "agents-updated";
+      ok: boolean;
+      error?: string;
+      agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
+      runtimes: Record<string, RuntimeDef>;
+      warnings: string[];
+    };
 
 function broadcast(event: ServerEvent): void {
   const payload = JSON.stringify(event);
@@ -212,8 +220,29 @@ await agentRunner.adoptOrphanWorktrees();
 // otherwise a newly-declared runtime silently reports installed:false
 // (or a renamed runtime's command isn't re-probed) until the user
 // forces a refresh from the UI.
+// Debounced broadcast of the fresh registry state on `agents.yaml`
+// file-system changes. Debouncing collapses atomic-write patterns
+// (`.tmp → rename` fires multiple fs.watch events on macOS) into a
+// single event. See add-agents-broadcast-on-file-event.
+let agentsBroadcastTimer: NodeJS.Timeout | null = null;
 void agentRegistry.startWatching(() => {
   clearRuntimeDetectionCache();
+  if (agentsBroadcastTimer) clearTimeout(agentsBroadcastTimer);
+  agentsBroadcastTimer = setTimeout(() => {
+    agentsBroadcastTimer = null;
+    const cfg = agentRegistry.publicConfig();
+    console.log(
+      `[registry] broadcasting agents-updated (${cfg.agents.length} agents, ${cfg.warnings.length} warnings)`,
+    );
+    broadcast({
+      type: "agents-updated",
+      ok: cfg.ok,
+      error: cfg.error,
+      agents: cfg.agents,
+      runtimes: cfg.runtimes,
+      warnings: cfg.warnings,
+    });
+  }, 100);
 });
 
 process.on("SIGINT", () => {
