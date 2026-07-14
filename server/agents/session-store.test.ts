@@ -26,7 +26,7 @@ describe("getOrCreateSessionId — mint on first call", () => {
   it("mints and persists a new sessionId when the file is absent", async () => {
     expect(existsSync(join(dir, ".ithyno"))).toBe(false);
     const id = await getOrCreateSessionId(dir, "add-foo");
-    expect(id).toMatch(/^session-add-foo-[0-9a-z]+$/);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(existsSync(STORE_PATH(dir))).toBe(true);
     const raw = await readFile(STORE_PATH(dir), "utf8");
     const parsed = JSON.parse(raw);
@@ -49,7 +49,7 @@ describe("getOrCreateSessionId — mint on first call", () => {
     const foo = await getOrCreateSessionId(dir, "add-foo");
     const bar = await getOrCreateSessionId(dir, "add-bar");
     expect(bar).not.toBe(foo);
-    expect(bar).toMatch(/^session-add-bar-[0-9a-z]+$/);
+    expect(bar).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     const parsed = JSON.parse(readFileSync(STORE_PATH(dir), "utf8"));
     expect(parsed).toEqual({ "add-foo": foo, "add-bar": bar });
   });
@@ -92,7 +92,7 @@ describe("corruption recovery", () => {
     mkdirSync(join(dir, ".ithyno"));
     writeFileSync(STORE_PATH(dir), "not-json", "utf8");
     const id = await getOrCreateSessionId(dir, "add-foo");
-    expect(id).toMatch(/^session-add-foo-[0-9a-z]+$/);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     const parsed = JSON.parse(readFileSync(STORE_PATH(dir), "utf8"));
     expect(parsed).toEqual({ "add-foo": id });
   });
@@ -102,22 +102,48 @@ describe("corruption recovery", () => {
     mkdirSync(join(dir, ".ithyno"));
     writeFileSync(STORE_PATH(dir), "[1,2,3]", "utf8");
     const id = await getOrCreateSessionId(dir, "add-foo");
-    expect(id).toMatch(/^session-add-foo-[0-9a-z]+$/);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 
-  it("drops malformed entries (non-string value) but keeps valid ones", async () => {
+  it("drops malformed entries (non-string value)", async () => {
     const { mkdirSync } = await import("node:fs");
     mkdirSync(join(dir, ".ithyno"));
     writeFileSync(
       STORE_PATH(dir),
-      JSON.stringify({ "add-foo": "session-add-foo-abc", "bad": 42 }),
+      JSON.stringify({
+        "valid-uuid": "550e8400-e29b-41d4-a716-446655440000",
+        "bad": 42,
+      }),
       "utf8",
     );
-    const foo = await getSessionId(dir, "add-foo");
-    expect(foo).toBe("session-add-foo-abc");
-    // 'bad' should be dropped — its lookup returns null.
+    const uuid = await getSessionId(dir, "valid-uuid");
+    expect(uuid).toBe("550e8400-e29b-41d4-a716-446655440000");
     const bad = await getSessionId(dir, "bad");
     expect(bad).toBeNull();
+  });
+
+  it("treats pre-UUID entries as legacy (getSessionId returns null; getOrCreateSessionId re-mints)", async () => {
+    // Simulates a `.ithyno/sessions.json` written by the initial
+    // `session-<changeId>-<base36-ts>` mint format before it was
+    // swapped for RFC 4122 UUIDs (Claude Code --session-id compat).
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(dir, ".ithyno"));
+    writeFileSync(
+      STORE_PATH(dir),
+      JSON.stringify({ "add-foo": "session-add-foo-mrjz4fkt" }),
+      "utf8",
+    );
+    // Read-only path skips the legacy value.
+    const readOnly = await getSessionId(dir, "add-foo");
+    expect(readOnly).toBeNull();
+    // Mint path replaces it with a fresh UUID.
+    const minted = await getOrCreateSessionId(dir, "add-foo");
+    expect(minted).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(minted).not.toBe("session-add-foo-mrjz4fkt");
+    const parsed = JSON.parse(readFileSync(STORE_PATH(dir), "utf8"));
+    expect(parsed["add-foo"]).toBe(minted);
   });
 });
 

@@ -34,9 +34,9 @@
 #   ${session_id}    — change-scoped session id for conversation grouping
 #                      (persisted at .ithyno/sessions.json; stable across
 #                      server restarts; empty string when unavailable).
-#                      Useful with Claude Code's `--session <id>` or
-#                      `gh copilot`'s equivalent flag.
-#                      Example: args: [--session, "${session_id}"]
+#                      Value is an RFC 4122 UUID v4 (Claude Code's
+#                      `--session-id <uuid>` requires this format).
+#                      Example: args: [--session-id, "${session_id}"]
 #
 # ─── Backward compatibility ────────────────────────────────────────────────
 #

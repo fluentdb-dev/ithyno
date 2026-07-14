@@ -114,7 +114,9 @@ describe("dispatch — session correlation", () => {
     });
     expect(outcome.ok).toBe(true);
     expect(runCalls).toHaveLength(1);
-    expect(runCalls[0].sessionId).toMatch(/^session-add-foo-[0-9a-z]+$/);
+    expect(runCalls[0].sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
     // sessions.json should now contain the minted entry.
     const stored = await getSessionId(dir, "add-foo");
     expect(stored).toBe(runCalls[0].sessionId);
@@ -155,6 +157,8 @@ describe("dispatch — session correlation", () => {
     if (!outcome.ok) expect(outcome.status).toBe(404);
     // sessions.json gains the orphan entry per spec.
     const stored = await getSessionId(dir, "does-not-exist");
-    expect(stored).toMatch(/^session-does-not-exist-[0-9a-z]+$/);
+    expect(stored).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
   });
 });

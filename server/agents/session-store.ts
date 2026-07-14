@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -76,15 +77,19 @@ async function writeMap(projectRoot: string, map: Record<string, string>): Promi
   }
 }
 
-/** Base36 encoding of a millisecond timestamp — short and readable. */
-function base36Ts(): string {
-  return Date.now().toString(36);
-}
+/** RFC 4122 UUID regex — used to detect pre-UUID legacy entries so we
+ *  can transparently re-mint them into a Claude-Code-compatible shape. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Read-only lookup. Returns the existing sessionId for `changeId` if
- * one is stored, else `null`. Does not touch the filesystem when the
- * file is absent.
+ * one is stored AND it's a valid UUID; else `null`. Does not touch
+ * the filesystem.
+ *
+ * Non-UUID stored entries (from the pre-`crypto.randomUUID` mint
+ * format `session-<changeId>-<base36-ts>`) return `null` here so
+ * `getOrCreateSessionId` will re-mint on next call.
  */
 export async function getSessionId(
   projectRoot: string,
@@ -93,20 +98,22 @@ export async function getSessionId(
   const path = storePath(projectRoot);
   if (!existsSync(path)) return null;
   const map = await readMap(projectRoot);
-  return map[changeId] ?? null;
+  const stored = map[changeId];
+  if (!stored) return null;
+  if (!UUID_RE.test(stored)) return null;
+  return stored;
 }
 
 /**
- * Look up the sessionId for `changeId`. If none is stored, mint a
- * fresh `session-<changeId>-<base36-ts>` and persist it atomically
- * before returning.
+ * Look up the sessionId for `changeId`. If none is stored, or the
+ * stored value predates the switch to UUID (`session-<changeId>-
+ * <base36-ts>`), mint a fresh RFC 4122 UUID v4 via
+ * `crypto.randomUUID()` and persist it atomically before returning.
  *
- * Mint format uses the current wall-clock timestamp encoded in base36
- * so the resulting ID is stable (once written it's read back verbatim
- * on subsequent calls) but human-readable enough to sort by creation
- * time in logs.
- *
- * Callers should treat the returned value as opaque.
+ * UUID format is required for compatibility with Claude Code's
+ * `--session-id <uuid>` flag (which strictly validates). Users who
+ * need cross-server-restart stability keep it via the persistent
+ * file-backed map; the value itself is opaque.
  */
 export async function getOrCreateSessionId(
   projectRoot: string,
@@ -115,7 +122,13 @@ export async function getOrCreateSessionId(
   const existing = await getSessionId(projectRoot, changeId);
   if (existing) return existing;
   const map = await readMap(projectRoot);
-  const minted = `session-${changeId}-${base36Ts()}`;
+  const prior = map[changeId];
+  if (prior && !UUID_RE.test(prior)) {
+    console.warn(
+      `[session-store] pre-UUID entry for '${changeId}' (${prior}) re-minted for Claude Code --session-id compatibility`,
+    );
+  }
+  const minted = randomUUID();
   map[changeId] = minted;
   await writeMap(projectRoot, map);
   return minted;

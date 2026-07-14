@@ -1839,19 +1839,19 @@ string — matching the "always-defined" convention of the other
 template vars.
 
 #### Scenario: session_id substituted in args
-- **GIVEN** an agent with `args: [--session, "${session_id}"]` and no runtime
-- **WHEN** the runner calls `resolve()` with `vars.session_id = "session-add-foo-lz9k"`
-- **THEN** the resolved args are `[--session, "session-add-foo-lz9k"]`
+- **GIVEN** an agent with `args: [--session-id, "${session_id}"]` and no runtime
+- **WHEN** the runner calls `resolve()` with `vars.session_id = "550e8400-e29b-41d4-a716-446655440000"`
+- **THEN** the resolved args are `[--session-id, "550e8400-e29b-41d4-a716-446655440000"]`
 
 #### Scenario: session_id substituted in env
 - **GIVEN** an agent with `env: { AGENT_SESSION_ID: "${session_id}" }`
-- **WHEN** `resolve()` is called with `vars.session_id = "session-add-bar-lz9k4q"`
-- **THEN** the resolved `env.AGENT_SESSION_ID` is `"session-add-bar-lz9k4q"`
+- **WHEN** `resolve()` is called with `vars.session_id = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"`
+- **THEN** the resolved `env.AGENT_SESSION_ID` is `"6ba7b810-9dad-11d1-80b4-00c04fd430c8"`
 
 #### Scenario: session_id substituted in resolved prompt
 - **GIVEN** an agent with `prompts: { code: "/opsx:apply ${change_id} in session ${session_id}" }`
-- **WHEN** `resolve()` runs with `change_id: "add-foo"` and `session_id: "session-add-foo-lz9k"`
-- **THEN** the resolved prompt reads `"/opsx:apply add-foo in session session-add-foo-lz9k"`
+- **WHEN** `resolve()` runs with `change_id: "add-foo"` and `session_id: "550e8400-e29b-41d4-a716-446655440000"`
+- **THEN** the resolved prompt reads `"/opsx:apply add-foo in session 550e8400-e29b-41d4-a716-446655440000"`
 
 #### Scenario: empty session_id substituted as empty string
 - **GIVEN** an agent with `args: [--session, "${session_id}"]`
@@ -1875,13 +1875,16 @@ The module `server/agents/session-store.ts` SHALL export:
 - `getOrCreateSessionId(projectRoot, changeId): Promise<string>` —
   reads `.ithyno/sessions.json`; when the file / directory does not
   exist SHALL treat the map as empty. Returns the existing value
-  for `changeId` when set. Otherwise SHALL mint a new value of
-  shape `session-<changeId>-<base36-timestamp>` (timestamp taken
-  once at mint time and encoded so the ID is stable across future
-  reads), write the updated map back atomically, and return the
-  new value.
+  for `changeId` when set AND it is a valid RFC 4122 UUID.
+  Otherwise SHALL mint a new UUID v4 via `crypto.randomUUID()`,
+  write the updated map back atomically, and return the new value.
+  When the stored value is present but not a valid UUID (legacy
+  pre-UUID format such as `session-<changeId>-<base36-ts>`), the
+  entry SHALL be re-minted with a warning to the server log for
+  Claude Code `--session-id` compatibility.
 - `getSessionId(projectRoot, changeId): Promise<string | null>` —
-  read-only lookup returning `null` when the file / key is absent.
+  read-only lookup returning `null` when the file / key is absent
+  OR when the stored value is not a valid UUID (legacy format).
 
 Writes SHALL be atomic: write to `.ithyno/sessions.json.tmp` then
 `rename` to `.ithyno/sessions.json`. A corrupt / unparseable file
@@ -1894,26 +1897,38 @@ local state does not leak into commits.
 #### Scenario: First call for a change mints and persists
 - **GIVEN** `.ithyno/sessions.json` does not exist
 - **WHEN** `getOrCreateSessionId(root, "add-foo")` is called
-- **THEN** the return value matches `/^session-add-foo-[0-9a-z]+$/`
-- **AND** `.ithyno/sessions.json` is written containing exactly `{ "add-foo": "<returned-id>" }`
+- **THEN** the return value matches `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i` (RFC 4122 UUID)
+- **AND** `.ithyno/sessions.json` is written containing exactly `{ "add-foo": "<returned-uuid>" }`
 
-#### Scenario: Second call returns the same ID
-- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "session-add-foo-lz9k" }`
+#### Scenario: Second call returns the same UUID
+- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "550e8400-e29b-41d4-a716-446655440000" }`
 - **WHEN** `getOrCreateSessionId(root, "add-foo")` is called
-- **THEN** the return value is `"session-add-foo-lz9k"`
+- **THEN** the return value is `"550e8400-e29b-41d4-a716-446655440000"`
 - **AND** the file's timestamp is unchanged
 
 #### Scenario: Session persists across server restart
-- **GIVEN** `getOrCreateSessionId(root, "add-foo")` returned `"session-add-foo-lz9k"` before shutdown
+- **GIVEN** `getOrCreateSessionId(root, "add-foo")` returned `"550e8400-e29b-41d4-a716-446655440000"` before shutdown
 - **WHEN** the process restarts and `getOrCreateSessionId(root, "add-foo")` is called again
-- **THEN** the return value is still `"session-add-foo-lz9k"`
+- **THEN** the return value is still `"550e8400-e29b-41d4-a716-446655440000"`
 
-#### Scenario: Second call for a different change mints a distinct ID
-- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "session-add-foo-lz9k" }`
+#### Scenario: Second call for a different change mints a distinct UUID
+- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "550e8400-e29b-41d4-a716-446655440000" }`
 - **WHEN** `getOrCreateSessionId(root, "add-bar")` is called
-- **THEN** the return value is a new ID matching `/^session-add-bar-[0-9a-z]+$/`
-- **AND** the returned ID is not equal to `"session-add-foo-lz9k"`
+- **THEN** the return value is a new UUID matching `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i`
+- **AND** the returned UUID is not equal to the `add-foo` UUID
 - **AND** the file now contains both keys
+
+#### Scenario: Legacy pre-UUID entry is re-minted on next call
+- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "session-add-foo-mrjz4fkt" }` (pre-UUID mint format)
+- **WHEN** `getOrCreateSessionId(root, "add-foo")` is called
+- **THEN** a warning is emitted to the server log naming the legacy entry
+- **AND** the return value is a freshly-minted UUID
+- **AND** `.ithyno/sessions.json` for `add-foo` is overwritten with the new UUID
+
+#### Scenario: Read-only getSessionId returns null for a legacy entry
+- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "session-add-foo-mrjz4fkt" }` (pre-UUID mint format)
+- **WHEN** `getSessionId(root, "add-foo")` is called
+- **THEN** the return value is `null` (legacy value not surfaced to callers; `getOrCreateSessionId` re-mints on demand)
 
 #### Scenario: Read-only getSessionId returns null when unset
 - **GIVEN** `.ithyno/sessions.json` does not exist
@@ -1952,15 +1967,16 @@ originating session. Orphan-adopted jobs SHALL leave `sessionId`
 undefined.
 
 #### Scenario: Explicit sessionId in body wins
-- **WHEN** a client POSTs `{ role: "code", changeId: "add-foo", sessionId: "session-explicit-9" }`
-- **THEN** the created job's `sessionId` is `"session-explicit-9"`
-- **AND** the agent's `${session_id}` template substitution uses `"session-explicit-9"`
+- **WHEN** a client POSTs `{ role: "code", changeId: "add-foo", sessionId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8" }`
+- **THEN** the created job's `sessionId` is `"6ba7b810-9dad-11d1-80b4-00c04fd430c8"`
+- **AND** the agent's `${session_id}` template substitution uses `"6ba7b810-9dad-11d1-80b4-00c04fd430c8"`
 - **AND** `.ithyno/sessions.json` is NOT touched by this dispatch
+- **NOTE**: the body override is passed through verbatim without UUID validation — callers who want Claude Code compatibility SHALL supply a valid UUID themselves.
 
 #### Scenario: Missing sessionId falls back to change-scoped store
-- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "session-add-foo-lz9k" }`
+- **GIVEN** `.ithyno/sessions.json` contains `{ "add-foo": "550e8400-e29b-41d4-a716-446655440000" }`
 - **WHEN** a client POSTs `{ role: "code", changeId: "add-foo" }` (no sessionId)
-- **THEN** the created job's `sessionId` is `"session-add-foo-lz9k"`
+- **THEN** the created job's `sessionId` is `"550e8400-e29b-41d4-a716-446655440000"`
 
 #### Scenario: First dispatch on a fresh change mints the session
 - **GIVEN** `.ithyno/sessions.json` has no entry for `add-baz`
