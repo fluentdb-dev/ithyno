@@ -414,13 +414,20 @@ export const useStore = create<Store>((set, get) => ({
       } catch {
         return;
       }
+      // NOTE: Do NOT early-return when `state` is null. Several message
+      // types (agents-updated, tags-updated, git-status-updated,
+      // worktree-change-updated, doc-updated) do not depend on the
+      // workspace state at all and MUST be processed even before the
+      // first workspace load resolves. Only the handlers that mutate
+      // `state` in place gate on its presence — inlined below.
       const cur = get().state;
-      if (!cur) return;
       if (msg.type === "change-updated") {
+        if (!cur) return;
         set({ state: replaceChange(cur, msg.change) });
       } else if (msg.type === "worktree-change-updated") {
         set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [msg.changeId]: msg.change } }));
       } else if (msg.type === "spec-updated") {
+        if (!cur) return;
         set({ state: replaceSpec(cur, msg.domain, msg.spec) });
       } else if (msg.type === "state-replaced") {
         void get().load();
