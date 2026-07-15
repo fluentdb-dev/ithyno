@@ -8,6 +8,8 @@ related:
   - docs/ideas/2026-07-04-agent-roles-and-worktree-pool.md
 external:
   - https://github.com/fujibee/agmsg
+related_ideas:
+  - docs/ideas/2026-07-15-runtime-collapse-to-mode-dispatch.md
 promoted_to: null
 ---
 
