@@ -2,6 +2,8 @@
 tags: [agents-yaml, area/server, template-vars, feature/dispatch]
 ---
 
+> **REVERTED** by [revert-session-id-cli-wiring](../../changes/revert-session-id-cli-wiring/) — R1 で dispatch endpoint 撤去済み、session-id 配線 unused。3 requirements 全 REMOVE。
+
 # Add `${session_id}` template variable — change-scoped, server-persistent
 
 ## Why

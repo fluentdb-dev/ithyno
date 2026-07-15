@@ -10,8 +10,6 @@ agents:
     command: claude
     args:
       - --dangerously-skip-permissions
-      - --session-id
-      - ${session_id}
       - --model
       - sonnet
     prompts:

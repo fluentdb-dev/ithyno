@@ -35,10 +35,6 @@ export type JobSummary = {
    *  clients that fetch /api/agents/jobs see the current number without
    *  needing to wait for the WS `worktree-progress-updated` event. */
   worktreeProgress?: Progress;
-  /** Optional session correlation id — the value substituted for
-   *  `${session_id}` in the agent's args / env / prompts. Landed by
-   *  add-session-id-template-var. */
-  sessionId?: string;
   /** Parsed `review.md` when the job produced one and its frontmatter
    *  validated against the schema. Undefined otherwise (non-review
    *  jobs, malformed frontmatter, missing file). Landed by
@@ -231,18 +227,10 @@ export class AgentRunner {
     return stripOutput(all[0]);
   }
 
-  /**
-   * Spawn an agent for a change.
-   *
-   * `sessionId` (add-session-id-template-var) is the value substituted
-   * for `${session_id}` in the agent's args / env / prompts and also
-   * recorded on the resulting Job for correlation. Optional; empty /
-   * undefined resolves to the empty string in the template pass.
-   */
+  /** Spawn an agent for a change. */
   async run(
     changeId: string,
     agentName: string,
-    sessionId?: string,
   ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
@@ -288,7 +276,6 @@ export class AgentRunner {
           change_id: changeId,
           worktree_path: worktreePath,
           branch,
-          session_id: sessionId,
         },
         def.roles[0],
       );
@@ -328,7 +315,6 @@ export class AgentRunner {
       status: "running",
       startedAt: Date.now(),
       output: [],
-      sessionId: sessionId && sessionId.length > 0 ? sessionId : undefined,
     };
     this.jobs.set(id, job);
     this.locks.set(changeId, id);
