@@ -311,8 +311,6 @@ function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
     hasEnv: false,
     initialInput: initial,
     prompts: initial ? { manager: initial } : undefined,
-    specialties: [],
-    concurrency: 1,
   };
 }
 
@@ -374,9 +372,6 @@ function AgentRow({
       <span className="agent-name">{agent.name}</span>
       <span className="job-role-badge">{rolesDisplay}</span>
       <span className="job-mode-badge muted">mode: {modeDisplay}</span>
-      {agent.specialties.length > 0 && (
-        <span className="muted">specialties: [{agent.specialties.join(", ")}]</span>
-      )}
       {agent.description && <span className="muted">— {agent.description}</span>}
       <span className="agent-row-actions">
         <button type="button" className="action-btn ghost" onClick={onEdit}>

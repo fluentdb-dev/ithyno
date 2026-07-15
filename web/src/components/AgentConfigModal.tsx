@@ -73,9 +73,7 @@ export function AgentConfigModal({
   // start collapsed to reduce visual noise. Any non-default value on
   // those fields auto-expands the section on open so users editing
   // existing agents can see what they're editing.
-  const hasNonDefaultAdvanced =
-    !!initial.specialties ||
-    !!initial.description;
+  const hasNonDefaultAdvanced = !!initial.description;
   const [showAdvanced, setShowAdvanced] = useState(hasNonDefaultAdvanced);
 
   useEffect(() => {
@@ -161,19 +159,10 @@ export function AgentConfigModal({
       if (trimmed && form.roles.includes(role)) prompts[role] = trimmed;
     }
 
-    // Manager entries have hard-coded shape constraints — the UI doesn't
-    // ask about mode/roles/specialties/concurrency/dedicated because the
-    // Manager only makes sense one way. Force those values here.
+    // Manager entries have hard-coded shape constraints (mode / roles).
     const managerLocked = includesManager;
     const effectiveRoles = managerLocked ? ["manager"] : form.roles;
     const effectiveMode = managerLocked ? "live-shell" : form.mode;
-    const effectiveSpecialties = managerLocked
-      ? []
-      : form.specialties
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-    const effectiveConcurrency = managerLocked ? 1 : form.concurrency;
     // Name resolution:
     //   - Edit mode: keep the seed's name (form.name is preloaded from it)
     //   - Add mode + Manager: force "manager" (singleton, no collision)
@@ -191,8 +180,6 @@ export function AgentConfigModal({
       roles: effectiveRoles,
       mode: effectiveMode,
       prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
-      specialties: effectiveSpecialties,
-      concurrency: effectiveConcurrency,
       description: form.description.trim() || undefined,
     };
     if (form.command.trim()) {
@@ -394,28 +381,6 @@ export function AgentConfigModal({
             </button>
             {showAdvanced && (
               <div className="agent-config-advanced-body">
-                {!includesManager && (
-                  <label className="agent-config-field">
-                    <span>
-                      Specialties{" "}
-                      <span className="muted">
-                        (tag prefixes for dispatch routing, comma-separated; empty = accepts any tag)
-                      </span>
-                    </span>
-                    <input
-                      type="text"
-                      value={form.specialties}
-                      onChange={(e) => setForm({ ...form, specialties: e.target.value })}
-                      placeholder="e.g. area/web, feature/ui"
-                    />
-                  </label>
-                )}
-
-                {/* Concurrency input hidden — the field is schema-only
-                    (not enforced by runner/dispatch). Value round-trips
-                    via form.concurrency default so existing yaml entries
-                    with `concurrency: N` are preserved on save. */}
-
                 <label className="agent-config-field">
                   <span>Description (optional)</span>
                   <input
@@ -453,8 +418,6 @@ type FormState = {
   command: string;
   args: string;
   prompts: Record<string, string>;
-  specialties: string;
-  concurrency: number;
   description: string;
 };
 
@@ -505,8 +468,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       command: "",
       args: "",
       prompts: {},
-      specialties: "",
-      concurrency: 1,
       description: "",
     };
   }
@@ -535,8 +496,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     command: seed.command ?? "",
     args: (seed.args ?? []).join(" "),
     prompts: promptsFromSeed,
-    specialties: (seed.specialties ?? []).join(", "),
-    concurrency: seed.concurrency ?? 1,
     description: seed.description ?? "",
   };
 }

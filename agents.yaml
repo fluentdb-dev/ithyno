@@ -3,8 +3,6 @@ agents:
     mode: single-prompt
     roles:
       - code
-    specialties: []
-    concurrency: 2
     description: Implements the change using Claude Code via /ithy-opsx:apply
       (implementation + auto commit on the agent branch).
     command: claude
@@ -18,8 +16,6 @@ agents:
     mode: live-shell
     roles:
       - manager
-    specialties: []
-    concurrency: 1
     command: claude
     args:
       - --resume
@@ -28,8 +24,6 @@ agents:
     mode: single-prompt
     roles:
       - review
-    specialties: []
-    concurrency: 1
     command: copilot
     args:
       - --yolo

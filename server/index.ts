@@ -628,8 +628,6 @@ fastify.get("/api/manager/status", async (req, reply) => {
         initialInput: managerEntry.initialInput,
         prompt: managerEntry.prompt,
         role: managerEntry.role,
-        specialties: managerEntry.specialties,
-        concurrency: managerEntry.concurrency,
       }
     : null;
   return {

@@ -31,8 +31,6 @@ export type UpsertPayload = {
   prompts?: Record<string, string>;
   command?: string;
   args?: string[];
-  specialties: string[];
-  concurrency: number;
   description?: string;
 };
 
@@ -89,13 +87,6 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
     return { error: "roles containing 'manager' require mode: live-shell" };
   }
 
-  const specialties = coerceStringArray(o.specialties);
-  if (specialties === null) return { error: "specialties must be an array of strings" };
-  const concurrency = Number(o.concurrency);
-  if (!Number.isInteger(concurrency) || concurrency < 1) {
-    return { error: "concurrency must be an integer ≥ 1" };
-  }
-
   // command required.
   const hasCommand = typeof o.command === "string" && o.command.length > 0;
   if (!hasCommand) {
@@ -123,8 +114,6 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
     roles,
     mode: mode as AgentMode,
     prompts,
-    specialties,
-    concurrency,
   };
   if (typeof o.description === "string" && o.description.length > 0) {
     payload.description = o.description;
@@ -273,8 +262,6 @@ function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
     name: p.name,
     mode: p.mode,
     roles: p.roles,
-    specialties: p.specialties,
-    concurrency: p.concurrency,
   };
   if (p.description !== undefined) entry.description = p.description;
   if (p.command !== undefined) {

@@ -43,11 +43,6 @@ export type AgentDef = {
    *  default (`/opsx:apply|review|verify|manage ${change_id}`).
    *  See {@link resolvePromptForRole} and {@link BUILT_IN_ROLE_PROMPTS}. */
   prompts?: Record<string, string>;
-  /** Tag prefixes this agent claims expertise in (e.g. `area/web`). Empty
-   *  array or `["any"]` means wildcard. */
-  specialties: string[];
-  /** Declared job-parallelism capacity, defaulted to 1. Integer ≥ 1. */
-  concurrency: number;
 
   // ---- deprecated read aliases (kept for downstream consumers that
   // predate the mode+roles reshape; populated from the normalized fields) ----
@@ -84,8 +79,6 @@ const KNOWN_AGENT_KEYS = new Set([
   "mode",
   "role",
   "roles",
-  "specialties",
-  "concurrency",
   "initialInput",
 ]);
 
@@ -280,28 +273,6 @@ function normalizeAgent(
 
   const description = typeof o.description === "string" ? o.description : undefined;
 
-  // ---- specialties / concurrency ----
-  let specialties: string[] = [];
-  if (o.specialties !== undefined) {
-    if (!Array.isArray(o.specialties)) {
-      throw new Error(`${label}.specialties must be an array of non-empty strings`);
-    }
-    specialties = o.specialties.map((v, j) => {
-      if (typeof v !== "string" || !v) {
-        throw new Error(`${label}.specialties[${j}] must be a non-empty string`);
-      }
-      return v;
-    });
-  }
-
-  let concurrency = 1;
-  if (o.concurrency !== undefined) {
-    if (typeof o.concurrency !== "number" || !Number.isInteger(o.concurrency) || o.concurrency < 1) {
-      throw new Error(`${label}.concurrency must be an integer >= 1`);
-    }
-    concurrency = o.concurrency;
-  }
-
   const primaryRole = roles[0];
   return {
     name: o.name,
@@ -312,8 +283,6 @@ function normalizeAgent(
     mode,
     roles,
     prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
-    specialties,
-    concurrency,
     // deprecated read aliases
     role: primaryRole,
     initialInput: prompts[primaryRole],

@@ -10,8 +10,6 @@ function mkAgent(name: string, roles: string[]): AgentPublic {
     role: roles[0] ?? "",
     roles,
     mode: "single-prompt",
-    specialties: [],
-    concurrency: 1,
   };
 }
 

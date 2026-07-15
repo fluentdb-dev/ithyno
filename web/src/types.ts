@@ -168,8 +168,6 @@ export type AgentPublic = {
   roles: string[];
   /** Per-role prompt overrides. When absent, built-in defaults kick in. */
   prompts?: Record<string, string>;
-  specialties: string[];
-  concurrency: number;
 
   // ---- deprecated read aliases (populated by the loader from the
   // normalized fields for downstream consumers that predate the reshape) ----
@@ -212,8 +210,6 @@ export type AgentConfigPayload =
       prompts?: Record<string, string>;
       command?: string;
       args?: string[];
-      specialties: string[];
-      concurrency: number;
       description?: string;
     }
   | { action: "delete"; name: string };

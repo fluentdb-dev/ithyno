@@ -12,8 +12,6 @@ const agents: AgentPublic[] = [
     role: "code",
     roles: ["code"],
     mode: "single-prompt",
-    specialties: [],
-    concurrency: 1,
   },
 ];
 

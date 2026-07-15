@@ -45,8 +45,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.agents[0].role).toBe("code");
     expect(cfg.agents[0].roles).toEqual(["code"]);
     expect(cfg.agents[0].mode).toBe("single-prompt");
-    expect(cfg.agents[0].specialties).toEqual([]);
-    expect(cfg.agents[0].concurrency).toBe(1);
   });
 
   it("fully specified agent round-trips through the loader", async () => {
@@ -57,8 +55,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     args: []
     roles: [review]
     mode: single-prompt
-    specialties: [area/web, feature/ui]
-    concurrency: 2
 `,
     );
     const cfg = reg.publicConfig();
@@ -66,8 +62,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     const a = cfg.agents[0];
     expect(a.roles).toEqual(["review"]);
     expect(a.mode).toBe("single-prompt");
-    expect(a.specialties).toEqual(["area/web", "feature/ui"]);
-    expect(a.concurrency).toBe(2);
   });
 
   it("partially specified agent (only role) gets defaults for the rest", async () => {
@@ -83,8 +77,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.ok).toBe(true);
     const a = cfg.agents[0];
     expect(a.role).toBe("proposer");
-    expect(a.specialties).toEqual([]);
-    expect(a.concurrency).toBe(1);
   });
 
   it("arbitrary role strings are accepted (open set)", async () => {
@@ -101,62 +93,9 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.agents[0].role).toBe("archivist");
   });
 
-  it("rejects non-integer concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: 1.5
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-    expect(cfg.error).toMatch(/integer/);
-  });
-
-  it("rejects zero concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: 0
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-  });
-
-  it("rejects negative concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: -1
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-  });
-
-  it("rejects non-string specialty element", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    specialties: [area/web, 42]
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.specialties/);
-  });
+  // concurrency / specialties validation tests removed by
+  // revert-agents-yaml-schema-fields (R8). Both fields now trigger
+  // "unknown key" errors from the general validator.
 
   it("rejects empty-string role", async () => {
     const reg = await loadWith(
@@ -195,7 +134,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     command: claude
     args: ["/opsx:apply", "\${change_id}"]
     role: review
-    specialties: [area/server]
 `,
     );
     const def = reg.find("reviewer-web");

@@ -38,8 +38,6 @@ const legacyClaude: AgentConfigPayload = {
   command: "claude",
   args: ["--dangerously-skip-permissions"],
   prompts: { code: "/opsx:apply ${change_id}" },
-  specialties: [],
-  concurrency: 1,
 
 };
 
@@ -136,8 +134,6 @@ describe("applyAgentConfigPayload — upsert", () => {
       roles: ["code"],
       mode: "single-prompt" as const,
       runtime: "does-not-exist",
-      specialties: [],
-      concurrency: 1,
 
     };
     // Note: applyAgentConfigPayload's validateAgents wraps normalizeAgent
@@ -250,8 +246,6 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       mode: "live-shell",
       command: "aider",
       args: [],
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res.ok).toBe(false);
@@ -281,8 +275,6 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       mode: "live-shell",
       command: "aider",
       args: [],
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ ok: true });
@@ -302,8 +294,6 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       command: "claude",
       args: ["--continue"],
       prompts: { manager: "/opsx:manage" },
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ ok: true });
@@ -345,27 +335,12 @@ describe("coercePayload", () => {
       mode: "single-prompt",
       command: "cmd",
       args: [],
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ error: expect.stringMatching(/kebab-case/i) });
   });
 
-  it("rejects concurrency < 1", () => {
-    const res = coercePayload({
-      action: "upsert",
-      name: "foo",
-      roles: ["code"],
-      mode: "single-prompt",
-      command: "cmd",
-      args: [],
-      specialties: [],
-      concurrency: 0,
-
-    });
-    expect(res).toEqual({ error: expect.stringMatching(/concurrency/i) });
-  });
+  // "rejects concurrency < 1" — removed by revert-agents-yaml-schema-fields (R8).
 
   it("rejects missing mode", () => {
     const res = coercePayload({
@@ -373,8 +348,6 @@ describe("coercePayload", () => {
       name: "foo",
       roles: ["code"],
       command: "cmd",
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ error: expect.stringMatching(/mode/i) });
@@ -386,8 +359,6 @@ describe("coercePayload", () => {
       name: "foo",
       roles: ["code"],
       mode: "single-prompt",
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ error: expect.stringMatching(/command/i) });
@@ -401,8 +372,6 @@ describe("coercePayload", () => {
       mode: "single-prompt",
       command: "claude",
       args: ["--continue"],
-      specialties: [],
-      concurrency: 1,
 
     });
     expect(res).toEqual({ error: expect.stringMatching(/live-shell/i) });
@@ -416,8 +385,6 @@ describe("coercePayload", () => {
       mode: "single-prompt",
       command: "claude",
       args: ["-p", "/opsx:apply"],
-      specialties: [],
-      concurrency: 1,
 
     });
     expect("error" in res).toBe(false);
@@ -434,8 +401,6 @@ describe("coercePayload", () => {
       mode: "single-prompt",
       command: "claude",
       prompts: { code: "/opsx:apply ${change_id}" },
-      specialties: [],
-      concurrency: 1,
 
     });
     expect("error" in res).toBe(false);
