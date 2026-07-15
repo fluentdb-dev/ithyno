@@ -182,35 +182,6 @@ export type AgentPublic = {
   prompt?: string;
 };
 
-// ---- Runtime detection (add-runtime-detection Phase 3.3) -------------------
-export type RuntimePromptStyle = "cli-arg" | "stdin" | "file";
-export type RuntimeDiffStrategy = "git" | "aider-native" | "none";
-export type RuntimeSupports = {
-  interactive: boolean;
-  artifactOutput: boolean;
-  diff: RuntimeDiffStrategy;
-};
-
-/** Server-side RuntimeDef mirror — see server/agents/registry.ts. */
-export type RuntimeDefPublic = {
-  name: string;
-  command: string;
-  baseArgs: string[];
-  promptStyle: RuntimePromptStyle;
-  promptFlag?: string;
-  /** Per-role prompt defaults inherited by agents that reference this
-   *  runtime. See reshape-agents-yaml-mode-roles. */
-  prompts?: Record<string, string>;
-  supports: RuntimeSupports;
-  installed: boolean;
-  path?: string;
-  error?: string;
-};
-
-export type RuntimeStatusResponse = {
-  runtimes: RuntimeDefPublic[];
-};
-
 /** Manager section source-of-truth (add-agents-tab-manager-section).
  *  Reflects the resolved PTY startup so the tab can be honest about
  *  what's actually running, even when no `role: manager` entry exists. */

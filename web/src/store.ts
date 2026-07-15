@@ -7,7 +7,6 @@ import {
   fetchTagIndex,
   fetchAgentConfig,
   fetchAgentJobs,
-  fetchAgentRuntimes,
   fetchManagerStatus,
   fetchGitConfig,
   fetchGitStatus,
@@ -27,7 +26,6 @@ import type {
   ManagerStatus,
   OutputLine,
   Progress,
-  RuntimeStatusResponse,
   SpecDomain,
   TagIndex,
   Task,
@@ -62,11 +60,6 @@ type Store = {
   tagIndexStale: boolean;
   agents: AgentPublic[];
   agentConfigError: string | null;
-  /** Runtimes declared in agents.yaml plus their `which <cmd>`
-   *  install status. Null before the first fetch. Landed by
-   *  add-agents-tab-live-panel. */
-  runtimes: RuntimeStatusResponse | null;
-  runtimesError: string | null;
   /** Resolved Manager status — declared entry, running fallback, or
    *  idle (no terminal, no declaration). Null before the first fetch.
    *  Landed by add-agents-tab-manager-section. */
@@ -97,7 +90,6 @@ type Store = {
   openDocPath: (path: string | null) => Promise<void>;
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
-  loadRuntimes: (refresh?: boolean) => Promise<void>;
   loadManagerStatus: () => Promise<void>;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
@@ -176,8 +168,6 @@ export const useStore = create<Store>((set, get) => ({
   tagIndexStale: false,
   agents: [],
   agentConfigError: null,
-  runtimes: null,
-  runtimesError: null,
   managerStatus: null,
   managerStatusError: null,
   jobs: {},
@@ -192,14 +182,6 @@ export const useStore = create<Store>((set, get) => ({
       set({ agents: cfg.agents, agentConfigError: cfg.ok ? null : cfg.error ?? "config error" });
     } catch (err) {
       set({ agentConfigError: err instanceof Error ? err.message : String(err) });
-    }
-  },
-  loadRuntimes: async (refresh = false) => {
-    try {
-      const runtimes = await fetchAgentRuntimes(refresh);
-      set({ runtimes, runtimesError: null });
-    } catch (err) {
-      set({ runtimesError: err instanceof Error ? err.message : String(err) });
     }
   },
   loadManagerStatus: async () => {

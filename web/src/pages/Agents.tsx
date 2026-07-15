@@ -8,19 +8,17 @@ import type {
   AgentPublic,
   JobSummary,
   ManagerStatus,
-  RuntimeDefPublic,
 } from "../types";
 import { DiffView } from "../components/DiffView";
 import { AgentOutputView } from "../components/AgentOutputView";
 import { AgentConfigModal } from "../components/AgentConfigModal";
 
 /**
- * Agents tab. Four sections in reading order:
+ * Agents tab. Three sections in reading order:
  *
- *   1. Runtimes         — GET /api/agents/runtimes with installed badges
- *   2. Live             — running jobs (role / runtime badges)
- *   3. Configured (idle)— agents.yaml minus the ones currently running
- *   4. Recent jobs      — finished jobs with verdict badge on review runs
+ *   1. Live             — running jobs
+ *   2. Configured (idle)— agents.yaml minus the ones currently running
+ *   3. Recent jobs      — finished jobs with verdict badge on review runs
  *
  * The tab is fleet-centric: it answers "which agents exist and which are
  * running right now" but does NOT drill into per-change details (that's
@@ -32,12 +30,9 @@ export function Agents() {
   const jobs = useMemo(() => Object.values(jobsMap), [jobsMap]);
   const agents = useStore((s) => s.agents);
   const agentConfigError = useStore((s) => s.agentConfigError);
-  const runtimes = useStore((s) => s.runtimes);
-  const runtimesError = useStore((s) => s.runtimesError);
   const managerStatus = useStore((s) => s.managerStatus);
   const loadAgents = useStore((s) => s.loadAgents);
   const loadJobs = useStore((s) => s.loadJobs);
-  const loadRuntimes = useStore((s) => s.loadRuntimes);
   const loadManagerStatus = useStore((s) => s.loadManagerStatus);
   const pushToast = useStore((s) => s.pushToast);
   const [searchParams] = useSearchParams();
@@ -77,9 +72,8 @@ export function Agents() {
   useEffect(() => {
     void loadAgents();
     void loadJobs();
-    void loadRuntimes();
     void loadManagerStatus();
-  }, [loadAgents, loadJobs, loadRuntimes, loadManagerStatus]);
+  }, [loadAgents, loadJobs, loadManagerStatus]);
 
   const sorted = [...jobs].sort((a, b) => b.startedAt - a.startedAt);
   const active = sorted.filter((j) => j.status === "running");
@@ -112,12 +106,6 @@ export function Agents() {
       {agentConfigError && (
         <div className="parse-error">⚠ agents.yaml: {agentConfigError}</div>
       )}
-
-      <RuntimesSection
-        runtimes={runtimes?.runtimes ?? null}
-        error={runtimesError}
-        onRefresh={() => void loadRuntimes(true)}
-      />
 
       <ManagerSection
         status={managerStatus}
@@ -357,70 +345,6 @@ function DeleteConfirmDialog({
         </div>
       </div>
     </div>
-  );
-}
-
-function RuntimesSection({
-  runtimes,
-  error,
-  onRefresh,
-}: {
-  runtimes: RuntimeDefPublic[] | null;
-  error: string | null;
-  onRefresh: () => void;
-}) {
-  // Hide the section entirely when the server reports zero runtimes.
-  // That's the "no runtimes: declared" case per the spec.
-  if (runtimes !== null && runtimes.length === 0) return null;
-
-  const installedCount = runtimes?.filter((r) => r.installed).length ?? 0;
-  const total = runtimes?.length ?? 0;
-
-  return (
-    <section className="agents-section runtimes-section">
-      <div className="runtimes-head">
-        <h3>
-          Runtimes {runtimes && `(${total} declared, ${installedCount} installed)`}
-        </h3>
-        <button className="action-btn ghost runtimes-refresh" onClick={onRefresh}>
-          Refresh
-        </button>
-      </div>
-      {error && (
-        <div className="parse-error">⚠ Runtimes fetch failed: {error}</div>
-      )}
-      {runtimes === null ? (
-        <p className="empty">Loading runtimes…</p>
-      ) : (
-        <ul className="runtime-list">
-          {runtimes.map((r) => (
-            <RuntimeRow key={r.name} runtime={r} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function RuntimeRow({ runtime }: { runtime: RuntimeDefPublic }) {
-  return (
-    <li className={`runtime-row ${runtime.installed ? "installed" : "missing"}`}>
-      <span className="runtime-indicator" aria-hidden>
-        {runtime.installed ? "✓" : "○"}
-      </span>
-      <span className="runtime-name">{runtime.name}</span>
-      <span className="runtime-status">
-        {runtime.installed ? "installed" : "not found"}
-      </span>
-      {runtime.installed ? (
-        <span className="runtime-capabilities muted">
-          interactive: {runtime.supports.interactive ? "yes" : "no"} · artifact:{" "}
-          {runtime.supports.artifactOutput ? "yes" : "no"} · diff: {runtime.supports.diff}
-        </span>
-      ) : (
-        runtime.error && <span className="runtime-error muted">— {runtime.error}</span>
-      )}
-    </li>
   );
 }
 

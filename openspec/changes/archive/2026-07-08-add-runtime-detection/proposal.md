@@ -10,6 +10,8 @@ enables:
   - add-agents-tab-live-panel
 ---
 
+> **REVERTED** by [revert-runtime-detection](../../changes/revert-runtime-detection/) — R3 で runtimes: block 撤廃、detection の入力ゼロ。2 requirements (Runtime Installation Detection / Runtime Status Endpoint) 全 REMOVE。
+
 ## Why
 
 Phase 3.1 で `agents.yaml` の `runtimes:` section が受け入れられるように

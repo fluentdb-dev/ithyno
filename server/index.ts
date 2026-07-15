@@ -16,7 +16,6 @@ import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyS
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
-// R3 removed runtime-detect usage; imports retained until R4 removes the module.
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -214,17 +213,12 @@ const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadca
 // this init and misses the one-shot `agent-job-started` events.
 // See add-orphan-worktree-adoption.
 await agentRunner.adoptOrphanWorktrees();
-// Reset the runtime-detection cache whenever agents.yaml reloads —
-// otherwise a newly-declared runtime silently reports installed:false
-// (or a renamed runtime's command isn't re-probed) until the user
-// forces a refresh from the UI.
 // Debounced broadcast of the fresh registry state on `agents.yaml`
 // file-system changes. Debouncing collapses atomic-write patterns
 // (`.tmp → rename` fires multiple fs.watch events on macOS) into a
 // single event. See add-agents-broadcast-on-file-event.
 let agentsBroadcastTimer: NodeJS.Timeout | null = null;
 void agentRegistry.startWatching(() => {
-  clearRuntimeDetectionCache();
   if (agentsBroadcastTimer) clearTimeout(agentsBroadcastTimer);
   agentsBroadcastTimer = setTimeout(() => {
     agentsBroadcastTimer = null;
@@ -646,17 +640,6 @@ fastify.get("/api/manager/status", async (req, reply) => {
     fallbackSource,
     terminalActive: activeTerminalCount() > 0,
   };
-});
-
-// R3 removed the runtime detection cache; kept as a stub until R4.
-function clearRuntimeDetectionCache(): void {}
-
-fastify.get<{ Querystring: { refresh?: string } }>("/api/agents/runtimes", async (req, reply) => {
-  if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
-  // R3 (revert-runtime-abstraction) removed the `runtimes:` block from
-  // agents.yaml. This endpoint always returns an empty list until R4
-  // (revert-runtime-detection) removes it entirely.
-  return { runtimes: [] };
 });
 
 fastify.get("/api/agents/jobs", async (req, reply) => {
