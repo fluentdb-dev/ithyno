@@ -485,11 +485,17 @@ export const useStore = create<Store>((set, get) => ({
         // add-agents-broadcast-on-file-event — server fires this when
         // agents.yaml changes on disk (external edit OR Modal Save's
         // fs.watch follow-up). Payload IS the fresh state — no
-        // separate GET needed.
+        // separate GET needed for `agents`.
         set({
           agents: msg.agents,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
+        // Manager section is driven by `managerStatus` (a separate
+        // /api/manager/status endpoint that resolves the PTY startup
+        // chain). agents.yaml edits change whether a `role: manager`
+        // entry is declared and its command/args — the Manager section
+        // must reflect that too. Fire-and-forget refetch.
+        void get().loadManagerStatus();
       }
     };
   },
