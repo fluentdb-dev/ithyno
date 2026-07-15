@@ -83,25 +83,10 @@ describe("normalization: initialInput → prompts[role]", () => {
     expect(cfg.agents[0].prompts).toEqual({ code: "/custom-flow ${change_id}" });
   });
 
-  it("folds bare runtime `prompt` into prompts[role]", async () => {
-    const reg = await loadWith(
-      `runtimes:
-  claude:
-    command: claude
-    baseArgs: []
-    promptStyle: cli-arg
-    supports: { interactive: true, artifactOutput: true, diff: git }
-agents:
-  - name: worker
-    role: review
-    runtime: claude
-    prompt: /opsx:review \${change_id}
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(true);
-    expect(cfg.agents[0].prompts).toEqual({ review: "/opsx:review ${change_id}" });
-  });
+  // "folds bare runtime `prompt` into prompts[role]" — removed by
+  // revert-runtime-abstraction (R3). Runtime-backed shape is no longer
+  // accepted; the underlying normalization logic remains for legacy
+  // scalar role / initialInput, tested by the other cases above.
 });
 
 describe("normalization: mode synthesis", () => {
@@ -208,54 +193,28 @@ describe("fatal cases", () => {
 // Role → agent resolution now lives in skill-side judgment; see
 // docs/ideas/2026-07-15-runtime-collapse-to-mode-dispatch.md.
 
-describe("resolvePromptForRole — 3-tier resolution", () => {
-  it("agent.prompts wins over runtime.prompts and built-in", async () => {
+describe("resolvePromptForRole — 2-tier resolution (agent → built-in)", () => {
+  // R3 (revert-runtime-abstraction) removed the runtime.prompts tier,
+  // collapsing resolution to: agent.prompts[role] → built-in default.
+
+  it("agent.prompts wins over built-in default", async () => {
     const reg = await loadWith(
-      `runtimes:
-  claude:
-    command: claude
-    baseArgs: []
-    promptStyle: cli-arg
-    prompts:
-      code: /runtime-level
-    supports: { interactive: true, artifactOutput: true, diff: git }
-agents:
+      `agents:
   - name: worker
     mode: single-prompt
     roles: [code]
-    runtime: claude
+    command: claude
+    args: []
     prompts:
       code: /agent-level
 `,
     );
     const def = reg.find("worker")!;
-    const resolved = resolvePromptForRole(def, reg.runtimes(), "code");
+    const resolved = resolvePromptForRole(def, "code");
     expect(resolved).toBe("/agent-level");
   });
 
-  it("runtime.prompts wins over built-in when agent has no override", async () => {
-    const reg = await loadWith(
-      `runtimes:
-  claude:
-    command: claude
-    baseArgs: []
-    promptStyle: cli-arg
-    prompts:
-      review: /runtime-review
-    supports: { interactive: true, artifactOutput: true, diff: git }
-agents:
-  - name: worker
-    mode: single-prompt
-    roles: [review]
-    runtime: claude
-`,
-    );
-    const def = reg.find("worker")!;
-    const resolved = resolvePromptForRole(def, reg.runtimes(), "review");
-    expect(resolved).toBe("/runtime-review");
-  });
-
-  it("built-in default kicks in when neither agent nor runtime declares", async () => {
+  it("built-in default kicks in when agent has no override", async () => {
     const reg = await loadWith(
       `agents:
   - name: worker
@@ -266,7 +225,7 @@ agents:
 `,
     );
     const def = reg.find("worker")!;
-    const resolved = resolvePromptForRole(def, reg.runtimes(), "verify");
+    const resolved = resolvePromptForRole(def, "verify");
     expect(resolved).toBe("/opsx:verify ${change_id}");
   });
 
@@ -281,7 +240,7 @@ agents:
 `,
     );
     const def = reg.find("worker")!;
-    const resolved = resolvePromptForRole(def, reg.runtimes(), "other");
+    const resolved = resolvePromptForRole(def, "other");
     expect(resolved).toBeUndefined();
   });
 });

@@ -11,6 +11,8 @@ enables:
   - add-review-artifact
 ---
 
+> **PARTIALLY REVERTED** by [revert-runtime-abstraction](../../changes/revert-runtime-abstraction/) — R1/R2 で dispatcher/job-model 撤退後に runtime 中央定義の意味が消失。`Runtime Definitions In agents.yaml` と `Runtime-Backed Agents` の 2 requirement を REMOVE。`Backward Compatibility With Command-Based Agents` は後日 `reshape-agents-yaml-mode-roles` によって MODIFIED (legacy shape 正規化 spec に repurpose) されており、そちらは残す。
+
 ## Why
 
 Phase 3 で Manager (Phase 4) が `/opsx:dispatch code add-foo` のような

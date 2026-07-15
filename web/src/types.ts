@@ -158,20 +158,15 @@ export type AgentMode = "single-prompt" | "live-shell";
 export type AgentPublic = {
   name: string;
   description?: string;
-  /** Direct command. Optional — omitted when the entry inherits from a
-   *  runtime. */
   command?: string;
   args?: string[];
   hasEnv: boolean;
-  /** Optional runtime reference — shared-defaults inheritance. */
-  runtime?: string;
   /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
   mode: AgentMode;
   /** Dispatch labels. Always non-empty. Single-role legacy agents have
    *  `roles.length === 1`. */
   roles: string[];
-  /** Per-role prompt overrides. When absent, the runtime's prompts map
-   *  and built-in defaults kick in. */
+  /** Per-role prompt overrides. When absent, built-in defaults kick in. */
   prompts?: Record<string, string>;
   specialties: string[];
   concurrency: number;
@@ -242,14 +237,11 @@ export type AgentConfigPayload =
       /** Spawn mode. `single-prompt` for headless workers; `live-shell`
        *  for interactive Manager. Manager roles require `live-shell`. */
       mode: AgentMode;
-      /** Per-role prompt overrides. Runtime and built-in defaults kick
-       *  in for absent entries. */
+      /** Per-role prompt overrides. Built-in defaults kick in for absent
+       *  entries. */
       prompts?: Record<string, string>;
-      /** Optional direct command. When omitted, `runtime` must be set. */
       command?: string;
       args?: string[];
-      /** Optional runtime reference — shared defaults inheritance. */
-      runtime?: string;
       specialties: string[];
       concurrency: number;
       dedicated: boolean;

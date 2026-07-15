@@ -23,51 +23,24 @@ import chokidar, { type FSWatcher } from "chokidar";
  * warning. See {@link normalizeAgent} below.
  */
 
-export type PromptStyle = "cli-arg" | "stdin" | "file";
-export type DiffStrategy = "git" | "aider-native" | "none";
 export type AgentMode = "single-prompt" | "live-shell";
-
-export type RuntimeSupports = {
-  interactive: boolean;
-  artifactOutput: boolean;
-  diff: DiffStrategy;
-};
-
-export type RuntimeDef = {
-  name: string;
-  command: string;
-  baseArgs: string[];
-  promptStyle: PromptStyle;
-  /** Optional CLI flag placed immediately before the prompt when
-   *  promptStyle is `cli-arg`. Ignored for other prompt styles. */
-  promptFlag?: string;
-  /** Optional shared per-role prompt defaults inherited by agents that
-   *  reference this runtime. Resolution order at dispatch is
-   *  agent.prompts → runtime.prompts → built-in defaults. */
-  prompts?: Record<string, string>;
-  supports: RuntimeSupports;
-};
 
 export type AgentDef = {
   name: string;
   description?: string;
-  /** Direct command (mutually exclusive with inheriting from runtime).
-   *  When `runtime` is also set, the local value wins. */
+  /** Command to spawn (required for single-prompt agents; workers only). */
   command?: string;
-  /** Direct args. When `runtime` is also set, the local value wins over
-   *  `runtime.baseArgs`. */
+  /** Args for the spawned command. */
   args?: string[];
   env?: Record<string, string>;
-  /** Shared-defaults reference (see `Runtime-Backed Agents`). Optional. */
-  runtime?: string;
   /** Spawn mode (required). single-prompt → headless with `-p`; live-shell
    *  → PTY session, prompt typed into stdin after boot. */
   mode: AgentMode;
   /** Dispatch labels this agent can receive (non-empty). At most one
    *  agent may include `manager`. Manager agents must be `live-shell`. */
   roles: string[];
-  /** Per-role prompt overrides. Resolution: agent.prompts → runtime.prompts
-   *  → built-in default (`/opsx:apply|review|verify|manage ${change_id}`).
+  /** Per-role prompt overrides. Resolution: agent.prompts → built-in
+   *  default (`/opsx:apply|review|verify|manage ${change_id}`).
    *  See {@link resolvePromptForRole} and {@link BUILT_IN_ROLE_PROMPTS}. */
   prompts?: Record<string, string>;
   /** Tag prefixes this agent claims expertise in (e.g. `area/web`). Empty
@@ -109,35 +82,22 @@ export const DEFAULT_WORKTREE_POOL: WorktreePoolConfig = {
 };
 
 export type AgentConfig =
-  | { ok: true; agents: AgentDef[]; runtimes: Record<string, RuntimeDef>; worktreePool: WorktreePoolConfig; warnings: string[] }
+  | { ok: true; agents: AgentDef[]; worktreePool: WorktreePoolConfig; warnings: string[] }
   | {
       ok: false;
       agents: AgentDef[]; // last-known-good
-      runtimes: Record<string, RuntimeDef>; // last-known-good
       worktreePool: WorktreePoolConfig;
       warnings: string[];
       error: string;
     };
 
-const PROMPT_STYLES: readonly PromptStyle[] = ["cli-arg", "stdin", "file"];
-const DIFF_STRATEGIES: readonly DiffStrategy[] = ["git", "aider-native", "none"];
 const AGENT_MODES: readonly AgentMode[] = ["single-prompt", "live-shell"];
-const KNOWN_RUNTIME_KEYS = new Set([
-  "command",
-  "baseArgs",
-  "promptStyle",
-  "promptFlag",
-  "prompts",
-  "supports",
-]);
-const KNOWN_SUPPORTS_KEYS = new Set(["interactive", "artifactOutput", "diff"]);
 const KNOWN_AGENT_KEYS = new Set([
   "name",
   "description",
   "command",
   "args",
   "env",
-  "runtime",
   "prompt",
   "prompts",
   "mode",
@@ -149,8 +109,8 @@ const KNOWN_AGENT_KEYS = new Set([
   "initialInput",
 ]);
 
-/** Built-in per-role prompt defaults. When neither the agent nor its
- *  runtime declares `prompts.<role>`, dispatch falls back to these. */
+/** Built-in per-role prompt defaults. When the agent does not declare
+ *  `prompts.<role>`, dispatch falls back to these. */
 export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
   code: "/opsx:apply ${change_id}",
   coder: "/opsx:apply ${change_id}", // deprecated alias for "code"
@@ -174,81 +134,6 @@ function validatePromptsMap(
       throw new Error(`${context}.prompts.${role} must be a string`);
     }
     out[role] = val;
-  }
-  return out;
-}
-
-function validateRuntimes(raw: unknown): Record<string, RuntimeDef> {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("runtimes must be an object");
-  }
-  const out: Record<string, RuntimeDef> = {};
-  for (const [name, rawEntry] of Object.entries(raw as Record<string, unknown>)) {
-    if (!name) throw new Error("runtimes: entry name must be non-empty");
-    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
-      throw new Error(`runtimes.${name}: must be an object`);
-    }
-    const o = rawEntry as Record<string, unknown>;
-    for (const key of Object.keys(o)) {
-      if (!KNOWN_RUNTIME_KEYS.has(key)) {
-        throw new Error(`runtimes.${name}.${key}: unknown key`);
-      }
-    }
-    if (typeof o.command !== "string" || !o.command) {
-      throw new Error(`runtimes.${name}.command is required`);
-    }
-    if (o.baseArgs !== undefined && !Array.isArray(o.baseArgs)) {
-      throw new Error(`runtimes.${name}.baseArgs must be an array of strings`);
-    }
-    const baseArgs = Array.isArray(o.baseArgs) ? o.baseArgs.map(String) : [];
-    if (typeof o.promptStyle !== "string" || !PROMPT_STYLES.includes(o.promptStyle as PromptStyle)) {
-      throw new Error(
-        `runtimes.${name}.promptStyle must be one of ${PROMPT_STYLES.join(", ")}`,
-      );
-    }
-    const promptStyle = o.promptStyle as PromptStyle;
-    let promptFlag: string | undefined;
-    if (o.promptFlag !== undefined) {
-      if (typeof o.promptFlag !== "string" || !o.promptFlag) {
-        throw new Error(`runtimes.${name}.promptFlag must be a non-empty string`);
-      }
-      promptFlag = o.promptFlag;
-    }
-    const prompts = validatePromptsMap(o.prompts, `runtimes.${name}`);
-    if (!o.supports || typeof o.supports !== "object" || Array.isArray(o.supports)) {
-      throw new Error(`runtimes.${name}.supports must be an object`);
-    }
-    const sup = o.supports as Record<string, unknown>;
-    for (const key of Object.keys(sup)) {
-      if (!KNOWN_SUPPORTS_KEYS.has(key)) {
-        throw new Error(`runtimes.${name}.supports.${key}: unknown key`);
-      }
-    }
-    if (typeof sup.interactive !== "boolean") {
-      throw new Error(`runtimes.${name}.supports.interactive must be a boolean`);
-    }
-    if (typeof sup.artifactOutput !== "boolean") {
-      throw new Error(`runtimes.${name}.supports.artifactOutput must be a boolean`);
-    }
-    if (typeof sup.diff !== "string" || !DIFF_STRATEGIES.includes(sup.diff as DiffStrategy)) {
-      throw new Error(
-        `runtimes.${name}.supports.diff must be one of ${DIFF_STRATEGIES.join(", ")}`,
-      );
-    }
-    out[name] = {
-      name,
-      command: o.command,
-      baseArgs,
-      promptStyle,
-      promptFlag,
-      prompts,
-      supports: {
-        interactive: sup.interactive,
-        artifactOutput: sup.artifactOutput,
-        diff: sup.diff as DiffStrategy,
-      },
-    };
   }
   return out;
 }
@@ -322,15 +207,7 @@ function normalizeAgent(
     warnings.push(`${label}: no 'role' or 'roles' declared; defaulted to roles: [code]`);
   }
 
-  // ---- runtime/command/args ----
-  let runtime: string | undefined;
-  if (o.runtime !== undefined) {
-    if (typeof o.runtime !== "string" || !o.runtime) {
-      throw new Error(`${label}.runtime must be a non-empty string`);
-    }
-    runtime = o.runtime;
-  }
-
+  // ---- command/args ----
   let command: string | undefined;
   if (o.command !== undefined) {
     if (typeof o.command !== "string" || !o.command) {
@@ -347,8 +224,8 @@ function normalizeAgent(
     args = o.args.map(String);
   }
 
-  if (!runtime && !command) {
-    throw new Error(`${label}: must declare either 'command' or 'runtime'`);
+  if (!command) {
+    throw new Error(`${label}: must declare 'command'`);
   }
 
   // ---- prompts + legacy prompt/initialInput folding ----
@@ -460,7 +337,6 @@ function normalizeAgent(
     command,
     args,
     env,
-    runtime,
     mode,
     roles,
     prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
@@ -553,15 +429,10 @@ function validateWorktreePool(raw: unknown): WorktreePoolConfig {
  */
 export function resolvePromptForRole(
   agent: AgentDef,
-  runtimes: Record<string, RuntimeDef>,
   role: string,
 ): string | undefined {
   const agentPrompt = agent.prompts?.[role];
   if (agentPrompt !== undefined) return agentPrompt;
-  if (agent.runtime) {
-    const runtimePrompt = runtimes[agent.runtime]?.prompts?.[role];
-    if (runtimePrompt !== undefined) return runtimePrompt;
-  }
   return BUILT_IN_ROLE_PROMPTS[role];
 }
 
@@ -569,7 +440,6 @@ export class AgentRegistry {
   private cache: AgentConfig = {
     ok: true,
     agents: [],
-    runtimes: {},
     worktreePool: { ...DEFAULT_WORKTREE_POOL },
     warnings: [],
   };
@@ -586,7 +456,6 @@ export class AgentRegistry {
       this.cache = {
         ok: true,
         agents: [],
-        runtimes: {},
         worktreePool: { ...DEFAULT_WORKTREE_POOL },
         warnings: [],
       };
@@ -595,9 +464,6 @@ export class AgentRegistry {
     try {
       const raw = await readFile(path, "utf8");
       const parsed = parseYaml(raw);
-      const runtimes = validateRuntimes(
-        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).runtimes : undefined,
-      );
       const warnings: string[] = [];
       const agents = validateAgents(parsed, warnings);
       const worktreePool = validateWorktreePool(
@@ -606,13 +472,12 @@ export class AgentRegistry {
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[registry] ${w}`);
       }
-      this.cache = { ok: true, agents, runtimes, worktreePool, warnings };
+      this.cache = { ok: true, agents, worktreePool, warnings };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.cache = {
         ok: false,
         agents: this.cache.agents,
-        runtimes: this.cache.runtimes,
         worktreePool: this.cache.worktreePool,
         warnings: this.cache.warnings,
         error: msg,
@@ -660,7 +525,6 @@ export class AgentRegistry {
     ok: boolean;
     error?: string;
     agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
-    runtimes: Record<string, RuntimeDef>;
     warnings: string[];
   } {
     const sanitized = this.cache.agents.map(({ env, ...rest }) => ({
@@ -672,14 +536,12 @@ export class AgentRegistry {
         ok: false,
         error: this.cache.error,
         agents: sanitized,
-        runtimes: this.cache.runtimes,
         warnings: this.cache.warnings,
       };
     }
     return {
       ok: true,
       agents: sanitized,
-      runtimes: this.cache.runtimes,
       warnings: this.cache.warnings,
     };
   }
@@ -696,12 +558,6 @@ export class AgentRegistry {
     return this.cache.agents.find((a) => a.roles.includes("manager")) ?? null;
   }
 
-  /** All configured runtimes (name → def). Empty when no runtimes: section
-   *  is declared. */
-  runtimes(): Record<string, RuntimeDef> {
-    return this.cache.runtimes;
-  }
-
   /** Resolved worktree pool config (with defaults applied). Present whether
    *  or not any agent has opted in via `dedicated: false`. */
   worktreePoolConfig(): WorktreePoolConfig {
@@ -710,16 +566,14 @@ export class AgentRegistry {
 
   /**
    * Resolve template variables, apply per-role prompt resolution, and
-   * expand the runtime lookup into a concrete command + args tuple.
+   * produce a concrete command + args tuple.
    *
    * `role` is the dispatched role — the specific role that was requested
    * (not the agent's whole `roles` array). When omitted, defaults to
-   * `agent.roles[0]` (Manager PTY startup / single-role legacy path).
+   * `agent.roles[0]`.
    *
-   * @throws when `agent.runtime` references an unknown runtime, when the
-   *   agent has no command and no runtime, when the resolved runtime
-   *   uses `promptStyle: file`, or when the dispatched role has no
-   *   prompt at any resolution tier.
+   * @throws when the dispatched role has no prompt at any resolution tier
+   *   for `mode: live-shell` workers.
    */
   resolve(
     def: AgentDef,
@@ -763,104 +617,30 @@ export class AgentRegistry {
     const env: Record<string, string> = {};
     if (def.env) for (const [k, v] of Object.entries(def.env)) env[k] = replace(v);
 
-    // Resolve command + args + prompt-delivery style.
-    let command: string;
-    let args: string[];
-    let promptStyle: PromptStyle = "cli-arg";
-    let promptFlag: string | undefined = "-p";
-    /** When true, the agent OWNS its full args — no auto-appending of the
-     *  resolved prompt. Set for command-only agents whose args are hand-
-     *  authored (`command + args` legacy shape without a runtime). */
-    let userAuthoredArgs = false;
+    // Resolve command + args.
+    const command = def.command ?? "";
+    const args = (def.args ?? []).map(replace);
 
-    if (def.runtime !== undefined) {
-      const runtime = this.cache.runtimes[def.runtime];
-      if (!runtime) {
-        throw new Error(
-          `agent '${def.name}' references unknown runtime '${def.runtime}'; declared runtimes: ${Object.keys(this.cache.runtimes).join(", ") || "(none)"}`,
-        );
-      }
-      command = def.command ?? runtime.command;
-      // Local args override runtime.baseArgs — user opt-in to hand-authored args.
-      if (def.args !== undefined) {
-        args = def.args.map(replace);
-        userAuthoredArgs = true;
-      } else {
-        args = runtime.baseArgs.map(replace);
-      }
-      promptStyle = runtime.promptStyle;
-      promptFlag = runtime.promptFlag; // may be undefined — matches pre-reshape "flag optional" semantics
-      if (promptStyle === "file") {
-        throw new Error(
-          `runtime '${def.runtime}' uses promptStyle: file which is not yet supported`,
-        );
-      }
-    } else {
-      command = def.command ?? "";
-      args = (def.args ?? []).map(replace);
-      // Command-only agents: the user hand-authored args (likely including
-      // their own `-p` and prompt template). Skip auto-append.
-      userAuthoredArgs = true;
-    }
-
-    // Resolve the prompt for the dispatched role. Track whether the
-    // resolved value came from an *explicit* source (agent.prompts or
-    // runtime.prompts) vs the built-in-default fallback — used below
-    // to decide whether the cli-arg path should auto-inject the prompt.
+    // Resolve the prompt for the dispatched role. explicit = agent.prompts;
+    // fallback = built-in default per role.
     const agentPrompt = def.prompts?.[dispatchedRole];
-    const runtimePrompt =
-      def.runtime !== undefined
-        ? this.cache.runtimes[def.runtime]?.prompts?.[dispatchedRole]
-        : undefined;
-    const explicitTemplate = agentPrompt ?? runtimePrompt;
-    const promptTemplate = explicitTemplate ?? BUILT_IN_ROLE_PROMPTS[dispatchedRole];
+    const promptTemplate = agentPrompt ?? BUILT_IN_ROLE_PROMPTS[dispatchedRole];
     const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
-    const isExplicitPrompt = explicitTemplate !== undefined;
+    const isExplicitPrompt = agentPrompt !== undefined;
 
-    // Wire the prompt into the runner. Behavior by mode:
-    //
-    //   - Worker `mode: live-shell` — runner writes resolvedPrompt to
-    //     child.stdin (no PTY; just stdin-piped headless spawn).
-    //     `initialInputMode: "stdin"`. Manager `mode: live-shell` is
-    //     handled by `attachPtyToSocket` on the Terminal panel WS and
-    //     never reaches this code path.
-    //   - `single-prompt` + `promptStyle: stdin` — runner writes
-    //     resolvedPrompt to child.stdin. `initialInputMode: "stdin"`.
-    //   - `single-prompt` + `promptStyle: cli-arg` — resolve() appends
-    //     `[promptFlag, resolvedPrompt]` to args when the user hasn't
-    //     already inlined the prompt themselves.
-    //
-    // Injection gate for cli-arg: append `[promptFlag, prompt]` when
-    //   (a) `resolvedPrompt` is defined, AND
-    //   (b) `args` does NOT already contain the promptFlag (so users
-    //       who hand-authored `args: [..., -p, "..."]` aren't
-    //       double-injected), AND
-    //   (c) EITHER the prompt was set explicitly (agent.prompts or
-    //       runtime.prompts) OR the agent is runtime-referenced (whose
-    //       runtime baseArgs represent an incomplete recipe expecting
-    //       the runner to inject the prompt).
-    //
-    // Command-only agents with NO explicit prompts skip auto-inject —
-    // they are treated as fully hand-authored (legacy escape hatch).
-    // Users who want per-role prompt delivery set `prompts.<role>` on
-    // the agent (or on the runtime they reference).
+    // Wire the prompt into the runner:
+    //   - `mode: live-shell` (worker) — write resolvedPrompt to child.stdin.
+    //     Manager `mode: live-shell` is handled by attachPtyToSocket
+    //     (Terminal panel WS) and never reaches this branch.
+    //   - `mode: single-prompt` — append `[-p, prompt]` to args when the
+    //     agent has an explicit `prompts.<role>` set AND args does not
+    //     already inline `-p`. Command-only agents with no explicit
+    //     prompt keep their hand-authored args unchanged.
     let initialInputMode: "cli-arg" | "stdin";
     let initialInput: string | undefined;
     let effectiveArgs = args;
 
     if (def.mode === "live-shell") {
-      if (resolvedPrompt === undefined) {
-        throw new Error(
-          `agent '${def.name}': no prompt configured for role '${dispatchedRole}' (agent.prompts, runtime.prompts, and built-in defaults are all empty)`,
-        );
-      }
-      // Worker `mode: live-shell` — spawn headless with stdin piped and
-      // write the resolved prompt to it. Manager `mode: live-shell` is
-      // handled by attachPtyToSocket (Terminal panel WS), never reaches
-      // this branch.
-      initialInputMode = "stdin";
-      initialInput = resolvedPrompt;
-    } else if (promptStyle === "stdin") {
       if (resolvedPrompt === undefined) {
         throw new Error(
           `agent '${def.name}': no prompt configured for role '${dispatchedRole}'`,
@@ -869,30 +649,17 @@ export class AgentRegistry {
       initialInputMode = "stdin";
       initialInput = resolvedPrompt;
     } else {
-      // cli-arg
       initialInputMode = "cli-arg";
       initialInput = undefined;
       const shouldInject =
         resolvedPrompt !== undefined &&
-        (isExplicitPrompt || !userAuthoredArgs) &&
-        !args.includes(promptFlag ?? "-p");
+        isExplicitPrompt &&
+        !args.includes("-p");
       if (shouldInject) {
-        effectiveArgs = promptFlag
-          ? [...args, promptFlag, resolvedPrompt!]
-          : [...args, resolvedPrompt!];
+        effectiveArgs = [...args, "-p", resolvedPrompt!];
       }
     }
 
     return { command, args: effectiveArgs, env, initialInput, initialInputMode };
   }
-}
-
-/**
- * Human-readable runtime label for an agent. Runtime-referenced agents
- * carry the runtime name; agents that declare `command` locally without a
- * runtime get the literal "legacy". Used by the Job model so downstream
- * UIs can display the runtime without a null-check.
- */
-export function runtimeLabel(agent: AgentDef): string {
-  return agent.runtime ?? "legacy";
 }

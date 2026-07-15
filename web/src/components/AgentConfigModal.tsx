@@ -4,7 +4,6 @@ import type {
   AgentConfigPayload,
   AgentMode,
   AgentPublic,
-  RuntimeDefPublic,
 } from "../types";
 
 /**
@@ -34,7 +33,6 @@ type Props = {
   /** `AgentPublic` = edit mode with the row's data;
    *  `"new"` = add mode (fields default; name auto-generated on submit). */
   seed: AgentPublic | "new";
-  runtimes: RuntimeDefPublic[];
   /** Existing agent names — used by the Add-mode auto-namer to avoid
    *  collisions (appends `-2`, `-3`, ... on conflict). */
   existingNames: string[];
@@ -52,7 +50,6 @@ type Props = {
 
 export function AgentConfigModal({
   seed,
-  runtimes,
   existingNames,
   existingManagerName,
   addModePrefill,
@@ -72,12 +69,11 @@ export function AgentConfigModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  // Advanced fields (Runtime, Specialties, Concurrency, Dedicated,
-  // Description) start collapsed to reduce visual noise. Any non-default
-  // value on those fields auto-expands the section on open so users
-  // editing existing agents can see what they're editing.
+  // Advanced fields (Specialties, Concurrency, Dedicated, Description)
+  // start collapsed to reduce visual noise. Any non-default value on
+  // those fields auto-expands the section on open so users editing
+  // existing agents can see what they're editing.
   const hasNonDefaultAdvanced =
-    !!initial.runtime ||
     !!initial.specialties ||
     initial.dedicated !== true ||
     !!initial.description;
@@ -88,9 +84,6 @@ export function AgentConfigModal({
     setError(null);
     setFieldErrors({});
   }, [initial]);
-
-  const runtimeOptions = runtimes.map((r) => r.name);
-  const selectedRuntime = runtimes.find((r) => r.name === form.runtime) ?? null;
 
   // The Manager section's `[Declare in agents.yaml]` shortcut is the ONLY
   // Add-mode entry point for `manager`. Edit mode on the existing manager
@@ -141,16 +134,9 @@ export function AgentConfigModal({
     setForm((f) => ({ ...f, prompts: { ...f.prompts, [role]: value } }));
   };
 
-  const inheritedCommand = selectedRuntime?.command ?? "";
-  const inheritedArgs = (selectedRuntime?.baseArgs ?? []).join(" ");
-
   const resolvedPromptForRole = (role: string): { source: string; value: string } => {
     const local = form.prompts[role]?.trim();
     if (local) return { source: "custom", value: local };
-    const fromRuntime = selectedRuntime?.prompts?.[role];
-    if (fromRuntime) {
-      return { source: `runtime:${selectedRuntime.name}`, value: fromRuntime };
-    }
     const builtIn = BUILT_IN_ROLE_PROMPTS[role];
     if (builtIn) return { source: "built-in", value: builtIn };
     return { source: "none", value: "" };
@@ -164,8 +150,8 @@ export function AgentConfigModal({
     if (form.roles.length === 0) {
       errs.roles = "at least one role required";
     }
-    if (!form.runtime && !form.command.trim()) {
-      errs.command = "pick a runtime OR set a command";
+    if (!form.command.trim()) {
+      errs.command = "command required";
     }
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -219,11 +205,6 @@ export function AgentConfigModal({
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
     }
-    // Manager entries never reference a runtime (they always spawn the
-    // command directly in the PTY panel — no shared-defaults inheritance
-    // makes sense for the interactive session).
-    if (!managerLocked && form.runtime) payload.runtime = form.runtime;
-
     setSubmitting(true);
     setError(null);
     try {
@@ -339,11 +320,7 @@ export function AgentConfigModal({
               type="text"
               value={form.command}
               onChange={(e) => setForm({ ...form, command: e.target.value })}
-              placeholder={
-                selectedRuntime
-                  ? `inherits: ${inheritedCommand}`
-                  : "e.g. claude"
-              }
+              placeholder="e.g. claude"
             />
             {fieldErrors.command && (
               <span className="agent-config-error">{fieldErrors.command}</span>
@@ -355,11 +332,7 @@ export function AgentConfigModal({
               type="text"
               value={form.args}
               onChange={(e) => setForm({ ...form, args: e.target.value })}
-              placeholder={
-                selectedRuntime
-                  ? `inherits: ${inheritedArgs}`
-                  : "e.g. --dangerously-skip-permissions"
-              }
+              placeholder="e.g. --dangerously-skip-permissions"
             />
           </label>
 
@@ -376,7 +349,7 @@ export function AgentConfigModal({
                 <>
                   Prompts{" "}
                   <span className="muted">
-                    (per-role override — leave blank to use runtime or built-in default)
+                    (per-role override — leave blank to use built-in default)
                   </span>
                 </>
               )}
@@ -400,8 +373,6 @@ export function AgentConfigModal({
                   />
                   <span className="agent-config-prompt-chain-hint muted">
                     {resolved.source === "custom" && "Custom override active"}
-                    {resolved.source.startsWith("runtime:") &&
-                      `Inherits from ${resolved.source} → ${resolved.value}`}
                     {resolved.source === "built-in" &&
                       `Built-in default → ${resolved.value}`}
                     {resolved.source === "none" &&
@@ -412,7 +383,7 @@ export function AgentConfigModal({
             })}
           </fieldset>
 
-          {/* Advanced options — collapsed by default. Runtime, Specialties,
+          {/* Advanced options — collapsed by default. Specialties,
               Concurrency, Dedicated, Description. Manager entries only
               expose Description (the rest are irrelevant). */}
           <div className="agent-config-advanced">
@@ -426,28 +397,6 @@ export function AgentConfigModal({
             </button>
             {showAdvanced && (
               <div className="agent-config-advanced-body">
-                {!includesManager && (
-                  <label className="agent-config-field">
-                    <span>
-                      Runtime{" "}
-                      <span className="muted">
-                        (optional — inherit command / args / prompts from a `runtimes:` entry)
-                      </span>
-                    </span>
-                    <select
-                      value={form.runtime}
-                      onChange={(e) => setForm({ ...form, runtime: e.target.value })}
-                    >
-                      <option value="">— none (specify command below) —</option>
-                      {runtimeOptions.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
                 {!includesManager && (
                   <label className="agent-config-field">
                     <span>
@@ -517,7 +466,6 @@ type FormState = {
   mode: AgentMode;
   command: string;
   args: string;
-  runtime: string;
   prompts: Record<string, string>;
   specialties: string;
   concurrency: number;
@@ -541,7 +489,7 @@ function autoNameForWorker(form: FormState, existingNames: string[]): string {
           .replace(/\.(exe|bat|cmd|sh)$/i, ""),
       )
     : "";
-  const base = form.runtime || commandBase || form.roles[0] || "agent";
+  const base = commandBase || form.roles[0] || "agent";
   const soleRole =
     form.roles.length === 1 && form.roles[0] !== base ? form.roles[0] : "";
   const candidate = kebabify(soleRole ? `${base}-${soleRole}` : base) || "agent";
@@ -571,7 +519,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       mode: "single-prompt",
       command: "",
       args: "",
-      runtime: "",
       prompts: {},
       specialties: "",
       concurrency: 1,
@@ -603,7 +550,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     mode: modeFromSeed,
     command: seed.command ?? "",
     args: (seed.args ?? []).join(" "),
-    runtime: seed.runtime ?? "",
     prompts: promptsFromSeed,
     specialties: (seed.specialties ?? []).join(", "),
     concurrency: seed.concurrency ?? 1,

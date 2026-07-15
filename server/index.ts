@@ -13,10 +13,10 @@ import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
-import { AgentRegistry, type AgentDef, type RuntimeDef } from "./agents/registry.js";
+import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
-import { detectAllRuntimes, type DetectionResult } from "./agents/runtime-detect.js";
+// R3 removed runtime-detect usage; imports retained until R4 removes the module.
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -114,7 +114,6 @@ type ServerEvent =
       ok: boolean;
       error?: string;
       agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
-      runtimes: Record<string, RuntimeDef>;
       warnings: string[];
     };
 
@@ -238,7 +237,6 @@ void agentRegistry.startWatching(() => {
       ok: cfg.ok,
       error: cfg.error,
       agents: cfg.agents,
-      runtimes: cfg.runtimes,
       warnings: cfg.warnings,
     });
   }, 100);
@@ -634,7 +632,6 @@ fastify.get("/api/manager/status", async (req, reply) => {
         args: managerEntry.args,
         hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
         initialInput: managerEntry.initialInput,
-        runtime: managerEntry.runtime,
         prompt: managerEntry.prompt,
         role: managerEntry.role,
         specialties: managerEntry.specialties,
@@ -651,42 +648,15 @@ fastify.get("/api/manager/status", async (req, reply) => {
   };
 });
 
-// Per-runtime installation cache. Populated on demand (first request or
-// ?refresh=1). Reset when agents.yaml reloads (registered above via
-// startWatching) so a fresh detection runs on the next request — this
-// covers both new runtimes and command changes on existing ones.
-let runtimeDetectionCache: Record<string, DetectionResult> | null = null;
-function clearRuntimeDetectionCache(): void {
-  runtimeDetectionCache = null;
-}
+// R3 removed the runtime detection cache; kept as a stub until R4.
+function clearRuntimeDetectionCache(): void {}
 
 fastify.get<{ Querystring: { refresh?: string } }>("/api/agents/runtimes", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
-  const cfg = agentRegistry.publicConfig();
-  const runtimes = cfg.runtimes;
-  if (Object.keys(runtimes).length === 0) return { runtimes: [] };
-
-  const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-  if (refresh || runtimeDetectionCache === null) {
-    runtimeDetectionCache = await detectAllRuntimes(runtimes);
-  }
-  const detection = runtimeDetectionCache;
-
-  const list = Object.entries(runtimes).map(([name, def]) => {
-    const det = detection[name] ?? { installed: false, error: "not detected" };
-    return {
-      name,
-      command: def.command,
-      baseArgs: def.baseArgs,
-      promptStyle: def.promptStyle,
-      promptFlag: def.promptFlag,
-      supports: def.supports,
-      installed: det.installed,
-      path: det.path,
-      error: det.error,
-    };
-  });
-  return { runtimes: list };
+  // R3 (revert-runtime-abstraction) removed the `runtimes:` block from
+  // agents.yaml. This endpoint always returns an empty list until R4
+  // (revert-runtime-detection) removes it entirely.
+  return { runtimes: [] };
 });
 
 fastify.get("/api/agents/jobs", async (req, reply) => {

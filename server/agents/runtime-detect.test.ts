@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { detectRuntime, detectAllRuntimes } from "./runtime-detect.js";
-import type { RuntimeDef } from "./registry.js";
+
+// R3 (revert-runtime-abstraction) collapsed RuntimeDef to a minimal
+// `{ command: string }`. runtime-detect stays until R4.
+type RuntimeStub = { command: string };
 
 const skipOnWindows = process.platform === "win32" ? it.skip : it;
 
-function runtime(name: string, command: string): RuntimeDef {
-  return {
-    name,
-    command,
-    baseArgs: [],
-    promptStyle: "cli-arg",
-    supports: { interactive: false, artifactOutput: false, diff: "none" },
-  };
+function runtime(_name: string, command: string): RuntimeStub {
+  return { command };
 }
 
 describe("detectRuntime", () => {
@@ -46,7 +43,7 @@ describe("detectAllRuntimes", () => {
   });
 
   skipOnWindows("detects a mix of installed and missing commands", async () => {
-    const map: Record<string, RuntimeDef> = {
+    const map: Record<string, RuntimeStub> = {
       installed: runtime("installed", "echo"),
       bogus: runtime("bogus", "this-command-should-not-exist-xyz-abc-42"),
     };
@@ -60,7 +57,7 @@ describe("detectAllRuntimes", () => {
   skipOnWindows("shares a single detection between runtimes with the same command", async () => {
     // Both runtimes point at `echo`; both entries should carry the same
     // path (i.e. the underlying `which echo` was resolved once and reused).
-    const map: Record<string, RuntimeDef> = {
+    const map: Record<string, RuntimeStub> = {
       a: runtime("a", "echo"),
       b: runtime("b", "echo"),
     };
@@ -77,7 +74,7 @@ describe("detectAllRuntimes", () => {
     const original = process.platform;
     Object.defineProperty(process, "platform", { value: "win32" });
     try {
-      const map: Record<string, RuntimeDef> = {
+      const map: Record<string, RuntimeStub> = {
         a: runtime("a", "echo"),
         b: runtime("b", "aider"),
       };

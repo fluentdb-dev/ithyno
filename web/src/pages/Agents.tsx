@@ -188,7 +188,6 @@ export function Agents() {
       {editing && (
         <AgentConfigModal
           seed={editing}
-          runtimes={runtimes?.runtimes ?? []}
           existingNames={agents.map((a) => a.name)}
           existingManagerName={existingManagerName}
           addModePrefill={addModePrefill}
@@ -434,7 +433,6 @@ function AgentRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const isRuntimeBacked = !!agent.runtime;
   // Manager row is edit-only (refine-agents-config-modal). Deleting the
   // Manager from the UI silently disables the Terminal panel's
   // auto-launch — a footgun. Users who really want to remove it can
@@ -452,9 +450,6 @@ function AgentRow({
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
       <span className="job-role-badge">{rolesDisplay}</span>
-      <span className="job-runtime-badge">
-        runtime: {isRuntimeBacked ? agent.runtime : "legacy"}
-      </span>
       <span className="job-mode-badge muted">mode: {modeDisplay}</span>
       {agent.specialties.length > 0 && (
         <span className="muted">specialties: [{agent.specialties.join(", ")}]</span>

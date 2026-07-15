@@ -43,18 +43,6 @@ const legacyClaude: AgentConfigPayload = {
   dedicated: true,
 };
 
-const runtimeReviewer: AgentConfigPayload = {
-  action: "upsert",
-  name: "reviewer",
-  roles: ["review"],
-  mode: "single-prompt",
-  runtime: "claude",
-  prompts: { review: "/opsx:review ${change_id}" },
-  specialties: ["area/web"],
-  concurrency: 2,
-  dedicated: false,
-};
-
 describe("applyAgentConfigPayload — upsert", () => {
   it("appends to an empty file", async () => {
     await seed("agents: []\n");
@@ -129,32 +117,9 @@ describe("applyAgentConfigPayload — upsert", () => {
     expect(doc.customTopKey).toBe("keep-me");
   });
 
-  it("supports the runtime-backed shape", async () => {
-    await seed(
-      [
-        "runtimes:",
-        "  claude:",
-        "    command: claude",
-        "    baseArgs: [--dangerously-skip-permissions, -p]",
-        "    promptStyle: cli-arg",
-        "agents: []",
-        "",
-      ].join("\n"),
-    );
-    const res = await applyAgentConfigPayload(dir, runtimeReviewer);
-    expect(res).toEqual({ ok: true });
-    const doc = await readBack();
-    const agents = doc.agents as Array<Record<string, unknown>>;
-    expect(agents[0]).toMatchObject({
-      name: "reviewer",
-      runtime: "claude",
-      prompts: { review: "/opsx:review ${change_id}" },
-      dedicated: false,
-    });
-    // Legacy fields must not leak into a runtime-backed entry.
-    expect(agents[0].command).toBeUndefined();
-    expect(agents[0].args).toBeUndefined();
-  });
+  // "supports the runtime-backed shape" — removed by
+  // revert-runtime-abstraction (R3). Runtime block + agent runtime
+  // reference are no longer supported.
 
   it("rejects a payload the loader validator refuses", async () => {
     await seed("agents: []\n");

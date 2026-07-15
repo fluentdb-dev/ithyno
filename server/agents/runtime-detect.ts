@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import type { RuntimeDef } from "./registry.js";
+
+// R3 (revert-runtime-abstraction) removed `RuntimeDef` — this module
+// becomes dead code but is retained until R4 (revert-runtime-detection)
+// removes it entirely. Callers now pass an empty map.
+type RuntimeMap = Record<string, { command: string }>;
 
 /**
  * Runtime installation detection. Runs `which <cmd>` in a child process
@@ -60,7 +64,7 @@ export async function detectRuntime(command: string): Promise<DetectionResult> {
  * keyed by runtime name.
  */
 export async function detectAllRuntimes(
-  runtimes: Record<string, RuntimeDef>,
+  runtimes: RuntimeMap,
 ): Promise<Record<string, DetectionResult>> {
   const entries = Object.entries(runtimes);
   if (entries.length === 0) return {};
