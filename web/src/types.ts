@@ -276,15 +276,10 @@ export type JobSummary = {
   finishedAt?: number;
   exitCode?: number | null;
   worktreeProgress?: Progress;
-  // extend-agent-job-model: server sets these three at spawn / finish.
-  // Client mirror of server/agents/runner.ts's JobSummary — hand-synced.
-  role: string;
-  runtime: string;
   /** add-session-id-template-var: session correlation id substituted for
    *  `${session_id}` in the agent's args / env / prompts at spawn.
    *  Undefined for orphan-adopted jobs. */
   sessionId?: string;
-  artifactPaths?: string[];
   /** add-review-artifact: parsed review.md verdict when the job
    *  produced one, otherwise undefined. */
   verdict?: import("./reviewTypes").ReviewArtifact;

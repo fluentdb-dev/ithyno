@@ -11,6 +11,8 @@ enables:
   - add-agents-tab-live-panel
 ---
 
+> **REVERTED** by [revert-agent-job-model](../../changes/revert-agent-job-model/) — R1 (revert-dispatch-endpoint) 後に role/runtime/artifactPaths field の意味が消失。2 requirements (Job Model Includes Role And Runtime / Job Model Includes Artifact Paths On Finish) を全 REMOVE。
+
 ## Why
 
 Phase 3.2 の `add-dispatch-endpoint` は response で `agentName / runtime /

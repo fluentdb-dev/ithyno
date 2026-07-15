@@ -61,8 +61,6 @@ function runningJob(changeId: string): JobSummary {
     worktreePath: `/wt/${changeId}`,
     status: "running",
     startedAt: 1,
-    role: "coder",
-    runtime: "legacy",
   };
 }
 

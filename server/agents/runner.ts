@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
-import { runtimeLabel } from "./registry.js";
 import { WorktreePool } from "./pool.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
 import { listOrphanWorktrees } from "./adopt-orphans.js";
-import { listChangeArtifacts } from "./artifact-scan.js";
 import { parseReview, type ReviewArtifact } from "./review-parser.js";
 import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
@@ -38,26 +36,10 @@ export type JobSummary = {
    *  clients that fetch /api/agents/jobs see the current number without
    *  needing to wait for the WS `worktree-progress-updated` event. */
   worktreeProgress?: Progress;
-  /** Workflow role of the spawning agent — "code" / "review" / "verify" /
-   *  "apply" for agents.yaml-declared agents, or "orphan" for adopted
-   *  jobs. Set once at spawn time, never mutated. Landed by
-   *  `extend-agent-job-model`. */
-  role: string;
-  /** Runtime label — runtime name for runtime-backed agents, "legacy"
-   *  for command+args agents, "unknown" for orphan-adopted jobs. Set
-   *  once at spawn time, never mutated. */
-  runtime: string;
   /** Optional session correlation id — the value substituted for
-   *  `${session_id}` in the agent's args / env / prompts. Populated
-   *  at spawn time from dispatch's session resolution. Orphan-adopted
-   *  jobs leave this undefined (no dispatch context).
-   *  Landed by add-session-id-template-var. */
+   *  `${session_id}` in the agent's args / env / prompts. Landed by
+   *  add-session-id-template-var. */
   sessionId?: string;
-  /** Paths (relative to project root) of files created or modified
-   *  inside `openspec/changes/<changeId>/` during the job. Populated by
-   *  the runner at finish; undefined while the job is running or when
-   *  the job is an adopted orphan. */
-  artifactPaths?: string[];
   /** Parsed `review.md` when the job produced one and its frontmatter
    *  validated against the schema. Undefined otherwise (non-review
    *  jobs, malformed frontmatter, missing file). Landed by
@@ -151,8 +133,6 @@ export class AgentRunner {
         status: "orphaned",
         startedAt,
         output: [],
-        role: "orphan",
-        runtime: "unknown",
       };
       this.jobs.set(jobId, job);
       this.locks.set(orphan.changeId, jobId);
@@ -237,8 +217,6 @@ export class AgentRunner {
         startedAt,
         output: [],
         fromPool: true,
-        role: "orphan",
-        runtime: "unknown",
       };
       this.jobs.set(jobId, job);
       this.locks.set(changeId, jobId);
@@ -346,13 +324,7 @@ export class AgentRunner {
   }
 
   /**
-   * Spawn an agent for a change. `dispatchedRole` — the role that was
-   * requested by the caller — is threaded through so the job's `role`
-   * field reflects the specific dispatch (multi-role agents produce
-   * different jobs for `code` vs `review` vs `verify`).
-   *
-   * `dispatchedRole` defaults to the agent's first declared role for
-   * back-compat with the pre-reshape single-role dispatch path.
+   * Spawn an agent for a change.
    *
    * `sessionId` (add-session-id-template-var) is the value substituted
    * for `${session_id}` in the agent's args / env / prompts and also
@@ -362,7 +334,6 @@ export class AgentRunner {
   async run(
     changeId: string,
     agentName: string,
-    dispatchedRole?: string,
     sessionId?: string,
   ): Promise<
     | { ok: true; job: JobSummary }
@@ -435,7 +406,6 @@ export class AgentRunner {
       }
     }
 
-    const effectiveRole = dispatchedRole ?? def.roles[0];
     let resolved;
     try {
       resolved = this.registry.resolve(
@@ -446,7 +416,7 @@ export class AgentRunner {
           branch,
           session_id: sessionId,
         },
-        effectiveRole,
+        def.roles[0],
       );
     } catch (err) {
       // Clean up before returning — otherwise a misconfigured runtime
@@ -486,8 +456,6 @@ export class AgentRunner {
       startedAt: Date.now(),
       output: [],
       fromPool,
-      role: effectiveRole,
-      runtime: runtimeLabel(def),
       sessionId: sessionId && sessionId.length > 0 ? sessionId : undefined,
     };
     this.jobs.set(id, job);
@@ -567,25 +535,13 @@ export class AgentRunner {
       job.finishedAt = Date.now();
       job.exitCode = exitCode;
       this.processes.delete(id);
-      // Scan the worktree for artifacts produced inside the change dir
-      // BEFORE flipping status or releasing the lock. Consumers that
-      // poll `job.status !== "running"` as the "done" signal need
-      // `artifactPaths` visible atomically alongside the terminal
-      // status. Landed by extend-agent-job-model.
-      try {
-        job.artifactPaths = await listChangeArtifacts(worktreePath, changeId);
-      } catch {
-        job.artifactPaths = [];
-      }
       // If a review.md landed in the change dir, parse it into a
-      // structured verdict so the dispatch endpoint (and downstream
-      // Manager loop) can consume it without re-reading the file.
-      // Landed by add-review-artifact. Read from the WORKTREE — the
-      // branch is not yet merged so review.md only exists there.
-      if (job.artifactPaths?.some((p) => p.endsWith("/review.md"))) {
-        const parsed = await parseReview(worktreePath, changeId);
-        if (parsed) job.verdict = parsed;
-      }
+      // structured verdict. Landed by add-review-artifact. Read from
+      // the WORKTREE — the branch is not yet merged so review.md only
+      // exists there. parseReview returns null when the file is
+      // missing / malformed, so no artifact-scan pre-check is needed.
+      const parsed = await parseReview(worktreePath, changeId);
+      if (parsed) job.verdict = parsed;
       job.status = status;
       // Emit the last-known worktree progress so the client keeps the
       // right number on screen while the user reviews the finished job.
