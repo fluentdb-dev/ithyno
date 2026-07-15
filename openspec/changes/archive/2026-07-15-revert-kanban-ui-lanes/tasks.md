@@ -38,10 +38,10 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test && npm run typecheck && npm run build` clean
-- [ ] 8.2 UI: Kanban renders **exactly 3 columns** (TODO / IN-PROGRESS / DONE) — no 5-column PROPOSED/CODED/REVIEWED/DONE/UNPHASED layout
-- [ ] 8.3 UI: WaitBadge and needs-human card accent styling are gone (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS no longer applied to any card)
-- [ ] 8.4 UI: `+ New Change` is in the TODO column header; `Start ▾` is in the IN-PROGRESS column header (NOT in a top-of-board toolbar)
-- [ ] 8.5 UI: Card head badges come from the agent job, never from `change.phase`
+- [x] 8.2 UI: Kanban renders **exactly 3 columns** (TODO / IN-PROGRESS / DONE) — no 5-column PROPOSED/CODED/REVIEWED/DONE/UNPHASED layout
+- [x] 8.3 UI: WaitBadge and needs-human card accent styling are gone (`.kanban-card.needs-human` / `.kanban-wait-badge` CSS no longer applied to any card)
+- [x] 8.4 UI: `+ New Change` is in the TODO column header; `Start ▾` is in the IN-PROGRESS column header (NOT in a top-of-board toolbar)
+- [x] 8.5 UI: Card head badges come from the agent job, never from `change.phase` (verified: `grep change.phase web/src/components/Kanban.tsx` shows only comment refs, no code use)
 
 ## 9. Post-impl
 

@@ -4,7 +4,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry, resolvePromptForRole } from "./registry.js";
-import { selectAgent } from "./dispatch.js";
 
 /**
  * Tests specifically covering the reshape-agents-yaml-mode-roles change:
@@ -204,44 +203,10 @@ describe("fatal cases", () => {
   });
 });
 
-describe("multi-role dispatch selection", () => {
-  it("same agent selected by different roles", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: claude-all
-    mode: single-prompt
-    roles: [code, review, verify]
-    command: claude
-    args: []
-`,
-    );
-    const sCode = selectAgent(reg, { role: "code", changeTags: [] });
-    expect("agent" in sCode).toBe(true);
-    if ("agent" in sCode) expect(sCode.agent.name).toBe("claude-all");
-
-    const sReview = selectAgent(reg, { role: "review", changeTags: [] });
-    expect("agent" in sReview).toBe(true);
-    if ("agent" in sReview) expect(sReview.agent.name).toBe("claude-all");
-
-    const sVerify = selectAgent(reg, { role: "verify", changeTags: [] });
-    expect("agent" in sVerify).toBe(true);
-    if ("agent" in sVerify) expect(sVerify.agent.name).toBe("claude-all");
-  });
-
-  it("multi-role agent not selected for a role it doesn't declare", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: coder-only
-    mode: single-prompt
-    roles: [code]
-    command: claude
-    args: []
-`,
-    );
-    const s = selectAgent(reg, { role: "review", changeTags: [] });
-    expect("error" in s).toBe(true);
-  });
-});
+// NOTE: `describe("multi-role dispatch selection", ...)` removed by
+// revert-dispatch-endpoint — selectAgent + dispatch endpoint no longer exist.
+// Role → agent resolution now lives in skill-side judgment; see
+// docs/ideas/2026-07-15-runtime-collapse-to-mode-dispatch.md.
 
 describe("resolvePromptForRole — 3-tier resolution", () => {
   it("agent.prompts wins over runtime.prompts and built-in", async () => {

@@ -15,7 +15,6 @@ import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry, type AgentDef, type RuntimeDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
-import { dispatch } from "./agents/dispatch.js";
 import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
 import { detectAllRuntimes, type DetectionResult } from "./agents/runtime-detect.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
@@ -700,46 +699,6 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   const job = agentRunner.getJob(req.params.id);
   if (!job) return reply.code(404).send({ error: "not found" });
   return job;
-});
-
-type DispatchBody = {
-  role?: unknown;
-  changeId?: unknown;
-  runtime?: unknown;
-  wait?: unknown;
-  timeoutMs?: unknown;
-  sessionId?: unknown;
-};
-fastify.post<{ Body: DispatchBody }>("/api/agents/dispatch", async (req, reply) => {
-  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
-    return reply.code(403).send({ error: "local only" });
-  }
-  const b = req.body ?? {};
-  const role = typeof b.role === "string" ? b.role : "";
-  const changeId = typeof b.changeId === "string" ? b.changeId : "";
-  const runtime = typeof b.runtime === "string" ? b.runtime : undefined;
-  const wait = typeof b.wait === "boolean" ? b.wait : true;
-  const timeoutMs = typeof b.timeoutMs === "number" ? b.timeoutMs : undefined;
-  const sessionId = typeof b.sessionId === "string" && b.sessionId.length > 0 ? b.sessionId : undefined;
-
-  if (changeId && !isSafeChangeId(changeId)) {
-    return reply.code(400).send({ error: "invalid change id" });
-  }
-
-  const outcome = await dispatch(agentRunner, agentRegistry, PROJECT_ROOT, {
-    role,
-    changeId,
-    runtime,
-    wait,
-    timeoutMs,
-    sessionId,
-  });
-  if (!outcome.ok) {
-    const body: Record<string, unknown> = { error: outcome.error };
-    if (outcome.matches !== undefined) body.matches = outcome.matches;
-    return reply.code(outcome.status).send(body);
-  }
-  return outcome.result;
 });
 
 type RunBody = { changeId: string; agentName: string };

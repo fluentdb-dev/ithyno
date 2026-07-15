@@ -12,6 +12,8 @@ enables:
   - add-manager-prompt-and-skills
 ---
 
+> **REVERTED** by [revert-dispatch-endpoint](../../changes/revert-dispatch-endpoint/) — runtime-collapse-to-mode-dispatch 方針で dispatch 判断を skill 側 (`/opsx:manage`, `/opsx:code`) に戻す。3 requirements (Role-Based Agent Dispatch API / Agent Selection By Role And Specialties / Synchronous Dispatch With Timeout) を全部 REMOVE。
+
 ## Why
 
 `add-runtime-abstraction` (Phase 3.1) で agents.yaml が `role` と `runtime` を持てるようになったが、Ithyno には **role をキーに agent を選ぶ dispatch 経路**がない。Phase 4 の Manager (`/opsx:apply` claude session) は work loop の中で:
