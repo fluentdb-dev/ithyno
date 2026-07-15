@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { readFile, watch } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import chokidar, { type FSWatcher } from "chokidar";
 
 /**
  * Agent registry — loads `agents.yaml`, validates+normalizes shapes, and
@@ -573,7 +574,7 @@ export class AgentRegistry {
     warnings: [],
   };
   private projectRoot: string;
-  private watcher: any = null;
+  private watcher: FSWatcher | null = null;
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
@@ -621,15 +622,34 @@ export class AgentRegistry {
 
   async startWatching(onChange?: () => void): Promise<void> {
     const path = join(this.projectRoot, "agents.yaml");
-    if (!existsSync(path)) return;
+    // Watch the directory not the file — `fs.watch(file)` loses the
+    // watch across atomic rename patterns on macOS (editor writes via
+    // `.tmp → rename` fire once and then the watcher goes silent).
+    // chokidar handles this by re-establishing the watch on `unlink`.
+    // We filter by filename inside the handler.
     try {
-      this.watcher = watch(path);
-      void (async () => {
-        for await (const _ of this.watcher) {
-          await this.load();
-          onChange?.();
-        }
-      })();
+      this.watcher = chokidar.watch(path, {
+        ignoreInitial: true,
+        awaitWriteFinish: {
+          stabilityThreshold: 50,
+          pollInterval: 20,
+        },
+      });
+      const handle = (kind: string) => async (changedPath: string) => {
+        // chokidar path is absolute; only react to agents.yaml.
+        if (changedPath !== path) return;
+        console.log(`[registry] fs event: ${kind} ${changedPath}`);
+        await this.load();
+        onChange?.();
+      };
+      this.watcher.on("add", handle("add"));
+      this.watcher.on("change", handle("change"));
+      this.watcher.on("unlink", handle("unlink"));
+      this.watcher.on("error", (err) => {
+        console.warn(
+          `[registry] chokidar error watching ${path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     } catch {
       // best-effort; the dashboard still works without auto-reload
     }
