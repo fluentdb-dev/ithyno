@@ -40,7 +40,7 @@ const legacyClaude: AgentConfigPayload = {
   prompts: { code: "/opsx:apply ${change_id}" },
   specialties: [],
   concurrency: 1,
-  dedicated: true,
+
 };
 
 describe("applyAgentConfigPayload — upsert", () => {
@@ -138,7 +138,7 @@ describe("applyAgentConfigPayload — upsert", () => {
       runtime: "does-not-exist",
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     };
     // Note: applyAgentConfigPayload's validateAgents wraps normalizeAgent
     // which does NOT validate the runtime reference (that happens at
@@ -252,7 +252,7 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       args: [],
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res.ok).toBe(false);
     if (!res.ok) {
@@ -283,7 +283,7 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       args: [],
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res).toEqual({ ok: true });
     const doc = await readBack();
@@ -304,7 +304,7 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       prompts: { manager: "/opsx:manage" },
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res).toEqual({ ok: true });
     const doc = await readBack();
@@ -347,7 +347,7 @@ describe("coercePayload", () => {
       args: [],
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res).toEqual({ error: expect.stringMatching(/kebab-case/i) });
   });
@@ -362,7 +362,7 @@ describe("coercePayload", () => {
       args: [],
       specialties: [],
       concurrency: 0,
-      dedicated: true,
+
     });
     expect(res).toEqual({ error: expect.stringMatching(/concurrency/i) });
   });
@@ -375,7 +375,7 @@ describe("coercePayload", () => {
       command: "cmd",
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res).toEqual({ error: expect.stringMatching(/mode/i) });
   });
@@ -388,9 +388,9 @@ describe("coercePayload", () => {
       mode: "single-prompt",
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
-    expect(res).toEqual({ error: expect.stringMatching(/either/i) });
+    expect(res).toEqual({ error: expect.stringMatching(/command/i) });
   });
 
   it("rejects manager role without live-shell mode", () => {
@@ -403,7 +403,7 @@ describe("coercePayload", () => {
       args: ["--continue"],
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect(res).toEqual({ error: expect.stringMatching(/live-shell/i) });
   });
@@ -418,7 +418,7 @@ describe("coercePayload", () => {
       args: ["-p", "/opsx:apply"],
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect("error" in res).toBe(false);
     if (!("error" in res) && res.action === "upsert") {
@@ -432,11 +432,11 @@ describe("coercePayload", () => {
       name: "claude",
       roles: ["code", "review", "verify"],
       mode: "single-prompt",
-      runtime: "claude",
+      command: "claude",
       prompts: { code: "/opsx:apply ${change_id}" },
       specialties: [],
       concurrency: 1,
-      dedicated: true,
+
     });
     expect("error" in res).toBe(false);
     if (!("error" in res) && res.action === "upsert") {

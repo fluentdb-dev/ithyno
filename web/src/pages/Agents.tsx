@@ -313,7 +313,6 @@ function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
     prompts: initial ? { manager: initial } : undefined,
     specialties: [],
     concurrency: 1,
-    dedicated: true,
   };
 }
 
@@ -379,7 +378,6 @@ function AgentRow({
         <span className="muted">specialties: [{agent.specialties.join(", ")}]</span>
       )}
       {agent.description && <span className="muted">— {agent.description}</span>}
-      {agent.dedicated === false && <span className="muted">· pool</span>}
       <span className="agent-row-actions">
         <button type="button" className="action-btn ghost" onClick={onEdit}>
           Edit

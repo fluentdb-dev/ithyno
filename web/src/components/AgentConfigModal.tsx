@@ -75,7 +75,6 @@ export function AgentConfigModal({
   // existing agents can see what they're editing.
   const hasNonDefaultAdvanced =
     !!initial.specialties ||
-    initial.dedicated !== true ||
     !!initial.description;
   const [showAdvanced, setShowAdvanced] = useState(hasNonDefaultAdvanced);
 
@@ -175,7 +174,6 @@ export function AgentConfigModal({
           .map((s) => s.trim())
           .filter((s) => s.length > 0);
     const effectiveConcurrency = managerLocked ? 1 : form.concurrency;
-    const effectiveDedicated = managerLocked ? true : form.dedicated;
     // Name resolution:
     //   - Edit mode: keep the seed's name (form.name is preloaded from it)
     //   - Add mode + Manager: force "manager" (singleton, no collision)
@@ -195,7 +193,6 @@ export function AgentConfigModal({
       prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
       specialties: effectiveSpecialties,
       concurrency: effectiveConcurrency,
-      dedicated: effectiveDedicated,
       description: form.description.trim() || undefined,
     };
     if (form.command.trim()) {
@@ -419,17 +416,6 @@ export function AgentConfigModal({
                     via form.concurrency default so existing yaml entries
                     with `concurrency: N` are preserved on save. */}
 
-                {!includesManager && (
-                  <label className="agent-config-field agent-config-field-inline">
-                    <input
-                      type="checkbox"
-                      checked={form.dedicated}
-                      onChange={(e) => setForm({ ...form, dedicated: e.target.checked })}
-                    />
-                    <span>Dedicated (unchecked = pool mode)</span>
-                  </label>
-                )}
-
                 <label className="agent-config-field">
                   <span>Description (optional)</span>
                   <input
@@ -469,7 +455,6 @@ type FormState = {
   prompts: Record<string, string>;
   specialties: string;
   concurrency: number;
-  dedicated: boolean;
   description: string;
 };
 
@@ -522,7 +507,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       prompts: {},
       specialties: "",
       concurrency: 1,
-      dedicated: true,
       description: "",
     };
   }
@@ -553,7 +537,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     prompts: promptsFromSeed,
     specialties: (seed.specialties ?? []).join(", "),
     concurrency: seed.concurrency ?? 1,
-    dedicated: seed.dedicated ?? true,
     description: seed.description ?? "",
   };
 }

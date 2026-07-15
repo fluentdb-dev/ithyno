@@ -14,7 +14,6 @@ const agents: AgentPublic[] = [
     mode: "single-prompt",
     specialties: [],
     concurrency: 1,
-    dedicated: true,
   },
 ];
 

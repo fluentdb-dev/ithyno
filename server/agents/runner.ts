@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
-import { WorktreePool } from "./pool.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
 import { listOrphanWorktrees } from "./adopt-orphans.js";
 import { parseReview, type ReviewArtifact } from "./review-parser.js";
@@ -57,10 +56,6 @@ export type Job = JobSummary & {
   worktreeTasksWatcher?: WorktreeProgressHandle;
   /** Last emitted worktree progress; also used for a final broadcast in finish(). */
   lastWorktreeProgress?: Progress;
-  /** True when the worktree was leased from `WorktreePool`; the runner
-   *  calls `pool.release()` at job end instead of leaving the worktree
-   *  in place for a UI-driven Merge / Discard. Landed by add-worktree-pool. */
-  fromPool?: boolean;
 };
 
 export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
@@ -79,23 +74,15 @@ export class AgentRunner {
   private processes = new Map<string, ChildProcess>();
   private locks = new Map<string, string>(); // changeId -> jobId
   private seq = 0;
-  private pool: WorktreePool;
 
   constructor(
     private readonly projectRoot: string,
     private readonly registry: AgentRegistry,
     private readonly emit: (event: RunnerEvent) => void,
-  ) {
-    this.pool = new WorktreePool(projectRoot, registry.worktreePoolConfig());
-  }
+  ) {}
 
   config(): { worktreesDir: string } {
     return { worktreesDir: join(this.projectRoot, ".worktrees") };
-  }
-
-  /** Introspection for tests + future roster UI. */
-  poolSnapshot() {
-    return this.pool.snapshot();
   }
 
   private newId(): string {
@@ -191,85 +178,6 @@ export class AgentRunner {
       });
     }
 
-    // Pool worktrees are named `.worktrees/<prefix>-N/`, not
-    // `.worktrees/<change-id>/`, so listOrphanWorktrees() above (which
-    // matches path→change-id) does not see them. Ask the pool to
-    // categorize its slots and adopt leased ones as orphan jobs. Free
-    // slots stay in the pool's internal table and are ready for
-    // acquire().
-    const poolAdopted = await this.pool.adoptExisting();
-    for (const { poolDir, changeId } of poolAdopted) {
-      if (this.locks.has(changeId)) continue;
-      const jobId = this.newId();
-      let startedAt = Date.now();
-      try {
-        startedAt = statSync(poolDir).mtimeMs;
-      } catch {
-        /* fall back to now */
-      }
-      const job: Job = {
-        id: jobId,
-        changeId,
-        agentName: "orphan",
-        branch: `agent/${changeId}`,
-        worktreePath: poolDir,
-        status: "orphaned",
-        startedAt,
-        output: [],
-        fromPool: true,
-      };
-      this.jobs.set(jobId, job);
-      this.locks.set(changeId, jobId);
-
-      try {
-        const tasksPath = join(
-          poolDir,
-          "openspec",
-          "changes",
-          changeId,
-          "tasks.md",
-        );
-        const raw = readFileSync(tasksPath, "utf8");
-        const list = parseTasks(tasksPath, raw);
-        let done = 0;
-        let total = 0;
-        for (const sec of list.sections) {
-          for (const t of sec.tasks) {
-            total++;
-            if (t.checked) done++;
-          }
-        }
-        job.lastWorktreeProgress = { done, total };
-      } catch {
-        // Worktree may not have the file yet; watcher will pick it up.
-      }
-
-      console.log(
-        `[runner] adopted orphan pool worktree ${changeId} at ${poolDir} → ${jobId}`,
-      );
-      this.emit({ type: "agent-job-started", job: stripOutput(job) });
-
-      job.worktreeTasksWatcher = startWorktreeProgressWatcher({
-        projectRoot: this.projectRoot,
-        changeId,
-        worktreePath: poolDir,
-        onProgress: (progress) => {
-          job.lastWorktreeProgress = progress;
-          this.emit({
-            type: "worktree-progress-updated",
-            jobId,
-            changeId,
-            progress,
-          });
-        },
-        onError: (err) => {
-          console.warn(
-            `[runner] pool-orphan worktree-progress read failed for ${changeId}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        },
-        onUnlink: () => this.removeJobExternally(jobId, changeId),
-      });
-    }
   }
 
   /**
@@ -347,63 +255,29 @@ export class AgentRunner {
     if (!def) {
       return { ok: false, status: 400, reason: `Unknown agent "${agentName}". Check agents.yaml.` };
     }
-    let worktreePath: string;
-    let branch: string;
-    let fromPool = false;
-
-    if (def.dedicated === false) {
-      // Pool-leased path (add-worktree-pool). No pre-existing-worktree
-      // check needed — the pool tracks slots itself; if the same change
-      // was already leased somewhere, the branch-in-use error from git
-      // surfaces through pool.acquire().
-      try {
-        const leased = await this.pool.acquire(changeId);
-        if (!leased) {
-          const cap = this.registry.worktreePoolConfig().max;
-          return {
-            ok: false,
-            status: 503,
-            reason: `worktree pool exhausted (max ${cap}). Wait for a job to finish, or set a higher max in agents.yaml worktreePool.max.`,
-          };
-        }
-        worktreePath = leased.poolDir;
-        branch = leased.branch;
-        fromPool = true;
-        console.log(`[runner] pool acquire ${worktreePath} branch=${branch}`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[runner] pool acquire failed: ${msg}`);
-        return {
-          ok: false,
-          status: 500,
-          reason: `worktree pool acquire failed: ${msg}`,
-        };
-      }
-    } else {
-      // Dedicated per-change worktree (pre-Phase-1 default behavior).
-      worktreePath = join(this.projectRoot, ".worktrees", changeId);
-      branch = `agent/${changeId}`;
-      if (existsSync(worktreePath)) {
-        return {
-          ok: false,
-          status: 409,
-          reason: `${worktreePath} already exists. Merge or discard the previous run before starting another.`,
-        };
-      }
-      try {
-        console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
-        await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
-          cwd: this.projectRoot,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[runner] git worktree add failed: ${msg}`);
-        return {
-          ok: false,
-          status: 500,
-          reason: `git worktree add failed: ${msg}`,
-        };
-      }
+    // Dedicated per-change worktree.
+    const worktreePath = join(this.projectRoot, ".worktrees", changeId);
+    const branch = `agent/${changeId}`;
+    if (existsSync(worktreePath)) {
+      return {
+        ok: false,
+        status: 409,
+        reason: `${worktreePath} already exists. Merge or discard the previous run before starting another.`,
+      };
+    }
+    try {
+      console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
+      await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
+        cwd: this.projectRoot,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runner] git worktree add failed: ${msg}`);
+      return {
+        ok: false,
+        status: 500,
+        reason: `git worktree add failed: ${msg}`,
+      };
     }
 
     let resolved;
@@ -420,9 +294,8 @@ export class AgentRunner {
       );
     } catch (err) {
       // Clean up before returning — otherwise a misconfigured runtime
-      // (unknown runtime name, promptStyle:file) leaks a worktree or
-      // pool slot on every dispatch attempt.
-      await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch, fromPool);
+      // leaks a worktree on every dispatch attempt.
+      await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
       return {
         ok: false,
         status: 400,
@@ -455,7 +328,6 @@ export class AgentRunner {
       status: "running",
       startedAt: Date.now(),
       output: [],
-      fromPool,
       sessionId: sessionId && sessionId.length > 0 ? sessionId : undefined,
     };
     this.jobs.set(id, job);
@@ -553,16 +425,6 @@ export class AgentRunner {
           progress: job.lastWorktreeProgress,
         });
       }
-      // Pool-leased worktree: return the slot to the pool. Failure just
-      // logs — the slot self-quarantines and won't be handed out again.
-      // Fire-and-forget so finalize() stays sync-shaped like before.
-      if (job.fromPool) {
-        void this.pool.release(worktreePath).catch((err) => {
-          console.error(
-            `[runner] pool release failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
-      }
       // Do NOT dispose the fs watcher here — post-run jobs (completed /
       // crashed / cancelled) leave the worktree on disk waiting for
       // Merge / Discard. The watcher stays alive so an external `git
@@ -600,23 +462,12 @@ export class AgentRunner {
   }
 
   /** Roll back a partially-set-up job when registry.resolve() throws
-   *  after the worktree is already created / the pool slot is already
-   *  leased. Without this, misconfigured runtimes leak worktrees on
-   *  every dispatch. Failures are logged, not rethrown — the caller is
-   *  already returning an error to the client. */
+   *  after the worktree is already created. Failures are logged, not
+   *  rethrown — the caller is already returning an error to the client. */
   private async cleanupWorktreeOnEarlyReturn(
     worktreePath: string,
     branch: string,
-    fromPool: boolean,
   ): Promise<void> {
-    if (fromPool) {
-      await this.pool.release(worktreePath).catch((err) => {
-        console.error(
-          `[runner] pool release (early return) failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
-      return;
-    }
     try {
       await execFile("git", ["worktree", "remove", "--force", worktreePath], {
         cwd: this.projectRoot,

@@ -1,14 +1,40 @@
 agents:
   - name: claude
-    description: Implements the change using Claude Code via /ithy-opsx:apply (implementation + auto commit on the agent branch).
+    mode: single-prompt
+    roles:
+      - code
+    specialties: []
+    concurrency: 2
+    description: Implements the change using Claude Code via /ithy-opsx:apply
+      (implementation + auto commit on the agent branch).
     command: claude
-    # Print mode (-p) runs the prompt non-interactively — the slash command
-    # is submitted immediately, no paste-detection heuristics get in the way.
-    # `--dangerously-skip-permissions` bypasses the tool-approval prompts
-    # (worktree isolation is the safety net).
-    #
-    # `/ithy-opsx:apply` wraps `/opsx:apply` and adds a commit step at the
-    # end so the agent branch ends with the implementation recorded. See
-    # `.claude/skills/ithy-opsx-apply/SKILL.md`. Use `/opsx:apply` directly
-    # if you want the bare non-committing flow.
-    args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]
+    args:
+      - --dangerously-skip-permissions
+      - --session-id
+      - ${session_id}
+      - --model
+      - sonnet
+    prompts:
+      code: /ithy-opsx:apply ${change_id}
+  - name: pptr
+    mode: live-shell
+    roles:
+      - manager
+    specialties: []
+    concurrency: 1
+    command: claude
+    args:
+      - --resume
+      - 6f91588b-6030-4c63-b288-61f17794d82c
+  - name: copilot-review
+    mode: single-prompt
+    roles:
+      - review
+    specialties: []
+    concurrency: 1
+    command: copilot
+    args:
+      - --yolo
+      - -s
+    prompts:
+      review: /opsx:review ${change_id}

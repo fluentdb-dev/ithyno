@@ -170,7 +170,6 @@ export type AgentPublic = {
   prompts?: Record<string, string>;
   specialties: string[];
   concurrency: number;
-  dedicated: boolean;
 
   // ---- deprecated read aliases (populated by the loader from the
   // normalized fields for downstream consumers that predate the reshape) ----
@@ -215,7 +214,6 @@ export type AgentConfigPayload =
       args?: string[];
       specialties: string[];
       concurrency: number;
-      dedicated: boolean;
       description?: string;
     }
   | { action: "delete"; name: string };

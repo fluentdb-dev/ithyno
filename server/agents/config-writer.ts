@@ -31,10 +31,8 @@ export type UpsertPayload = {
   prompts?: Record<string, string>;
   command?: string;
   args?: string[];
-  runtime?: string;
   specialties: string[];
   concurrency: number;
-  dedicated: boolean;
   description?: string;
 };
 
@@ -97,13 +95,11 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     return { error: "concurrency must be an integer ≥ 1" };
   }
-  const dedicated = typeof o.dedicated === "boolean" ? o.dedicated : true;
 
-  // Command / runtime — at least one must be set.
+  // command required.
   const hasCommand = typeof o.command === "string" && o.command.length > 0;
-  const hasRuntime = typeof o.runtime === "string" && (o.runtime as string).length > 0;
-  if (!hasCommand && !hasRuntime) {
-    return { error: "must declare either 'command' or 'runtime'" };
+  if (!hasCommand) {
+    return { error: "must declare 'command'" };
   }
 
   // prompts — optional map<role, string>.
@@ -129,20 +125,14 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
     prompts,
     specialties,
     concurrency,
-    dedicated,
   };
   if (typeof o.description === "string" && o.description.length > 0) {
     payload.description = o.description;
   }
-  if (hasCommand) {
-    payload.command = o.command as string;
-    const args = coerceStringArray(o.args ?? []);
-    if (args === null) return { error: "args must be an array of strings" };
-    payload.args = args;
-  }
-  if (hasRuntime) {
-    payload.runtime = o.runtime as string;
-  }
+  payload.command = o.command as string;
+  const args = coerceStringArray(o.args ?? []);
+  if (args === null) return { error: "args must be an array of strings" };
+  payload.args = args;
   return payload;
 }
 
@@ -285,14 +275,12 @@ function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
     roles: p.roles,
     specialties: p.specialties,
     concurrency: p.concurrency,
-    dedicated: p.dedicated,
   };
   if (p.description !== undefined) entry.description = p.description;
   if (p.command !== undefined) {
     entry.command = p.command;
     entry.args = p.args ?? [];
   }
-  if (p.runtime !== undefined) entry.runtime = p.runtime;
   if (p.prompts !== undefined && Object.keys(p.prompts).length > 0) {
     entry.prompts = p.prompts;
   }
