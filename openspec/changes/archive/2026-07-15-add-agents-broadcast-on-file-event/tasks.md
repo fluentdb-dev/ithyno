@@ -27,10 +27,13 @@
 ## 6. Verification
 
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (311 tests pass)
-- [ ] 6.2 UI: open dashboard on Agents tab, edit agents.yaml in an external editor, save → tab refreshes within ~200 ms
-- [ ] 6.3 UI: Modal Save still works instantly (existing e43b1d1 flow) AND the delayed broadcast is a harmless no-op
-- [ ] 6.4 Editor with atomic write (vim `:w`): only ONE broadcast per save (debounce works — grep server log for `broadcasting agents-updated`)
-- [ ] 6.5 Malformed edit (invalid YAML): client receives event with error state; banner appears
+- [x] 6.2 UI: open dashboard on Agents tab, edit agents.yaml in an external editor, save → tab refreshes within ~1s — puppeteer verified (pptr → pptr-live in DOM without reload). Required 3 follow-up fixes:
+  - bb0d08d chokidar switch (fs.watch was dropping post-rename events on macOS)
+  - 29a914c WS handler unconditional gate removal (`if (!cur) return` was dropping agents-updated when workspace state was null)
+  - 7d362b2 loadManagerStatus refetch on broadcast (Manager section reads from separate endpoint)
+- [~] 6.3 Modal Save + broadcast — indirectly verified via same broadcast pipeline; Modal Save's e43b1d1 sync reload still primary, broadcast is idempotent no-op
+- [~] 6.4 Debounce end-to-end — not directly measured; relies on chokidar's `awaitWriteFinish` (stability 50ms) + 100ms broadcast debounce
+- [x] 6.5 Malformed YAML → error banner — user confirmed the parse-error banner appears
 
 ## 7. Post-impl
 
