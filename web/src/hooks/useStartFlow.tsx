@@ -15,6 +15,7 @@ import { AgentPickerModal } from "../components/AgentPickerModal";
 import { GitIdentityModal } from "../components/GitIdentityModal";
 import { UncommittedProposalModal } from "../components/UncommittedProposalModal";
 import { isVsCodeShell } from "../runtime/shell";
+import { selectStartAgent } from "../util/selectStartAgent";
 
 /**
  * Unified Start-implementation flow, shared between Kanban Start button and
@@ -39,7 +40,10 @@ export function useStartFlow() {
   const pushToast = useStore((s) => s.pushToast);
 
   const [applyPending, setApplyPending] = useState<{ change: Change } | null>(null);
-  const [agentPicker, setAgentPicker] = useState<{ change: Change } | null>(null);
+  const [agentPicker, setAgentPicker] = useState<{
+    change: Change;
+    candidates: typeof agents;
+  } | null>(null);
   const [executionPicker, setExecutionPicker] = useState<{ change: Change } | null>(null);
   const [uncommittedPending, setUncommittedPending] = useState<{
     change: Change;
@@ -55,18 +59,26 @@ export function useStartFlow() {
 
   const startWorktreeFlow = async (change: Change, agentName?: string) => {
     if (!agentName) {
-      if (agents.length === 0) {
-        console.warn("[start:worktree]", change.id, "aborted: no agents in agents.yaml");
-        pushToast("error", "No agents defined. See agents.yaml.example.");
+      const selection = selectStartAgent(agents);
+      if (selection.kind === "none") {
+        console.warn("[start:worktree]", change.id, "aborted: no code or manager agent");
+        pushToast(
+          "error",
+          agents.length === 0
+            ? "No agents defined. See agents.yaml.example."
+            : "No agent with role 'code' or 'manager' in agents.yaml.",
+        );
         return;
       }
-      if (agents.length === 1) {
-        agentName = agents[0].name;
-      } else {
-        console.log("[start:worktree]", change.id, "opening agent picker (multiple agents)");
-        setAgentPicker({ change });
+      if (selection.kind === "pick") {
+        console.log("[start:worktree]", change.id, "opening agent picker (multiple code agents)");
+        setAgentPicker({ change, candidates: selection.candidates });
         return;
       }
+      if (selection.kind === "fallback-manager") {
+        console.log("[start:worktree]", change.id, "no code agent → falling back to manager", selection.agent.name);
+      }
+      agentName = selection.agent.name;
     }
     // Pre-check: `git worktree add HEAD` will silently skip anything the user
     // hasn't committed under `openspec/changes/<id>/`. Surface that before
@@ -207,7 +219,12 @@ export function useStartFlow() {
             setExecutionPicker(null);
             setOpenGitPanel(true);
           }}
-          firstAgent={agents[0]}
+          firstAgent={(() => {
+            const s = selectStartAgent(agents);
+            if (s.kind === "auto" || s.kind === "fallback-manager") return s.agent;
+            if (s.kind === "pick") return s.candidates[0];
+            return agents[0];
+          })()}
           onCancel={() => setExecutionPicker(null)}
           onPick={async (mode, save) => {
             const change = executionPicker.change;
@@ -244,7 +261,7 @@ export function useStartFlow() {
       {agentPicker && (
         <AgentPickerModal
           change={agentPicker.change}
-          agents={agents}
+          agents={agentPicker.candidates}
           onPick={(agentName) => {
             void startWorktreeFlow(agentPicker.change, agentName);
             setAgentPicker(null);
