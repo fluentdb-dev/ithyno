@@ -91,7 +91,6 @@ export function ChangeDetail() {
   const pushToast = useStore((s) => s.pushToast);
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
-  const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
   // Live worktree progress — same source as the Kanban card. Prefer the
   // WS-driven per-change slice; fall back to the running job's own
@@ -233,8 +232,11 @@ export function ChangeDetail() {
               ? worktreeProgress
               : change.progress;
           const isDone = effectiveProgress.total > 0 && effectiveProgress.done === effectiveProgress.total;
+          // Post wire-role-to-cli-in-manager-skill (Phase 1): the UI no
+          // longer gates on `agents.length`. When agents.yaml lacks a
+          // code role, the skill falls back to Manager (which has
+          // built-in defaults).
           const canStart =
-            agents.length > 0 &&
             !isDone &&
             !isRunningOrPending(latestJob) &&
             hasNonVerifyWork(change.tasks);
@@ -266,18 +268,9 @@ export function ChangeDetail() {
                   console.error("[start] unhandled:", err);
                 });
               }}
-              title={
-                change.proposal?.execution
-                  ? `Start (${change.proposal.execution})`
-                  : "Start — pick terminal or worktree"
-              }
+              title="Start — opens Apply modal to inject /opsx:apply into the terminal"
             >
               Start
-              {change.proposal?.execution && (
-                <span className={`action-badge mode-${change.proposal.execution}`}>
-                  {change.proposal.execution}
-                </span>
-              )}
             </button>
           );
         })()}

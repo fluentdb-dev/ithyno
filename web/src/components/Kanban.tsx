@@ -125,7 +125,6 @@ export function KanbanBoard({
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
   const pushToast = useStore((s) => s.pushToast);
-  const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
   const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
   const [pending, setPending] = useState<PendingDrag | null>(null);
@@ -178,7 +177,6 @@ export function KanbanBoard({
       change={c}
       slot={slot}
       job={jobByChange.get(c.id)}
-      hasAgents={agents.length > 0}
       onStart={() => onStartClick(c)}
       onArchive={() => onArchiveClick(c)}
       onMerge={(j) => onMergeClick(c, j)}
@@ -285,7 +283,6 @@ function ChangeCard({
   slot,
   onArchive,
   job,
-  hasAgents,
   onStart,
   onMerge,
   onDiscard,
@@ -294,7 +291,6 @@ function ChangeCard({
   slot: Slot;
   onArchive: () => void;
   job?: JobSummary;
-  hasAgents: boolean;
   onStart: () => void;
   onMerge: (job: JobSummary) => void;
   onDiscard: (job: JobSummary) => void;
@@ -312,9 +308,12 @@ function ChangeCard({
   const jobStillRunning = job?.status === "running";
   const showArchiveInSlot = !jobStillRunning && slot === "done";
 
-  // Start button: any non-done slot with no live job.
+  // Start button: any non-done slot with no live job. UI does NOT gate on
+  // `hasAgents` — when agents.yaml lacks a code role, the skill falls back
+  // to Manager (which has built-in defaults). Post
+  // wire-role-to-cli-in-manager-skill (Phase 1).
   const startEligibleSlot = slot === "todo" || slot === "inprogress";
-  const showStartArea = hasAgents && startEligibleSlot && !job;
+  const showStartArea = startEligibleSlot && !job;
 
   return (
     <div className="kanban-card">
@@ -366,13 +365,7 @@ function ChangeCard({
                 e.stopPropagation();
                 onStart();
               }}
-              title={
-                change.proposal?.execution === "worktree"
-                  ? "Start (worktree)"
-                  : change.proposal?.execution === "terminal"
-                    ? "Start (terminal)"
-                    : "Start (will ask how to execute)"
-              }
+              title="Start — opens Apply modal to inject /opsx:apply into the terminal"
             >
               Start
             </button>
@@ -384,7 +377,7 @@ function ChangeCard({
               verify only
             </span>
           ))}
-        {hasAgents && job?.status === "orphaned" && (
+        {job?.status === "orphaned" && (
           <button
             className="action-btn"
             onClick={(e) => {
@@ -397,7 +390,7 @@ function ChangeCard({
             Archive
           </button>
         )}
-        {hasAgents && job && job.status !== "running" && isMergeable(job) && (
+        {job && job.status !== "running" && isMergeable(job) && (
           <>
             <Link
               to={`/agents?job=${encodeURIComponent(job.id)}&tab=diff`}

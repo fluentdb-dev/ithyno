@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useStore } from "../store";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { startableCandidates } from "../util/changeState";
 import { TagChipList } from "./TagChip";
@@ -23,13 +22,12 @@ type Props = {
  * `proposal.execution` overrides still win).
  */
 export function ParallelStartLauncher({ changes, jobByChange, startImplementation }: Props) {
-  const agents = useStore((s) => s.agents);
   const ownFlow = useStartFlow();
   const start = startImplementation ?? ownFlow.startImplementation;
 
   const candidates = useMemo(
-    () => startableCandidates(changes, jobByChange, agents),
-    [changes, jobByChange, agents],
+    () => startableCandidates(changes, jobByChange),
+    [changes, jobByChange],
   );
 
   const [open, setOpen] = useState(false);
@@ -52,14 +50,15 @@ export function ParallelStartLauncher({ changes, jobByChange, startImplementatio
     };
   }, [open]);
 
+  // Post wire-role-to-cli-in-manager-skill (Phase 1): the UI no longer gates
+  // on `agents.length === 0`. When agents.yaml lacks a code role, the skill
+  // layer falls back to Manager (which has built-in defaults).
   const disabled =
-    agents.length === 0
-      ? { text: "No agents in agents.yaml." }
-      : candidates.length === 0
-        ? {
-            text: "Nothing startable — all changes are already running or have verify-only work left.",
-          }
-        : null;
+    candidates.length === 0
+      ? {
+          text: "Nothing startable — all changes are already running or have verify-only work left.",
+        }
+      : null;
 
   const label = candidates.length > 0 ? `Start ▾ (${candidates.length})` : "Start ▾";
 

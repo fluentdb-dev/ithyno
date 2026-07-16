@@ -981,35 +981,6 @@ a:hover {
   50% { opacity: 0.4; transform: scale(0.7); }
 }
 
-/* Agent picker modal */
-.agent-picker {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.agent-picker button {
-  width: 100%;
-  text-align: left;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.agent-picker button:hover {
-  border-color: var(--accent);
-}
-.agent-picker-name {
-  font-weight: 600;
-}
-
 /* Agents page */
 .agents-page h2 {
   margin: 0 0 18px;
@@ -2379,49 +2350,6 @@ a:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.modal.uncommitted-proposal-modal {
-  width: min(560px, 92vw);
-}
-.uncommitted-proposal-intro {
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0 0 12px;
-}
-.uncommitted-proposal-intro code {
-  font-size: 11px;
-}
-.uncommitted-proposal-files {
-  max-height: 260px;
-  overflow-y: auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 14px;
-}
-.uncommitted-proposal-heading {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin: 6px 0 4px;
-}
-.uncommitted-proposal-heading:first-child {
-  margin-top: 0;
-}
-.uncommitted-proposal-files ul {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.uncommitted-proposal-files code {
-  font-size: 12px;
-  color: var(--text);
 }
 
 /* Session expired full-page banner */

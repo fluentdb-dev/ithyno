@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { AgentPublic, Change, JobSummary, TaskList } from "../types";
+import type { Change, JobSummary, TaskList } from "../types";
 
 /**
  * True when there is at least one unchecked task in a non-verification
@@ -28,7 +28,6 @@ export function isRunningOrPending(job?: JobSummary): boolean {
 
 /**
  * Filter the workspace's changes down to those that are ready to be started:
- *  - at least one agent is available
  *  - the change is not fully done — by phase OR by progress. Phase is
  *    authoritative under Progress-Independent Phase Placement, so a card
  *    the Manager has flipped to `phase: done` is NEVER startable, even
@@ -36,15 +35,17 @@ export function isRunningOrPending(job?: JobSummary): boolean {
  *  - implementation work remains (non-verify tasks unchecked)
  *  - no worktree job is currently running for it
  *
+ * Post wire-role-to-cli-in-manager-skill (Phase 1): the UI no longer gates
+ * on `agents.length === 0`. When agents.yaml lacks a code role, the skill
+ * falls back to Manager (which has built-in defaults).
+ *
  * Shared by the card-level Start gate and the parallel Start launcher so
  * they agree on what "startable" means.
  */
 export function startableCandidates(
   changes: Change[],
   jobByChange: Map<string, JobSummary>,
-  agents: AgentPublic[],
 ): Change[] {
-  if (agents.length === 0) return [];
   return changes.filter((c) => {
     if (c.phase === "done") return false;
     const isDone = c.progress.total > 0 && c.progress.done === c.progress.total;

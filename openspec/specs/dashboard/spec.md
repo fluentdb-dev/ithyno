@@ -134,6 +134,9 @@ that requires human judgment.
 - **THEN** the card behaves as today (Archive button, no Run); this requirement does not affect DONE
 
 ### Requirement: IN-PROGRESS Column Start Launcher
+
+> ⚠️ **PENDING MODIFIED** by [wire-role-to-cli-in-manager-skill](../../changes/wire-role-to-cli-in-manager-skill/): "Pick dispatches through shared start flow" scenario の "reading proposal.execution and either dispatching directly (worktree/terminal) or opening the ExecutionPicker" 記述を skill inject only の形に書き換え中.
+
 The Kanban IN-PROGRESS column SHALL expose a header-level Start launcher
 button — visually and semantically parallel to the TODO column's
 `+ New Change` button — that opens a popover listing every change ready to
@@ -918,6 +921,8 @@ The dispatch endpoint's response SHALL include `verdict?: ReviewArtifact` popula
 
 The `/opsx:review <change-id>` slash command SHALL exist as a prompt template that instructs a Claude Code session to inspect the change's proposal, tasks, spec deltas, and worktree diff, then write `openspec/changes/<change-id>/review.md` conforming to the schema defined by `add-review-artifact` (verdict enum, findings array, optional summary). The template SHALL define the `verdict: pass | needs-rework` rubric so a review-role agent invoked via `/opsx:dispatch review <change-id>` returns a structured verdict.
 
+> ⚠️ **PENDING MODIFIED** by [wire-role-to-cli-in-manager-skill](../../changes/wire-role-to-cli-in-manager-skill/): `/opsx:dispatch` 参照は R1 revert 後の spec-vs-reality 残骸; propose で CLI-agnostic 表現へ書き換え中.
+
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/review.md`
 - **WHEN** a Claude Code session evaluates the slash command
@@ -998,6 +1003,8 @@ The `/opsx:answer <change-id> "<answer>"` slash command SHALL exist as a prompt 
 ### Requirement: Manager Loop Slash Command
 
 The `/opsx:manage <change-id>` slash command SHALL exist as a prompt template that instructs a Claude Code session to run the Manager orchestration loop for the change: read change context, iterate over `dispatch code → dispatch review` pairs until the review verdict is `"pass"`, then `dispatch verify` once, and update the change's phase via `POST /api/changes/:id/phase` on each successful transition (`coded → reviewed → done`). The template SHALL bound iterations at a hard-coded MAX_ITERATIONS constant (default 5) and SHALL escalate the change to `needs-human` when the loop fails to converge, when any worker returns a non-`completed` status, or when a review or verify returns without a structured verdict.
+
+> ⚠️ **PENDING MODIFIED** by [wire-role-to-cli-in-manager-skill](../../changes/wire-role-to-cli-in-manager-skill/): 現行文言は R1 revert 前の `/opsx:dispatch` 前提; agents.yaml driven CLI dispatch (claude → Task tool / それ以外 → subprocess) + 3-stage success 契約 (subprocess exit / review.md 存在 / verdict) へ書き換え中.
 
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/manage.md`
@@ -1536,6 +1543,8 @@ value SHALL be exposed to clients via the existing `GET
 - **THEN** the load reports `parallelExecution must be a boolean` in the config error banner
 
 ### Requirement: Start Flow Consumes Config Instead Of Picker
+
+> ⚠️ **PENDING REMOVED** by [wire-role-to-cli-in-manager-skill](../../changes/wire-role-to-cli-in-manager-skill/): UI が `parallelExecution` を読む挙動を撤去し、常に skill inject に単純化する. Replaced by `Start Flow Delegates Execution To Skill Layer`.
 
 The Kanban Start button and the ChangeDetail Start button SHALL
 select an execution mode without opening the ExecutionPicker modal.
