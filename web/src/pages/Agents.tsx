@@ -7,6 +7,7 @@ import type {
   AgentConfigPayload,
   AgentPublic,
   JobSummary,
+  ManagerStatus,
 } from "../types";
 import { DiffView } from "../components/DiffView";
 import { AgentOutputView } from "../components/AgentOutputView";
@@ -29,8 +30,10 @@ export function Agents() {
   const jobs = useMemo(() => Object.values(jobsMap), [jobsMap]);
   const agents = useStore((s) => s.agents);
   const agentConfigError = useStore((s) => s.agentConfigError);
+  const managerStatus = useStore((s) => s.managerStatus);
   const loadAgents = useStore((s) => s.loadAgents);
   const loadJobs = useStore((s) => s.loadJobs);
+  const loadManagerStatus = useStore((s) => s.loadManagerStatus);
   const pushToast = useStore((s) => s.pushToast);
   const [searchParams] = useSearchParams();
   const focusedJobId = searchParams.get("job");
@@ -69,7 +72,8 @@ export function Agents() {
   useEffect(() => {
     void loadAgents();
     void loadJobs();
-  }, [loadAgents, loadJobs]);
+    void loadManagerStatus();
+  }, [loadAgents, loadJobs, loadManagerStatus]);
 
   const sorted = [...jobs].sort((a, b) => b.startedAt - a.startedAt);
   const active = sorted.filter((j) => j.status === "running");
@@ -102,6 +106,15 @@ export function Agents() {
       {agentConfigError && (
         <div className="parse-error">⚠ agents.yaml: {agentConfigError}</div>
       )}
+
+      <ManagerSection
+        status={managerStatus}
+        onEdit={(agent) => setEditing(agent)}
+        onDeclare={(prefill) => {
+          setAddModePrefill(prefill);
+          setEditing("new");
+        }}
+      />
 
       <section className="agents-section">
         <h3>Live ({active.length})</h3>
@@ -187,6 +200,118 @@ export function Agents() {
       )}
     </div>
   );
+}
+
+function ManagerSection({
+  status,
+  onEdit,
+  onDeclare,
+}: {
+  status: ManagerStatus | null;
+  onEdit: (agent: AgentPublic) => void;
+  onDeclare: (prefill: AgentPublic) => void;
+}) {
+  if (status === null) {
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <p className="empty">Loading manager status…</p>
+      </section>
+    );
+  }
+
+  // Declared state: agents.yaml has a role: manager entry.
+  if (status.agentEntry) {
+    const a = status.agentEntry;
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <ul className="agents-list">
+          <li className="agent-row">
+            <span className="agent-name">{a.name}</span>
+            <span className="job-role-badge">MANAGER</span>
+            {status.resolvedStartup && (
+              <code className="manager-startup">{status.resolvedStartup}</code>
+            )}
+            {status.initialInput && (
+              <span className="muted">initialInput: {status.initialInput}</span>
+            )}
+            {a.description && <span className="muted">— {a.description}</span>}
+            <span className="agent-row-actions">
+              <button type="button" className="action-btn ghost" onClick={() => onEdit(a)}>
+                Edit
+              </button>
+            </span>
+          </li>
+        </ul>
+      </section>
+    );
+  }
+
+  // "Not configured" state: no role: manager entry BUT the Terminal
+  // panel is open, so something is actually running. Say that plainly.
+  if (status.terminalActive) {
+    const explanation =
+      status.fallbackSource === "env"
+        ? "Currently running the command from ITHYNO_TERMINAL_STARTUP."
+        : "Currently running the built-in default startup command.";
+    const prefill = fallbackToPrefillAgent(status);
+    return (
+      <section className="agents-section manager-section">
+        <h3>Manager</h3>
+        <div className="manager-fallback-card">
+          <div>
+            <strong>Manager (not configured in agents.yaml):</strong>{" "}
+            <code className="manager-startup">{status.resolvedStartup ?? "(none)"}</code>
+          </div>
+          {status.initialInput && (
+            <div className="muted">initialInput: {status.initialInput}</div>
+          )}
+          <div className="muted">{explanation}</div>
+          <div style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="action-btn ghost"
+              onClick={() => onDeclare(prefill)}
+            >
+              Declare in agents.yaml
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Idle state: no manager declared, no terminal open.
+  return (
+    <section className="agents-section manager-section">
+      <h3>Manager</h3>
+      <p className="empty">
+        No manager declared. Opening a change view launches the Terminal
+        panel, which will run the built-in default until you declare one.
+      </p>
+    </section>
+  );
+}
+
+/** Parse `resolvedStartup` ("claude --continue") into an AgentPublic-shaped
+ *  prefill for the Declare-in-agents.yaml modal. Naive whitespace split
+ *  is fine for the common case; users can adjust in the modal. */
+function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
+  const parts = (status.resolvedStartup ?? "").trim().split(/\s+/).filter(Boolean);
+  const [command, ...args] = parts;
+  const initial = status.initialInput ?? undefined;
+  return {
+    name: "",
+    role: "manager", // deprecated read alias
+    roles: ["manager"],
+    mode: "live-shell",
+    command: command ?? "",
+    args,
+    hasEnv: false,
+    initialInput: initial,
+    prompts: initial ? { manager: initial } : undefined,
+  };
 }
 
 function DeleteConfirmDialog({

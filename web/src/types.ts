@@ -179,6 +179,17 @@ export type AgentPublic = {
   prompt?: string;
 };
 
+/** Manager section source-of-truth (add-agents-tab-manager-section).
+ *  Reflects the resolved PTY startup so the tab can be honest about
+ *  what's actually running, even when no `role: manager` entry exists. */
+export type ManagerStatus = {
+  agentEntry: AgentPublic | null;
+  resolvedStartup: string | null;
+  initialInput: string | null;
+  fallbackSource: "declared" | "env" | "default";
+  terminalActive: boolean;
+};
+
 /** Write shape sent by AgentConfigModal to `POST /api/agents/config`.
  *  Post-reshape (reshape-agents-yaml-mode-roles): the payload speaks the
  *  new `mode + roles + prompts` schema. */

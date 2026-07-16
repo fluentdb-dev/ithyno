@@ -7,6 +7,7 @@ import {
   fetchTagIndex,
   fetchAgentConfig,
   fetchAgentJobs,
+  fetchManagerStatus,
   fetchGitConfig,
   fetchGitStatus,
   checkAuth,
@@ -22,6 +23,7 @@ import type {
   GitConfig,
   JobStatus,
   JobSummary,
+  ManagerStatus,
   OutputLine,
   Progress,
   SpecDomain,
@@ -58,6 +60,11 @@ type Store = {
   tagIndexStale: boolean;
   agents: AgentPublic[];
   agentConfigError: string | null;
+  /** Resolved Manager status — declared entry, running fallback, or
+   *  idle (no terminal, no declaration). Null before the first fetch.
+   *  Landed by add-agents-tab-manager-section. */
+  managerStatus: ManagerStatus | null;
+  managerStatusError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
   /** Per-change live progress derived from the running job's worktree
@@ -83,6 +90,7 @@ type Store = {
   openDocPath: (path: string | null) => Promise<void>;
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
+  loadManagerStatus: () => Promise<void>;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -160,6 +168,8 @@ export const useStore = create<Store>((set, get) => ({
   tagIndexStale: false,
   agents: [],
   agentConfigError: null,
+  managerStatus: null,
+  managerStatusError: null,
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
@@ -172,6 +182,14 @@ export const useStore = create<Store>((set, get) => ({
       set({ agents: cfg.agents, agentConfigError: cfg.ok ? null : cfg.error ?? "config error" });
     } catch (err) {
       set({ agentConfigError: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  loadManagerStatus: async () => {
+    try {
+      const managerStatus = await fetchManagerStatus();
+      set({ managerStatus, managerStatusError: null });
+    } catch (err) {
+      set({ managerStatusError: err instanceof Error ? err.message : String(err) });
     }
   },
   loadJobs: async () => {
@@ -454,6 +472,12 @@ export const useStore = create<Store>((set, get) => ({
           agents: msg.agents,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
+        // Manager section is driven by `managerStatus` (a separate
+        // /api/manager/status endpoint that resolves the PTY startup
+        // chain). agents.yaml edits change whether a `role: manager`
+        // entry is declared and its command/args — the Manager section
+        // must reflect that too. Fire-and-forget refetch.
+        void get().loadManagerStatus();
       }
     };
   },

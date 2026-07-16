@@ -1,5 +1,12 @@
 # Outcome: revert-manager-agent-config (Case β partial)
 
+> ⚠️ **UI 部分は 2026-07-16 に walk-back**: 動作確認で user が「Manager
+> section は消えなくていい」と判断、code 側 (server endpoint /
+> ManagerSection component / store state / types / CSS) をすべて pre-R9
+> 状態に restore。**spec の ADDED requirement `Manager Agent Listed
+> With Other Agents` は仕様と実態が乖離** — 別 revert change で
+> requirement を撤回する follow-up 必要。
+
 Final revert (R9) of runtime-collapse pivot. Manager section visual
 special-casing 撤去。Manager agent は通常の Configured 一覧に出る形へ。
 
