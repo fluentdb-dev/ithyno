@@ -2,28 +2,33 @@
 name: "OPSX: Verify"
 description: Run npm test / typecheck / build in fail-fast order and write review.md with the outcome
 category: Workflow
-tags: [workflow, verify, worker, phase-4]
+tags: [workflow, verify, worker]
 argument-hint: "<change-id>"
 ---
 
 Verify that the current change's worktree passes the Node build chain
 and write a structured verdict to `openspec/changes/<change-id>/review.md`.
-This slash command is the prompt template dispatched to a verify-role
-agent via `/opsx:dispatch verify <change-id>`. Manager reads the
-resulting `verdict.verdict` field to decide whether to advance the
-phase from `reviewed` to `done`.
+When invoked by the Manager loop, the verdict drives the final
+`reviewed → done` phase transition.
 
-**Input**: `$ARGUMENTS` is the change id.
+**Input**: `$ARGUMENTS` is the change id. The worktree at
+`.worktrees/<change-id>/` must exist with the code worker's commit
+landed.
 
-**Assumption (Fable review MEDIUM #6)**: This template targets Node
-projects that expose `npm test`, `npm run typecheck`, and
-`npm run build`. Non-Node projects need a different verify template.
-The follow-up idea note `docs/ideas/2026-07-08-verify-command-per-project.md`
-tracks a per-project `agents.yaml` field.
+**Node assumption**: This template targets Node projects that expose
+`npm test`, `npm run typecheck`, and `npm run build`. Non-Node
+projects need a different verify template — see
+`docs/ideas/2026-07-08-verify-command-per-project.md`.
 
 ## Steps
 
-1. **Run the fail-fast chain via Bash**
+1. **cd into the worktree**
+
+   ```bash
+   cd .worktrees/<change-id>
+   ```
+
+2. **Run the fail-fast chain via Bash**
 
    Execute in order, stop on first non-zero exit:
 
@@ -31,8 +36,8 @@ tracks a per-project `agents.yaml` field.
    npm test 2>&1
    ```
 
-   If exit code is 0, continue. Otherwise, capture the last ~50 lines
-   of output and skip to step 3 with `stage: test`.
+   Exit 0 → continue. Non-zero → capture last ~50 lines, skip to
+   step 4 with `stage: test`.
 
    ```bash
    npm run typecheck 2>&1
@@ -45,12 +50,12 @@ tracks a per-project `agents.yaml` field.
    npm run build 2>&1
    ```
 
-   Same: continue on 0, capture and skip on non-zero with `stage: build`.
+   Same: continue on 0, capture and skip on non-zero with
+   `stage: build`.
 
-2. **Success case — write pass verdict**
+3. **Success case — write pass verdict**
 
-   If all three commands returned exit code 0, write
-   `openspec/changes/<change-id>/review.md` with:
+   All three exit 0. Write `openspec/changes/<change-id>/review.md`:
 
    ```markdown
    ---
@@ -67,9 +72,9 @@ tracks a per-project `agents.yaml` field.
    - `npm run build` — clean
    ```
 
-3. **Failure case — write needs-rework verdict**
+4. **Failure case — write needs-rework verdict**
 
-   Write `openspec/changes/<change-id>/review.md` with:
+   Write `openspec/changes/<change-id>/review.md`:
 
    ```markdown
    ---
@@ -89,24 +94,25 @@ tracks a per-project `agents.yaml` field.
    ```
    ```
 
-   The `message` inside findings SHALL contain the failing command's
-   error output verbatim so the Manager can pass it as
-   `prompt_suffix` to the next `code` dispatch.
+   The `message` contains the failing output verbatim so the Manager
+   can pass it as prompt suffix to the next `/opsx:code` invocation.
 
-4. **Report to the caller**
+5. **Report to the caller**
 
-   Print `Wrote review.md — verify pass|failed(<stage>).`
+   `Wrote review.md — verify pass|failed(<stage>).`
 
 ## Guardrails
 
-- **Do NOT modify code**. Verify is read-only for the change.
-- **Do NOT interpret partial failures**. If any command fails, the
-  whole verify verdict is `needs-rework`. Do not paper over one failure
-  by re-running or by disabling test cases.
+- **Do NOT modify code**. Verify is read-only.
+- **Do NOT interpret partial failures**. Any command failing → whole
+  verdict is `needs-rework`. Don't paper over failures by re-running
+  or disabling tests.
 - **Do NOT skip steps**. Fail-fast means STOP after the first failure,
-  not skip forward past a failing test suite.
-- **Do NOT invoke Manager or Ithyno endpoints from here**. Verify is a
-  pure verification worker; the phase transition is Manager's decision.
-- **Node assumption**: this template will produce misleading results on
-  non-Node projects (e.g. Python, Rust). Until per-project verify
-  commands land, a Rust project should NOT dispatch verify.
+  not skip past a failing test suite.
+- **Do NOT touch phase or emit any dashboard events from here**. This
+  is a pure verification worker; phase transitions are the Manager's
+  decision.
+- **Node assumption**: on non-Node projects (Python, Rust, ...) this
+  template produces misleading results. Until per-project verify
+  commands land, non-Node changes should NOT be verified via this
+  template.

@@ -65,9 +65,9 @@ returning the change to the phase it was in before being escalated.
 
 - **Do NOT retry on 200 or 409**. Both indicate the change is out of
   needs-human; retry would 409 again with no progress.
-- **Do NOT chain to the next dispatch from here**. Manager (Phase
-  4.2) is responsible for re-picking up the change after answer
-  succeeds. This command's only job is to submit the answer.
+- **Do NOT chain to the next Task worker from here**. Manager
+  (`/opsx:manage`) is responsible for re-picking up the change after
+  answer succeeds. This command's only job is to submit the answer.
 - **Do NOT include secrets in the answer**. The endpoint appends the
   answer to `needs-human.md`, which will be committed as part of the
   change dir on the next archive.

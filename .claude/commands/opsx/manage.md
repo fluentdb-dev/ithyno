@@ -1,30 +1,26 @@
 ---
 name: "OPSX: Manage"
-description: Manager loop — dispatch code / review / verify workers for a change until phase reaches done
+description: Manager loop — orchestrate code / review / verify workers for a change until phase reaches done
 category: Workflow
-tags: [workflow, manager, orchestrator, phase-4]
+tags: [workflow, manager, orchestrator]
 argument-hint: "<change-id>"
 ---
 
 Run the Manager orchestration loop for the given change. This is the
-prompt that a Claude Code session evaluates when the user clicks
-Kanban's [Apply] (after `add-agents-yaml-migration` swaps the default
-agent's initialInput) or when the user types `/opsx:manage <change-id>`
-manually in a PTY.
+prompt a Claude Code session evaluates when the user types
+`/opsx:manage <change-id>` (e.g., in the Terminal panel PTY).
 
-The loop advances the change through phase transitions
-`proposed → coded → reviewed → done` by dispatching worker agents via
-`POST /api/agents/dispatch`, reading the returned `verdict`, and
+The loop advances the change through `proposed → coded → reviewed →
+done` by **invoking workers via the Task tool** (Claude Code
+subagent), reading each verdict from the resulting `review.md`, and
 updating the change's `phase` via `POST /api/changes/:id/phase`.
 
 **Input**: `$ARGUMENTS` is the change id.
 
-**Constants** (hard-coded — see the follow-up idea note for a future
-`agents.yaml manager.maxIterations` field):
+**Constants**:
 
-- `MAX_ITERATIONS = 5` — the code ↔ review loop halts after this many
-  attempts and escalates.
-- `DISPATCH_TIMEOUT_MS = 1800000` (30 min) — passed to each dispatch.
+- `MAX_ITERATIONS = 5` — the code ↔ review loop halts and escalates
+  after this many attempts.
 - `ITHYNO_BASE = http://localhost:4321` — adjust if the user's
   `ITHYNO_PORT` differs.
 
@@ -34,9 +30,9 @@ updating the change's `phase` via `POST /api/changes/:id/phase`.
 
    Read every file under `openspec/changes/<change-id>/`:
    - `proposal.md`, `tasks.md`, `specs/**/*.md`, `.openspec.yaml`
-   - Optional: `review.md`, `needs-human.md` if they exist
+   - Optional: `review.md`, `needs-human.md`
 
-   Summarize the change's intent in 2 sentences before proceeding.
+   Summarize the intent in 2 sentences before proceeding.
 
 2. **Check current phase**
 
@@ -45,49 +41,56 @@ updating the change's `phase` via `POST /api/changes/:id/phase`.
    ```
 
    Parse the response's `phase` field:
-   - `done` — exit immediately, report `Change already at phase: done — nothing to do.`
-   - `needs-human` — exit immediately, report `Change is in needs-human — answer required before Manager can proceed. Use /opsx:answer <id> "<answer>" once the user resolves the escalation.`
-   - `proposed` or `null` (missing) — enter the loop from step 4 (code first)
-   - `coded` — enter the loop from step 5 (review first)
+   - `done` → exit: `Change already at phase: done — nothing to do.`
+   - `needs-human` → exit: `Change is in needs-human — user must
+     answer via /opsx:answer <id> "<answer>" before Manager can
+     proceed.`
+   - `proposed` or `null` — enter loop from step 4 (code first)
+   - `coded` — enter loop from step 5 (review first)
    - `reviewed` — skip to step 7 (verify)
-   - unknown value — escalate with `Unknown phase '<value>' — cannot proceed.`
+   - unknown value → escalate: `Unknown phase '<value>'.`
 
-3. **Initialize loop state**
+3. **Ensure worktree exists**
+
+   ```bash
+   if [ ! -d ".worktrees/<change-id>" ]; then
+     git worktree add .worktrees/<change-id> -b agent/<change-id>
+   fi
+   ```
+
+   All subsequent worker invocations reference this path.
+
+4. **Initialize loop state**
 
    ```
    iteration = 0
    priorFindings = ""   # empty on first iteration
    ```
 
-4. **LOOP — code stage** (skip when phase is already `coded` or later)
+5. **LOOP — code stage** (skip when phase is already `coded` or later)
 
    ```
    iteration += 1
    if iteration > MAX_ITERATIONS:
-     Escalate:
-       /opsx:escalate <change-id> "Manager loop did not converge after MAX_ITERATIONS iterations. Latest review findings: <priorFindings>"
-     Exit.
+     /opsx:escalate <change-id> "Manager loop did not converge after MAX_ITERATIONS iterations. Latest review findings: <priorFindings>"
+     exit
    ```
 
-   Dispatch the code worker:
+   Invoke the code worker via **Task tool** with:
 
-   ```bash
-   curl -sS -X POST $ITHYNO_BASE/api/agents/dispatch \
-     -H 'content-type: application/json' \
-     -d '{
-       "role": "code",
-       "changeId": "<change-id>",
-       "promptSuffix": "<priorFindings>",
-       "wait": true,
-       "timeoutMs": 1800000
-     }'
+   ```
+   prompt: |
+     /opsx:code <change-id>
+     <priorFindings>
    ```
 
-   Parse the response:
-   - `status != "completed"` → escalate with reason
-     `code worker failed on iteration <n>: <stdoutTail excerpt>` and
-     exit.
-   - `status == "completed"` — advance phase:
+   (The Task tool spawns a subagent that runs the `/opsx:code` skill
+   in the worktree, commits the impl, and returns.)
+
+   After the Task returns:
+   - If the subagent reported failure or timeout → escalate:
+     `code worker failed on iteration <n>: <summary>`; exit.
+   - If success → advance phase:
      ```bash
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
@@ -95,128 +98,126 @@ updating the change's `phase` via `POST /api/changes/:id/phase`.
      ```
      Log: `[manager] iteration <n>: code done, phase=coded`.
 
-5. **LOOP — review stage**
+6. **LOOP — review stage**
 
-   Dispatch the review worker:
+   Invoke the review worker via **Task tool** with:
 
-   ```bash
-   curl -sS -X POST $ITHYNO_BASE/api/agents/dispatch \
-     -H 'content-type: application/json' \
-     -d '{"role": "review", "changeId": "<change-id>", "wait": true, "timeoutMs": 1800000}'
+   ```
+   prompt: /opsx:review <change-id>
    ```
 
-   Parse the response's `verdict` object:
+   (The subagent runs `/opsx:review`, writes
+   `openspec/changes/<change-id>/review.md`, and returns.)
 
-   - `verdict.verdict == "pass"`:
+   Read the review artifact:
+
+   ```bash
+   cat openspec/changes/<change-id>/review.md
+   ```
+
+   Parse the frontmatter's `verdict`:
+
+   - `verdict: pass`:
      ```bash
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "reviewed"}'
      ```
      Log: `[manager] iteration <n>: review pass, phase=reviewed`.
-     Break the loop, proceed to step 7 (verify).
+     Break out of the loop, proceed to step 7.
 
-   - `verdict.verdict == "needs-rework"`:
-     Format findings as an actionable prompt suffix:
+   - `verdict: needs-rework`:
+     Format findings as prompt suffix for the next code iteration:
      ```
      priorFindings = "Prior review findings to address:\n" +
-                     verdict.findings.map(f =>
-                       `- ${f.severity} ${f.file || ""}:${f.line || ""}` +
-                       ` — ${f.message}`
+                     findings.map(f =>
+                       `- ${f.severity} ${f.file || ""}:${f.line || ""} — ${f.message}`
                      ).join("\n")
      ```
      Log: `[manager] iteration <n>: review needs-rework (<count> findings), retrying code`.
-     Continue loop (back to step 4).
+     Continue loop (back to step 5).
 
-   - `verdict` missing or malformed:
-     Escalate with reason
-     `Review returned no verdict on iteration <n>. artifactPaths: <list>`.
-     Exit.
-
-6. **After loop** (when we broke out of step 5 with pass)
-
-   phase should be `reviewed`. Proceed to step 7.
+   - Malformed or missing verdict:
+     Escalate: `Review returned no verdict on iteration <n>.`; exit.
 
 7. **Verify stage**
 
-   Dispatch the verify worker:
+   Invoke the verify worker via **Task tool** with:
 
-   ```bash
-   curl -sS -X POST $ITHYNO_BASE/api/agents/dispatch \
-     -H 'content-type: application/json' \
-     -d '{"role": "verify", "changeId": "<change-id>", "wait": true, "timeoutMs": 1800000}'
+   ```
+   prompt: /opsx:verify <change-id>
    ```
 
-   Parse the response's `verdict`:
+   Read the updated review artifact:
 
-   - `verdict.verdict == "pass"`:
+   ```bash
+   cat openspec/changes/<change-id>/review.md
+   ```
+
+   Parse the `verdict`:
+
+   - `verdict: pass`:
      ```bash
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "done"}'
      ```
-     Report to the user:
+     Report:
      ```
      Manager loop complete for <change-id>.
      Phase: done. <n> code/review iterations.
-     The change is ready for /opsx:archive.
+     Ready for /ithy-opsx:archive.
      ```
      Exit.
 
-   - `verdict.verdict == "needs-rework"`:
-     Escalate with reason `Verify failed: <verdict.summary>`. Include
-     the findings so the user can see which command failed. Exit.
+   - `verdict: needs-rework`:
+     Escalate: `Verify failed: <summary>` (include findings so the
+     user sees which command failed); exit.
 
-   - `verdict` missing:
-     Escalate with reason `Verify returned no verdict.`. Exit.
+   - missing:
+     Escalate: `Verify returned no verdict.`; exit.
 
 ## Guardrails
 
 - **Convergence guard**: MAX_ITERATIONS is a hard ceiling. Do NOT
-  bypass it under any circumstance. If a change is stuck at
-  needs-rework after 5 iterations, human input is required. Silently
-  raising the cap wastes tokens and hides real problems.
+  bypass it. If a change is stuck at needs-rework after 5 iterations,
+  human input is required. Silently raising the cap wastes tokens and
+  hides real problems.
 
-- **One phase update at a time**: only call `POST /api/changes/:id/phase`
-  after the corresponding worker returned `status: completed` AND the
-  review (for reviewed) or verify (for done) returned `verdict: pass`.
-  Do NOT set phase from the Manager for `needs-human` — that's a
-  worker's `/opsx:escalate` responsibility.
+- **One phase update per stage**: only call `POST /api/changes/:id/phase`
+  after the corresponding worker returned success AND the review
+  (for reviewed) or verify (for done) verdict is `pass`. Do NOT set
+  `phase: needs-human` from the Manager — that's `/opsx:escalate`'s
+  job.
 
 - **Do NOT modify code from the Manager session**. All code changes
-  happen inside dispatched worker sessions. If the Manager needs to
-  investigate, use Read-only tools. Modifying files from here breaks
-  the audit trail (the worker's commit is the record of who wrote
-  what).
+  happen inside Task tool subagent invocations. If the Manager needs
+  to investigate, use Read-only tools. Modifying files from here
+  breaks the audit trail.
 
 - **Do NOT retry a failed worker without changing input**. If a code
-  worker returned `status: failed` on the same promptSuffix twice in
-  a row, escalate — do not loop indefinitely on the same failure.
+  Task returned failure on the same `priorFindings` twice in a row,
+  escalate — don't loop on the same failure.
 
 - **Do NOT skip the phase check in step 2**. Re-entering the Manager
   on a change that's `done` or `needs-human` MUST be a no-op.
 
 - **Escalation is Manager's last resort, not first**. Only escalate
-  when the loop cannot make progress: worker failure, missing verdict,
-  or convergence cap. A single needs-rework verdict is NOT an
-  escalation trigger.
+  when the loop cannot make progress: worker failure, missing
+  verdict, or convergence cap. A single needs-rework verdict is NOT
+  an escalation trigger.
 
 - **Restart recovery**: when the Manager is invoked a second time on
-  the same change (e.g. because the PTY session died), the phase
+  the same change (e.g., because the PTY session died), the phase
   check in step 2 does the right thing automatically. A change at
   `coded` skips to review; at `reviewed` skips to verify.
 
-- **Cancellation**: if the user cancels the Manager session (Ctrl+C in
-  the PTY or Cancel button in Kanban), any in-flight dispatch also
-  cancels via the runner's SIGTERM chain. The change's phase remains
-  at whatever it was last set to; the user can re-run
-  `/opsx:manage <id>` to resume.
-
-## Follow-ups (not this change)
+## Follow-ups (not this file)
 
 - Per-project `manager.maxIterations` field in `agents.yaml`
   (`docs/ideas/2026-07-11-manager-max-iterations-config.md`).
 - Per-project verify command
   (`docs/ideas/2026-07-11-verify-command-per-project.md`).
-- Cost tracking for Manager sessions
-  (proposed in Fable-review notes, deferred to Phase 5+).
+- agmsg-based dispatch as an alternative to Task tool (see
+  `docs/ideas/2026-07-15-runtime-collapse-to-mode-dispatch.md` and
+  the parked `docs/ideas/2026-07-06-cross-agent-messaging.md`).
