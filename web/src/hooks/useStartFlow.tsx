@@ -6,11 +6,9 @@ import {
   fetchChangeGitState,
   injectPty,
   runAgent,
-  setProposalExecution,
 } from "../api";
 import type { Change } from "../types";
 import { CommandModal } from "../components/CommandModal";
-import { ExecutionPicker, type PickerReason } from "../components/ExecutionPicker";
 import { AgentPickerModal } from "../components/AgentPickerModal";
 import { GitIdentityModal } from "../components/GitIdentityModal";
 import { UncommittedProposalModal } from "../components/UncommittedProposalModal";
@@ -21,15 +19,22 @@ import { selectStartAgent } from "../util/selectStartAgent";
  * Unified Start-implementation flow, shared between Kanban Start button and
  * the ChangeDetail Start button.
  *
+ * Mode selection order:
+ *   1. `change.proposal.execution` — per-change override (still honored)
+ *   2. `parallelExecution` config — true → worktree, false → terminal inject
+ *
+ * Landed by add-parallel-execution-config: no picker modal — mode is
+ * resolved silently. Prerequisite failures (no agents / not a repo / no
+ * commits / no terminal) surface as toasts.
+ *
  * Returns:
- *  - `startImplementation(change)` — dispatch based on `proposal.execution`.
- *    Falls back to the ExecutionPicker when the saved mode's prerequisites
- *    are not met (so the user sees the disabled reason).
- *  - `StartFlowModals` — a component that renders all downstream modals
- *    (Apply CommandModal, ExecutionPicker, AgentPickerModal, GitIdentityModal).
+ *  - `startImplementation(change)` — resolve mode and dispatch.
+ *  - `StartFlowModals` — Apply CommandModal, AgentPickerModal, and
+ *    GitIdentityModal downstream renders.
  */
 export function useStartFlow() {
   const agents = useStore((s) => s.agents);
+  const parallelExecution = useStore((s) => s.parallelExecution);
   const gitStatus = useStore((s) => s.state?.gitStatus);
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   // In VS Code, the extension owns a `vscode.window.createTerminal` — inject
@@ -44,7 +49,6 @@ export function useStartFlow() {
     change: Change;
     candidates: typeof agents;
   } | null>(null);
-  const [executionPicker, setExecutionPicker] = useState<{ change: Change } | null>(null);
   const [uncommittedPending, setUncommittedPending] = useState<{
     change: Change;
     files: { untracked: string[]; modified: string[] };
@@ -53,20 +57,43 @@ export function useStartFlow() {
   const [openGitPanel, setOpenGitPanel] = useState(false);
 
   const startTerminalFlow = (change: Change) => {
+    if (!terminalAvailable) {
+      pushToast("error", "No embedded terminal — open a change view to spawn one.");
+      return;
+    }
     console.log("[start:terminal]", change.id, "opening apply modal");
     setApplyPending({ change });
   };
 
   const startWorktreeFlow = async (change: Change, agentName?: string) => {
+    if (gitStatus?.isRepo !== true) {
+      pushToast(
+        "error",
+        isVsCodeShell()
+          ? "Not a git repository — initialize via VS Code's Source Control."
+          : "Not a git repository — initialize via the Git panel first.",
+      );
+      if (!isVsCodeShell()) setOpenGitPanel(true);
+      return;
+    }
+    if (!gitStatus.hasCommits) {
+      pushToast(
+        "error",
+        'No commits yet — `git worktree add -b` needs a HEAD. Make an initial commit first (e.g. `git commit --allow-empty -m "Initial commit"`).',
+      );
+      return;
+    }
+    if (agents.length === 0) {
+      pushToast("error", "No agents defined. See agents.yaml.example.");
+      return;
+    }
     if (!agentName) {
       const selection = selectStartAgent(agents);
       if (selection.kind === "none") {
         console.warn("[start:worktree]", change.id, "aborted: no code or manager agent");
         pushToast(
           "error",
-          agents.length === 0
-            ? "No agents defined. See agents.yaml.example."
-            : "No agent with role 'code' or 'manager' in agents.yaml.",
+          "No agent with role 'code' or 'manager' in agents.yaml.",
         );
         return;
       }
@@ -127,29 +154,23 @@ export function useStartFlow() {
   };
 
   const startImplementation = async (change: Change) => {
-    const mode = change.proposal?.execution;
-    console.log("[start]", change.id, "execution=", mode ?? "(unset → picker)");
-    if (mode === "worktree") {
-      if (
-        gitStatus?.isRepo !== true ||
-        gitStatus.hasCommits !== true ||
-        agents.length === 0
-      ) {
-        console.log("[start]", change.id, "worktree saved but prerequisites missing → picker");
-        setExecutionPicker({ change });
-        return;
-      }
-      return startWorktreeFlow(change);
-    }
-    if (mode === "terminal") {
-      if (!terminalAvailable) {
-        console.log("[start]", change.id, "terminal saved but embedded terminal missing → picker");
-        setExecutionPicker({ change });
-        return;
-      }
-      return startTerminalFlow(change);
-    }
-    setExecutionPicker({ change });
+    // Resolution order: per-change override → parallelExecution config.
+    const override = change.proposal?.execution;
+    const mode: "worktree" | "terminal" =
+      override === "worktree" || override === "terminal"
+        ? override
+        : parallelExecution
+          ? "worktree"
+          : "terminal";
+    console.log(
+      "[start]",
+      change.id,
+      "mode=",
+      mode,
+      override ? `(override=${override})` : `(config parallelExecution=${parallelExecution})`,
+    );
+    if (mode === "worktree") return startWorktreeFlow(change);
+    return startTerminalFlow(change);
   };
 
   const runApplyInject = async (line: string) => {
@@ -167,25 +188,6 @@ export function useStartFlow() {
     }
   };
 
-  const terminalDisabledReason: PickerReason = !terminalAvailable
-    ? { text: "No embedded terminal — open a change view to spawn one." }
-    : null;
-
-  const worktreeDisabledReason: PickerReason = (() => {
-    if (gitStatus?.isRepo !== true) {
-      return isVsCodeShell()
-        ? { text: "Not a git repository — initialize via VS Code's Source Control." }
-        : { text: "Not a git repository — open the Git panel to initialize.", hint: "git-panel" };
-    }
-    if (!gitStatus.hasCommits) {
-      return {
-        text: 'No commits yet — `git worktree add -b` needs a HEAD. Make an initial commit first (e.g. `git commit --allow-empty -m "Initial commit"`).',
-      };
-    }
-    if (agents.length === 0) return { text: "No agents in agents.yaml." };
-    return null;
-  })();
-
   // Return JSX (not a component) so React sees stable element types across
   // re-renders. Returning a `() => JSX` component defined inside the hook
   // creates a new function reference every render, which React treats as a
@@ -201,48 +203,6 @@ export function useStartFlow() {
           submitLabel="Send /opsx:apply"
           onCancel={() => setApplyPending(null)}
           onSubmit={runApplyInject}
-        />
-      )}
-
-      {executionPicker && (
-        <ExecutionPicker
-          change={executionPicker.change}
-          terminalAvailable={terminalAvailable}
-          terminalDisabledReason={terminalDisabledReason}
-          worktreeAvailable={
-            agents.length > 0 &&
-            gitStatus?.isRepo === true &&
-            gitStatus.hasCommits === true
-          }
-          worktreeDisabledReason={worktreeDisabledReason}
-          onOpenGitPanel={() => {
-            setExecutionPicker(null);
-            setOpenGitPanel(true);
-          }}
-          firstAgent={(() => {
-            const s = selectStartAgent(agents);
-            if (s.kind === "auto" || s.kind === "fallback-manager") return s.agent;
-            if (s.kind === "pick") return s.candidates[0];
-            return agents[0];
-          })()}
-          onCancel={() => setExecutionPicker(null)}
-          onPick={async (mode, save) => {
-            const change = executionPicker.change;
-            console.log("[picker]", change.id, "mode=", mode, "save=", save);
-            setExecutionPicker(null);
-            if (save) {
-              try {
-                await setProposalExecution(change.id, mode);
-                console.log("[picker]", change.id, "saved execution to proposal");
-                pushToast("info", `Saved execution: ${mode}`);
-              } catch (err) {
-                console.error("[picker]", change.id, "save failed:", err);
-                pushToast("error", err instanceof Error ? err.message : String(err));
-              }
-            }
-            if (mode === "worktree") await startWorktreeFlow(change);
-            else startTerminalFlow(change);
-          }}
         />
       )}
 

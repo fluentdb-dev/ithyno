@@ -285,3 +285,38 @@ async function atomicWrite(path: string, contents: string): Promise<void> {
     throw err;
   }
 }
+
+/**
+ * Set the top-level `parallelExecution` boolean in agents.yaml.
+ * Preserves other keys (agents list, runtimes if any legacy, unknown keys).
+ * Landed by add-parallel-execution-config.
+ */
+export async function writeParallelExecution(
+  projectRoot: string,
+  value: boolean,
+): Promise<ApplyResult> {
+  const path = join(projectRoot, "agents.yaml");
+  let doc: Record<string, unknown>;
+  if (existsSync(path)) {
+    const raw = await readFile(path, "utf8");
+    try {
+      const parsed = parseYaml(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = parsed as Record<string, unknown>;
+      } else {
+        return { ok: false, status: 400, error: "agents.yaml is not a mapping — refusing to overwrite" };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        status: 400,
+        error: `agents.yaml is not valid YAML — refusing to overwrite: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  } else {
+    doc = { agents: [] };
+  }
+  doc.parallelExecution = value;
+  await atomicWrite(path, stringifyYaml(doc));
+  return { ok: true };
+}

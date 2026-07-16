@@ -981,88 +981,6 @@ a:hover {
   50% { opacity: 0.4; transform: scale(0.7); }
 }
 
-/* Execution picker modal */
-.modal.execution-picker {
-  max-width: 640px;
-}
-.execution-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin: 12px 0 14px;
-}
-@media (max-width: 640px) {
-  .execution-options {
-    grid-template-columns: 1fr;
-  }
-}
-.execution-option {
-  text-align: left;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.execution-option:hover:not(.disabled) {
-  border-color: var(--accent);
-}
-.execution-option.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.execution-option-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 14px;
-}
-.execution-option code {
-  background: var(--panel-2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-}
-.execution-option p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.execution-disabled-reason {
-  color: var(--amber, #e5a70a);
-  font-weight: 600;
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: color-mix(in oklab, var(--amber, #e5a70a) 12%, transparent);
-  border-left: 3px solid var(--amber, #e5a70a);
-  border-radius: 2px;
-  display: block;
-}
-.execution-disabled-reason .link {
-  background: none;
-  border: none;
-  color: inherit;
-  padding: 0;
-  margin-left: 4px;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.execution-save {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-
 /* Agent picker modal */
 .agent-picker {
   list-style: none;
@@ -2552,4 +2470,50 @@ a:hover {
 }
 .toast.info {
   border-left-color: var(--accent);
+}
+
+/* Settings page (add-parallel-execution-config) */
+.settings-page {
+  max-width: 720px;
+}
+.settings-page h2 {
+  margin: 0 0 20px;
+}
+.settings-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  background: var(--panel);
+}
+.settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.settings-toggle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.settings-toggle input[type="checkbox"] {
+  margin-top: 4px;
+}
+.settings-toggle strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.settings-toggle p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-toggle code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }

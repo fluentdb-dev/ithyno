@@ -15,7 +15,7 @@ import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
-import { applyAgentConfigPayload, coercePayload } from "./agents/config-writer.js";
+import { applyAgentConfigPayload, coercePayload, writeParallelExecution } from "./agents/config-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -113,6 +113,7 @@ type ServerEvent =
       ok: boolean;
       error?: string;
       agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
+      parallelExecution: boolean;
       warnings: string[];
     };
 
@@ -231,6 +232,7 @@ void agentRegistry.startWatching(() => {
       ok: cfg.ok,
       error: cfg.error,
       agents: cfg.agents,
+      parallelExecution: cfg.parallelExecution,
       warnings: cfg.warnings,
     });
   }, 100);
@@ -595,6 +597,25 @@ fastify.post("/api/agents/config", async (req, reply) => {
   // fs.watch-based auto-reload on registry.startWatching() is
   // asynchronous and can race the client's re-fetch on macOS
   // (rename events sometimes fire after a delay).
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Parallel-execution config toggle (add-parallel-execution-config).
+// Writes the top-level `parallelExecution: boolean` field in agents.yaml
+// and reloads the registry so the change is reflected on next fetch.
+fastify.post<{ Body: { value?: unknown } }>("/api/config/parallel-execution", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const value = (req.body ?? {}).value;
+  if (typeof value !== "boolean") {
+    return reply.code(400).send({ error: "value must be a boolean" });
+  }
+  const result = await writeParallelExecution(PROJECT_ROOT, value);
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
+  // Registry reload — same rationale as /api/agents/config's POST handler:
+  // watcher is best-effort, race with client refetch.
   await agentRegistry.load();
   return { ok: true };
 });

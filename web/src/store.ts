@@ -60,6 +60,10 @@ type Store = {
   tagIndexStale: boolean;
   agents: AgentPublic[];
   agentConfigError: string | null;
+  /** Top-level parallelExecution flag from agents.yaml. Drives Start
+   *  flow's mode selection (worktree if true, terminal inject if false).
+   *  Landed by add-parallel-execution-config. */
+  parallelExecution: boolean;
   /** Resolved Manager status — declared entry, running fallback, or
    *  idle (no terminal, no declaration). Null before the first fetch.
    *  Landed by add-agents-tab-manager-section. */
@@ -168,6 +172,7 @@ export const useStore = create<Store>((set, get) => ({
   tagIndexStale: false,
   agents: [],
   agentConfigError: null,
+  parallelExecution: false,
   managerStatus: null,
   managerStatusError: null,
   jobs: {},
@@ -179,7 +184,11 @@ export const useStore = create<Store>((set, get) => ({
   loadAgents: async () => {
     try {
       const cfg = await fetchAgentConfig();
-      set({ agents: cfg.agents, agentConfigError: cfg.ok ? null : cfg.error ?? "config error" });
+      set({
+        agents: cfg.agents,
+        parallelExecution: cfg.parallelExecution,
+        agentConfigError: cfg.ok ? null : cfg.error ?? "config error",
+      });
     } catch (err) {
       set({ agentConfigError: err instanceof Error ? err.message : String(err) });
     }
@@ -470,6 +479,7 @@ export const useStore = create<Store>((set, get) => ({
         // separate GET needed for `agents`.
         set({
           agents: msg.agents,
+          parallelExecution: msg.parallelExecution,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
         // Manager section is driven by `managerStatus` (a separate

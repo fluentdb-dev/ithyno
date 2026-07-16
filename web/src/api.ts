@@ -260,6 +260,16 @@ export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Toggle the top-level parallelExecution flag in agents.yaml. Landed by
+ *  add-parallel-execution-config. */
+export async function setParallelExecution(value: boolean): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/parallel-execution",
+    { value },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 export async function fetchAgentJobs(): Promise<{ jobs: JobSummary[] }> {
   const res = await fetch("/api/agents/jobs");
   if (!res.ok) throw new Error(`GET /api/agents/jobs failed: ${res.status}`);

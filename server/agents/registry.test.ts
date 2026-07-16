@@ -227,3 +227,44 @@ agents:
     if (!cfg.ok) expect(cfg.error).toMatch(/manager/);
   });
 });
+
+describe("AgentRegistry parallelExecution (add-parallel-execution-config)", () => {
+  it("defaults parallelExecution to false when the key is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.parallelExecution).toBe(false);
+  });
+
+  it("accepts a boolean true and surfaces it in publicConfig", async () => {
+    const reg = await loadWith(
+      `parallelExecution: true
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.parallelExecution).toBe(true);
+  });
+
+  it("rejects a non-boolean parallelExecution", async () => {
+    const reg = await loadWith(
+      `parallelExecution: "yes"
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/parallelExecution/);
+  });
+});

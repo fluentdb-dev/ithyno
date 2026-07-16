@@ -18,9 +18,9 @@ type Props = {
 /**
  * Column-header Start launcher for the IN-PROGRESS column. Mirrors the
  * `+ New Change` button pattern in TODO. Opens a popover of startable
- * changes; picking one dispatches through the shared Start flow so the
- * ExecutionPicker (worktree/terminal) shows up if the proposal hasn't
- * saved an execution mode.
+ * changes; picking one dispatches through the shared Start flow, which
+ * silently resolves the mode from `parallelExecution` config (per-change
+ * `proposal.execution` overrides still win).
  */
 export function ParallelStartLauncher({ changes, jobByChange, startImplementation }: Props) {
   const agents = useStore((s) => s.agents);

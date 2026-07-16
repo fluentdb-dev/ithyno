@@ -59,10 +59,11 @@ export type AgentDef = {
 };
 
 export type AgentConfig =
-  | { ok: true; agents: AgentDef[]; warnings: string[] }
+  | { ok: true; agents: AgentDef[]; parallelExecution: boolean; warnings: string[] }
   | {
       ok: false;
       agents: AgentDef[]; // last-known-good
+      parallelExecution: boolean; // last-known-good
       warnings: string[];
       error: string;
     };
@@ -319,6 +320,18 @@ export function validateAgents(raw: unknown, warningsOut?: string[]): AgentDef[]
 }
 
 /**
+ * Validate top-level `parallelExecution` field. Absent → false.
+ * Non-boolean values throw so the config-error banner surfaces the mistake.
+ */
+function validateParallelExecution(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw !== "boolean") {
+    throw new Error("parallelExecution must be a boolean");
+  }
+  return raw;
+}
+
+/**
  * Resolve a prompt for a given (agent, role) pair using the 3-tier chain:
  * agent.prompts[role] → runtime.prompts[role] → built-in default.
  * Returns undefined only for unknown roles with no override at any level
@@ -339,6 +352,7 @@ export class AgentRegistry {
   private cache: AgentConfig = {
     ok: true,
     agents: [],
+    parallelExecution: false,
     warnings: [],
   };
   private projectRoot: string;
@@ -351,7 +365,7 @@ export class AgentRegistry {
   async load(): Promise<void> {
     const path = join(this.projectRoot, "agents.yaml");
     if (!existsSync(path)) {
-      this.cache = { ok: true, agents: [], warnings: [] };
+      this.cache = { ok: true, agents: [], parallelExecution: false, warnings: [] };
       return;
     }
     try {
@@ -359,15 +373,21 @@ export class AgentRegistry {
       const parsed = parseYaml(raw);
       const warnings: string[] = [];
       const agents = validateAgents(parsed, warnings);
+      const parallelExecution = validateParallelExecution(
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).parallelExecution
+          : undefined,
+      );
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[registry] ${w}`);
       }
-      this.cache = { ok: true, agents, warnings };
+      this.cache = { ok: true, agents, parallelExecution, warnings };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.cache = {
         ok: false,
         agents: this.cache.agents,
+        parallelExecution: this.cache.parallelExecution,
         warnings: this.cache.warnings,
         error: msg,
       };
@@ -414,6 +434,7 @@ export class AgentRegistry {
     ok: boolean;
     error?: string;
     agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
+    parallelExecution: boolean;
     warnings: string[];
   } {
     const sanitized = this.cache.agents.map(({ env, ...rest }) => ({
@@ -425,12 +446,14 @@ export class AgentRegistry {
         ok: false,
         error: this.cache.error,
         agents: sanitized,
+        parallelExecution: this.cache.parallelExecution,
         warnings: this.cache.warnings,
       };
     }
     return {
       ok: true,
       agents: sanitized,
+      parallelExecution: this.cache.parallelExecution,
       warnings: this.cache.warnings,
     };
   }

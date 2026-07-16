@@ -218,6 +218,7 @@ export type AgentConfigResponse = {
   ok: boolean;
   error?: string;
   agents: AgentPublic[];
+  parallelExecution: boolean;
 };
 
 export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";

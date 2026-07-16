@@ -11,6 +11,7 @@ import { Docs } from "./pages/Docs";
 import { Tags, TagDetailPage } from "./pages/Tags";
 import { Archive } from "./pages/Archive";
 import { Agents } from "./pages/Agents";
+import { Settings } from "./pages/Settings";
 import { Terminal } from "./components/Terminal";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { isVsCodeShell } from "./runtime/shell";
@@ -108,6 +109,7 @@ export function App() {
           <NavLink to="/tags">Tags</NavLink>
           <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/docs">Docs</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="topbar-right">
           {!isVsCodeShell() && <GitIdentityChip />}
@@ -140,6 +142,7 @@ export function App() {
             <Route path="/tags/:ns/*" element={<TagDetailPage />} />
             <Route path="/archive" element={<Archive />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         )}
       </main>
