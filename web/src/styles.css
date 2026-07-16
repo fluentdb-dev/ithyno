@@ -1352,91 +1352,6 @@ a:hover {
   font-size: 12px;
 }
 
-/* Manager section (add-agents-tab-manager-section) */
-.manager-section {
-  border-left: 3px solid color-mix(in oklab, var(--accent) 40%, var(--border));
-  padding-left: 12px;
-}
-.manager-startup {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in oklab, var(--accent) 8%, var(--panel));
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-.manager-fallback-card {
-  background: color-mix(in oklab, var(--muted) 6%, transparent);
-  border: 1px dashed color-mix(in oklab, var(--muted) 40%, var(--border));
-  border-radius: 6px;
-  padding: 10px 12px;
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* Runtimes section (add-agents-tab-live-panel Phase 5.1) */
-.runtimes-section {
-  background: color-mix(in oklab, var(--accent) 3%, var(--panel));
-  border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
-  border-radius: var(--radius);
-  padding: 10px 14px;
-}
-.runtimes-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.runtimes-refresh {
-  font-size: 12px;
-  padding: 2px 10px;
-}
-.runtime-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.runtime-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 6px 4px;
-  border-bottom: 1px solid var(--border);
-}
-.runtime-row:last-child {
-  border-bottom: none;
-}
-.runtime-row.installed .runtime-indicator {
-  color: var(--green);
-  font-weight: 700;
-}
-.runtime-row.missing .runtime-indicator {
-  color: var(--muted);
-}
-.runtime-name {
-  font-weight: 600;
-  min-width: 100px;
-}
-.runtime-row.installed .runtime-status {
-  color: var(--green);
-  font-size: 12px;
-}
-.runtime-row.missing .runtime-status {
-  color: var(--muted);
-  font-size: 12px;
-}
-.runtime-capabilities {
-  font-size: 11px;
-}
-.runtime-error {
-  font-size: 11px;
-  font-style: italic;
-}
-
 /* Job / agent badges — used by both Live and Recent job rows plus the
    Configured (idle) agent rows. */
 .job-role-badge {
@@ -1450,15 +1365,6 @@ a:hover {
   border-radius: 6px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-.job-runtime-badge {
-  display: inline-flex;
-  align-items: center;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
 }
 .job-verdict-badge {
   display: inline-flex;
