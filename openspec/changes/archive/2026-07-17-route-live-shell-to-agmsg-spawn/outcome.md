@@ -90,3 +90,33 @@ touched.
 - **User-side install verify.** Once user installs agmsg locally,
   re-run 5.3/5.4/5.5 and update this outcome with a "verified
   live" postscript.
+
+## 📮 Postscript — live verify 2026-07-17
+
+Ran a branching-logic verify against the skill's exact shell code.
+Two out of three deferred manual scenarios have now been exercised:
+
+- **agmsg-type derivation (all 7 mappings)**: `claude → claude-code`,
+  `codex → codex`, `copilot → copilot`, `gemini → gemini`,
+  `antigravity → antigravity`, `opencode → opencode`,
+  `cursor → cursor`. All produce the expected type.
+- **Unknown-command escalation**: an entry with `command:
+  my-wrapper` correctly falls through the `case` to the `*` branch
+  and would emit `agmsg-type unknown for command: my-wrapper`.
+- **agmsg-not-installed fallthrough**: presence check on
+  `~/.agents/skills/agmsg/scripts/send.sh` succeeds — the file
+  does not exist locally, so the notice fires and the branch falls
+  through as designed.
+
+**One real bug caught by the verify** — the shell code as
+originally written used `AGMSG_TYPE=$(case "$entry_command" in
+claude) …)` which does NOT parse in bash: the `)` closing each case
+pattern collides with `$(...)`'s closing paren. Fixed post-archive
+by restructuring the case to assign `AGMSG_TYPE` directly inside
+each pattern branch. This is a trivial syntax fix (no proposal
+required per CLAUDE.md), committed on `phase-workflow` as `fix
+(dispatch): use direct case for AGMSG_TYPE lookup`.
+
+The 5.3 scenario (actual `/agmsg spawn` invocation in a Claude
+session with agmsg installed) still requires a user-side plugin
+install and remains deferred.
