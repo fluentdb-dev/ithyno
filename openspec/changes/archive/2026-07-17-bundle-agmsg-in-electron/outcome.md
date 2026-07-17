@@ -91,3 +91,54 @@ and added a first-launch installer that copies the tree to
   must do `git submodule update --init --recursive` before the
   install / build steps. Not currently gated in the repo; add to
   the pipeline when CI touches Electron packaging.
+
+## 📮 Postscript — manual verify 2026-07-17
+
+Ran the deferred manual verify partially. Results:
+
+- **5.6 CLI-mode negative check (PASS)** — `node bin/ithyno.js
+  --port 4323` stdout was grepped for `agmsg` / `install`: zero
+  matches. The CLI entry point does not fire any first-launch
+  install prompt (as intended; the prompt is Electron-only).
+
+- **Config-level extraResources check (PASS)** — A `node -e`
+  one-liner over `electron/package.json`'s `build.extraResources`
+  confirmed the `{ from: "../vendor/agmsg", to: "app/vendor/agmsg" }`
+  entry is present and would map to
+  `<app>/Contents/resources/app/vendor/agmsg/scripts/send.sh`
+  post-package. The source file (`vendor/agmsg/scripts/send.sh`)
+  exists with `-rwxr-xr-x` executable bits, so the copy inside
+  `ensureAgmsgInstalled()` will preserve them without needing the
+  chmod pass in the common case.
+
+- **5.3–5.5 DMG build + first-launch dialog (STILL DEFERRED)** —
+  Hit a `electron-builder` × `npm workspaces` incompatibility:
+  the "installing production dependencies" step (which
+  electron-builder runs before packaging) does an `npm ci
+  --production` in the workspace subdir that wipes root's hoisted
+  `node_modules/app-builder-bin/` — the very binary
+  electron-builder needs on the next step. Result: every
+  `npm run electron:package:mac` invocation fails with `spawn
+  .../app-builder-bin/mac/app-builder_arm64 ENOENT`, and re-running
+  `npm install` at root restores the state until the next attempt.
+  Also true with `--dir` mode.
+
+  This is orthogonal to the P3 change itself — the code is correct;
+  the toolchain path is broken by an upstream workspace-hoist bug.
+  Fix options (deferred to a separate change):
+    1. Move `electron-builder` from `electron/package.json` to root
+       `devDependencies` so the workspace's "installing production
+       dependencies" step doesn't try to reconcile it.
+    2. Add an `.npmrc` under `electron/` with
+       `install-strategy=nested` to force a per-workspace
+       `node_modules/` and stop hoisting.
+    3. Switch to `electron-forge` (which handles workspaces better)
+       for packaging.
+
+  Meanwhile, a small unrelated build fix DID come out of this
+  session — `electron/package.json` gained `"electron": "33.4.11"`
+  (pinned, not caret) and an `author` field, both required to get
+  past the very first electron-builder invocation error before
+  hitting the workspace bug. Committed as
+  `fix(electron): pin electron 33.4.11 + add author for
+  electron-builder`.
