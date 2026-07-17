@@ -76,16 +76,16 @@ For each stage `S ∈ {code, review, verify}`:
        echo "[dispatch] agmsg configured but not installed locally; falling back to non-agmsg dispatch"
        # Fall through to the Task tool / subprocess branches below.
      else
-       AGMSG_TYPE=$(case "$entry_command" in
-         claude)      echo claude-code ;;
-         codex)       echo codex ;;
-         copilot)     echo copilot ;;
-         gemini)      echo gemini ;;
-         antigravity) echo antigravity ;;
-         opencode)    echo opencode ;;
-         cursor)      echo cursor ;;
-         *)           echo "" ;;
-       esac)
+       case "$entry_command" in
+         claude)      AGMSG_TYPE=claude-code ;;
+         codex)       AGMSG_TYPE=codex ;;
+         copilot)     AGMSG_TYPE=copilot ;;
+         gemini)      AGMSG_TYPE=gemini ;;
+         antigravity) AGMSG_TYPE=antigravity ;;
+         opencode)    AGMSG_TYPE=opencode ;;
+         cursor)      AGMSG_TYPE=cursor ;;
+         *)           AGMSG_TYPE="" ;;
+       esac
        if [ -z "$AGMSG_TYPE" ]; then
          /opsx:escalate <change-id> "agmsg-type unknown for command: $entry_command"
          exit
