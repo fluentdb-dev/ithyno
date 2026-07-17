@@ -1530,52 +1530,60 @@ value.
 The Kanban Start button and the ChangeDetail Start button SHALL
 inject `/ithy-opsx:dispatch <change-id>` into the embedded terminal
 without opening any picker, agent-selection modal, or worktree spawn
-from the UI. The UI SHALL NOT read `parallelExecution`, SHALL NOT
-filter `agents.yaml` by role, and SHALL NOT check worktree
-prerequisites (`gitStatus.isRepo`, `hasCommits`, uncommitted
-proposal, etc.) — the skill layer (via the persistent Manager
-receiving the injected string) takes full responsibility for those
-decisions.
+from the UI. The UI SHALL NOT read `parallelExecution` to make its
+own execution-mode decision — that lives in the skill layer.
+
+**Lock-based gate** (new): the UI SHALL read `state.lock`
+(broadcast by the server) and, when `parallelExecution === false`
+AND the lock is held by a different change than the one being
+started, gate the Start button:
+
+- The Start button is disabled with tooltip `Change <held-change> is
+  currently running. Merge or discard it first.`
+- No inject happens on click.
+
+When the lock is held by the same change being started, the Start
+button acts as an **Attach**: it re-injects `/ithy-opsx:dispatch
+<change-id>` (the dispatcher is idempotent — it re-enters at the
+current phase per its restart-recovery guarantee).
+
+The UI SHALL NOT gate on `agents.yaml` contents beyond the lock.
+Empty agents.yaml is handled by the dispatcher's Manager fallback
+(no UI gate needed).
 
 Only one prerequisite failure SHALL surface as a toast notification
-from the UI: embedded terminal unavailable → "No embedded terminal
-— open a change view to spawn one".
-
-The UI SHALL NOT gate on `agents.yaml` contents. When `agents.yaml`
-is empty or lacks a code-role entry, the dispatcher falls back to
-Manager self-dispatch; all that decision-making lives in the skill
-layer.
-
-All other execution concerns (which CLI to spawn, whether to create
-a worktree, what branch to commit on) are downstream of the
-dispatcher and NOT the UI's responsibility.
-
-> ⚠️ **PENDING MODIFIED** by [collapse-jobregistry-and-add-semaphore](../../changes/collapse-jobregistry-and-add-semaphore/): lock-based gate 追加中 (parallelExecution=false 時に `.worktrees/.lock` を read してもう 1 change が active なら Start 無効化).
+from the UI: embedded terminal unavailable → `No embedded terminal
+— open a change view to spawn one`.
 
 #### Scenario: Start injects dispatch invocation
-- **GIVEN** the embedded terminal is available
-- **WHEN** the user clicks Start on a change
-- **THEN** the flow opens the Apply CommandModal proposing `/ithy-opsx:dispatch <change-id>`, injects it into the terminal on submit, and shows no picker or worktree modal
+- **GIVEN** the embedded terminal is available, `parallelExecution: true`, and no lock held
+- **WHEN** the user clicks Start on `change-A`
+- **THEN** the flow injects `/ithy-opsx:dispatch change-A` into the terminal
 
-#### Scenario: no worktree spawn from UI regardless of config
-- **GIVEN** `parallelExecution: true` in `agents.yaml`
-- **WHEN** the user clicks Start
-- **THEN** the UI still only injects `/ithy-opsx:dispatch <id>` into the terminal — no `POST /api/agents/run` is issued from the Start flow
+#### Scenario: parallelExecution false, no lock — normal dispatch
+- **GIVEN** `parallelExecution: false` and no lock held
+- **WHEN** the user clicks Start on `change-A`
+- **THEN** the flow injects normally; the dispatcher will acquire the lock during its own execution
+
+#### Scenario: parallelExecution false, lock held by another change — Start disabled
+- **GIVEN** `parallelExecution: false` and `state.lock: { change: "change-A" }`
+- **WHEN** the user views `change-B`'s Start button
+- **THEN** the button is disabled with tooltip `Change change-A is currently running. Merge or discard it first.`
+
+#### Scenario: parallelExecution false, lock held by same change — Attach
+- **GIVEN** `parallelExecution: false` and `state.lock: { change: "change-A" }`
+- **WHEN** the user clicks Start on `change-A` again (e.g., after PTY died)
+- **THEN** the flow re-injects `/ithy-opsx:dispatch change-A`; the dispatcher's restart-recovery detects the current phase and continues from there
 
 #### Scenario: no embedded terminal surfaces as toast
 - **GIVEN** the embedded terminal is unavailable
 - **WHEN** the user clicks Start
 - **THEN** a toast reports "No embedded terminal — open a change view to spawn one" and no injection occurs
 
-#### Scenario: empty agents.yaml does not gate Start
-- **GIVEN** `agents.yaml` empty (`agents: []`) or missing a code-role entry
+#### Scenario: empty agents.yaml does not gate UI
+- **GIVEN** `agents.yaml` empty (`agents: []`)
 - **WHEN** the user clicks Start
 - **THEN** the UI still injects `/ithy-opsx:dispatch <id>` — the dispatcher resolves the fallback to Manager self-dispatch
-
-#### Scenario: per-change proposal.execution override ignored by UI
-- **GIVEN** a change with `proposal.execution: worktree` in its frontmatter
-- **WHEN** the user clicks Start
-- **THEN** the UI still only injects `/ithy-opsx:dispatch <id>` — the override is a signal for the dispatcher to read, not for the UI to consume
 
 ### Requirement: Repo-Level Agent Instructions Files
 
@@ -1642,130 +1650,213 @@ The skill SHALL:
    .worktrees/<change-id> HEAD`, guarded by `if [ ! -d ]` for
    idempotence). All subsequent worker invocations run with that
    worktree as `cwd`.
-3. Advance the change through `proposed → coded → reviewed → done`
-   by dispatching workers in stages:
-   - **code**: dispatch a worker with prompt `/opsx:apply <change-id>`
-     (append `Prior review findings: ...` when returning to this
-     stage after a needs-rework verdict). Success = subprocess exit
-     0 / Task-tool subagent returned; failure = non-zero exit or
-     tool-reported failure → escalate.
-   - **review**: dispatch with prompt `/ithy-opsx:review <change-id>`.
-     Apply the 3-stage success contract.
-   - **verify**: dispatch with prompt `/ithy-opsx:verify <change-id>`.
-     Apply the 3-stage success contract.
-4. Dispatch each stage via the **Dispatch helper protocol**:
-   - Look up the agent entry in `agents.yaml` whose `roles` array
-     includes the stage role.
-   - If no entry exists for the `code` role, fall back to Manager
-     self-dispatch (Task tool with the same prompt). For `review` /
-     `verify`, escalate with `no agent declared for role: <S>`.
-   - Resolve the prompt from `entry.prompts[S]` if set, else the
-     built-in default (`/opsx:apply <id>`, `/ithy-opsx:review <id>`,
-     `/ithy-opsx:verify <id>`).
-   - Dispatch based on `entry.command`:
-     - `command == "claude"` → Task tool invocation.
-     - Otherwise → subprocess `cd .worktrees/<id> && <cmd>
-       <args...> -p "<prompt>"`. `entry.args` MUST include the CLI's
-       permission-skip flag.
-5. Apply the **3-stage success contract** for `review` and `verify`
-   stages:
-   1. Subprocess non-zero exit / Task-tool subagent failure →
-      subprocess failure → escalate.
-   2. Subprocess exit 0 but `openspec/changes/<change-id>/review.md`
-      absent or its frontmatter unparseable → contract failure →
-      escalate.
-   3. `review.md` present with `verdict:` frontmatter → route on
-      `pass` (advance phase) / `needs-rework` (loop back to code with
-      findings serialized into the next prompt).
+3. **When `parallelExecution === false`, before creating the worktree
+   in step 2 above, acquire the `.worktrees/.lock` semaphore per the
+   `Worktree Concurrency Semaphore` requirement.** If the lock is
+   held by another change whose worktree still exists, escalate
+   without creating a worktree.
+4. Advance the change through `proposed → coded → reviewed → done`
+   by dispatching workers in stages (code → review → verify), using
+   the Dispatch helper protocol (Task tool for `command == "claude"`,
+   subprocess `-p` otherwise) and the 3-stage success contract for
+   review/verify (subprocess exit / review.md existence / verdict).
+5. On verify `pass` (phase → done), release the `.worktrees/.lock`
+   semaphore.
+6. On any escalate path, release the `.worktrees/.lock` semaphore
+   before exiting.
 
-The code stage SHALL NOT use the 3-stage contract (no artifact
-contract for code — the impl lands in the worktree directly).
-Success = subprocess/task success. After a successful code stage
-the dispatcher commits on `agent/<change-id>` (workers no longer
-commit themselves) and advances phase to `coded`.
+MAX_ITERATIONS remains 5 for the code↔review loop. All other
+existing behavior from the previous Dispatch Slash Command spec is
+retained.
 
-MAX_ITERATIONS is a hard-coded ceiling (default 5) for the
-code↔review loop. On non-convergence the dispatcher escalates via
-`/opsx:escalate <change-id> "<reason>"` and exits.
+#### Scenario: parallelExecution false — lock acquired before worktree
+- **GIVEN** `parallelExecution: false` and no `.worktrees/.lock`
+- **WHEN** the dispatcher runs for `change-A`
+- **THEN** it writes the lock first, then creates `.worktrees/change-A/`
 
-The dispatcher SHALL NOT bypass the exit code alone for review/verify
-— both Copilot and Antigravity return exit code 0 even on semantic
-failure; only `review.md` is the contract.
+#### Scenario: parallelExecution false — lock held blocks dispatch
+- **GIVEN** `parallelExecution: false` and `.worktrees/.lock` held by `change-A` with `.worktrees/change-A/` present
+- **WHEN** the dispatcher runs for `change-B`
+- **THEN** the dispatcher escalates with `Another change (change-A) is currently running.` and no `.worktrees/change-B/` is created
 
-> ⚠️ **PENDING MODIFIED** by [collapse-jobregistry-and-add-semaphore](../../changes/collapse-jobregistry-and-add-semaphore/): `.worktrees/.lock` semaphore の acquire (step 4 前) / release (verify pass or escalate 時) ロジックを追加中. parallelExecution=false 時の single-concurrency gate.
+#### Scenario: verify pass releases lock
+- **GIVEN** the dispatcher completes verify with `verdict: pass` under `parallelExecution: false`
+- **WHEN** phase transitions to done
+- **THEN** `.worktrees/.lock` is deleted
 
-#### Scenario: template exists in commands directory
-- **GIVEN** the repository at `.claude/commands/ithy-opsx/dispatch.md`
-- **WHEN** a Claude Code live-shell session evaluates the slash command
-- **THEN** the template loads, receives the change id as its argument, and follows the dispatcher instructions
+#### Scenario: escalation releases lock
+- **GIVEN** the dispatcher escalates for any reason under `parallelExecution: false`
+- **WHEN** the escalation runs
+- **THEN** `.worktrees/.lock` is deleted before exit
 
-#### Scenario: convergence loop with pass verdict
-- **GIVEN** a change whose `code → review` cycle produces `verdict: pass` on iteration 1
-- **WHEN** the dispatcher follows the template
-- **THEN** it sets phase to `coded`, then `reviewed` after review pass, invokes verify, then sets phase to `done` on verify pass — all within one iteration
+### Requirement: Kanban Placement Is Folder-Driven
 
-#### Scenario: needs-rework retries with findings
-- **GIVEN** a review that returns `verdict: needs-rework` with 2 findings
-- **WHEN** the dispatcher follows the template
-- **THEN** it re-invokes the code worker with the findings serialized into the prompt (`/opsx:apply <id>` followed by `Prior review findings: ...`) — the loop continues until `pass` or MAX_ITERATIONS is reached
+The Kanban `bucketize` algorithm SHALL classify each change into
+TODO / IN-PROGRESS / DONE using **filesystem state only**, without
+consulting the in-memory job registry. Placement order (first match
+wins):
 
-#### Scenario: convergence loop cap
-- **GIVEN** a review that keeps returning `verdict: needs-rework` on every iteration
-- **WHEN** the dispatcher reaches MAX_ITERATIONS (default 5) without a pass verdict
-- **THEN** the dispatcher invokes `/opsx:escalate <change-id> "Dispatch loop did not converge after 5 iterations"` and exits
+1. If `openspec/changes/archive/*-<change-id>/` exists → **DONE**.
+2. If `.worktrees/<change-id>/openspec/changes/<change-id>/tasks.md`
+   exists AND all its checkboxes are ticked → **DONE**.
+3. If `.worktrees/<change-id>/` exists → **IN-PROGRESS**.
+4. If main-tree `openspec/changes/<change-id>/tasks.md` exists AND
+   all checkboxes are ticked → **DONE**.
+5. If main-tree progress `done > 0` → **IN-PROGRESS**.
+6. Else → **TODO**.
 
-#### Scenario: claude-role dispatch uses Task tool
-- **GIVEN** an `agents.yaml` entry with `command: claude` for the code role
-- **WHEN** the dispatcher reaches the code stage
-- **THEN** it invokes the worker via the Task tool with the resolved `/opsx:apply <id>` prompt, not via subprocess
+The dashboard SHALL read a change `X`'s progress from
+`.worktrees/X/openspec/changes/X/tasks.md` when the worktree exists,
+otherwise from main-tree `openspec/changes/X/tasks.md`. The
+dashboard SHALL NOT read change `X`'s tasks.md from a different
+change's worktree (`.worktrees/Y/openspec/changes/X/tasks.md`) —
+that copy is frozen at the time `Y`'s worktree was created and does
+not reflect `X`'s live state.
 
-#### Scenario: non-claude role dispatch uses subprocess
-- **GIVEN** an `agents.yaml` entry with `command: copilot, args: [--yolo, -s]` for the review role
-- **WHEN** the dispatcher reaches the review stage
-- **THEN** it runs `cd .worktrees/<change-id> && copilot --yolo -s -p "/ithy-opsx:review <id>"` as a subprocess
+Placement decisions SHALL use `fs.stat` and `fs.readFile` only —
+NOT `git status`, `git log`, or any other subprocess-git call —
+because git subprocess overhead compounds across cards on every
+render.
 
-#### Scenario: subprocess non-zero exit escalates
-- **GIVEN** a review subprocess that exits with code 127 (command not found)
-- **WHEN** the dispatcher evaluates the result
-- **THEN** it escalates via `/opsx:escalate <change-id> "review subprocess failed with exit code 127"` and exits without further stages
+Live updates SHALL propagate via a chokidar watcher over the
+`.worktrees/*/openspec/changes/*/tasks.md` glob. On tasks.md
+change, the server SHALL emit a `worktree-progress-updated` WS
+event carrying the new progress; the store applies it to the
+matching `Change`'s `worktree.tasksProgress`.
 
-#### Scenario: missing review.md escalates
-- **GIVEN** a review subprocess that exits 0 but never writes `openspec/changes/<change-id>/review.md`
-- **WHEN** the dispatcher reads the workspace
-- **THEN** it escalates with reason "review returned no artifact" and exits
+#### Scenario: worktree exists → IN-PROGRESS
+- **GIVEN** `.worktrees/add-dummy-tab/` exists but not all tasks are ticked in its tasks.md
+- **WHEN** the Kanban renders
+- **THEN** the `add-dummy-tab` card appears in the IN-PROGRESS column
 
-#### Scenario: unparseable verdict escalates
-- **GIVEN** a `review.md` whose frontmatter is missing the `verdict:` field
-- **WHEN** the dispatcher parses the artifact
-- **THEN** it escalates with reason "review returned no verdict" and exits
+#### Scenario: worktree all-done → DONE
+- **GIVEN** `.worktrees/add-dummy-tab/openspec/changes/add-dummy-tab/tasks.md` has every checkbox ticked
+- **WHEN** the Kanban renders
+- **THEN** the card appears in the DONE column
 
-#### Scenario: worktree bootstrap idempotent on re-run
-- **GIVEN** `.worktrees/<id>/` already exists (previous run left it)
-- **WHEN** the dispatcher runs step 2 again
-- **THEN** it skips `git worktree add` (guarded by `if [ ! -d ]`) and reuses the existing worktree
+#### Scenario: worktree missing, main-tree partial → IN-PROGRESS
+- **GIVEN** no `.worktrees/add-dummy-tab/`, main-tree tasks.md has 5/10 ticked
+- **WHEN** the Kanban renders
+- **THEN** the card appears in the IN-PROGRESS column
 
-#### Scenario: parallelExecution false uses main tree
-- **GIVEN** `agents.yaml` with `parallelExecution: false` and no override
-- **WHEN** the dispatcher resolves the execution mode
-- **THEN** it does NOT create a worktree; workers run in the main tree via subprocess `cd` to project root (or Task tool without cd)
+#### Scenario: no worktree, main-tree untouched → TODO
+- **GIVEN** no `.worktrees/add-dummy-tab/`, main-tree tasks.md has 0/10 ticked
+- **WHEN** the Kanban renders
+- **THEN** the card appears in the TODO column
 
-#### Scenario: proposal.execution override wins
-- **GIVEN** `agents.yaml` `parallelExecution: false` but change's `proposal.execution: worktree`
-- **WHEN** the dispatcher resolves mode
-- **THEN** the per-change override wins — worktree is created and used
+#### Scenario: archived → DONE
+- **GIVEN** `openspec/changes/archive/2026-07-17-add-dummy-tab/` exists
+- **WHEN** the Kanban renders
+- **THEN** the card appears in the DONE column (archive short-circuits earlier checks)
 
-#### Scenario: no code agent falls back to Manager
-- **GIVEN** `agents.yaml` has no entry with `roles: code`
-- **WHEN** the dispatcher reaches the code stage
-- **THEN** it invokes the Task tool with the resolved prompt (Manager self-dispatch), rather than escalating
+#### Scenario: X's progress not read from Y's worktree
+- **GIVEN** a change X with no worktree, and a different change Y whose worktree at `.worktrees/Y/openspec/changes/X/tasks.md` contains stale X data
+- **WHEN** the dashboard resolves X's progress
+- **THEN** it reads main-tree `openspec/changes/X/tasks.md` — not the frozen copy inside Y's worktree
 
-#### Scenario: already-done change exits early
-- **GIVEN** a change whose current phase is already `done`
-- **WHEN** the dispatcher reads the current phase
-- **THEN** it exits without any dispatch, reporting "change already at phase: done"
+#### Scenario: chokidar-driven live progress updates
+- **GIVEN** the server is watching `.worktrees/*/openspec/changes/*/tasks.md`
+- **WHEN** a task checkbox is flipped in `.worktrees/add-dummy-tab/openspec/changes/add-dummy-tab/tasks.md`
+- **THEN** the server emits a `worktree-progress-updated` WS event; the client's `Change.worktree.tasksProgress` updates without a full state refetch
 
-#### Scenario: needs-human change is not restarted
-- **GIVEN** a change whose current phase is `needs-human`
-- **WHEN** the dispatcher reads the current phase
-- **THEN** it exits without any dispatch, reporting "change is in needs-human — answer required before dispatcher can proceed"
+#### Scenario: no git subprocess in bucketize
+- **GIVEN** N changes rendered in Kanban
+- **WHEN** bucketize runs on each
+- **THEN** no `git status`, `git log`, or other git subprocess is invoked; only `fs.stat` and (cached) tasks.md reads happen
+
+### Requirement: Worktree Concurrency Semaphore
+
+The system SHALL maintain a semaphore file at `.worktrees/.lock`
+that gates concurrent dispatch when `agents.yaml.parallelExecution
+=== false`. When `parallelExecution` is `true` (or absent, treated
+as `false` per `add-parallel-execution-config`), the lock still
+exists conceptually but does not prevent dispatch.
+
+Wait — actually the lock's role is exclusively for the
+`parallelExecution: false` case (single-tenant). When
+`parallelExecution: true`, no lock is acquired or checked. This
+requirement documents the `false` case.
+
+**File format** (YAML):
+```yaml
+change: <change-id>
+acquiredAt: <ISO-8601 timestamp>
+pid: null | <process-id>
+```
+
+`pid` is `null` when the dispatcher spawned workers via Task tool
+(no owning process), populated with the dispatcher's own PID when
+the dispatcher runs as a subprocess (future-proof).
+
+**Acquire** (dispatcher's step 4 worktree bootstrap, only when
+`parallelExecution: false`):
+
+1. Read `.worktrees/.lock`. If it does not exist → write the lock
+   (change = current change id, acquiredAt = now, pid = null) and
+   proceed to worktree setup.
+2. If it exists:
+   - Read its `change` field. If `.worktrees/<change>/` exists →
+     escalate: `Another change (<held-change>) is currently
+     running. Merge or discard it before starting another.`. Do NOT
+     proceed with worktree setup.
+   - If `.worktrees/<held-change>/` is missing → treat as **stale**,
+     delete the lock, then write a fresh lock for the current
+     change and proceed.
+
+**Release** — three paths:
+
+1. Dispatcher step 7 verify pass (phase → done) — delete the lock.
+2. Any dispatcher escalate path — delete the lock (the dispatcher
+   is done with this change, regardless of outcome).
+3. Kanban's Merge / Discard action — after `git worktree remove` +
+   `git branch -D` succeeds, if `.worktrees/.lock`'s `change` field
+   matches the change being merged/discarded, delete the lock.
+
+**Startup cleanup**: on server boot, read `.worktrees/.lock`. If it
+exists but `.worktrees/<lock.change>/` does not, delete the lock
+(stale from a previous crash).
+
+The server SHALL expose the lock state via workspace state (`state.
+lock: { change, acquiredAt } | null`) and broadcast a `lock-updated`
+WS event when it changes.
+
+#### Scenario: parallelExecution false, first dispatch acquires lock
+- **GIVEN** `parallelExecution: false` and no `.worktrees/.lock`
+- **WHEN** the dispatcher runs for `change-A`
+- **THEN** the dispatcher writes `.worktrees/.lock` with `change: change-A` and proceeds to worktree setup
+
+#### Scenario: parallelExecution false, second dispatch blocked
+- **GIVEN** `parallelExecution: false` and `.worktrees/.lock` exists with `change: change-A`, `.worktrees/change-A/` exists
+- **WHEN** the dispatcher runs for `change-B`
+- **THEN** the dispatcher escalates with `Another change (change-A) is currently running. Merge or discard it before starting another.` and does NOT create `.worktrees/change-B/`
+
+#### Scenario: stale lock (worktree missing) auto-cleared
+- **GIVEN** `.worktrees/.lock` exists with `change: change-A` but `.worktrees/change-A/` does not exist
+- **WHEN** the dispatcher runs for `change-B` (or any change)
+- **THEN** the dispatcher deletes the stale lock, writes a fresh lock for the current change, and proceeds
+
+#### Scenario: dispatch complete releases lock
+- **GIVEN** the dispatcher is at step 7 with verify verdict `pass`
+- **WHEN** the dispatcher posts `phase: done`
+- **THEN** it deletes `.worktrees/.lock` before exiting
+
+#### Scenario: dispatch escalation releases lock
+- **GIVEN** the dispatcher escalates (any reason: worker failure, missing artifact, MAX_ITERATIONS)
+- **WHEN** the escalation completes
+- **THEN** `.worktrees/.lock` is deleted before the dispatcher exits
+
+#### Scenario: Kanban merge/discard releases lock
+- **GIVEN** `.worktrees/.lock` holds `change: change-A` and the user clicks Merge or Discard on change-A's card
+- **WHEN** the merge/discard action completes (`git worktree remove` + `git branch -D`)
+- **THEN** `.worktrees/.lock` is deleted
+
+#### Scenario: server startup clears stale lock
+- **GIVEN** server crashes with `.worktrees/.lock` set to `change: change-A` but `.worktrees/change-A/` was manually deleted
+- **WHEN** the server restarts
+- **THEN** startup routine detects the missing worktree and deletes the lock; `state.lock` broadcasts as `null`
+
+#### Scenario: parallelExecution true — lock ignored
+- **GIVEN** `parallelExecution: true`
+- **WHEN** the dispatcher runs for any change
+- **THEN** the lock file is not consulted (may or may not exist; irrelevant); multiple worktrees may exist concurrently
 
