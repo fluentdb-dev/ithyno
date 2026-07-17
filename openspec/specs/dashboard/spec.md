@@ -1639,6 +1639,8 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
+> ⚠️ **PENDING MODIFIED** by [route-live-shell-to-agmsg-spawn](../../changes/route-live-shell-to-agmsg-spawn/): dispatch helper protocol will gain a first-priority "agmsg spawn" branch for `mode: live-shell` workers when `agents.yaml` has an `agmsg:` block, and the 3-stage success contract will grow a polling-based variant for the agmsg branch.
+
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default

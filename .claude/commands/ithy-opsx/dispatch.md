@@ -60,18 +60,60 @@ For each stage `S ∈ {code, review, verify}`:
 
    Then substitute template vars: `${change_id}` → the current change id.
 
-3. **Dispatch** based on `entry.command`:
+3. **Dispatch**. Branch priority (first match wins):
 
-   - `entry.command == "claude"` → invoke the **Task tool** with the
-     resolved prompt. The subagent runs in-process and returns when
-     the slash command completes.
+   Manager (`roles` includes `manager`) is never dispatched through
+   these branches — the Manager IS the dispatcher and runs in tmux
+   pane 0 (or the direct-spawn PTY when agmsg is not configured).
+   These branches only fire for worker roles.
+
+   - **agmsg branch** — `entry.mode == "live-shell"` AND `agents.yaml`
+     contains a valid `agmsg:` block (top-level `agmsg.team` set):
+
+     ```bash
+     # First: presence check for local agmsg install.
+     if [ ! -f "$HOME/.agents/skills/agmsg/scripts/send.sh" ]; then
+       echo "[dispatch] agmsg configured but not installed locally; falling back to non-agmsg dispatch"
+       # Fall through to the Task tool / subprocess branches below.
+     else
+       AGMSG_TYPE=$(case "$entry_command" in
+         claude)      echo claude-code ;;
+         codex)       echo codex ;;
+         copilot)     echo copilot ;;
+         gemini)      echo gemini ;;
+         antigravity) echo antigravity ;;
+         opencode)    echo opencode ;;
+         cursor)      echo cursor ;;
+         *)           echo "" ;;
+       esac)
+       if [ -z "$AGMSG_TYPE" ]; then
+         /opsx:escalate <change-id> "agmsg-type unknown for command: $entry_command"
+         exit
+       fi
+       # Slash command form (inside the Manager's Claude session).
+       # This creates a new tmux pane running the worker CLI in
+       # agmsg monitor mode, then injects the boot prompt.
+       /agmsg spawn "$AGMSG_TYPE" "$entry_name" --boot-prompt "<resolved-prompt>"
+     fi
+     ```
+
+     Success judgment for this branch is **poll-based** (see the
+     agmsg branch of the 3-stage success contract below) — the
+     spawn call returns as soon as the peer is listening, not when
+     the boot task is done.
+
+   - **Task tool branch** — `entry.command == "claude"` (Manager
+     self-dispatch or `mode: single-prompt` claude workers):
 
      ```
      Task tool: prompt = <resolved-prompt>
      ```
 
-   - **Otherwise** (copilot, agy, or any other CLI) → run as a
-     **subprocess** using Bash:
+     The subagent runs in-process and returns when the slash command
+     completes.
+
+   - **Subprocess branch** — anything else (copilot, agy, aider, or
+     any CLI without a Task-tool integration):
 
      ```bash
      cd .worktrees/<change-id>   # only when worktree mode
@@ -84,17 +126,19 @@ For each stage `S ∈ {code, review, verify}`:
 
 4. **Judge success**:
 
-   - **`S = code`**: no artifact contract. Success = subprocess exit 0
-     / Task-tool subagent returned; failure = non-zero exit / tool
-     failure → escalate `code stage subprocess failed with exit code
-     <n>`.
+   - **`S = code`**: no artifact contract for Task tool / subprocess
+     branches. Success = subprocess exit 0 / Task-tool subagent
+     returned; failure = non-zero exit / tool failure → escalate
+     `code stage subprocess failed with exit code <n>`. For the
+     agmsg branch, use the polling contract below.
    - **`S = review` or `S = verify`**: apply the **3-stage success
      contract** below.
 
 ## 3-stage success contract (review / verify only)
 
 Never trust exit code alone — Copilot and Antigravity return exit code
-0 even on semantic failure. Judgment order:
+0 even on semantic failure. Judgment order for the Task tool /
+subprocess branches:
 
 1. **Subprocess non-zero exit** (or Task-tool subagent reported
    failure) → subprocess failure → escalate with `<stage> subprocess
@@ -104,6 +148,50 @@ Never trust exit code alone — Copilot and Antigravity return exit code
    escalate with `<stage> returned no artifact`.
 3. **`review.md` present with parseable `verdict:` frontmatter** →
    route on `pass` / `needs-rework`.
+
+### agmsg branch — poll-based judgment
+
+`/agmsg spawn --boot-prompt` returns as soon as the peer is listening;
+the boot task keeps running in the worker's tmux pane. The dispatcher
+polls for the artifact:
+
+- **`S = code`** — poll `git log agent/<change-id> -1 --format=%H` at
+  a 5-second interval. When the head hash differs from the pre-spawn
+  hash (a new commit landed), the code stage is done → advance phase
+  to `coded`. **Ceiling: 15 minutes.** On timeout → escalate
+  `code stage agmsg worker did not commit within timeout`.
+
+- **`S = review` or `S = verify`** — poll for
+  `openspec/changes/<change-id>/review.md` existence + parseable
+  `verdict:` frontmatter at a 5-second interval. When both are
+  satisfied, route on `pass` / `needs-rework` per the standard
+  contract. **Ceiling: 5 minutes.** On timeout → escalate
+  `<stage> agmsg worker did not produce review.md within timeout`.
+
+Rough polling shape (bash):
+
+```bash
+POLL_INTERVAL=5
+CEILING_CODE=900     # 15 min
+CEILING_REVIEW=300   # 5 min
+ELAPSED=0
+CEILING=$CEILING_REVIEW   # or $CEILING_CODE for code stage
+PRE_HEAD=$(git rev-parse agent/<change-id> 2>/dev/null || echo "")
+while [ $ELAPSED -lt $CEILING ]; do
+  sleep $POLL_INTERVAL
+  ELAPSED=$((ELAPSED + POLL_INTERVAL))
+  # code stage:
+  NEW_HEAD=$(git rev-parse agent/<change-id> 2>/dev/null || echo "")
+  if [ "$NEW_HEAD" != "$PRE_HEAD" ] && [ -n "$NEW_HEAD" ]; then break; fi
+  # OR review/verify stage:
+  if [ -f "openspec/changes/<change-id>/review.md" ] && \
+     grep -q "^verdict:" "openspec/changes/<change-id>/review.md"; then break; fi
+done
+if [ $ELAPSED -ge $CEILING ]; then
+  /opsx:escalate <change-id> "<stage> agmsg worker did not produce review.md within timeout"
+  exit
+fi
+```
 
 ## Steps
 
@@ -365,6 +453,13 @@ Never trust exit code alone — Copilot and Antigravity return exit code
   (`docs/ideas/2026-07-11-manager-max-iterations-config.md`).
 - Per-project verify command
   (`docs/ideas/2026-07-11-verify-command-per-project.md`).
-- agmsg-based worker dispatch as an alternative to Task tool +
-  subprocess (see `docs/ideas/2026-07-15-runtime-collapse-to-mode-dispatch.md`
-  and the parked `docs/ideas/2026-07-06-cross-agent-messaging.md`).
+- Explicit `agmsgType` field on `agents.yaml` agent entries when the
+  command-name → agmsg-type inference table proves insufficient
+  (non-canonical wrapper commands). Deferred until a real user needs
+  it — landed as a note in
+  `openspec/changes/archive/2026-07-17-route-live-shell-to-agmsg-spawn/outcome.md`.
+- Stale-pane cleanup: `/agmsg spawn` creates a fresh pane per
+  invocation. A `kill-pane on task done` hook (via `agmsg cleanup`
+  or `tmux kill-pane`) is a follow-up.
+- Polling ceilings (15 min code / 5 min review-verify) are hand-
+  picked; tune once real workloads land.
