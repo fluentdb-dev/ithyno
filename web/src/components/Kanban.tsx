@@ -72,29 +72,38 @@ function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): strin
  *
  * `change.phase` is intentionally ignored — see the file-level comment.
  */
-function bucketize(changes: Change[], jobByChange: Map<string, JobSummary>): Buckets {
+/**
+ * Folder-driven placement (post collapse-jobregistry-and-add-semaphore).
+ * Uses filesystem state only — no consultation of an in-memory job
+ * registry. Order (first match wins):
+ *
+ *   1. `.worktrees/<id>/openspec/changes/<id>/tasks.md` all-ticked → DONE
+ *   2. `.worktrees/<id>/` exists (worktree in flight)             → IN-PROGRESS
+ *   3. main-tree tasks all-ticked (total > 0)                     → DONE
+ *   4. main-tree progress.done > 0 (partial)                      → IN-PROGRESS
+ *   5. else                                                        → TODO
+ *
+ * Archive-based DONE is handled elsewhere — archived changes aren't in
+ * the `changes` array, they're in `state.archive`.
+ */
+function bucketize(changes: Change[]): Buckets {
   const todo: Change[] = [];
   const inprogress: Change[] = [];
   const done: Change[] = [];
   for (const c of changes) {
+    const wt = c.worktree;
+    if (wt) {
+      const wtp = wt.tasksProgress;
+      if (wtp.total > 0 && wtp.done === wtp.total) done.push(c);
+      else inprogress.push(c);
+      continue;
+    }
     const { done: d, total } = c.progress;
-    const job = jobByChange.get(c.id);
-    const hasActiveJob = !!job && (job.status === "running" || isPendingMergeOrDiscard(job));
-    if (d === total && total > 0) done.push(c);
-    else if (hasActiveJob) inprogress.push(c);
-    else if (total === 0 || d === 0) todo.push(c);
-    else inprogress.push(c);
+    if (total > 0 && d === total) done.push(c);
+    else if (d > 0) inprogress.push(c);
+    else todo.push(c);
   }
   return { todo, inprogress, done };
-}
-
-function isPendingMergeOrDiscard(job: JobSummary): boolean {
-  return (
-    job.status === "completed" ||
-    job.status === "crashed" ||
-    job.status === "cancelled" ||
-    job.status === "orphaned"
-  );
 }
 
 type PendingDrag =
@@ -139,7 +148,7 @@ export function KanbanBoard({
     return m;
   }, [jobs]);
 
-  const buckets = useMemo(() => bucketize(changes, jobByChange), [changes, jobByChange]);
+  const buckets = useMemo(() => bucketize(changes), [changes]);
 
   const onArchiveClick = (change: Change) => {
     setPending({ kind: "archive", change });

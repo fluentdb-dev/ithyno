@@ -9,6 +9,7 @@ import type { Change, ChangeSummary, RawDoc, SpecDomain, WorkspaceState } from "
 import { readSidecar, extractSidecarFields } from "../sidecar.js";
 import { parseNeedsHuman } from "../needs-human.js";
 import { getGitStatus } from "../git/status.js";
+import { readLock } from "../agents/worktree-lock.js";
 
 /** Locate the openspec/ directory under a project root. */
 export function resolveOpenspecDir(projectRoot: string): string | null {
@@ -43,6 +44,26 @@ async function parseSpecsDir(specsDir: string): Promise<SpecDomain[]> {
   return out;
 }
 
+/** Read a change's worktree state — `.worktrees/<id>/` presence + its
+ *  own tasks.md progress. Returns undefined when the worktree does not
+ *  exist. Landed by collapse-jobregistry-and-add-semaphore for the
+ *  folder-driven Kanban placement. */
+async function readWorktreeState(
+  projectRoot: string,
+  id: string,
+): Promise<Change["worktree"]> {
+  const path = join(projectRoot, ".worktrees", id);
+  if (!existsSync(path)) return undefined;
+  const tasksPath = join(path, "openspec", "changes", id, "tasks.md");
+  const tasksRaw = await readIfExists(tasksPath);
+  const tasks = tasksRaw != null ? parseTasks(tasksPath, tasksRaw) : null;
+  return {
+    path,
+    branch: `agent/${id}`,
+    tasksProgress: countProgress(tasks),
+  };
+}
+
 export async function parseChange(openspecDir: string, id: string): Promise<Change> {
   const dir = join(openspecDir, "changes", id);
 
@@ -73,6 +94,8 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
     if (doc?.question) needsHumanQuestion = doc.question;
   }
 
+  const worktree = await readWorktreeState(projectRoot, id);
+
   return {
     id,
     proposal,
@@ -85,6 +108,7 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
     priorPhase,
     escalatedAt,
     needsHumanQuestion,
+    worktree,
   };
 }
 
@@ -109,8 +133,9 @@ export async function scanWorkspace(
   projectRoot: string,
 ): Promise<WorkspaceState> {
   const gitStatus = await getGitStatus(projectRoot);
+  const lock = await readLock(projectRoot);
   if (!openspecDir) {
-    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus };
+    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus, lock };
   }
 
   const specs = await parseSpecsDir(join(openspecDir, "specs"));
@@ -126,7 +151,7 @@ export async function scanWorkspace(
   changes.sort((a, b) => a.id.localeCompare(b.id));
   archive.sort((a, b) => b.id.localeCompare(a.id));
 
-  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus };
+  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock };
 }
 
 /**

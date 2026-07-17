@@ -10,6 +10,17 @@ export type WorkspaceState = {
   changes: Change[];
   archive: ChangeSummary[];
   gitStatus: GitStatus;
+  /** Contents of `.worktrees/.lock` when present. Null when no lock
+   *  is held. Consumed by the UI to gate the Kanban Start button when
+   *  `parallelExecution: false` and the lock is held by another
+   *  change. Landed by collapse-jobregistry-and-add-semaphore. */
+  lock: WorktreeLock | null;
+};
+
+export type WorktreeLock = {
+  change: string;
+  acquiredAt: string;
+  pid: number | null;
 };
 
 export type GitStatus =
@@ -55,6 +66,24 @@ export type Change = {
    *  the escalation question. Populated only while
    *  `phase === "needs-human"` AND the artifact exists on disk. */
   needsHumanQuestion?: string;
+  /** Populated when `.worktrees/<id>/` exists on disk. The presence of
+   *  this field is the primary signal for Kanban's IN-PROGRESS
+   *  placement (see collapse-jobregistry-and-add-semaphore). The
+   *  `tasksProgress` reflects the worktree's own copy of tasks.md
+   *  (impl-in-flight state), which typically differs from the main
+   *  tree's `progress` field. */
+  worktree?: {
+    /** Absolute path to `.worktrees/<id>/`. */
+    path: string;
+    /** Conventional branch name: `agent/<id>`. Populated even when we
+     *  don't spawn git to verify — the convention is enforced at
+     *  `git worktree add` time by the dispatcher. */
+    branch: string;
+    /** Progress computed from `.worktrees/<id>/openspec/changes/<id>/tasks.md`.
+     *  Zero (`{done:0,total:0}`) when the worktree exists but its
+     *  tasks.md is missing or unparseable. */
+    tasksProgress: Progress;
+  };
 };
 
 export type ChangeSummary = {

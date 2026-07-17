@@ -153,6 +153,42 @@ Never trust exit code alone — Copilot and Antigravity return exit code
 
 4. **Set up worktree if worktree mode** (idempotent)
 
+   **First, when `parallelExecution === false`, acquire the
+   `.worktrees/.lock` semaphore.** The lock prevents starting a
+   second change while a first is still active (per
+   `collapse-jobregistry-and-add-semaphore`). Skip this whole
+   sub-step when `parallelExecution === true` (multi-worktree
+   mode).
+
+   ```bash
+   if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then
+     HELD=$(sed -n 's/^change:[[:space:]]*//p' .worktrees/.lock | head -1)
+     if [ -n "$HELD" ] && [ -d ".worktrees/$HELD" ]; then
+       # Lock held by another live change → escalate.
+       if [ "$HELD" != "<change-id>" ]; then
+         /opsx:escalate <change-id> "Another change ($HELD) is currently running. Merge or discard it before starting another."
+         exit
+       fi
+       # Lock held by this same change → we're re-entering (attach path).
+     else
+       # Stale lock (held-change worktree missing) → delete and continue.
+       rm -f .worktrees/.lock
+     fi
+   fi
+
+   # Ensure .worktrees/ dir exists so the lock file can be written.
+   mkdir -p .worktrees
+   if [ "$PARALLEL" = "false" ] && [ ! -f .worktrees/.lock ]; then
+     cat > .worktrees/.lock <<EOF
+   change: <change-id>
+   acquiredAt: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+   pid: null
+   EOF
+   fi
+   ```
+
+   **Then create the worktree** (idempotent):
+
    ```bash
    if [ ! -d ".worktrees/<change-id>" ]; then
      git worktree add -b agent/<change-id> .worktrees/<change-id> HEAD
@@ -242,6 +278,14 @@ Never trust exit code alone — Copilot and Antigravity return exit code
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "done"}'
+
+     # Release the .worktrees/.lock semaphore (parallelExecution=false only).
+     if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then
+       HELD=$(sed -n 's/^change:[[:space:]]*//p' .worktrees/.lock | head -1)
+       if [ "$HELD" = "<change-id>" ]; then
+         rm -f .worktrees/.lock
+       fi
+     fi
      ```
      Report:
      ```
@@ -297,6 +341,23 @@ Never trust exit code alone — Copilot and Antigravity return exit code
   the same change (e.g., because the PTY session died), the phase
   check in step 2 does the right thing automatically. A change at
   `coded` skips to review; at `reviewed` skips to verify.
+
+- **Semaphore release on every exit path** (`parallelExecution=false`
+  only). Before invoking `/opsx:escalate` from ANY stage — code stage
+  failure, review contract failure, verify failure, MAX_ITERATIONS
+  cap — release the lock if this dispatcher holds it:
+
+  ```bash
+  if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then
+    HELD=$(sed -n 's/^change:[[:space:]]*//p' .worktrees/.lock | head -1)
+    if [ "$HELD" = "<change-id>" ]; then
+      rm -f .worktrees/.lock
+    fi
+  fi
+  ```
+
+  Do NOT delete the lock when it's held by a different change (that
+  would be a bug — you'd release someone else's lock).
 
 ## Follow-ups (not this file)
 

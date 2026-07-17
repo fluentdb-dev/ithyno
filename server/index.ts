@@ -921,6 +921,18 @@ ptyWss.on("connection", async (ws) => {
 
 // ---- Boot ------------------------------------------------------------------
 try {
+  // Stale worktree lock cleanup — see server/agents/worktree-lock.ts.
+  // Runs before we start serving so the first workspace scan sees the
+  // clean state.
+  const { cleanupStaleLock } = await import("./agents/worktree-lock.js");
+  const cleaned = await cleanupStaleLock(PROJECT_ROOT);
+  if (cleaned === null) {
+    // Either no lock existed, or we just removed a stale one. Either
+    // way, the current state is "no lock held" — nothing to log unless
+    // we actually removed something. cleanupStaleLock does not
+    // currently report which case; if we care, extend the return type.
+  }
+
   await fastify.listen({ port: PORT, host: "127.0.0.1" });
   // Rebuild the allow-list against the final port (in case it differs from the
   // requested PORT in some edge case).

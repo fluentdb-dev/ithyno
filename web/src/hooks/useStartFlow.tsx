@@ -32,6 +32,8 @@ export function useStartFlow() {
   // is always true regardless of the server's /api/health probe.
   const terminalAvailable = isVsCodeShell() ? true : storeTerminalAvailable;
   const pushToast = useStore((s) => s.pushToast);
+  const parallelExecution = useStore((s) => s.parallelExecution);
+  const lock = useStore((s) => s.state?.lock ?? null);
 
   const [applyPending, setApplyPending] = useState<{ change: Change } | null>(null);
 
@@ -43,7 +45,18 @@ export function useStartFlow() {
       );
       return;
     }
-    console.log("[start]", change.id, "opening apply modal");
+    // Lock-based gate (post collapse-jobregistry-and-add-semaphore). Only
+    // gates when `parallelExecution: false`. When the lock is held by a
+    // different change, block; when held by THIS change, allow (the
+    // dispatcher's restart-recovery handles the attach).
+    if (parallelExecution === false && lock && lock.change !== change.id) {
+      pushToast(
+        "error",
+        `Change ${lock.change} is currently running. Merge or discard it first.`,
+      );
+      return;
+    }
+    console.log("[start]", change.id, "opening dispatch modal");
     setApplyPending({ change });
   };
 

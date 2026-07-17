@@ -8,6 +8,17 @@ export type WorkspaceState = {
   changes: Change[];
   archive: ChangeSummary[];
   gitStatus: GitStatus;
+  /** `.worktrees/.lock` state — null when no lock is held. Consumed by
+   *  the Start button to gate when `parallelExecution: false` and the
+   *  lock is held by a different change. Landed by
+   *  collapse-jobregistry-and-add-semaphore. */
+  lock: WorktreeLock | null;
+};
+
+export type WorktreeLock = {
+  change: string;
+  acquiredAt: string;
+  pid: number | null;
 };
 
 export type GitStatus =
@@ -47,6 +58,15 @@ export type Change = {
   /** Question surfaced from `needs-human.md` and shown on the Kanban
    *  card head while `phase === "needs-human"`. */
   needsHumanQuestion?: string;
+  /** Populated when `.worktrees/<id>/` exists on disk. Presence drives
+   *  Kanban's IN-PROGRESS placement (collapse-jobregistry-and-add-
+   *  semaphore). `tasksProgress` reflects the worktree's own tasks.md,
+   *  which typically differs from `progress` (the main tree copy). */
+  worktree?: {
+    path: string;
+    branch: string;
+    tasksProgress: Progress;
+  };
 };
 
 export type ChangeSummary = {

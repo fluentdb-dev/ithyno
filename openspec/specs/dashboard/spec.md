@@ -1550,6 +1550,8 @@ All other execution concerns (which CLI to spawn, whether to create
 a worktree, what branch to commit on) are downstream of the
 dispatcher and NOT the UI's responsibility.
 
+> ⚠️ **PENDING MODIFIED** by [collapse-jobregistry-and-add-semaphore](../../changes/collapse-jobregistry-and-add-semaphore/): lock-based gate 追加中 (parallelExecution=false 時に `.worktrees/.lock` を read してもう 1 change が active なら Start 無効化).
+
 #### Scenario: Start injects dispatch invocation
 - **GIVEN** the embedded terminal is available
 - **WHEN** the user clicks Start on a change
@@ -1689,6 +1691,8 @@ code↔review loop. On non-convergence the dispatcher escalates via
 The dispatcher SHALL NOT bypass the exit code alone for review/verify
 — both Copilot and Antigravity return exit code 0 even on semantic
 failure; only `review.md` is the contract.
+
+> ⚠️ **PENDING MODIFIED** by [collapse-jobregistry-and-add-semaphore](../../changes/collapse-jobregistry-and-add-semaphore/): `.worktrees/.lock` semaphore の acquire (step 4 前) / release (verify pass or escalate 時) ロジックを追加中. parallelExecution=false 時の single-concurrency gate.
 
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/ithy-opsx/dispatch.md`
