@@ -19,6 +19,7 @@ const OVERLAY_HEIGHT = 32;
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu } from './menu';
+import { ensureAgmsgInstalled } from './agmsg-installer';
 
 const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
@@ -318,6 +319,7 @@ if (!gotLock) {
 
   void app.whenReady().then(async () => {
     refreshMenu();
+    await ensureAgmsgInstalled();
     const project = await ensureProject();
     if (!project) {
       app.quit();

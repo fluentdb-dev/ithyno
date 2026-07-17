@@ -54,6 +54,10 @@
       {
         "from": "../package.json",
         "to": "app/package.json"
+      },
+      {
+        "from": "../vendor/agmsg",
+        "to": "app/vendor/agmsg"
       }
     ],
     "mac": {
