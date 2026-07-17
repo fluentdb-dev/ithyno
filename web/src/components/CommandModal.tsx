@@ -159,7 +159,7 @@ export function CommandModal({
               }}
             />
             {!inputValid && input.length > 0 && (
-              <small className="field-error">Invalid input for this mode</small>
+              <small className="form-field-error">Invalid input for this mode</small>
             )}
           </label>
         )}

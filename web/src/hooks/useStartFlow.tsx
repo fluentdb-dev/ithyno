@@ -5,6 +5,7 @@ import { injectPty } from "../api";
 import type { Change } from "../types";
 import { CommandModal } from "../components/CommandModal";
 import { isVsCodeShell } from "../runtime/shell";
+import { ERR } from "../lib/errorMessages";
 
 /**
  * Unified Start-implementation flow, shared between Kanban Start button and
@@ -39,10 +40,7 @@ export function useStartFlow() {
 
   const startImplementation = async (change: Change) => {
     if (!terminalAvailable) {
-      pushToast(
-        "error",
-        "No embedded terminal — open a change view to spawn one.",
-      );
+      pushToast("error", ERR.NO_TERMINAL);
       return;
     }
     // Lock-based gate (post collapse-jobregistry-and-add-semaphore). Only
@@ -50,10 +48,7 @@ export function useStartFlow() {
     // different change, block; when held by THIS change, allow (the
     // dispatcher's restart-recovery handles the attach).
     if (parallelExecution === false && lock && lock.change !== change.id) {
-      pushToast(
-        "error",
-        `Change ${lock.change} is currently running. Merge or discard it first.`,
-      );
+      pushToast("error", ERR.LOCK_HELD(lock.change));
       return;
     }
     console.log("[start]", change.id, "opening dispatch modal");
@@ -63,15 +58,12 @@ export function useStartFlow() {
   const runApplyInject = async (line: string) => {
     const res = await injectPty(line, true);
     if ((res as { status?: string }).status === "ok") {
-      pushToast("info", "Sent to terminal");
+      pushToast("info", ERR.SENT_TO_TERMINAL);
       setApplyPending(null);
     } else if ((res as { status?: string }).status === "no-terminal") {
-      pushToast(
-        "error",
-        (res as { reason?: string }).reason ?? "No terminal open. Open a change view to start one.",
-      );
+      pushToast("error", (res as { reason?: string }).reason ?? ERR.NO_TERMINAL);
     } else {
-      pushToast("error", (res as { error?: string }).error ?? "Inject failed");
+      pushToast("error", (res as { error?: string }).error ?? ERR.INJECT_FAILED);
     }
   };
 

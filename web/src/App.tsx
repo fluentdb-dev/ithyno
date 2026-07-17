@@ -121,7 +121,7 @@ export function App() {
 
       <main className="content">
         {loading && <p className="empty">Loading…</p>}
-        {error && <p className="parse-error">Failed to load: {error}</p>}
+        {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
         {!loading && state && !state.exists && (
           <div className="empty-state">
             <h2>No OpenSpec project found</h2>

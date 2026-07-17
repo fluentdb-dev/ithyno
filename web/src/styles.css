@@ -589,6 +589,12 @@ a:hover {
   font-size: 13px;
 }
 
+/* Canonical inline banner for load-time / server errors (per the
+ * `Error Display Convention` — normalize-error-display).
+ * Markup: `<div className="parse-error">⚠ <message></div>` — always
+ * a div, always with the ⚠ prefix. Toast-based transient errors use
+ * `.toast.error` instead; form-field validation uses
+ * `.form-field-error`. */
 .parse-error {
   color: var(--amber);
 }
@@ -1228,18 +1234,9 @@ a:hover {
   font-size: 10px;
   font-style: italic;
 }
-.agent-config-error {
-  color: var(--danger, #b91c1c);
-  font-size: 11px;
-}
-.agent-config-server-error {
-  color: var(--danger, #b91c1c);
-  background: color-mix(in oklab, var(--danger, #b91c1c) 10%, transparent);
-  border: 1px solid color-mix(in oklab, var(--danger, #b91c1c) 40%, transparent);
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-}
+/* (Deleted `.agent-config-error` and `.agent-config-server-error` by
+ * normalize-error-display. Inline field validation now uses
+ * `.form-field-error`; modal server error banners use `.parse-error`.) */
 
 /* Manager section (add-agents-tab-manager-section) */
 .manager-section {
@@ -2278,7 +2275,11 @@ a:hover {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.field-error {
+/* Canonical form-field validation error (per the `Error Display
+ * Convention` — normalize-error-display). Replaces the pre-cleanup
+ * mix of `.field-error` (CommandModal) and `.agent-config-error`
+ * (AgentConfigModal), which rendered nearly identical output. */
+.form-field-error {
   display: block;
   color: var(--red);
   font-size: 11px;

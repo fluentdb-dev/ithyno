@@ -9,6 +9,7 @@ import { CommandModal } from "../components/CommandModal";
 import { TagChipList } from "../components/TagChip";
 import { injectPty, fetchChange } from "../api";
 import { useStartFlow } from "../hooks/useStartFlow";
+import { ERR } from "../lib/errorMessages";
 import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
 import type { Change as ChangeType } from "../types";
 import { isVsCodeShell } from "../runtime/shell";
@@ -112,12 +113,12 @@ export function ChangeDetail() {
   const runInject = async (line: string) => {
     const res = await injectPty(line, true);
     if ((res as any).status === "ok") {
-      pushToast("info", "Sent to terminal");
+      pushToast("info", ERR.SENT_TO_TERMINAL);
       setPendingAction(null);
     } else if ((res as any).status === "no-terminal") {
-      pushToast("error", (res as any).reason ?? "No terminal open. Open the terminal pane to start one.");
+      pushToast("error", (res as any).reason ?? ERR.NO_TERMINAL);
     } else {
-      pushToast("error", (res as any).error ?? "Inject failed");
+      pushToast("error", (res as any).error ?? ERR.INJECT_FAILED);
     }
   };
 

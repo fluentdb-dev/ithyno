@@ -10,6 +10,7 @@ import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
 import { ParallelStartLauncher } from "./ParallelStartLauncher";
+import { ERR } from "../lib/errorMessages";
 
 /**
  * Kanban is a *state monitor* — it shows a classic three-column
@@ -174,9 +175,9 @@ export function KanbanBoard({
       }
       setPending(null);
     } else if ((res as any).status === "no-terminal") {
-      pushToast("error", (res as any).reason ?? "No terminal open. Open a change view to start one.");
+      pushToast("error", (res as any).reason ?? ERR.NO_TERMINAL);
     } else {
-      pushToast("error", (res as any).error ?? "Inject failed");
+      pushToast("error", (res as any).error ?? ERR.INJECT_FAILED);
     }
   };
 

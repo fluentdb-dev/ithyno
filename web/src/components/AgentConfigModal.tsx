@@ -258,7 +258,7 @@ export function AgentConfigModal({
                 })}
               </div>
               {fieldErrors.roles && (
-                <span className="agent-config-error">{fieldErrors.roles}</span>
+                <span className="form-field-error">{fieldErrors.roles}</span>
               )}
             </fieldset>
           )}
@@ -312,7 +312,7 @@ export function AgentConfigModal({
               placeholder="e.g. claude"
             />
             {fieldErrors.command && (
-              <span className="agent-config-error">{fieldErrors.command}</span>
+              <span className="form-field-error">{fieldErrors.command}</span>
             )}
           </label>
           <label className="agent-config-field">
@@ -400,7 +400,7 @@ export function AgentConfigModal({
 
           </div>{/* /.agent-config-body — scrollable region ends */}
 
-          {error && <div className="agent-config-server-error">⚠ {error}</div>}
+          {error && <div className="parse-error">⚠ {error}</div>}
 
           <div className="modal-actions">
             <button type="button" className="ghost" onClick={onCancel} disabled={submitting}>
