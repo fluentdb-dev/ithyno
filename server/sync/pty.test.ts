@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
-import { ptyStartup } from "./pty.js";
+import { _setTmuxCacheForTest, ptyStartup } from "./pty.js";
 
 /**
  * Priority chain for the Terminal panel's PTY startup command
@@ -16,17 +16,24 @@ import { ptyStartup } from "./pty.js";
 
 let dir: string;
 let savedEnv: string | undefined;
+let savedSession: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "ithyno-pty-test-"));
   savedEnv = process.env.ITHYNO_TERMINAL_STARTUP;
+  savedSession = process.env.ITHYNO_TMUX_SESSION;
   delete process.env.ITHYNO_TERMINAL_STARTUP;
+  delete process.env.ITHYNO_TMUX_SESSION;
+  _setTmuxCacheForTest(null);
 });
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
   if (savedEnv !== undefined) process.env.ITHYNO_TERMINAL_STARTUP = savedEnv;
   else delete process.env.ITHYNO_TERMINAL_STARTUP;
+  if (savedSession !== undefined) process.env.ITHYNO_TMUX_SESSION = savedSession;
+  else delete process.env.ITHYNO_TMUX_SESSION;
+  _setTmuxCacheForTest(null);
 });
 
 async function loadWith(yaml: string): Promise<AgentRegistry> {
@@ -117,5 +124,112 @@ describe("ptyStartup — priority chain", () => {
     );
     // "my project" contains a space → single-quoted; --project is fine unquoted.
     expect(ptyStartup(reg).startup).toBe("claude --project 'my project'");
+  });
+});
+
+describe("ptyStartup — tmux wrap (wrap-embedded-pty-in-tmux)", () => {
+  it("agmsg absent → direct spawn unchanged (regression lock)", async () => {
+    _setTmuxCacheForTest(true); // tmux available but no agmsg → still no wrap
+    const reg = await loadWith(
+      `agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({ startup: "claude --continue" });
+  });
+
+  it("agmsg present + tmux available → wraps in tmux new-session -A -s ithyno --", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({
+      startup: "tmux new-session -A -s ithyno -- claude --continue",
+    });
+  });
+
+  it("agmsg present + tmux missing → fallback banner; initialInput suppressed", async () => {
+    _setTmuxCacheForTest(false);
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+    initialInput: /ithy-opsx:dispatch
+`,
+    );
+    const r = ptyStartup(reg);
+    expect(r.startup).toMatch(/^printf '/);
+    expect(r.startup).toMatch(/agmsg is configured/);
+    expect(r.startup).toMatch(/tmux was not found on PATH/);
+    expect(r.startup).toMatch(/brew install tmux/);
+    expect(r.initialInput).toBeUndefined();
+  });
+
+  it("ITHYNO_TMUX_SESSION env overrides the session name", async () => {
+    _setTmuxCacheForTest(true);
+    process.env.ITHYNO_TMUX_SESSION = "proj-a";
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg).startup).toBe(
+      "tmux new-session -A -s proj-a -- claude --continue",
+    );
+  });
+
+  it("shell-quotes manager args so tmux sees them as separate tokens (agmsg wrap)", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: ["--project", "my project"]
+`,
+    );
+    expect(ptyStartup(reg).startup).toBe(
+      "tmux new-session -A -s ithyno -- claude --project 'my project'",
+    );
+  });
+
+  it("passes initialInput through when agmsg wraps (tmux forwards stdin to pane 0)", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+    initialInput: /ithy-opsx:dispatch
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({
+      startup: "tmux new-session -A -s ithyno -- claude --continue",
+      initialInput: "/ithy-opsx:dispatch",
+    });
   });
 });
