@@ -10,16 +10,17 @@ import { isVsCodeShell } from "../runtime/shell";
  * Unified Start-implementation flow, shared between Kanban Start button and
  * the ChangeDetail Start button.
  *
- * Landed by wire-role-to-cli-in-manager-skill (Phase 1 — UI walk-back):
- * the UI no longer makes execution decisions. It always injects
- * `/opsx:apply <change-id>` into the embedded terminal. Worktree
- * spawn, per-role agent selection, and `parallelExecution` consumption
- * are moved to the skill layer (Phase 2, deferred).
+ * Landed by redesign-skill-namespace-and-dispatch: the UI injects
+ * `/ithy-opsx:dispatch <change-id>` into the embedded terminal. The
+ * persistent Manager (a `claude` live-shell session) sees the input
+ * and evaluates the dispatch skill, which reads agents.yaml, sets up
+ * a worktree if needed, and runs the code → review → verify loop by
+ * dispatching workers per the role→CLI mapping.
  *
  * The UI does NOT gate on `agents.yaml` contents. When agents.yaml is
- * empty or lacks a code-role entry, the skill falls back to Manager;
- * Manager itself uses built-in defaults when no manager entry is
- * declared. All that decision-making lives in the skill layer.
+ * empty or lacks a code-role entry, the dispatcher falls back to
+ * Manager self-dispatch. All execution decisions live in the skill
+ * layer.
  *
  * The only prerequisite failure surfaced here is embedded-terminal
  * availability — there's literally no place to inject into otherwise.
@@ -70,9 +71,9 @@ export function useStartFlow() {
     <>
       {applyPending && (
         <CommandModal
-          title={`Apply this change`}
-          build={() => `/opsx:apply ${applyPending.change.id}`}
-          submitLabel="Send /opsx:apply"
+          title={`Dispatch this change`}
+          build={() => `/ithy-opsx:dispatch ${applyPending.change.id}`}
+          submitLabel="Send /ithy-opsx:dispatch"
           onCancel={() => setApplyPending(null)}
           onSubmit={runApplyInject}
         />

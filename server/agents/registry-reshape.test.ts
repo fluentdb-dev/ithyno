@@ -226,7 +226,7 @@ describe("resolvePromptForRole — 2-tier resolution (agent → built-in)", () =
     );
     const def = reg.find("worker")!;
     const resolved = resolvePromptForRole(def, "verify");
-    expect(resolved).toBe("/opsx:verify ${change_id}");
+    expect(resolved).toBe("/ithy-opsx:verify ${change_id}");
   });
 
   it("undefined for a role with no built-in default and no override", async () => {

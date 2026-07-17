@@ -84,13 +84,20 @@ const KNOWN_AGENT_KEYS = new Set([
 ]);
 
 /** Built-in per-role prompt defaults. When the agent does not declare
- *  `prompts.<role>`, dispatch falls back to these. */
+ *  `prompts.<role>`, dispatch falls back to these.
+ *
+ *  Post redesign-skill-namespace-and-dispatch: review / verify / manager
+ *  live under the `ithy-opsx:` namespace because they touch ithyno's
+ *  worktree convention, `review.md` artifact schema, and phase API.
+ *  Only `code` (== `/opsx:apply`) and `propose` stay under `opsx:` as
+ *  pure OpenSpec worker prompts. */
 export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
+  propose: "/opsx:propose ${change_id}",
   code: "/opsx:apply ${change_id}",
   coder: "/opsx:apply ${change_id}", // deprecated alias for "code"
-  review: "/opsx:review ${change_id}",
-  verify: "/opsx:verify ${change_id}",
-  manager: "/opsx:manage",
+  review: "/ithy-opsx:review ${change_id}",
+  verify: "/ithy-opsx:verify ${change_id}",
+  manager: "/ithy-opsx:dispatch",
 };
 
 function validatePromptsMap(

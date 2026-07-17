@@ -1,15 +1,15 @@
 ---
-name: "OPSX: Verify"
+name: "ITHY-OPSX: Verify"
 description: Run npm test / typecheck / build in fail-fast order and write review.md with the outcome
 category: Workflow
-tags: [workflow, verify, worker]
+tags: [workflow, verify, worker, ithy-opsx]
 argument-hint: "<change-id>"
 ---
 
 Verify that the current change's worktree passes the Node build chain
 and write a structured verdict to `openspec/changes/<change-id>/review.md`.
-When invoked by the Manager loop, the verdict drives the final
-`reviewed → done` phase transition.
+When invoked by the dispatcher (`/ithy-opsx:dispatch`), the verdict
+drives the final `reviewed → done` phase transition.
 
 **Input**: `$ARGUMENTS` is the change id. The worktree at
 `.worktrees/<change-id>/` must exist with the code worker's commit
@@ -94,8 +94,8 @@ projects need a different verify template — see
    ```
    ```
 
-   The `message` contains the failing output verbatim so the Manager
-   can pass it as prompt suffix to the next `/opsx:code` invocation.
+   The `message` contains the failing output verbatim so the dispatcher
+   can pass it as prompt suffix to the next `/opsx:apply` invocation.
 
 5. **Report to the caller**
 
@@ -110,8 +110,11 @@ projects need a different verify template — see
 - **Do NOT skip steps**. Fail-fast means STOP after the first failure,
   not skip past a failing test suite.
 - **Do NOT touch phase or emit any dashboard events from here**. This
-  is a pure verification worker; phase transitions are the Manager's
+  is a pure verification worker; phase transitions are the dispatcher's
   decision.
+- **`review.md` is the sole contract**. The dispatcher parses only
+  the artifact frontmatter — stdout is ignored. Write the verdict
+  to the file, not to stdout.
 - **Node assumption**: on non-Node projects (Python, Rust, ...) this
   template produces misleading results. Until per-project verify
   commands land, non-Node changes should NOT be verified via this

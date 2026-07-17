@@ -4,15 +4,15 @@ import { useStore } from "../store";
 import { setParallelExecution } from "../api";
 
 /**
- * Settings tab. Landed by add-parallel-execution-config.
+ * Settings tab. Landed by add-parallel-execution-config; updated for
+ * redesign-skill-namespace-and-dispatch.
  *
- * Currently exposes the top-level `parallelExecution` boolean from
- * agents.yaml. Off (default) = Start dispatches via terminal inject
- * (`/opsx:apply <id>`). On = Start spawns a headless agent in a
- * `.worktrees/<id>/` worktree so multiple changes can run in parallel.
- *
- * The Start flow silently follows this flag; per-change
- * `proposal.execution` overrides still win when set.
+ * Exposes the top-level `parallelExecution` boolean from agents.yaml.
+ * The Kanban Start button always injects `/ithy-opsx:dispatch <id>`
+ * into the terminal — the dispatcher skill reads this flag and either
+ * runs workers in the main tree (`false`) or creates a `.worktrees/
+ * <id>/` isolated tree (`true`). Per-change `proposal.execution`
+ * overrides still win when set.
  */
 export function Settings() {
   const parallelExecution = useStore((s) => s.parallelExecution);
@@ -52,11 +52,12 @@ export function Settings() {
           <span>
             <strong>Parallel execution</strong>
             <p className="muted">
-              When on, <code>Start</code> spawns headless agents in isolated
-              worktrees under <code>.worktrees/&lt;change&gt;/</code>, so
-              multiple changes can run at once. When off, <code>Start</code>{" "}
-              injects <code>/opsx:apply &lt;change&gt;</code> into the
-              embedded terminal for interactive work. Per-change{" "}
+              When on, the dispatcher (<code>/ithy-opsx:dispatch</code>) spawns
+              workers inside an isolated worktree under{" "}
+              <code>.worktrees/&lt;change&gt;/</code>, so multiple changes can
+              run at once. When off, workers run in the main tree — Start
+              still injects <code>/ithy-opsx:dispatch &lt;change&gt;</code> into
+              the embedded terminal. Per-change{" "}
               <code>proposal.execution</code> overrides always win.
             </p>
           </span>

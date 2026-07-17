@@ -926,6 +926,8 @@ resulting frontmatter regardless of which CLI executed the worker.
 > post-R1 spec-vs-reality gap); skill file rewrite lands in a
 > follow-up change.
 
+> ⚠️ **PENDING MODIFIED** by [redesign-skill-namespace-and-dispatch](../../changes/redesign-skill-namespace-and-dispatch/): `/opsx:review` → `/ithy-opsx:review` に namespace 移動 + sole-contract 節追加中.
+
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/review.md`
 - **WHEN** a Claude Code session evaluates the slash command
@@ -1043,6 +1045,8 @@ and Antigravity return exit code 0 on semantic failure):
 > **Phase 2 requirement** — spec text captured now (also fixes the
 > post-R1 spec-vs-reality gap); skill file rewrite lands in a
 > follow-up change.
+
+> ⚠️ **PENDING RENAMED + MODIFIED** by [redesign-skill-namespace-and-dispatch](../../changes/redesign-skill-namespace-and-dispatch/): Requirement 名を `Dispatch Slash Command` に rename、 `/opsx:manage` → `/ithy-opsx:dispatch` 移動、code stage は artifact 契約なしに簡素化、per-change override 対応、worktree bootstrap 責務を dispatch に集約中.
 
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/manage.md`
@@ -1641,6 +1645,8 @@ declared. All that decision-making lives in the skill layer.
 All other execution concerns (which CLI to spawn, whether to create a
 worktree, what branch to commit on) are downstream of the skill and
 NOT the UI's responsibility.
+
+> ⚠️ **PENDING MODIFIED** by [redesign-skill-namespace-and-dispatch](../../changes/redesign-skill-namespace-and-dispatch/): inject 内容を `/opsx:apply <id>` → `/ithy-opsx:dispatch <id>` に変更中.
 
 #### Scenario: Start injects skill invocation
 - **GIVEN** the embedded terminal is available

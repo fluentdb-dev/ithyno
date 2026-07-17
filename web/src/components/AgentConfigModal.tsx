@@ -20,13 +20,18 @@ import type {
  * include `manager` in `roles`. Manager roles force `mode: live-shell`.
  */
 
-const ROLE_OPTIONS = ["code", "review", "verify", "manager", "other"] as const;
+const ROLE_OPTIONS = ["propose", "code", "review", "verify", "manager", "other"] as const;
 
+// Client-side mirror of server/agents/registry.ts BUILT_IN_ROLE_PROMPTS.
+// Keep in sync — this is only shown in the modal as a placeholder /
+// preview; the server's version is what actually kicks in when the
+// agent has no `prompts.<role>` entry.
 const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
+  propose: "/opsx:propose ${change_id}",
   code: "/opsx:apply ${change_id}",
-  review: "/opsx:review ${change_id}",
-  verify: "/opsx:verify ${change_id}",
-  manager: "/opsx:manage",
+  review: "/ithy-opsx:review ${change_id}",
+  verify: "/ithy-opsx:verify ${change_id}",
+  manager: "/ithy-opsx:dispatch",
 };
 
 type Props = {

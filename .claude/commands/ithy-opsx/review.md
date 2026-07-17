@@ -1,14 +1,14 @@
 ---
-name: "OPSX: Review"
+name: "ITHY-OPSX: Review"
 description: Review a change's proposal, tasks, spec, and worktree diff; write review.md with a structured verdict
 category: Workflow
-tags: [workflow, review, worker]
+tags: [workflow, review, worker, ithy-opsx]
 argument-hint: "<change-id>"
 ---
 
 Review the specified OpenSpec change and write a structured verdict to
-`openspec/changes/<change-id>/review.md`. When invoked by the Manager
-loop (via `/opsx:manage`), the verdict flows back and drives the
+`openspec/changes/<change-id>/review.md`. When invoked by the dispatcher
+(via `/ithy-opsx:dispatch`), the verdict flows back and drives the
 next phase transition.
 
 **Input**: `$ARGUMENTS` is the change id. The worktree at
@@ -44,8 +44,8 @@ exist with the code worker's commit already landed.
    - Diff realizes the "What Changes" section of `proposal.md` (nothing
      missing, nothing surplus)
    - Tests covering the intended behavior exist (updated or new).
-     `/opsx:verify` runs actual tests separately — you don't run them
-     here.
+     `/ithy-opsx:verify` runs actual tests separately — you don't run
+     them here.
    - No blocking issues: bugs, spec violations, security concerns,
      backward-incompatible surprises, obvious type or logic errors
 
@@ -83,7 +83,7 @@ exist with the code worker's commit already landed.
      `file` and `line` are optional.
    - `summary` — optional one-line description
 
-   Non-conforming frontmatter fails the Manager's parser; keep it
+   Non-conforming frontmatter fails the dispatcher's parser; keep it
    strict.
 
 6. **Do not modify the change's code**
@@ -100,10 +100,16 @@ exist with the code worker's commit already landed.
 - The rubric is deliberately strict: prefer `needs-rework` when in
   doubt about a specific finding. False-positives waste one iteration;
   false-passes ship bugs.
-- Don't run tests here. `/opsx:verify` does that separately.
+- Don't run tests here. `/ithy-opsx:verify` does that separately.
 - If proposal / tasks / specs are unreadable (missing files, YAML
   parse errors), write `review.md` with `verdict: needs-rework` and a
   `severity: high` finding explaining what could not be read.
-- The findings list becomes the next `/opsx:code` invocation's
+- The findings list becomes the next `/opsx:apply` invocation's
   prompt suffix — keep each `message` actionable (`"Off-by-one at
   line 42; change <= to <"`) rather than diagnostic-only (`"wrong"`).
+- **`review.md` is the sole contract**. The dispatcher never reads
+  your stdout — it parses the frontmatter of the artifact file only.
+  If you fail to write `review.md`, the dispatcher escalates with
+  `review returned no artifact` regardless of what you printed. Do
+  NOT emit the verdict on stdout expecting the caller to pick it
+  up; write it to the file.

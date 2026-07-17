@@ -268,7 +268,7 @@ export function ChangeDetail() {
                   console.error("[start] unhandled:", err);
                 });
               }}
-              title="Start — opens Apply modal to inject /opsx:apply into the terminal"
+              title="Start — opens modal to inject /ithy-opsx:dispatch into the terminal"
             >
               Start
             </button>
