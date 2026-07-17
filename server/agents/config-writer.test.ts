@@ -115,6 +115,26 @@ describe("applyAgentConfigPayload — upsert", () => {
     expect(doc.customTopKey).toBe("keep-me");
   });
 
+  it("preserves the top-level agmsg block through upsert (add-agmsg-config-block)", async () => {
+    await seed(
+      [
+        "agmsg:",
+        "  team: alpha",
+        "  storage: .worktrees/.agmsg.sqlite",
+        "agents: []",
+        "",
+      ].join("\n"),
+    );
+    const res = await applyAgentConfigPayload(dir, legacyClaude);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.agmsg).toEqual({
+      team: "alpha",
+      storage: ".worktrees/.agmsg.sqlite",
+    });
+    expect((doc.agents as unknown[]).length).toBe(1);
+  });
+
   // "supports the runtime-backed shape" — removed by
   // revert-runtime-abstraction (R3). Runtime block + agent runtime
   // reference are no longer supported.

@@ -58,12 +58,28 @@ export type AgentDef = {
   prompt?: string;
 };
 
+/** Top-level `agmsg` config block. Optional in agents.yaml — absence
+ *  means agmsg is not configured, which is the default. Landed by
+ *  add-agmsg-config-block. Runtime spawn / dispatcher routing land
+ *  in follow-up changes; this type is metadata-only for P1. */
+export type AgmsgConfig = {
+  team: string;
+  storage?: string;
+};
+
 export type AgentConfig =
-  | { ok: true; agents: AgentDef[]; parallelExecution: boolean; warnings: string[] }
+  | {
+      ok: true;
+      agents: AgentDef[];
+      parallelExecution: boolean;
+      agmsg: AgmsgConfig | null;
+      warnings: string[];
+    }
   | {
       ok: false;
       agents: AgentDef[]; // last-known-good
       parallelExecution: boolean; // last-known-good
+      agmsg: AgmsgConfig | null; // last-known-good
       warnings: string[];
       error: string;
     };
@@ -339,6 +355,32 @@ function validateParallelExecution(raw: unknown): boolean {
 }
 
 /**
+ * Validate top-level `agmsg` block. Absent → null (agmsg not
+ * configured; default). When present, `team` is required and
+ * non-empty. Landed by add-agmsg-config-block.
+ */
+function validateAgmsg(raw: unknown): AgmsgConfig | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("agmsg must be an object");
+  }
+  const o = raw as Record<string, unknown>;
+  if (typeof o.team !== "string" || o.team.length === 0) {
+    throw new Error("agmsg.team is required when the agmsg block is present");
+  }
+  if (o.storage !== undefined && o.storage !== null) {
+    if (typeof o.storage !== "string") {
+      throw new Error("agmsg.storage must be a string");
+    }
+  }
+  const out: AgmsgConfig = { team: o.team };
+  if (typeof o.storage === "string" && o.storage.length > 0) {
+    out.storage = o.storage;
+  }
+  return out;
+}
+
+/**
  * Resolve a prompt for a given (agent, role) pair using the 3-tier chain:
  * agent.prompts[role] → runtime.prompts[role] → built-in default.
  * Returns undefined only for unknown roles with no override at any level
@@ -360,6 +402,7 @@ export class AgentRegistry {
     ok: true,
     agents: [],
     parallelExecution: false,
+    agmsg: null,
     warnings: [],
   };
   private projectRoot: string;
@@ -372,7 +415,13 @@ export class AgentRegistry {
   async load(): Promise<void> {
     const path = join(this.projectRoot, "agents.yaml");
     if (!existsSync(path)) {
-      this.cache = { ok: true, agents: [], parallelExecution: false, warnings: [] };
+      this.cache = {
+        ok: true,
+        agents: [],
+        parallelExecution: false,
+        agmsg: null,
+        warnings: [],
+      };
       return;
     }
     try {
@@ -385,16 +434,22 @@ export class AgentRegistry {
           ? (parsed as Record<string, unknown>).parallelExecution
           : undefined,
       );
+      const agmsg = validateAgmsg(
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).agmsg
+          : undefined,
+      );
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[registry] ${w}`);
       }
-      this.cache = { ok: true, agents, parallelExecution, warnings };
+      this.cache = { ok: true, agents, parallelExecution, agmsg, warnings };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.cache = {
         ok: false,
         agents: this.cache.agents,
         parallelExecution: this.cache.parallelExecution,
+        agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
         error: msg,
       };
@@ -442,6 +497,7 @@ export class AgentRegistry {
     error?: string;
     agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
     parallelExecution: boolean;
+    agmsg: AgmsgConfig | null;
     warnings: string[];
   } {
     const sanitized = this.cache.agents.map(({ env, ...rest }) => ({
@@ -454,6 +510,7 @@ export class AgentRegistry {
         error: this.cache.error,
         agents: sanitized,
         parallelExecution: this.cache.parallelExecution,
+        agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
       };
     }
@@ -461,12 +518,20 @@ export class AgentRegistry {
       ok: true,
       agents: sanitized,
       parallelExecution: this.cache.parallelExecution,
+      agmsg: this.cache.agmsg,
       warnings: this.cache.warnings,
     };
   }
 
   find(name: string): AgentDef | null {
     return this.cache.agents.find((a) => a.name === name) ?? null;
+  }
+
+  /** The parsed top-level `agmsg` block, or null when not configured.
+   *  Consumers use this to decide whether to spawn tmux / agmsg
+   *  runtime pieces (in follow-up changes). */
+  agmsg(): AgmsgConfig | null {
+    return this.cache.agmsg;
   }
 
   /**

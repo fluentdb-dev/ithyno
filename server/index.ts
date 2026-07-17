@@ -114,6 +114,7 @@ type ServerEvent =
       error?: string;
       agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
       parallelExecution: boolean;
+      agmsg: import("./agents/registry.js").AgmsgConfig | null;
       warnings: string[];
     };
 
@@ -233,6 +234,7 @@ void agentRegistry.startWatching(() => {
       error: cfg.error,
       agents: cfg.agents,
       parallelExecution: cfg.parallelExecution,
+      agmsg: cfg.agmsg,
       warnings: cfg.warnings,
     });
   }, 100);

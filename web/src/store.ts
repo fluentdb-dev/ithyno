@@ -64,6 +64,10 @@ type Store = {
    *  flow's mode selection (worktree if true, terminal inject if false).
    *  Landed by add-parallel-execution-config. */
   parallelExecution: boolean;
+  /** Top-level `agmsg` block from agents.yaml, or null when absent
+   *  (default). Landed by add-agmsg-config-block. Metadata-only in P1;
+   *  consumers surface it only for future features. */
+  agmsg: import("./types").AgmsgConfig | null;
   /** Resolved Manager status — declared entry, running fallback, or
    *  idle (no terminal, no declaration). Null before the first fetch.
    *  Landed by add-agents-tab-manager-section. */
@@ -173,6 +177,7 @@ export const useStore = create<Store>((set, get) => ({
   agents: [],
   agentConfigError: null,
   parallelExecution: false,
+  agmsg: null,
   managerStatus: null,
   managerStatusError: null,
   jobs: {},
@@ -187,6 +192,7 @@ export const useStore = create<Store>((set, get) => ({
       set({
         agents: cfg.agents,
         parallelExecution: cfg.parallelExecution,
+        agmsg: cfg.agmsg,
         agentConfigError: cfg.ok ? null : cfg.error ?? "config error",
       });
     } catch (err) {
@@ -480,6 +486,7 @@ export const useStore = create<Store>((set, get) => ({
         set({
           agents: msg.agents,
           parallelExecution: msg.parallelExecution,
+          agmsg: msg.agmsg,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
         // Manager section is driven by `managerStatus` (a separate

@@ -23,6 +23,14 @@ export type WorktreeLock = {
   pid: number | null;
 };
 
+/** Top-level `agmsg` block from agents.yaml, mirrored to clients via
+ *  `GET /api/agents/config` and the `agents-updated` WS event. Landed
+ *  by add-agmsg-config-block. Metadata-only in P1. */
+export type AgmsgConfig = {
+  team: string;
+  storage?: string;
+};
+
 export type GitStatus =
   | { isRepo: true; root: string; headBranch: string | null; hasCommits: boolean }
   | { isRepo: false; reason?: "git-missing" };

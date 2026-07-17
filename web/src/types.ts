@@ -239,6 +239,15 @@ export type AgentConfigResponse = {
   error?: string;
   agents: AgentPublic[];
   parallelExecution: boolean;
+  agmsg: AgmsgConfig | null;
+};
+
+/** Top-level `agmsg` block from agents.yaml, mirrored via
+ *  `GET /api/agents/config` and the `agents-updated` WS event.
+ *  Landed by add-agmsg-config-block. */
+export type AgmsgConfig = {
+  team: string;
+  storage?: string;
 };
 
 export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";

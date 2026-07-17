@@ -268,3 +268,108 @@ agents:
     if (!cfg.ok) expect(cfg.error).toMatch(/parallelExecution/);
   });
 });
+
+describe("AgentRegistry agmsg block (add-agmsg-config-block)", () => {
+  it("defaults agmsg to null when the block is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toBeNull();
+    expect(reg.agmsg()).toBeNull();
+  });
+
+  it("accepts a block with just team and populates AgmsgConfig", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toEqual({ team: "alpha" });
+    expect(reg.agmsg()).toEqual({ team: "alpha" });
+  });
+
+  it("accepts team + storage and surfaces both fields", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+  storage: .worktrees/.agmsg.sqlite
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toEqual({
+      team: "alpha",
+      storage: ".worktrees/.agmsg.sqlite",
+    });
+  });
+
+  it("rejects agmsg block missing team", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  storage: .worktrees/.agmsg.sqlite
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(
+        /agmsg\.team is required when the agmsg block is present/,
+      );
+    }
+  });
+
+  it("rejects agmsg block with empty team", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: ""
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(
+        /agmsg\.team is required when the agmsg block is present/,
+      );
+    }
+  });
+
+  it("rejects non-string storage", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+  storage: 42
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/agmsg\.storage/);
+  });
+});
