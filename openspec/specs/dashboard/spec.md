@@ -1695,8 +1695,6 @@ Claude does not have.
 
 ### Requirement: Dispatch Slash Command
 
-> ⚠️ **PENDING MODIFIED** by [harden-dispatch-from-round3](../../changes/harden-dispatch-from-round3/): Manager owns the commit (worker MUST NOT auto-commit); Manager registration guard added at dispatch start; Failure recovery ladder defines despawn → leave + tmux kill-pane fallback and forbids bare `reset.sh`.
-
 The `/ithy-opsx:dispatch <change-id>` slash command SHALL exist as a
 prompt template at `.claude/commands/ithy-opsx/dispatch.md`. It is
 evaluated by the persistent Manager (a `claude` live-shell session
@@ -1719,13 +1717,31 @@ The skill SHALL:
    `Worktree Concurrency Semaphore` requirement.** If the lock is
    held by another change whose worktree still exists, escalate
    without creating a worktree.
-4. Advance the change through `proposed → coded → reviewed → done`
+4. **Manager registration guard.** When `agents.yaml` contains a valid
+   `agmsg:` block, the skill SHALL idempotently register Manager in
+   the team at dispatch start (before any worker spawn):
+
+   ```bash
+   ~/.agents/skills/agmsg/scripts/join.sh "$AGMSG_TEAM" manager \
+     claude-code "$(pwd)"
+   ```
+
+   `join.sh` is idempotent — safe to invoke when Manager is already
+   registered. This closes the class of failure where prior cleanup
+   operations dropped Manager's registration silently.
+
+   Additionally, before each stage's spawn (code / review / verify),
+   the skill SHALL verify Manager is still a team member via
+   `team.sh` and re-invoke `join.sh` when Manager is absent. The
+   check is cheap and defends against cross-stage drift.
+
+5. Advance the change through `proposed → coded → reviewed → done`
    by dispatching workers in stages (code → review → verify), using
    the Dispatch helper protocol below and the 3-stage success
    contract for review/verify.
-5. On verify `pass` (phase → done), release the `.worktrees/.lock`
+6. On verify `pass` (phase → done), release the `.worktrees/.lock`
    semaphore.
-6. On any escalate path, release the `.worktrees/.lock` semaphore
+7. On any escalate path, release the `.worktrees/.lock` semaphore
    before exiting.
 
 **Target artifact path**. Before dispatching, the skill SHALL
@@ -1820,6 +1836,16 @@ entry in the following priority order:
    contract when both are present, so a well-behaved worker writes
    review.md and only then sends the completion message.
 
+   **Worker MUST NOT commit.** The dispatched code worker's role is
+   apply-only. The `agents.yaml` example / default code prompt for
+   command `claude` SHALL be `/opsx:apply ${change_id}` (apply
+   only). The self-committing `/ithy-opsx:apply` variant is NOT
+   supported as a dispatched worker prompt — its interactive
+   "commit OK?" confirmation cannot be answered from an agmsg
+   pane, causing the stage to hang until the ceiling. Manager owns
+   the commit (see the code-stage judgment in the 3-stage success
+   contract below).
+
    **Iteration for Copilot workers**. When the review stage returns
    `needs-rework`, the skill iterates. For agmsg workers whose
    agmsg-type has no receive-side Monitor equivalent (currently
@@ -1856,13 +1882,19 @@ entry in the following priority order:
   `<stage> agmsg worker did not report within timeout`.
 
   On message receipt:
-  - **`S = code`** — check `git log agent/<change-id>` head vs the
-    pre-spawn head. If a new commit landed, advance phase to `coded`.
-    If the head is unchanged but the tree has uncommitted worker
-    output (staged or unstaged), Manager SHALL commit the tree on
-    the agent branch as fallback and then advance. If neither
-    condition holds (no worker output at all), escalate `code stage
-    reported done but produced no changes`.
+  - **`S = code`** — Manager SHALL check the working tree of
+    `agent/<change-id>`. If the tree has uncommitted worker output
+    (staged or unstaged), Manager SHALL commit unconditionally on
+    `agent/<change-id>` with subject `impl: <change-id>` and then
+    advance phase to `coded`. If the tree is clean AND no new
+    commit exists on `agent/<change-id>` beyond the pre-spawn
+    head, escalate `code stage reported done but produced no
+    changes`. Worker-side commits are NOT expected under this
+    contract; when the worker does commit (e.g. via a non-default
+    self-committing apply variant), Manager's tree check finds a
+    clean tree AND a new commit — this counts as success and
+    Manager's own commit step is a no-op (nothing to stage). No
+    duplicate commits.
   - **`S = review` or `S = verify`** — read
     `<TARGET_PATH>/openspec/changes/<change-id>/review.md` (the
     same absolute path the boot-prompt's artifact contract named).
@@ -1887,6 +1919,50 @@ the agmsg branch — the Manager runs in tmux pane 0 (per `Embedded
 PTY Uses tmux When Agmsg Is Configured`); its `/agmsg spawn` calls
 are what land workers in adjacent panes.
 
+**Failure recovery ladder.** When a stage fails or the dispatch
+ends (whether successfully, via escalation, or via a hung worker),
+the skill SHALL clean up worker panes and team memberships using
+the following ordered ladder. Each step is tried in order; on
+failure, fall through to the next step; escalate with a message
+naming the leaked resource only after step 3 fails.
+
+1. **Preferred — graceful despawn.**
+
+   ```bash
+   ~/.agents/skills/agmsg/scripts/despawn.sh "$AGMSG_TEAM" manager "$entry_name"
+   ```
+
+   Releases the tmux pane placement AND the team member entry in
+   one atomic operation. This is the correct path when spawn
+   recorded a placement (the normal case).
+
+2. **On despawn failure — targeted leave + kill.**
+
+   ```bash
+   ~/.agents/skills/agmsg/scripts/leave.sh "$AGMSG_TEAM" "$entry_name"
+   tmux kill-pane -t "$WORKER_PANE_ID"
+   ```
+
+   Removes the specific agent from the team AND kills the specific
+   pane. Used when despawn fails because `spawn.sh` did not
+   register a placement (e.g. the known `run/spawn.<team>__<name>`
+   first-invocation mkdir gap). Scope is exactly one agent, one
+   pane — no collateral damage.
+
+3. **NEVER — bare `reset.sh`.** The skill SHALL NOT invoke
+   `reset.sh "$path" <type>` without an `agent_id` argument in any
+   recovery path. Without `agent_id`, `reset.sh` clears every
+   agent of that type registered under that project path — which
+   can include Manager itself, silently taking down the dispatch
+   loop's own reply channel. Full-team resets are a manual
+   operator escape hatch, not a skill responsibility.
+
+   If step 2 also fails (leave.sh errors AND the pane won't die),
+   escalate with `stage <S> cleanup failed — leaked pane
+   <pane-id>, leaked team member <entry.name>` so the operator can
+   inspect manually. Do NOT silently fall through to a bare
+   `reset.sh` as a "just make it go away" catch-all.
+
 MAX_ITERATIONS remains 5 for the code↔review loop. All other
 existing behavior is retained.
 
@@ -1910,6 +1986,16 @@ existing behavior is retained.
 - **WHEN** the escalation runs
 - **THEN** `.worktrees/.lock` is deleted before exit
 
+#### Scenario: Manager registration ensured at dispatch start
+- **GIVEN** `agents.yaml` has a valid `agmsg:` block AND Manager (`manager`) is NOT currently registered in the team
+- **WHEN** the dispatcher starts for change `add-foo`
+- **THEN** the skill invokes `join.sh openspec-ui manager claude-code "$(pwd)"` before any worker spawn, and Manager appears in `team.sh openspec-ui` output when the code stage begins
+
+#### Scenario: Manager registration re-verified before each stage
+- **GIVEN** dispatch is between stages (code completed, review about to spawn) AND Manager's registration was removed by an external process
+- **WHEN** the skill enters the review stage
+- **THEN** the pre-spawn `team.sh` check finds Manager absent, `join.sh` is re-invoked, and Manager is registered again before `/agmsg spawn` fires
+
 #### Scenario: agmsg branch takes priority for live-shell workers
 - **GIVEN** `agents.yaml` has a valid `agmsg:` block AND a worker entry `{ name: peer, mode: live-shell, command: codex, roles: [review] }`
 - **AND** agmsg scripts exist at `~/.agents/skills/agmsg/scripts/send.sh`
@@ -1932,10 +2018,21 @@ existing behavior is retained.
 - **WHEN** the dispatcher reaches the stage
 - **THEN** it logs "agmsg configured but not installed locally; falling back to non-agmsg dispatch" and takes the Task tool or subprocess branch as if no `agmsg:` block were present
 
-#### Scenario: agmsg branch code stage advances on report message
-- **GIVEN** an agmsg-routed code dispatch to worker `claude`
-- **WHEN** Manager receives an inbox message `from:claude body:"stage:code status:done"` within the 15-min ceiling
-- **THEN** Manager checks `git log agent/<change-id>` — if a new commit landed, phase advances to `coded`; if not but the tree has uncommitted changes, Manager commits as fallback and advances
+#### Scenario: code stage — Manager commits worker's uncommitted output
+- **GIVEN** an agmsg-routed code dispatch to worker `claude` with the default `/opsx:apply ${change_id}` prompt (apply only)
+- **WHEN** Manager receives `from:claude body:"stage:code status:done"` within the 15-min ceiling
+- **AND** the `agent/<change-id>` working tree has uncommitted changes (worker applied but did not commit)
+- **THEN** Manager runs `git -C .worktrees/<change-id> add . && git commit -m "impl: <change-id>"`, and phase advances to `coded`
+
+#### Scenario: code stage — worker-committed tree treated as no-op
+- **GIVEN** an agmsg-routed code dispatch with a self-committing worker variant
+- **WHEN** Manager receives `stage:code status:done` and the `agent/<change-id>` tree is clean AND a new commit exists beyond the pre-spawn head
+- **THEN** Manager's commit step is a no-op (nothing to stage), no duplicate commit is created, and phase advances to `coded`
+
+#### Scenario: code stage — escalate when no changes produced
+- **GIVEN** an agmsg-routed code dispatch
+- **WHEN** Manager receives `stage:code status:done` AND the tree is clean AND no new commit exists beyond the pre-spawn head
+- **THEN** Manager escalates with `code stage reported done but produced no changes` and does NOT advance the phase
 
 #### Scenario: agmsg branch review stage advances on report + review.md
 - **GIVEN** an agmsg-routed review dispatch to worker `copilot-review`
@@ -2003,6 +2100,21 @@ existing behavior is retained.
 - **GIVEN** an agmsg-routed dispatch with worker `{ name: coder, command: claude, mode: live-shell }` that returned `verdict: needs-rework`
 - **WHEN** the dispatcher decides on the next iteration
 - **THEN** the skill MAY either fresh-spawn a new worker OR send the new prompt to the existing worker (Claude Code has Monitor, so send-based iteration is technically supported); either choice is compliant with this requirement in the current version
+
+#### Scenario: cleanup prefers despawn
+- **GIVEN** the review stage completes (pass or needs-rework) and the copilot-review worker's pane is still open
+- **WHEN** the skill runs its post-stage cleanup
+- **THEN** it invokes `despawn.sh openspec-ui manager copilot-review` FIRST; the pane closes and copilot-review is removed from the team in one operation
+
+#### Scenario: cleanup falls back to leave + kill when despawn fails
+- **GIVEN** `despawn.sh` fails because `spawn.sh` did not record a placement (first-invocation `run/` dir gap)
+- **WHEN** the skill runs its post-stage cleanup
+- **THEN** it invokes `leave.sh openspec-ui copilot-review` AND `tmux kill-pane -t <worker-pane-id>` — one specific agent, one specific pane — and Manager's registration is unaffected
+
+#### Scenario: cleanup never invokes bare reset.sh
+- **GIVEN** dispatch has escalated and is about to exit
+- **WHEN** the skill runs its final cleanup pass
+- **THEN** it does NOT invoke `reset.sh "$path" claude-code` (missing `agent_id`); if steps 1 and 2 of the recovery ladder both fail, the skill escalates with a message naming the leaked pane and team member, but does not attempt to clear the whole `(project, type)` slice
 
 ### Requirement: Kanban Placement Is Folder-Driven
 
