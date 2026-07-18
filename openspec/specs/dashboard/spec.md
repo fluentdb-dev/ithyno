@@ -1695,6 +1695,8 @@ Claude does not have.
 
 ### Requirement: Dispatch Slash Command
 
+> ⚠️ **PENDING MODIFIED** by [harden-dispatch-round5](../../changes/harden-dispatch-round5/): Portable AGMSG_TEAM extraction (no GNU-only sed); artifact contract added to subprocess + Task tool branches; Manager reads review.md at `$REVIEW_MD_PATH` in all branches.
+
 The `/ithy-opsx:dispatch <change-id>` slash command SHALL exist as a
 prompt template at `.claude/commands/ithy-opsx/dispatch.md`. It is
 evaluated by the persistent Manager (a `claude` live-shell session

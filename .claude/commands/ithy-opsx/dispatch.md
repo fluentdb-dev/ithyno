@@ -129,7 +129,11 @@ For each stage `S ∈ {code, review, verify}`:
        # explicitly (signal-stage-completion-via-agmsg-message).
        # <team> extracted from agents.yaml agmsg.team; <S> is the
        # current stage (code|review|verify).
-       AGMSG_TEAM=$(sed -n '/^agmsg:/,/^[^ ]/{s/^  team:[[:space:]]*//p}' agents.yaml | head -1)
+       AGMSG_TEAM=$(awk '
+         /^agmsg:/ { in_block=1; next }
+         in_block && /^[^ ]/ { in_block=0 }
+         in_block && /^  team:/ { sub(/^  team:[[:space:]]*/, ""); print; exit }
+       ' agents.yaml)
        # Artifact contract — only review/verify stages write review.md.
        # Names the absolute path so the worker does not depend on its
        # own cwd inference (write-review-md-to-explicit-path).
@@ -188,8 +192,24 @@ for code stage) and advance the workflow. Send exactly once.
    - **Task tool branch** — `entry.command == "claude"` (Manager
      self-dispatch or `mode: single-prompt` claude workers):
 
-     ```
-     Task tool: prompt = <resolved-prompt>
+     ```bash
+     # For review / verify stages, append the SAME absolute-path
+     # artifact contract used by the agmsg branch, so the Task-
+     # tool subagent writes review.md at $REVIEW_MD_PATH — where
+     # Manager reads from. Matches harden-dispatch-round5.
+     ARTIFACT_CONTRACT=""
+     if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
+       ARTIFACT_CONTRACT="
+
+--- artifact contract ---
+Write your review.md to this exact absolute path:
+  $REVIEW_MD_PATH
+Do NOT rely on your CLI's cwd inference; the dispatcher will look
+at this exact path only. If the path's parent directory does not
+exist, create it first.
+"
+     fi
+     # Task tool: prompt = "<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
      The subagent runs in-process and returns when the slash command
@@ -199,8 +219,24 @@ for code stage) and advance the workflow. Send exactly once.
      any CLI without a Task-tool integration):
 
      ```bash
+     # Same artifact contract shape for review / verify —
+     # some CLIs (notably copilot) ignore process cwd and write
+     # to a discovered project root; the absolute path removes
+     # the ambiguity. Matches harden-dispatch-round5.
+     ARTIFACT_CONTRACT=""
+     if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
+       ARTIFACT_CONTRACT="
+
+--- artifact contract ---
+Write your review.md to this exact absolute path:
+  $REVIEW_MD_PATH
+Do NOT rely on your CLI's cwd inference; the dispatcher will look
+at this exact path only. If the path's parent directory does not
+exist, create it first.
+"
+     fi
      cd .worktrees/<change-id>   # only when worktree mode
-     <entry.command> <entry.args...> -p "<resolved-prompt>"
+     <entry.command> <entry.args...> -p "<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
      `entry.args` from `agents.yaml` MUST include the CLI's
@@ -226,9 +262,11 @@ subprocess branches:
 1. **Subprocess non-zero exit** (or Task-tool subagent reported
    failure) → subprocess failure → escalate with `<stage> subprocess
    failed with exit code <N>`.
-2. **Subprocess exit 0 but `openspec/changes/<change-id>/review.md`
-   is absent or its frontmatter unparseable** → contract failure →
-   escalate with `<stage> returned no artifact`.
+2. **Subprocess exit 0 but `$REVIEW_MD_PATH` is absent or its
+   frontmatter unparseable** → contract failure → escalate with
+   `<stage> returned no artifact`. The check uses the absolute
+   path computed in step 4, not the relative form; see the
+   artifact contract discussion above.
 3. **`review.md` present with parseable `verdict:` frontmatter** →
    route on `pass` / `needs-rework`.
 
@@ -487,7 +525,11 @@ a message naming the leaked resource only after step 3 fails.
    valid `agmsg:` block (no-op otherwise):
 
    ```bash
-   AGMSG_TEAM=$(sed -n '/^agmsg:/,/^[^ ]/{s/^  team:[[:space:]]*//p}' agents.yaml | head -1)
+   AGMSG_TEAM=$(awk '
+     /^agmsg:/ { in_block=1; next }
+     in_block && /^[^ ]/ { in_block=0 }
+     in_block && /^  team:/ { sub(/^  team:[[:space:]]*/, ""); print; exit }
+   ' agents.yaml)
    if [ -n "$AGMSG_TEAM" ] && [ -f "$HOME/.agents/skills/agmsg/scripts/join.sh" ]; then
      ~/.agents/skills/agmsg/scripts/join.sh "$AGMSG_TEAM" manager claude-code "$(pwd)"
    fi
@@ -539,10 +581,14 @@ a message naming the leaked resource only after step 3 fails.
    Dispatch the review worker via the **Dispatch helper protocol**
    with stage `S = review`. Apply the **3-stage success contract**.
 
-   Read the review artifact and parse frontmatter's `verdict`:
+   Read the review artifact and parse frontmatter's `verdict`.
+   Use the absolute `$REVIEW_MD_PATH` computed in step 4 — the
+   same path the worker's artifact contract instructed. The older
+   relative form is not compliant in worktree mode because
+   Manager's cwd (project root) is not the worktree.
 
    ```bash
-   cat openspec/changes/<change-id>/review.md
+   cat "$REVIEW_MD_PATH"
    ```
 
    - `verdict: pass`:
@@ -570,7 +616,12 @@ a message naming the leaked resource only after step 3 fails.
    Dispatch the verify worker via the **Dispatch helper protocol** with
    stage `S = verify`. Apply the **3-stage success contract**.
 
-   Read the updated `review.md` and parse `verdict`:
+   Read the updated `$REVIEW_MD_PATH` and parse `verdict`
+   (absolute path, matches the artifact contract):
+
+   ```bash
+   cat "$REVIEW_MD_PATH"
+   ```
 
    - `verdict: pass`:
      ```bash
