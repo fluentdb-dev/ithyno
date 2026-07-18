@@ -1695,8 +1695,6 @@ Claude does not have.
 
 ### Requirement: Dispatch Slash Command
 
-> ⚠️ **PENDING MODIFIED** by [harden-dispatch-round5](../../changes/harden-dispatch-round5/): Portable AGMSG_TEAM extraction (no GNU-only sed); artifact contract added to subprocess + Task tool branches; Manager reads review.md at `$REVIEW_MD_PATH` in all branches.
-
 The `/ithy-opsx:dispatch <change-id>` slash command SHALL exist as a
 prompt template at `.claude/commands/ithy-opsx/dispatch.md`. It is
 evaluated by the persistent Manager (a `claude` live-shell session
@@ -1721,9 +1719,19 @@ The skill SHALL:
    without creating a worktree.
 4. **Manager registration guard.** When `agents.yaml` contains a valid
    `agmsg:` block, the skill SHALL idempotently register Manager in
-   the team at dispatch start (before any worker spawn):
+   the team at dispatch start (before any worker spawn).
+
+   The team name SHALL be extracted from `agents.yaml` using a
+   POSIX-portable form (BSD sed on macOS rejects GNU sed's
+   address-block `{...}` syntax). Recommended: awk.
 
    ```bash
+   AGMSG_TEAM=$(awk '
+     /^agmsg:/ { in_block=1; next }
+     in_block && /^[^ ]/ { in_block=0 }
+     in_block && /^  team:/ { sub(/^  team:[[:space:]]*/, ""); print; exit }
+   ' agents.yaml)
+
    ~/.agents/skills/agmsg/scripts/join.sh "$AGMSG_TEAM" manager \
      claude-code "$(pwd)"
    ```
@@ -1736,6 +1744,11 @@ The skill SHALL:
    the skill SHALL verify Manager is still a team member via
    `team.sh` and re-invoke `join.sh` when Manager is absent. The
    check is cheap and defends against cross-stage drift.
+
+   Portable extraction is normative: the skill SHALL NOT use GNU-
+   only sed syntax (e.g. address-block `{}` in `-n` mode). Any
+   `$AGMSG_TEAM` extraction inside the agmsg branch body SHALL
+   also follow this rule.
 
 5. Advance the change through `proposed → coded → reviewed → done`
    by dispatching workers in stages (code → review → verify), using
@@ -1866,9 +1879,25 @@ entry in the following priority order:
    `mode: single-prompt` claude worker) — invoke the **Task tool**
    with the resolved prompt.
 
+   For review / verify stages, the resolved prompt SHALL include
+   the same absolute-path artifact contract used by the agmsg
+   branch (naming `<TARGET_PATH>/openspec/changes/<change-id>/
+   review.md`). This gives the Task tool subagent an unambiguous
+   write target matching where Manager reads.
+
 3. **Otherwise** — run as a **subprocess** using Bash with
    `<entry.command> <entry.args...> -p "<resolved-prompt>"` from the
    worker's `cwd` (worktree root when applicable).
+
+   For review / verify stages, the resolved prompt SHALL include
+   the absolute-path artifact contract (identical wording to the
+   agmsg branch's contract). Some CLIs — notably `copilot` — do
+   not honor their process cwd for file writes and default to a
+   discovered project root; the artifact contract removes that
+   ambiguity by naming the exact absolute path. Without the
+   contract, a subprocess reviewer may write `review.md` to the
+   main tree in worktree mode, causing Manager's post-report
+   read to fail with `<stage> returned no artifact`.
 
 **3-stage success contract** SHALL be applied per branch:
 
@@ -1910,11 +1939,22 @@ entry in the following priority order:
   Duplicate messages from the same worker SHALL be ignored (Manager
   processes only the first matching message per stage).
 
-- The **Task tool** and **subprocess** branches retain the current
-  contract: subprocess non-zero exit → subprocess failure;
-  subprocess exit 0 + review.md absent → contract failure;
-  review.md present with parseable `verdict:` → route on
-  `pass` / `needs-rework`.
+- The **Task tool** and **subprocess** branches retain their exit-
+  code contract but resolve the artifact against the same absolute
+  path as the agmsg branch: subprocess non-zero exit (or Task-tool
+  subagent failure) → failure; exit 0 + `review.md` absent at
+  `<TARGET_PATH>/openspec/changes/<change-id>/review.md` → contract
+  failure → escalate `<stage> returned no artifact`; present with
+  parseable `verdict:` → route on `pass` / `needs-rework`.
+
+  Manager SHALL read the artifact at `<TARGET_PATH>/openspec/
+  changes/<change-id>/review.md` (absolute path, computed in step
+  4) for all three branches — agmsg, Task tool, subprocess. The
+  older relative form (`openspec/changes/<change-id>/review.md`
+  from Manager's cwd) is not compliant in worktree mode because
+  Manager's cwd is the project root, not the worktree — a
+  well-behaved reviewer honoring its process cwd would write to
+  the worktree and Manager's read would miss it.
 
 Manager (`roles` includes `manager`) is never dispatched through
 the agmsg branch — the Manager runs in tmux pane 0 (per `Embedded
@@ -2117,6 +2157,27 @@ existing behavior is retained.
 - **GIVEN** dispatch has escalated and is about to exit
 - **WHEN** the skill runs its final cleanup pass
 - **THEN** it does NOT invoke `reset.sh "$path" claude-code` (missing `agent_id`); if steps 1 and 2 of the recovery ladder both fail, the skill escalates with a message naming the leaked pane and team member, but does not attempt to clear the whole `(project, type)` slice
+
+#### Scenario: portable AGMSG_TEAM extraction on BSD sed
+- **GIVEN** `agents.yaml` has an `agmsg:` block with `team: openspec-ui`
+- **AND** the running shell is macOS bash 3.2 with BSD sed
+- **WHEN** the skill extracts `$AGMSG_TEAM`
+- **THEN** the value is `openspec-ui` (extraction uses awk or another POSIX-portable form; no GNU-only sed address-block syntax)
+
+#### Scenario: subprocess review branch names absolute artifact path
+- **GIVEN** worktree mode with `copilot-review` (`mode: single-prompt`, `command: copilot`)
+- **WHEN** the dispatcher enters the review stage
+- **THEN** the `-p` prompt handed to `copilot` contains the artifact contract block naming `<TARGET_PATH>/openspec/changes/<change-id>/review.md` as the absolute write target
+
+#### Scenario: Task tool review branch names absolute artifact path
+- **GIVEN** worktree mode with a `mode: single-prompt` claude review worker
+- **WHEN** the dispatcher enters the review stage
+- **THEN** the Task tool prompt contains the same artifact contract block, naming the absolute path
+
+#### Scenario: Manager reads review.md from TARGET_PATH not cwd
+- **GIVEN** worktree mode; the review worker (any branch) wrote `review.md` at `<TARGET_PATH>/openspec/changes/<change-id>/review.md`
+- **WHEN** Manager reads the artifact after the report / subprocess completion
+- **THEN** Manager reads exactly that absolute path — NOT the relative `openspec/changes/<change-id>/review.md` under Manager's cwd (project root, main tree)
 
 ### Requirement: Kanban Placement Is Folder-Driven
 
