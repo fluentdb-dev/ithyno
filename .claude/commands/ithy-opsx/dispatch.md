@@ -114,7 +114,23 @@ For each stage `S ∈ {code, review, verify}`:
        # agmsg monitor mode, then injects the boot prompt.
        # $MODEL_ARG is empty when entry.args has no --model; a full
        # `--model <id>` pair when it does. Word-splitting is intentional.
-       /agmsg spawn "$AGMSG_TYPE" "$entry_name" $MODEL_ARG --boot-prompt "<resolved-prompt>"
+       #
+       # Report contract appended so the worker signals completion
+       # explicitly (signal-stage-completion-via-agmsg-message).
+       # <team> extracted from agents.yaml agmsg.team; <S> is the
+       # current stage (code|review|verify).
+       AGMSG_TEAM=$(sed -n '/^agmsg:/,/^[^ ]/{s/^  team:[[:space:]]*//p}' agents.yaml | head -1)
+       REPORT_CONTRACT="
+
+--- report contract ---
+When your task completes (whether the outcome is pass, needs-rework,
+or a blocker), send exactly ONE message to Manager via:
+  ~/.agents/skills/agmsg/scripts/send.sh $AGMSG_TEAM $entry_name manager \\
+    'stage:$S status:done'
+This tells Manager to inspect the review.md artifact (or git log
+for code stage) and advance the workflow. Send exactly once.
+"
+       /agmsg spawn "$AGMSG_TYPE" "$entry_name" $MODEL_ARG --boot-prompt "<resolved-prompt>$REPORT_CONTRACT"
      fi
      ```
 
@@ -126,10 +142,11 @@ For each stage `S ∈ {code, review, verify}`:
      up at spawn time. This skill only touches the CLI-level
      `--model` pass-through.
 
-     Success judgment for this branch is **poll-based** (see the
+     Success judgment for this branch is **message-based** (see the
      agmsg branch of the 3-stage success contract below) — the
-     spawn call returns as soon as the peer is listening, not when
-     the boot task is done.
+     spawn call returns as soon as the peer is listening; Manager
+     then waits for the worker's `stage:$S status:done` message
+     rather than polling files.
 
    - **Task tool branch** — `entry.command == "claude"` (Manager
      self-dispatch or `mode: single-prompt` claude workers):
@@ -178,26 +195,17 @@ subprocess branches:
 3. **`review.md` present with parseable `verdict:` frontmatter** →
    route on `pass` / `needs-rework`.
 
-### agmsg branch — poll-based judgment
+### agmsg branch — message-based judgment
 
 `/agmsg spawn --boot-prompt` returns as soon as the peer is listening;
 the boot task keeps running in the worker's tmux pane. The dispatcher
-polls for the artifact:
+does NOT poll files. Instead, it waits for the worker's
+`stage:$S status:done` message (appended to every agmsg-branch
+boot-prompt as a report contract, see the spawn snippet above).
 
-- **`S = code`** — poll `git log agent/<change-id> -1 --format=%H` at
-  a 5-second interval. When the head hash differs from the pre-spawn
-  hash (a new commit landed), the code stage is done → advance phase
-  to `coded`. **Ceiling: 15 minutes.** On timeout → escalate
-  `code stage agmsg worker did not commit within timeout`.
-
-- **`S = review` or `S = verify`** — poll for
-  `openspec/changes/<change-id>/review.md` existence + parseable
-  `verdict:` frontmatter at a 5-second interval. When both are
-  satisfied, route on `pass` / `needs-rework` per the standard
-  contract. **Ceiling: 5 minutes.** On timeout → escalate
-  `<stage> agmsg worker did not produce review.md within timeout`.
-
-Rough polling shape (bash):
+Wait mechanism (bash — Manager reads inbox at 5-second intervals via
+`inbox.sh`, which marks matched messages as read so duplicates are
+naturally suppressed by the DB state, not by client-side bookkeeping):
 
 ```bash
 POLL_INTERVAL=5
@@ -206,21 +214,52 @@ CEILING_REVIEW=300   # 5 min
 ELAPSED=0
 CEILING=$CEILING_REVIEW   # or $CEILING_CODE for code stage
 PRE_HEAD=$(git rev-parse agent/<change-id> 2>/dev/null || echo "")
+RECEIVED=0
+# inbox.sh output shape (verified 2026-07-18):
+#   `  [<iso-ts>] <sender>: <body>`
+# One unread message per line; messages are marked-as-read on the
+# call, so duplicates naturally suppress on the next iteration.
+# We match on the sender being $entry_name and the body carrying the
+# report contract token for this stage.
 while [ $ELAPSED -lt $CEILING ]; do
   sleep $POLL_INTERVAL
   ELAPSED=$((ELAPSED + POLL_INTERVAL))
-  # code stage:
-  NEW_HEAD=$(git rev-parse agent/<change-id> 2>/dev/null || echo "")
-  if [ "$NEW_HEAD" != "$PRE_HEAD" ] && [ -n "$NEW_HEAD" ]; then break; fi
-  # OR review/verify stage:
-  if [ -f "openspec/changes/<change-id>/review.md" ] && \
-     grep -q "^verdict:" "openspec/changes/<change-id>/review.md"; then break; fi
+  if ~/.agents/skills/agmsg/scripts/inbox.sh "$AGMSG_TEAM" manager 2>/dev/null | \
+       grep -qE "\] $entry_name: .*stage:$S status:done"; then
+    RECEIVED=1
+    break
+  fi
 done
-if [ $ELAPSED -ge $CEILING ]; then
-  /opsx:escalate <change-id> "<stage> agmsg worker did not produce review.md within timeout"
+if [ $RECEIVED -eq 0 ]; then
+  /opsx:escalate <change-id> "<stage> agmsg worker did not report within timeout"
   exit
 fi
 ```
+
+After receipt, judge per stage:
+
+- **`S = code`** — check `git log agent/<change-id> -1 --format=%H`
+  vs the pre-spawn `$PRE_HEAD`:
+  - New commit landed → phase advances to `coded`.
+  - Head unchanged AND `git -C .worktrees/<change-id> status
+    --porcelain` non-empty → Manager runs `git -C .worktrees/
+    <change-id> add . && git commit -m "impl: <change-id>"` as
+    fallback, then advances to `coded`.
+  - Head unchanged AND tree clean → escalate `code stage reported
+    done but produced no changes`.
+
+- **`S = review` or `S = verify`** — read
+  `openspec/changes/<change-id>/review.md`:
+  - Present with parseable `verdict:` frontmatter → route on
+    `pass` / `needs-rework` per the standard contract.
+  - Absent → retry once after `sleep 1` (race protection: worker
+    may have sent the message just before its file write flushed).
+  - Still absent after retry → escalate `<stage> reported done but
+    produced no review.md`.
+
+Duplicate messages from the same worker within the same stage
+SHALL be ignored — Manager processes only the first matching
+message per `(stage, entry.name)` pair.
 
 ## Steps
 

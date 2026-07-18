@@ -1678,6 +1678,8 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
+> ⚠️ **PENDING MODIFIED** by [signal-stage-completion-via-agmsg-message](../../changes/signal-stage-completion-via-agmsg-message/): agmsg branch success contract switches from polling to message-based wait; boot-prompt gains a report contract instructing the worker to signal completion via agmsg send.
+
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
