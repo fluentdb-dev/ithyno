@@ -60,6 +60,16 @@ For each stage `S ∈ {code, review, verify}`:
 
    Then substitute template vars: `${change_id}` → the current change id.
 
+   **Worker MUST NOT commit.** The dispatched code worker's role is
+   apply-only. The auto-committing `/ithy-opsx:apply` variant is
+   NOT supported as a code worker prompt — its interactive "commit
+   OK?" confirmation cannot be answered from an agmsg pane and
+   the stage hangs to the ceiling. If `entry.prompts.code` starts
+   with `/ithy-opsx:apply`, warn once and continue anyway (the
+   Manager-commit contract below will still work in the "worker
+   already committed" no-op case), but the recommended prompt is
+   `/opsx:apply ${change_id}`.
+
 3. **Dispatch**. Branch priority (first match wins):
 
    Manager (`roles` includes `manager`) is never dispatched through
@@ -145,6 +155,15 @@ or a blocker), send exactly ONE message to Manager via:
 This tells Manager to inspect the review.md artifact (or git log
 for code stage) and advance the workflow. Send exactly once.
 "
+       # Manager registration guard (harden-dispatch-from-round3).
+       # Before every spawn, ensure Manager is registered in the
+       # team. join.sh is idempotent — safe to invoke unconditionally.
+       # This closes the gap where prior cleanup operations dropped
+       # Manager's registration silently, breaking the worker's
+       # report send.sh with "manager is not registered in team".
+       if ! ~/.agents/skills/agmsg/scripts/team.sh "$AGMSG_TEAM" 2>/dev/null | grep -qE '^\s*manager\s'; then
+         ~/.agents/skills/agmsg/scripts/join.sh "$AGMSG_TEAM" manager claude-code "$(pwd)"
+       fi
        # Order: artifact contract (worker writes review.md) then
        # report contract (worker signals done). A well-behaved worker
        # writes review.md before sending the message.
@@ -256,15 +275,27 @@ fi
 
 After receipt, judge per stage:
 
-- **`S = code`** — check `git log agent/<change-id> -1 --format=%H`
-  vs the pre-spawn `$PRE_HEAD`:
-  - New commit landed → phase advances to `coded`.
-  - Head unchanged AND `git -C .worktrees/<change-id> status
-    --porcelain` non-empty → Manager runs `git -C .worktrees/
-    <change-id> add . && git commit -m "impl: <change-id>"` as
-    fallback, then advances to `coded`.
-  - Head unchanged AND tree clean → escalate `code stage reported
-    done but produced no changes`.
+- **`S = code`** — Manager owns the commit. Check the worktree
+  status first, then decide.
+
+  ```bash
+  DIRTY=$(git -C .worktrees/<change-id> status --porcelain)
+  HEAD_NOW=$(git rev-parse agent/<change-id> 2>/dev/null || echo "")
+  ```
+
+  - `$DIRTY` non-empty → Manager commits unconditionally, then
+    advances:
+    ```bash
+    git -C .worktrees/<change-id> add .
+    git -C .worktrees/<change-id> commit -m "impl: <change-id>"
+    ```
+    Phase advances to `coded`.
+  - `$DIRTY` empty AND `$HEAD_NOW != $PRE_HEAD` → the worker
+    self-committed (e.g. via a non-default apply variant).
+    Manager's commit step is a no-op — no duplicate commit.
+    Phase advances to `coded`.
+  - `$DIRTY` empty AND `$HEAD_NOW == $PRE_HEAD` → escalate
+    `code stage reported done but produced no changes`.
 
 - **`S = review` or `S = verify`** — read `$REVIEW_MD_PATH`
   (the same absolute path the boot-prompt's artifact contract
@@ -283,6 +314,51 @@ After receipt, judge per stage:
 Duplicate messages from the same worker within the same stage
 SHALL be ignored — Manager processes only the first matching
 message per `(stage, entry.name)` pair.
+
+## Failure recovery ladder
+
+When a stage fails or the dispatch ends (whether successfully, via
+escalation, or via a hung worker), clean up worker panes and team
+memberships using the following ordered ladder. Each step is tried
+in order; on failure, fall through to the next step; escalate with
+a message naming the leaked resource only after step 3 fails.
+
+1. **Preferred — graceful despawn.**
+
+   ```bash
+   ~/.agents/skills/agmsg/scripts/despawn.sh "$AGMSG_TEAM" manager "$entry_name"
+   ```
+
+   Releases the tmux pane placement AND the team member entry in
+   one atomic operation. This is the correct path when spawn
+   recorded a placement (the normal case).
+
+2. **On despawn failure — targeted leave + kill.**
+
+   ```bash
+   ~/.agents/skills/agmsg/scripts/leave.sh "$AGMSG_TEAM" "$entry_name"
+   tmux kill-pane -t "$WORKER_PANE_ID"
+   ```
+
+   Removes the specific agent from the team AND kills the specific
+   pane. Used when despawn fails because `spawn.sh` did not
+   register a placement (e.g. the known `run/spawn.<team>__<name>`
+   first-invocation mkdir gap). Scope is exactly one agent, one
+   pane — no collateral damage.
+
+3. **NEVER — bare `reset.sh`.** The skill SHALL NOT invoke
+   `reset.sh "$path" <type>` without an `agent_id` argument in any
+   recovery path. Without `agent_id`, `reset.sh` clears every
+   agent of that type registered under that project path — which
+   can include Manager itself, silently taking down the dispatch
+   loop's own reply channel. Full-team resets are a manual
+   operator escape hatch, not a skill responsibility.
+
+   If step 2 also fails (leave.sh errors AND the pane won't die),
+   escalate with `stage <S> cleanup failed — leaked pane
+   <pane-id>, leaked team member <entry.name>` so the operator
+   can inspect manually. Do NOT silently fall through to a bare
+   `reset.sh` as a "just make it go away" catch-all.
 
 ## Steps
 
@@ -305,9 +381,9 @@ message per `(stage, entry.name)` pair.
    - `needs-human` → exit: `Change is in needs-human — user must
      answer via /opsx:answer <id> "<answer>" before dispatcher can
      proceed.`
-   - `proposed` or `null` — enter loop from step 5 (code first)
-   - `coded` — enter loop from step 6 (review first)
-   - `reviewed` — skip to step 7 (verify)
+   - `proposed` or `null` — enter loop from step 6 (code first)
+   - `coded` — enter loop from step 7 (review first)
+   - `reviewed` — skip to step 8 (verify)
    - unknown value → escalate: `Unknown phase '<value>'.`
 
 3. **Resolve execution mode (worktree vs main tree)**
@@ -396,7 +472,33 @@ message per `(stage, entry.name)` pair.
    REVIEW_MD_PATH="$TARGET_PATH/openspec/changes/<change-id>/review.md"
    ```
 
-5. **LOOP — code stage** (skip when phase is already `coded` or later)
+5. **Manager registration guard** (agmsg configured only)
+
+   Before any worker spawn, ensure Manager is registered in the
+   agmsg team. Prior cleanup operations (bad `reset.sh` calls,
+   worktree churn, external `leave.sh`) can silently drop
+   Manager's team membership; when that happens, the worker's
+   `send.sh` for the report contract fails with `manager is not
+   registered in team <team>` and dispatch stalls waiting for a
+   message that will never come.
+
+   `join.sh` is idempotent — safe to re-invoke when already
+   registered. Only enter this step when `agents.yaml` has a
+   valid `agmsg:` block (no-op otherwise):
+
+   ```bash
+   AGMSG_TEAM=$(sed -n '/^agmsg:/,/^[^ ]/{s/^  team:[[:space:]]*//p}' agents.yaml | head -1)
+   if [ -n "$AGMSG_TEAM" ] && [ -f "$HOME/.agents/skills/agmsg/scripts/join.sh" ]; then
+     ~/.agents/skills/agmsg/scripts/join.sh "$AGMSG_TEAM" manager claude-code "$(pwd)"
+   fi
+   ```
+
+   Additionally, the Dispatch helper protocol re-verifies Manager
+   membership before each `/agmsg spawn` (see the guard inside
+   the agmsg branch). This step defends the initial dispatch
+   entry; the per-spawn guard defends cross-stage drift.
+
+6. **LOOP — code stage** (skip when phase is already `coded` or later)
 
    Increment iteration counter:
 
@@ -415,11 +517,15 @@ message per `(stage, entry.name)` pair.
    final_prompt = resolved_code_prompt + "\n" + priorFindings
    ```
 
-   On success:
+   On success (agmsg branch: message received; Task/subprocess
+   branch: exit 0):
 
-   - Commit the impl on `agent/<change-id>` if the worker did not
-     already commit (some workers like `/ithy-opsx:apply` commit
-     themselves; the plain `/opsx:apply` does not).
+   - Apply the code-stage judgment from the 3-stage success
+     contract's agmsg branch above: Manager commits any
+     uncommitted worker output on `agent/<change-id>`
+     unconditionally (`impl: <change-id>`). If the tree is clean
+     AND no new commit exists beyond `$PRE_HEAD`, escalate
+     instead of advancing.
    - Advance phase:
      ```bash
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
@@ -428,7 +534,7 @@ message per `(stage, entry.name)` pair.
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
 
-6. **LOOP — review stage**
+7. **LOOP — review stage**
 
    Dispatch the review worker via the **Dispatch helper protocol**
    with stage `S = review`. Apply the **3-stage success contract**.
@@ -446,7 +552,7 @@ message per `(stage, entry.name)` pair.
        -d '{"phase": "reviewed"}'
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
-     Break out of the loop, proceed to step 7.
+     Break out of the loop, proceed to step 8.
 
    - `verdict: needs-rework`:
      Format findings as prompt suffix for the next code iteration:
@@ -457,9 +563,9 @@ message per `(stage, entry.name)` pair.
                      ).join("\n")
      ```
      Log: `[dispatch] iteration <n>: review needs-rework (<count> findings), retrying code`.
-     Continue loop (back to step 5).
+     Continue loop (back to step 6).
 
-7. **Verify stage**
+8. **Verify stage**
 
    Dispatch the verify worker via the **Dispatch helper protocol** with
    stage `S = verify`. Apply the **3-stage success contract**.

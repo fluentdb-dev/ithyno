@@ -1,17 +1,20 @@
 agents:
   - name: claude
-    mode: single-prompt
+    mode: live-shell
     roles:
       - code
-    description: Implements the change using Claude Code via /ithy-opsx:apply
-      (implementation + auto commit on the agent branch).
+    description: Implements the change using Claude Code via /opsx:apply
+      (apply only). Manager commits the resulting tree on the agent
+      branch after receiving the worker's stage:code status:done
+      message, so the worker never enters an interactive commit
+      prompt.
     command: claude
     args:
       - --dangerously-skip-permissions
       - --model
       - sonnet
     prompts:
-      code: /ithy-opsx:apply ${change_id}
+      code: /opsx:apply ${change_id}
   - name: pptr
     mode: live-shell
     roles:
@@ -21,7 +24,7 @@ agents:
       - --resume
       - 6f91588b-6030-4c63-b288-61f17794d82c
   - name: copilot-review
-    mode: single-prompt
+    mode: live-shell
     roles:
       - review
     command: copilot
@@ -30,3 +33,6 @@ agents:
       - -s
     prompts:
       review: /opsx:review ${change_id}
+parallelExecution: true
+agmsg:
+  team: openspec-ui

@@ -1695,6 +1695,8 @@ Claude does not have.
 
 ### Requirement: Dispatch Slash Command
 
+> ⚠️ **PENDING MODIFIED** by [harden-dispatch-from-round3](../../changes/harden-dispatch-from-round3/): Manager owns the commit (worker MUST NOT auto-commit); Manager registration guard added at dispatch start; Failure recovery ladder defines despawn → leave + tmux kill-pane fallback and forbids bare `reset.sh`.
+
 The `/ithy-opsx:dispatch <change-id>` slash command SHALL exist as a
 prompt template at `.claude/commands/ithy-opsx/dispatch.md`. It is
 evaluated by the persistent Manager (a `claude` live-shell session
