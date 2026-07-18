@@ -1678,6 +1678,8 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
+> ⚠️ **PENDING MODIFIED** by [write-review-md-to-explicit-path](../../changes/write-review-md-to-explicit-path/): agmsg branch boot-prompt gains an artifact contract naming the absolute review.md path; Manager reads that path directly instead of the repo-relative default.
+
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default

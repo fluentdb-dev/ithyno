@@ -120,6 +120,21 @@ For each stage `S ∈ {code, review, verify}`:
        # <team> extracted from agents.yaml agmsg.team; <S> is the
        # current stage (code|review|verify).
        AGMSG_TEAM=$(sed -n '/^agmsg:/,/^[^ ]/{s/^  team:[[:space:]]*//p}' agents.yaml | head -1)
+       # Artifact contract — only review/verify stages write review.md.
+       # Names the absolute path so the worker does not depend on its
+       # own cwd inference (write-review-md-to-explicit-path).
+       ARTIFACT_CONTRACT=""
+       if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
+         ARTIFACT_CONTRACT="
+
+--- artifact contract ---
+Write your review.md to this exact absolute path:
+  $REVIEW_MD_PATH
+Do NOT rely on your CLI's cwd inference; the dispatcher will look
+at this exact path only. If the path's parent directory does not
+exist, create it first.
+"
+       fi
        REPORT_CONTRACT="
 
 --- report contract ---
@@ -130,7 +145,10 @@ or a blocker), send exactly ONE message to Manager via:
 This tells Manager to inspect the review.md artifact (or git log
 for code stage) and advance the workflow. Send exactly once.
 "
-       /agmsg spawn "$AGMSG_TYPE" "$entry_name" $MODEL_ARG --boot-prompt "<resolved-prompt>$REPORT_CONTRACT"
+       # Order: artifact contract (worker writes review.md) then
+       # report contract (worker signals done). A well-behaved worker
+       # writes review.md before sending the message.
+       /agmsg spawn "$AGMSG_TYPE" "$entry_name" $MODEL_ARG --boot-prompt "<resolved-prompt>$ARTIFACT_CONTRACT$REPORT_CONTRACT"
      fi
      ```
 
@@ -248,14 +266,19 @@ After receipt, judge per stage:
   - Head unchanged AND tree clean → escalate `code stage reported
     done but produced no changes`.
 
-- **`S = review` or `S = verify`** — read
-  `openspec/changes/<change-id>/review.md`:
+- **`S = review` or `S = verify`** — read `$REVIEW_MD_PATH`
+  (the same absolute path the boot-prompt's artifact contract
+  named). This is:
+  - `<repo>/.worktrees/<change-id>/openspec/changes/<change-id>/review.md`
+    in worktree mode
+  - `<repo>/openspec/changes/<change-id>/review.md` in main-tree mode
+
   - Present with parseable `verdict:` frontmatter → route on
     `pass` / `needs-rework` per the standard contract.
   - Absent → retry once after `sleep 1` (race protection: worker
     may have sent the message just before its file write flushed).
   - Still absent after retry → escalate `<stage> reported done but
-    produced no review.md`.
+    did not write review.md at $REVIEW_MD_PATH`.
 
 Duplicate messages from the same worker within the same stage
 SHALL be ignored — Manager processes only the first matching
@@ -358,6 +381,20 @@ message per `(stage, entry.name)` pair.
    as the subprocess cwd. Manager Task-tool subagents inherit the
    current session's cwd (project root), so they need to `cd` inside
    the prompt or rely on `/ithy-opsx:apply` which cds itself.
+
+   **Compute `TARGET_PATH`** (absolute path where review.md lands,
+   per `write-review-md-to-explicit-path`). Both the boot-prompt's
+   artifact contract and Manager's post-report artifact read
+   resolve against this:
+
+   ```bash
+   if [ -d ".worktrees/<change-id>" ]; then
+     TARGET_PATH="$(pwd)/.worktrees/<change-id>"
+   else
+     TARGET_PATH="$(pwd)"
+   fi
+   REVIEW_MD_PATH="$TARGET_PATH/openspec/changes/<change-id>/review.md"
+   ```
 
 5. **LOOP — code stage** (skip when phase is already `coded` or later)
 
