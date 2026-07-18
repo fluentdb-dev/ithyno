@@ -1639,8 +1639,6 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
-> ⚠️ **PENDING MODIFIED** by [thread-model-arg-through-agmsg-spawn](../../changes/thread-model-arg-through-agmsg-spawn/): agmsg branch を修正し `entry.args` から `--model <id>` を抽出して spawn CLI に thread する。
-
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
@@ -1673,7 +1671,7 @@ entry in the following priority order:
    `agmsg` block** (see `Agmsg Config Block In agents.yaml`) — invoke:
 
    ```
-   /agmsg spawn <agmsg-type> <entry.name> --boot-prompt "<resolved-prompt>"
+   /agmsg spawn <agmsg-type> <entry.name> [--model <id>] --boot-prompt "<resolved-prompt>"
    ```
 
    Where `<agmsg-type>` is derived from `entry.command` via this
@@ -1689,6 +1687,24 @@ entry in the following priority order:
    the branches below and note "agmsg configured but not installed
    locally; falling back to non-agmsg dispatch" in its stdout so
    the user can install agmsg if desired.
+
+   The skill SHALL scan `entry.args` for a `--model <id>` pair
+   (order-agnostic within the args array). When found, the
+   `--model <id>` pair SHALL be threaded into the spawn call before
+   `--boot-prompt`. When absent, the spawn call omits `--model` and
+   `spawn.sh` starts the CLI on its default model. When `--model`
+   appears without a following token in `entry.args`, the skill
+   SHALL escalate with `agents.yaml agent "<name>" has bare --model
+   without a value in args` and NOT dispatch. Errors returned by
+   `spawn.sh` (e.g. an agmsg-type whose manifest declares no
+   `model_arg`) SHALL surface as-is with no silent fallback.
+
+   Other `entry.args` (e.g. `--dangerously-skip-permissions`) are
+   NOT threaded through the CLI here. Their sync into
+   `~/.agmsg/config/spawn_options.yaml` is a **server-side**
+   concern (config-writer), NOT a dispatcher-skill concern. See
+   `sync-agmsg-spawn-options-on-config-write` (follow-up change)
+   for that flow.
 
 2. **`entry.command == "claude"`** (Manager self-dispatch or a
    `mode: single-prompt` claude worker) — invoke the **Task tool**
@@ -1784,6 +1800,21 @@ existing behavior is retained.
 - **GIVEN** an agmsg-routed review or verify dispatch that has not produced `review.md` after 5 minutes
 - **WHEN** the ceiling elapses
 - **THEN** the dispatcher escalates with `<stage> agmsg worker did not produce review.md within timeout`
+
+#### Scenario: agmsg branch threads --model from entry.args
+- **GIVEN** `agents.yaml` has a valid `agmsg:` block AND a live-shell worker entry `{ name: claude, command: claude, args: [--dangerously-skip-permissions, --model, sonnet], roles: [code] }`
+- **WHEN** the dispatcher reaches the code stage
+- **THEN** it invokes `/agmsg spawn claude-code claude --model sonnet --boot-prompt "/ithy-opsx:apply <change-id>"` (the `--model sonnet` pair is extracted from `args` and threaded before `--boot-prompt`)
+
+#### Scenario: agmsg branch omits --model when absent from args
+- **GIVEN** an entry whose `args` does not contain `--model`
+- **WHEN** the dispatcher reaches the stage
+- **THEN** the spawn call is `/agmsg spawn <type> <name> --boot-prompt "..."` (no `--model` inserted) and the CLI starts on its default model
+
+#### Scenario: agmsg branch escalates on bare --model
+- **GIVEN** an entry whose `args` contains `--model` with no following token (e.g. `args: [--model]`)
+- **WHEN** the dispatcher reaches the stage
+- **THEN** it escalates with `agents.yaml agent "<name>" has bare --model without a value in args` and does NOT dispatch
 
 ### Requirement: Kanban Placement Is Folder-Driven
 
