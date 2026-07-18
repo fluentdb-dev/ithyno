@@ -270,6 +270,20 @@ export async function setParallelExecution(value: boolean): Promise<void> {
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Enable/disable + upsert/remove the top-level `agmsg:` block in
+ *  agents.yaml. Landed by add-agmsg-config-write. */
+export async function setAgmsgConfig(
+  payload:
+    | { enabled: true; team: string; storage?: string }
+    | { enabled: false },
+): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/agmsg",
+    payload,
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 export async function fetchAgentJobs(): Promise<{ jobs: JobSummary[] }> {
   const res = await fetch("/api/agents/jobs");
   if (!res.ok) throw new Error(`GET /api/agents/jobs failed: ${res.status}`);

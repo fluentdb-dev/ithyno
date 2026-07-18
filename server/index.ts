@@ -15,7 +15,7 @@ import { Watcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
-import { applyAgentConfigPayload, coercePayload, writeParallelExecution } from "./agents/config-writer.js";
+import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
@@ -629,6 +629,42 @@ fastify.post<{ Body: { value?: unknown } }>("/api/config/parallel-execution", as
   if (!result.ok) return reply.code(result.status).send({ error: result.error });
   // Registry reload — same rationale as /api/agents/config's POST handler:
   // watcher is best-effort, race with client refetch.
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Agmsg config write endpoint (add-agmsg-config-write).
+// Enable/disable and edit the top-level `agmsg:` block in agents.yaml.
+// Follows the same shape as /api/config/parallel-execution.
+fastify.post<{
+  Body: { enabled?: unknown; team?: unknown; storage?: unknown };
+}>("/api/config/agmsg", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const body = req.body ?? {};
+  if (typeof body.enabled !== "boolean") {
+    return reply.code(400).send({ error: "enabled must be a boolean" });
+  }
+  let block: { team: string; storage?: string } | null;
+  if (body.enabled) {
+    if (typeof body.team !== "string" || body.team.length === 0) {
+      return reply.code(400).send({
+        error: "agmsg.team is required when the agmsg block is present",
+      });
+    }
+    block = { team: body.team };
+    if (body.storage !== undefined && body.storage !== null && body.storage !== "") {
+      if (typeof body.storage !== "string") {
+        return reply.code(400).send({ error: "agmsg.storage must be a string" });
+      }
+      block.storage = body.storage;
+    }
+  } else {
+    block = null;
+  }
+  const result = await writeAgmsg(PROJECT_ROOT, block);
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
   await agentRegistry.load();
   return { ok: true };
 });

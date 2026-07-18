@@ -8,6 +8,7 @@ import { parse as parseYaml } from "yaml";
 import {
   applyAgentConfigPayload,
   coercePayload,
+  writeAgmsg,
   type AgentConfigPayload,
 } from "./config-writer.js";
 
@@ -434,5 +435,96 @@ describe("coercePayload", () => {
   it("accepts a valid delete payload", () => {
     const res = coercePayload({ action: "delete", name: "reviewer" });
     expect(res).toEqual({ action: "delete", name: "reviewer" });
+  });
+});
+
+describe("writeAgmsg (add-agmsg-config-write)", () => {
+  it("upserts an agmsg block with just team", async () => {
+    await seed(
+      ["agents:", "  - name: existing", "    mode: single-prompt", "    roles: [code]", "    command: cmd", "    args: []", ""].join("\n"),
+    );
+    const res = await writeAgmsg(dir, { team: "openspec-ui" });
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.agmsg).toEqual({ team: "openspec-ui" });
+    expect(Array.isArray(doc.agents)).toBe(true);
+    expect((doc.agents as unknown[]).length).toBe(1);
+  });
+
+  it("upserts an agmsg block with team + storage", async () => {
+    await seed("agents: []\n");
+    const res = await writeAgmsg(dir, {
+      team: "openspec-ui",
+      storage: ".worktrees/.agmsg.sqlite",
+    });
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.agmsg).toEqual({
+      team: "openspec-ui",
+      storage: ".worktrees/.agmsg.sqlite",
+    });
+  });
+
+  it("removes an existing agmsg block when block is null", async () => {
+    await seed(
+      ["agmsg:", "  team: openspec-ui", "  storage: .worktrees/.agmsg.sqlite", "agents: []", ""].join("\n"),
+    );
+    const res = await writeAgmsg(dir, null);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.agmsg).toBeUndefined();
+    expect(doc.agents).toEqual([]);
+  });
+
+  it("is a no-op when null is written on an absent block", async () => {
+    await seed("agents: []\n");
+    const res = await writeAgmsg(dir, null);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.agmsg).toBeUndefined();
+  });
+
+  it("rejects an empty team", async () => {
+    await seed("agents: []\n");
+    const res = await writeAgmsg(dir, { team: "" });
+    expect(res).toEqual({
+      ok: false,
+      status: 400,
+      error: "agmsg.team is required when the agmsg block is present",
+    });
+    // File must not be modified on validation failure.
+    const doc = await readBack();
+    expect(doc.agmsg).toBeUndefined();
+  });
+
+  it("preserves unrelated top-level keys through an upsert", async () => {
+    await seed(
+      ["parallelExecution: true", "customTopKey: keep-me", "agents:", "  - name: a", "    mode: single-prompt", "    roles: [code]", "    command: c", "    args: []", ""].join("\n"),
+    );
+    await writeAgmsg(dir, { team: "openspec-ui" });
+    const doc = await readBack();
+    expect(doc.parallelExecution).toBe(true);
+    expect(doc.customTopKey).toBe("keep-me");
+    expect(doc.agmsg).toEqual({ team: "openspec-ui" });
+  });
+
+  it("preserves unrelated top-level keys through a remove", async () => {
+    await seed(
+      ["agmsg:", "  team: openspec-ui", "parallelExecution: true", "customTopKey: keep-me", "agents: []", ""].join("\n"),
+    );
+    await writeAgmsg(dir, null);
+    const doc = await readBack();
+    expect(doc.agmsg).toBeUndefined();
+    expect(doc.parallelExecution).toBe(true);
+    expect(doc.customTopKey).toBe("keep-me");
+  });
+
+  it("drops empty-string storage on upsert", async () => {
+    await seed("agents: []\n");
+    // Client may send "" for storage when the input is blank; the writer
+    // treats that as "not set".
+    await writeAgmsg(dir, { team: "openspec-ui", storage: "" });
+    const doc = await readBack();
+    expect(doc.agmsg).toEqual({ team: "openspec-ui" });
   });
 });

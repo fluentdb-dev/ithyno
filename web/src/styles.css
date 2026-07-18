@@ -2446,3 +2446,62 @@ a:hover {
   border-radius: 4px;
   font-size: 12px;
 }
+
+/* add-agmsg-config-write: Settings form fields + actions */
+.settings-field {
+  margin-top: 12px;
+}
+.settings-field label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+.settings-field label > span {
+  min-width: 0;
+}
+.settings-field label > span strong {
+  display: block;
+  font-size: 14px;
+}
+.settings-field label > span p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-field label > span code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.settings-field input[type="text"] {
+  min-width: 280px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--fg);
+  font-size: 14px;
+}
+.settings-field input[type="text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings-actions {
+  margin-top: 16px;
+}
+.settings-actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--fg));
+  font-size: 14px;
+  cursor: pointer;
+}
+.settings-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

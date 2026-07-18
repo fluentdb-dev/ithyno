@@ -1512,6 +1512,8 @@ checkbox SHALL persist through `POST /api/config/parallel-execution`
 and broadcast an `agents-updated` event so other tabs see the fresh
 value.
 
+> ⚠️ **PENDING MODIFIED** by [add-agmsg-config-write](../../changes/add-agmsg-config-write/): Settings form に Agmsg section (Enable / Team / Storage / Save) を追加する予定。
+
 #### Scenario: toggle persists
 - **GIVEN** `parallelExecution: false` in `agents.yaml`
 - **WHEN** the user opens `/settings` and toggles Parallel execution to on

@@ -308,6 +308,68 @@ async function atomicWrite(path: string, contents: string): Promise<void> {
 }
 
 /**
+ * Set or remove the top-level `agmsg` block in agents.yaml.
+ * `block === null` removes the key (idempotent if already absent);
+ * `block !== null` upserts it. Preserves every other top-level key.
+ * Validates `team` (required, non-empty) and `storage` (optional,
+ * non-empty when present). Landed by add-agmsg-config-write.
+ */
+export async function writeAgmsg(
+  projectRoot: string,
+  block: { team: string; storage?: string } | null,
+): Promise<ApplyResult> {
+  if (block !== null) {
+    if (typeof block.team !== "string" || block.team.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "agmsg.team is required when the agmsg block is present",
+      };
+    }
+    if (block.storage !== undefined) {
+      if (typeof block.storage !== "string") {
+        return { ok: false, status: 400, error: "agmsg.storage must be a string" };
+      }
+    }
+  }
+
+  const path = join(projectRoot, "agents.yaml");
+  let doc: Record<string, unknown>;
+  if (existsSync(path)) {
+    const raw = await readFile(path, "utf8");
+    try {
+      const parsed = parseYaml(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = parsed as Record<string, unknown>;
+      } else {
+        return { ok: false, status: 400, error: "agents.yaml is not a mapping — refusing to overwrite" };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        status: 400,
+        error: `agents.yaml is not valid YAML — refusing to overwrite: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  } else {
+    doc = { agents: [] };
+  }
+
+  if (block === null) {
+    delete doc.agmsg;
+  } else {
+    const nextBlock: Record<string, string> = { team: block.team };
+    if (block.storage !== undefined && block.storage.length > 0) {
+      nextBlock.storage = block.storage;
+    }
+    doc.agmsg = nextBlock;
+  }
+
+  await atomicWrite(path, stringifyYaml(doc));
+  return { ok: true };
+}
+
+/**
  * Set the top-level `parallelExecution` boolean in agents.yaml.
  * Preserves other keys (agents list, runtimes if any legacy, unknown keys).
  * Landed by add-parallel-execution-config.
