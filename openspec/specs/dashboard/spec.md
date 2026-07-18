@@ -1678,8 +1678,6 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
-> ⚠️ **PENDING MODIFIED** by [signal-stage-completion-via-agmsg-message](../../changes/signal-stage-completion-via-agmsg-message/): agmsg branch success contract switches from polling to message-based wait; boot-prompt gains a report contract instructing the worker to signal completion via agmsg send.
-
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
@@ -1747,6 +1745,25 @@ entry in the following priority order:
    `sync-agmsg-spawn-options-on-config-write` (follow-up change)
    for that flow.
 
+   **Report contract in the boot-prompt.** The resolved boot-prompt
+   for the agmsg branch SHALL append a "report" section that
+   instructs the worker to send exactly ONE completion message to
+   Manager when it finishes (whether the outcome is pass,
+   needs-rework, or a blocker). The appended text SHALL be:
+
+   ```
+   --- report contract ---
+   When your task completes, send exactly ONE message to Manager via:
+     ~/.agents/skills/agmsg/scripts/send.sh <team> <entry.name> manager \
+       "stage:<S> status:done"
+   This tells Manager to inspect the review.md artifact (or git log
+   for code stage) and advance the workflow. Send exactly once.
+   ```
+
+   Where `<team>` is the value from `agents.yaml`'s `agmsg.team`
+   field, `<entry.name>` is the worker's agent name, and `<S>` is
+   the dispatched stage (`code`, `review`, or `verify`).
+
 2. **`entry.command == "claude"`** (Manager self-dispatch or a
    `mode: single-prompt` claude worker) — invoke the **Task tool**
    with the resolved prompt.
@@ -1757,15 +1774,36 @@ entry in the following priority order:
 
 **3-stage success contract** SHALL be applied per branch:
 
-- The **agmsg branch** returns as soon as the peer is listening.
-  Success is judged by artifact only:
-  - `code` stage: poll `git log agent/<change-id>` for a new commit
-    (5s interval, 15 min ceiling). Timeout → escalate `code stage
-    agmsg worker did not commit within timeout`.
-  - `review` / `verify` stages: poll `openspec/changes/<change-id>/
-    review.md` for existence + parseable `verdict:` frontmatter (5s
-    interval, 5 min ceiling). Timeout → escalate `<stage> agmsg
-    worker did not produce review.md within timeout`.
+- The **agmsg branch** uses a **message-based wait** instead of
+  polling. After sending the spawn, Manager waits (via the Monitor
+  tool, or via periodic `check-inbox.sh` at 5-second intervals) for
+  an inbox message matching:
+  - `from:<entry.name>`
+  - body matches regex `^stage:<S> status:done`
+
+  Ceilings match the previous polling model: **15 min for the code
+  stage, 5 min for review / verify**. On timeout → escalate
+  `<stage> agmsg worker did not report within timeout`.
+
+  On message receipt:
+  - **`S = code`** — check `git log agent/<change-id>` head vs the
+    pre-spawn head. If a new commit landed, advance phase to `coded`.
+    If the head is unchanged but the tree has uncommitted worker
+    output (staged or unstaged), Manager SHALL commit the tree on
+    the agent branch as fallback and then advance. If neither
+    condition holds (no worker output at all), escalate `code stage
+    reported done but produced no changes`.
+  - **`S = review` or `S = verify`** — read
+    `openspec/changes/<change-id>/review.md`, parse the frontmatter
+    `verdict:` value. Route on `pass` / `needs-rework` per the
+    unchanged logic. If the file is absent or the verdict is
+    unparseable AFTER receiving the report message, retry the read
+    once with a 1-second delay; if still absent, escalate
+    `<stage> reported done but produced no review.md`.
+
+  Duplicate messages from the same worker SHALL be ignored (Manager
+  processes only the first matching message per stage).
+
 - The **Task tool** and **subprocess** branches retain the current
   contract: subprocess non-zero exit → subprocess failure;
   subprocess exit 0 + review.md absent → contract failure;
@@ -1804,7 +1842,7 @@ existing behavior is retained.
 - **GIVEN** `agents.yaml` has a valid `agmsg:` block AND a worker entry `{ name: peer, mode: live-shell, command: codex, roles: [review] }`
 - **AND** agmsg scripts exist at `~/.agents/skills/agmsg/scripts/send.sh`
 - **WHEN** the dispatcher runs the review stage
-- **THEN** it invokes `/agmsg spawn codex peer --boot-prompt "/ithy-opsx:review <change-id>"` (not the subprocess branch, not the Task tool)
+- **THEN** it invokes `/agmsg spawn codex peer --boot-prompt "<resolved-prompt with report contract>"` (not the subprocess branch, not the Task tool)
 
 #### Scenario: agmsg branch skipped for single-prompt workers
 - **GIVEN** `agents.yaml` has an `agmsg:` block AND a worker entry `{ name: coder, mode: single-prompt, command: claude, roles: [code] }`
@@ -1822,30 +1860,36 @@ existing behavior is retained.
 - **WHEN** the dispatcher reaches the stage
 - **THEN** it logs "agmsg configured but not installed locally; falling back to non-agmsg dispatch" and takes the Task tool or subprocess branch as if no `agmsg:` block were present
 
-#### Scenario: agmsg branch code stage waits for commit
-- **GIVEN** an agmsg-routed code dispatch has been sent via `/agmsg spawn --boot-prompt`
-- **WHEN** the dispatcher polls
-- **THEN** it checks `git log agent/<change-id>` every 5 seconds; a new commit signals stage success and phase advances to `coded`
+#### Scenario: agmsg branch code stage advances on report message
+- **GIVEN** an agmsg-routed code dispatch to worker `claude`
+- **WHEN** Manager receives an inbox message `from:claude body:"stage:code status:done"` within the 15-min ceiling
+- **THEN** Manager checks `git log agent/<change-id>` — if a new commit landed, phase advances to `coded`; if not but the tree has uncommitted changes, Manager commits as fallback and advances
 
-#### Scenario: agmsg branch review stage waits for review.md
-- **GIVEN** an agmsg-routed review or verify dispatch has been sent via `/agmsg spawn --boot-prompt`
-- **WHEN** the dispatcher polls
-- **THEN** it checks `openspec/changes/<change-id>/review.md` every 5 seconds; presence + parseable `verdict:` frontmatter signals stage completion and routes on `pass`/`needs-rework`
+#### Scenario: agmsg branch review stage advances on report + review.md
+- **GIVEN** an agmsg-routed review dispatch to worker `copilot-review`
+- **WHEN** Manager receives `from:copilot-review body:"stage:review status:done"` and reads `review.md` with parseable `verdict: pass`
+- **THEN** Manager advances the change to `reviewed`
 
-#### Scenario: agmsg branch escalates on code timeout
-- **GIVEN** an agmsg-routed code dispatch that has not produced a new commit on `agent/<change-id>` after 15 minutes
-- **WHEN** the ceiling elapses
-- **THEN** the dispatcher escalates with `code stage agmsg worker did not commit within timeout`
+#### Scenario: agmsg branch escalates on missing report message
+- **GIVEN** an agmsg-routed dispatch has spawned a worker
+- **WHEN** no `stage:<S> status:done` message from that worker arrives within the ceiling (15 min code / 5 min review-verify)
+- **THEN** Manager escalates with `<stage> agmsg worker did not report within timeout`
 
-#### Scenario: agmsg branch escalates on review timeout
-- **GIVEN** an agmsg-routed review or verify dispatch that has not produced `review.md` after 5 minutes
-- **WHEN** the ceiling elapses
-- **THEN** the dispatcher escalates with `<stage> agmsg worker did not produce review.md within timeout`
+#### Scenario: agmsg branch retries artifact read on race
+- **GIVEN** Manager received `stage:review status:done` from the worker
+- **AND** `review.md` is temporarily absent when Manager first tries to read it (worker sent the message just before its file was flushed)
+- **WHEN** Manager retries the read once after a 1-second delay
+- **THEN** the file is now present and Manager parses the verdict as usual
+
+#### Scenario: agmsg branch ignores duplicate report messages
+- **GIVEN** Manager already processed `stage:code status:done` from worker `claude`
+- **WHEN** a second identical message arrives from the same worker for the same stage
+- **THEN** Manager ignores the duplicate and does NOT re-advance the phase
 
 #### Scenario: agmsg branch threads --model from entry.args
 - **GIVEN** `agents.yaml` has a valid `agmsg:` block AND a live-shell worker entry `{ name: claude, command: claude, args: [--dangerously-skip-permissions, --model, sonnet], roles: [code] }`
 - **WHEN** the dispatcher reaches the code stage
-- **THEN** it invokes `/agmsg spawn claude-code claude --model sonnet --boot-prompt "/ithy-opsx:apply <change-id>"` (the `--model sonnet` pair is extracted from `args` and threaded before `--boot-prompt`)
+- **THEN** it invokes `/agmsg spawn claude-code claude --model sonnet --boot-prompt "<resolved-prompt with report contract>"` (the `--model sonnet` pair is extracted from `args` and threaded before `--boot-prompt`)
 
 #### Scenario: agmsg branch omits --model when absent from args
 - **GIVEN** an entry whose `args` does not contain `--model`
