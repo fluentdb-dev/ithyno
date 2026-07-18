@@ -90,12 +90,41 @@ For each stage `S ∈ {code, review, verify}`:
          /opsx:escalate <change-id> "agmsg-type unknown for command: $entry_command"
          exit
        fi
+       # Extract --model <id> from entry.args and thread it to spawn.
+       # agmsg spawn supports --model as pass-through (spawn.sh line 48).
+       # Order-agnostic: the pair can appear anywhere in args.
+       # Bare --model (missing, empty, or another --flag as next token) →
+       # escalate rather than guess.
+       MODEL_ARG=""
+       n=${#entry_args[@]}
+       for ((i=0; i<n; i++)); do
+         if [ "${entry_args[$i]}" = "--model" ]; then
+           j=$((i+1))
+           next="${entry_args[$j]:-}"
+           if [ $j -ge $n ] || [ -z "$next" ] || [[ "$next" == --* ]]; then
+             /opsx:escalate <change-id> "agents.yaml agent \"$entry_name\" has bare --model without a value in args"
+             exit
+           fi
+           MODEL_ARG="--model $next"
+           break
+         fi
+       done
        # Slash command form (inside the Manager's Claude session).
        # This creates a new tmux pane running the worker CLI in
        # agmsg monitor mode, then injects the boot prompt.
-       /agmsg spawn "$AGMSG_TYPE" "$entry_name" --boot-prompt "<resolved-prompt>"
+       # $MODEL_ARG is empty when entry.args has no --model; a full
+       # `--model <id>` pair when it does. Word-splitting is intentional.
+       /agmsg spawn "$AGMSG_TYPE" "$entry_name" $MODEL_ARG --boot-prompt "<resolved-prompt>"
      fi
      ```
+
+     Non-`--model` args in `entry.args` (e.g.
+     `--dangerously-skip-permissions`) are NOT threaded on the CLI
+     here — they are handled server-side by
+     `auto-sync-agmsg-spawn-options`, which writes them into
+     `~/.agmsg/config/spawn_options.yaml` so `spawn.sh` picks them
+     up at spawn time. This skill only touches the CLI-level
+     `--model` pass-through.
 
      Success judgment for this branch is **poll-based** (see the
      agmsg branch of the 3-stage success contract below) — the

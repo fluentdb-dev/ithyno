@@ -1639,6 +1639,8 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
+> ⚠️ **PENDING MODIFIED** by [thread-model-arg-through-agmsg-spawn](../../changes/thread-model-arg-through-agmsg-spawn/): agmsg branch を修正し `entry.args` から `--model <id>` を抽出して spawn CLI に thread する。
+
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
