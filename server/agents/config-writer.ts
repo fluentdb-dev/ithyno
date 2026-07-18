@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { validateAgents } from "./registry.js";
+import { AgentRegistry, validateAgents } from "./registry.js";
 import type { AgentMode } from "./registry.js";
+import { syncSpawnOptions } from "./spawn-options-writer.js";
 
 /**
  * Server-side writer for `agents.yaml` mutations invoked by the Agents tab.
@@ -233,6 +234,26 @@ export async function applyAgentConfigPayload(
 
   const yaml = stringifyYaml(next);
   await atomicWrite(path, yaml);
+
+  // auto-sync-agmsg-spawn-options: mirror non-`--model` args of live-shell
+  // workers into ~/.agmsg/config/spawn_options.yaml. Reload the registry
+  // so `cfg.agmsg` reflects the just-written file rather than the caller's
+  // stale in-memory copy. Failures are logged but do not fail the UI Save
+  // (the user's agents.yaml write already succeeded).
+  try {
+    const freshRegistry = new AgentRegistry(projectRoot);
+    await freshRegistry.load();
+    const publicCfg = freshRegistry.publicConfig();
+    // publicConfig() returns AgentPublic (env redacted) which is a
+    // structural superset of what syncSpawnOptions reads (mode/roles/
+    // command/args on agents, agmsg/parallelExecution top-level), so the
+    // cast is safe.
+    await syncSpawnOptions(publicCfg as unknown as import("./registry.js").AgentConfig);
+  } catch (err) {
+    console.warn(
+      `[config-writer] spawn_options.yaml sync failed after agents.yaml write: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   return { ok: true };
 }
 

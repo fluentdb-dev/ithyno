@@ -16,6 +16,7 @@ import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyS
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeParallelExecution } from "./agents/config-writer.js";
+import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -206,6 +207,16 @@ if (existsSync(DOCS_DIR)) {
 // ---- Agent runner ----------------------------------------------------------
 const agentRegistry = new AgentRegistry(PROJECT_ROOT);
 await agentRegistry.load();
+// auto-sync-agmsg-spawn-options: on boot, ensure ~/.agmsg/config/spawn_options.yaml
+// mirrors non-`--model` args of live-shell workers in agents.yaml. Silent on failure —
+// this is a defensive sync that also runs on POST /api/agents/config.
+try {
+  await syncSpawnOptions(agentRegistry.publicConfig() as unknown as import("./agents/registry.js").AgentConfig);
+} catch (err) {
+  console.warn(
+    `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+}
 const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadcast(ev));
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
