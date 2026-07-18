@@ -1095,6 +1095,8 @@ field with a value of `"single-prompt"` or `"live-shell"`. The
 independent of whether the agent references a `runtime` or specifies
 `command` directly.
 
+> ⚠️ **PENDING MODIFIED** by [clarify-agmsg-dispatch-semantics](../../changes/clarify-agmsg-dispatch-semantics/): worker live-shell definition is rewritten to reflect post-agmsg semantics (dispatcher's agmsg branch when block present; fall-through to Task tool / subprocess when absent). The legacy "stdio: [pipe, pipe, pipe] + aider-style stdin" description is retired.
+
 - `single-prompt` — the runner spawns a headless child, delivers the
   resolved prompt according to the effective `promptStyle` (see
   `Runtime-Backed Agents`), captures stdout, and waits for exit.
@@ -1677,6 +1679,8 @@ prompt template at `.claude/commands/ithy-opsx/dispatch.md`. It is
 evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
+
+> ⚠️ **PENDING MODIFIED** by [clarify-agmsg-dispatch-semantics](../../changes/clarify-agmsg-dispatch-semantics/): documents that Copilot workers can only iterate via fresh spawn (no Monitor tool, so send-based mid-iteration prompts are unreachable); adds an informative scenario for Claude workers where send-based iteration is optionally allowed.
 
 The skill SHALL:
 
