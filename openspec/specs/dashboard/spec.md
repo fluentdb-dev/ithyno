@@ -1091,29 +1091,45 @@ Each recent-job row SHALL display a verdict badge when the underlying job's `ver
 
 Every agent entry in `agents.yaml` SHALL declare a required `mode`
 field with a value of `"single-prompt"` or `"live-shell"`. The
-`mode` field SHALL control how the runner spawns the child process,
+`mode` field SHALL control how the dispatcher routes the worker,
 independent of whether the agent references a `runtime` or specifies
 `command` directly.
 
-> ⚠️ **PENDING MODIFIED** by [clarify-agmsg-dispatch-semantics](../../changes/clarify-agmsg-dispatch-semantics/): worker live-shell definition is rewritten to reflect post-agmsg semantics (dispatcher's agmsg branch when block present; fall-through to Task tool / subprocess when absent). The legacy "stdio: [pipe, pipe, pipe] + aider-style stdin" description is retired.
+- `single-prompt` — headless dispatch. The dispatcher's Task tool
+  branch (for `claude` command) or subprocess branch (for
+  everything else) delivers the resolved prompt via the CLI's
+  `-p` flag (or equivalent), captures stdout, and waits for exit.
+  Exit code plus `review.md` artifact form the completion contract
+  (see `Review Artifact Schema`).
 
-- `single-prompt` — the runner spawns a headless child, delivers the
-  resolved prompt according to the effective `promptStyle` (see
-  `Runtime-Backed Agents`), captures stdout, and waits for exit.
-- `live-shell` — the delivery channel depends on the agent's role:
-  - **Worker** (any `roles` without `manager`) — the runner spawns
-    a headless child with **`stdio: [pipe, pipe, pipe]`** (no PTY),
-    writes the resolved prompt followed by a newline to
-    `child.stdin`, and lets the process run to its own exit. CLIs
-    that strictly require a TTY (Claude Code without `-p`, most
-    REPLs) SHOULD use `single-prompt` instead — worker
-    `live-shell` is intended for CLIs that read prompt input from
-    stdin (aider's `--message-stdin`, custom scripts, gh copilot
-    with piped stdin, ...).
-  - **Manager** (`roles` includes `manager`) — spawned by the
+- `live-shell` — the routing depends on the agent's role AND on
+  whether `agents.yaml` has a top-level `agmsg:` block:
+
+  - **Worker (`roles` without `manager`), agmsg block present** —
+    the dispatcher's agmsg branch spawns the worker in a fresh
+    tmux pane via `/agmsg spawn`, injects the resolved prompt as
+    the CLI's boot-prompt (with artifact + report contracts
+    appended per `Dispatch Slash Command`), and waits for a
+    `stage:<S> status:done` message from the worker via
+    `inbox.sh` polling. Completion is signalled by the message,
+    not by a child-process exit. `review.md` at the absolute
+    target path names the verdict.
+
+  - **Worker (`roles` without `manager`), agmsg block absent** —
+    falls through to the Task tool branch (for `claude` command)
+    or subprocess branch (otherwise), same as `single-prompt`.
+    The mode value carries no semantic distinction from
+    `single-prompt` in this state; it exists for forward
+    compatibility with the agmsg-configured case.
+
+  - **Manager (`roles` includes `manager`)** — spawned by the
     embedded Terminal panel's WebSocket handler
     (`attachPtyToSocket` in `server/sync/pty.ts`) which allocates
-    a real PTY. Runner never dispatches Manager entries directly.
+    a real PTY. When the workspace has an `agmsg:` block, the PTY
+    wraps startup in `tmux new-session -A -s <session>` per
+    `Embedded PTY Uses tmux When Agmsg Is Configured`. The
+    dispatcher never routes to the Manager as a worker; the
+    Manager IS the dispatcher.
 
 Agents that omit `mode` SHALL be rejected at load time with an error
 identifying the missing field. During load-time normalization of
@@ -1127,16 +1143,21 @@ observable behavior.
 - **WHEN** the runner spawns the agent for change `add-foo`
 - **THEN** the child is spawned with argv `[claude, --dangerously-skip-permissions, -p, /opsx:apply add-foo]` and no PTY is allocated
 
-#### Scenario: worker mode live-shell spawns headless with stdin piped
-- **GIVEN** a worker agent with `mode: live-shell`, `roles: [code]`, `command: aider`, `args: [--message-stdin]`, and a resolved prompt `Implement add-foo`
-- **WHEN** the runner spawns the agent
-- **THEN** the child is spawned with argv `[aider, --message-stdin]`, `stdio: [pipe, pipe, pipe]`, and `Implement add-foo\n` written to `child.stdin`
-- **AND** no PTY is allocated
+#### Scenario: worker mode live-shell + agmsg block → agmsg spawn
+- **GIVEN** `agents.yaml` has an `agmsg:` block AND a worker `{ name: peer, mode: live-shell, command: codex, roles: [review] }`
+- **AND** `~/.agents/skills/agmsg/scripts/send.sh` exists (agmsg installed)
+- **WHEN** the dispatcher runs the review stage
+- **THEN** the dispatcher takes the agmsg branch (per `Dispatch Slash Command`) and invokes `/agmsg spawn codex peer …` in a fresh tmux pane; completion is signalled by a `stage:review status:done` message from `peer`
+
+#### Scenario: worker mode live-shell + no agmsg block → falls through
+- **GIVEN** an agents.yaml with NO top-level `agmsg:` block and a worker `{ name: peer, mode: live-shell, command: codex, roles: [review] }`
+- **WHEN** the dispatcher runs the review stage
+- **THEN** it takes the subprocess branch (per `Dispatch Slash Command`'s fallthrough) — `codex … -p "<resolved-prompt>"` — same as if the entry were `mode: single-prompt`
 
 #### Scenario: manager mode live-shell handled by Terminal panel
 - **GIVEN** an agent with `roles: [manager]`, `mode: live-shell`, `command: claude`, `args: [--continue]`
 - **WHEN** the user opens the embedded Terminal panel
-- **THEN** `attachPtyToSocket` spawns a real PTY running `claude --continue` — this path is separate from `runner.run()`
+- **THEN** `attachPtyToSocket` spawns a real PTY running `claude --continue` (wrapped in tmux when agmsg is configured) — separate from `runner.run()` and separate from the dispatcher's worker branches
 
 #### Scenario: missing mode rejected
 - **GIVEN** an agent that omits the `mode` field entirely and cannot be normalized from a legacy shape
@@ -1680,8 +1701,6 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
-> ⚠️ **PENDING MODIFIED** by [clarify-agmsg-dispatch-semantics](../../changes/clarify-agmsg-dispatch-semantics/): documents that Copilot workers can only iterate via fresh spawn (no Monitor tool, so send-based mid-iteration prompts are unreachable); adds an informative scenario for Claude workers where send-based iteration is optionally allowed.
-
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
@@ -1798,6 +1817,20 @@ entry in the following priority order:
    Order: the artifact contract SHALL appear before the report
    contract when both are present, so a well-behaved worker writes
    review.md and only then sends the completion message.
+
+   **Iteration for Copilot workers**. When the review stage returns
+   `needs-rework`, the skill iterates. For agmsg workers whose
+   agmsg-type has no receive-side Monitor equivalent (currently
+   `copilot`), iteration SHALL be a fresh `/agmsg spawn` per
+   iteration — the skill MUST NOT use `send.sh` to hand a mid-
+   iteration prompt to an already-spawned copilot worker (Copilot
+   has no Monitor tool; the message would sit in the inbox unread
+   until Copilot's next user-triggered turn, which the dispatcher
+   cannot cause). For agmsg types with a receive-side Monitor
+   (currently `claude-code`), the skill MAY optionally reuse an
+   existing worker via `send.sh` for iteration N+1 instead of
+   fresh spawn; that optimization is a follow-up and not
+   normative today.
 
 2. **`entry.command == "claude"`** (Manager self-dispatch or a
    `mode: single-prompt` claude worker) — invoke the **Task tool**
@@ -1958,6 +1991,16 @@ existing behavior is retained.
 - **GIVEN** the code stage boot-prompt is built
 - **WHEN** the resolved-prompt is assembled
 - **THEN** it contains the report contract but NOT the artifact contract (no review.md write expected in the code stage)
+
+#### Scenario: Copilot worker iteration means fresh spawn
+- **GIVEN** an agmsg-routed review with worker `{ name: copilot-review, command: copilot, mode: live-shell }` that returned `verdict: needs-rework`
+- **WHEN** the dispatcher runs the next iteration
+- **THEN** it invokes `/agmsg spawn copilot copilot-review --boot-prompt "<new resolved-prompt with priorFindings + artifact + report contracts>"` — a FRESH spawn creating a new tmux pane; it does NOT call `send.sh` to hand the new prompt to an existing copilot session
+
+#### Scenario: Claude worker iteration MAY reuse (informative)
+- **GIVEN** an agmsg-routed dispatch with worker `{ name: coder, command: claude, mode: live-shell }` that returned `verdict: needs-rework`
+- **WHEN** the dispatcher decides on the next iteration
+- **THEN** the skill MAY either fresh-spawn a new worker OR send the new prompt to the existing worker (Claude Code has Monitor, so send-based iteration is technically supported); either choice is compliant with this requirement in the current version
 
 ### Requirement: Kanban Placement Is Folder-Driven
 
