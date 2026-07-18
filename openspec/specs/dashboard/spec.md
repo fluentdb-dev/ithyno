@@ -1678,8 +1678,6 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
-> ⚠️ **PENDING MODIFIED** by [write-review-md-to-explicit-path](../../changes/write-review-md-to-explicit-path/): agmsg branch boot-prompt gains an artifact contract naming the absolute review.md path; Manager reads that path directly instead of the repo-relative default.
-
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
@@ -1704,6 +1702,16 @@ The skill SHALL:
    semaphore.
 6. On any escalate path, release the `.worktrees/.lock` semaphore
    before exiting.
+
+**Target artifact path**. Before dispatching, the skill SHALL
+compute an absolute `<TARGET_PATH>` — the directory the worker
+resolves `openspec/changes/<change-id>/review.md` inside:
+
+- worktree mode → `<repo>/.worktrees/<change-id>` (absolute)
+- main-tree mode → `<repo>` (absolute; the Manager's project root)
+
+`<TARGET_PATH>` is used both in the worker's boot-prompt (artifact
+contract, below) and by the Manager's own artifact judgment (below).
 
 **Dispatch helper protocol** SHALL branch on the resolved worker
 entry in the following priority order:
@@ -1747,6 +1755,23 @@ entry in the following priority order:
    `sync-agmsg-spawn-options-on-config-write` (follow-up change)
    for that flow.
 
+   **Artifact contract in the boot-prompt** (review / verify stages
+   only). The resolved boot-prompt SHALL append an "artifact
+   contract" section that names the exact absolute path where the
+   worker MUST write `review.md`. The appended text SHALL be:
+
+   ```
+   --- artifact contract ---
+   Write your review.md to this exact absolute path:
+     <TARGET_PATH>/openspec/changes/<change-id>/review.md
+   Do NOT rely on your CLI's cwd inference; the dispatcher will
+   look at this exact path only. If the path's parent directory
+   does not exist, create it first.
+   ```
+
+   The artifact contract SHALL NOT be appended for the code stage
+   (no review.md write expected).
+
    **Report contract in the boot-prompt.** The resolved boot-prompt
    for the agmsg branch SHALL append a "report" section that
    instructs the worker to send exactly ONE completion message to
@@ -1766,6 +1791,10 @@ entry in the following priority order:
    field, `<entry.name>` is the worker's agent name, and `<S>` is
    the dispatched stage (`code`, `review`, or `verify`).
 
+   Order: the artifact contract SHALL appear before the report
+   contract when both are present, so a well-behaved worker writes
+   review.md and only then sends the completion message.
+
 2. **`entry.command == "claude"`** (Manager self-dispatch or a
    `mode: single-prompt` claude worker) — invoke the **Task tool**
    with the resolved prompt.
@@ -1778,8 +1807,8 @@ entry in the following priority order:
 
 - The **agmsg branch** uses a **message-based wait** instead of
   polling. After sending the spawn, Manager waits (via the Monitor
-  tool, or via periodic `check-inbox.sh` at 5-second intervals) for
-  an inbox message matching:
+  tool, or via periodic `inbox.sh` at 5-second intervals) for an
+  inbox message matching:
   - `from:<entry.name>`
   - body matches regex `^stage:<S> status:done`
 
@@ -1796,12 +1825,14 @@ entry in the following priority order:
     condition holds (no worker output at all), escalate `code stage
     reported done but produced no changes`.
   - **`S = review` or `S = verify`** — read
-    `openspec/changes/<change-id>/review.md`, parse the frontmatter
-    `verdict:` value. Route on `pass` / `needs-rework` per the
-    unchanged logic. If the file is absent or the verdict is
-    unparseable AFTER receiving the report message, retry the read
-    once with a 1-second delay; if still absent, escalate
-    `<stage> reported done but produced no review.md`.
+    `<TARGET_PATH>/openspec/changes/<change-id>/review.md` (the
+    same absolute path the boot-prompt's artifact contract named).
+    Parse the frontmatter `verdict:` value. Route on
+    `pass` / `needs-rework` per the unchanged logic. If the file is
+    absent AFTER receiving the report message, retry the read once
+    with a 1-second delay; if still absent, escalate `<stage>
+    reported done but did not write review.md at <TARGET_PATH>/
+    openspec/changes/<change-id>/review.md`.
 
   Duplicate messages from the same worker SHALL be ignored (Manager
   processes only the first matching message per stage).
@@ -1844,7 +1875,7 @@ existing behavior is retained.
 - **GIVEN** `agents.yaml` has a valid `agmsg:` block AND a worker entry `{ name: peer, mode: live-shell, command: codex, roles: [review] }`
 - **AND** agmsg scripts exist at `~/.agents/skills/agmsg/scripts/send.sh`
 - **WHEN** the dispatcher runs the review stage
-- **THEN** it invokes `/agmsg spawn codex peer --boot-prompt "<resolved-prompt with report contract>"` (not the subprocess branch, not the Task tool)
+- **THEN** it invokes `/agmsg spawn codex peer --boot-prompt "<resolved-prompt with artifact + report contracts>"` (not the subprocess branch, not the Task tool)
 
 #### Scenario: agmsg branch skipped for single-prompt workers
 - **GIVEN** `agents.yaml` has an `agmsg:` block AND a worker entry `{ name: coder, mode: single-prompt, command: claude, roles: [code] }`
@@ -1869,7 +1900,7 @@ existing behavior is retained.
 
 #### Scenario: agmsg branch review stage advances on report + review.md
 - **GIVEN** an agmsg-routed review dispatch to worker `copilot-review`
-- **WHEN** Manager receives `from:copilot-review body:"stage:review status:done"` and reads `review.md` with parseable `verdict: pass`
+- **WHEN** Manager receives `from:copilot-review body:"stage:review status:done"` and reads `review.md` at `<TARGET_PATH>/openspec/changes/<change-id>/review.md` with parseable `verdict: pass`
 - **THEN** Manager advances the change to `reviewed`
 
 #### Scenario: agmsg branch escalates on missing report message
@@ -1879,7 +1910,7 @@ existing behavior is retained.
 
 #### Scenario: agmsg branch retries artifact read on race
 - **GIVEN** Manager received `stage:review status:done` from the worker
-- **AND** `review.md` is temporarily absent when Manager first tries to read it (worker sent the message just before its file was flushed)
+- **AND** `<TARGET_PATH>/openspec/changes/<change-id>/review.md` is temporarily absent when Manager first tries to read it (worker sent the message just before its file was flushed)
 - **WHEN** Manager retries the read once after a 1-second delay
 - **THEN** the file is now present and Manager parses the verdict as usual
 
@@ -1902,6 +1933,27 @@ existing behavior is retained.
 - **GIVEN** an entry whose `args` contains `--model` with no following token (e.g. `args: [--model]`)
 - **WHEN** the dispatcher reaches the stage
 - **THEN** it escalates with `agents.yaml agent "<name>" has bare --model without a value in args` and does NOT dispatch
+
+#### Scenario: worktree mode → boot-prompt names the worktree absolute path
+- **GIVEN** worktree mode with `<repo>/.worktrees/<change-id>/` created
+- **WHEN** the dispatcher builds the boot-prompt for the review stage
+- **THEN** the artifact contract section names `<repo-absolute>/.worktrees/<change-id>/openspec/changes/<change-id>/review.md` as the target path
+
+#### Scenario: main-tree mode → boot-prompt names the repo root path
+- **GIVEN** main-tree mode (no worktree)
+- **WHEN** the dispatcher builds the boot-prompt for the review stage
+- **THEN** the artifact contract section names `<repo-absolute>/openspec/changes/<change-id>/review.md` as the target path
+
+#### Scenario: worker writes review.md to the wrong path → escalate
+- **GIVEN** worktree mode; the worker completed and sent `stage:review status:done`
+- **AND** review.md is not present at `<TARGET_PATH>/openspec/changes/<change-id>/review.md` (worker ignored the artifact contract and wrote elsewhere)
+- **WHEN** Manager checks the artifact after the 1-second retry
+- **THEN** Manager escalates with `review reported done but did not write review.md at <TARGET_PATH>/openspec/changes/<change-id>/review.md`
+
+#### Scenario: code stage boot-prompt has NO artifact contract
+- **GIVEN** the code stage boot-prompt is built
+- **WHEN** the resolved-prompt is assembled
+- **THEN** it contains the report contract but NOT the artifact contract (no review.md write expected in the code stage)
 
 ### Requirement: Kanban Placement Is Folder-Driven
 
