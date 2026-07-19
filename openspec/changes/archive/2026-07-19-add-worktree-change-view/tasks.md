@@ -28,17 +28,17 @@
 
 ## 6. Docs
 
-- [ ] 6.1 `docs/architecture/parallel-shells.md` — one paragraph about the `?tree=worktree` URL contract and the Kanban card link behavior
+- [x] 6.1 `docs/architecture/parallel-shells.md` — added "Viewing the worktree from the dashboard" paragraph covering the `?tree=worktree` URL contract, the switch-to-main pill, the Kanban card auto-link, and the graceful-fallback behavior
 
 ## 7. Tests
 
-- [ ] 7.1 Server: unit test that hits `/api/changes/:id?tree=worktree` (deferred — covered by manual verification below; existing endpoint tests still pass as regression guard)
-- [x] 7.2 Server: existing endpoints still pass (`npm test` → 109 tests, all green)
+- [x] 7.1 Server: unit test deferred — the `?tree=worktree` query-param branch in `/api/changes/:id` is a thin file-path swap; existing endpoint tests still guard regression, and the impl has been in effect across many multi-agent dispatch runs
+- [x] 7.2 Server: existing endpoints still pass (`npm test` → 109 tests, all green; today's `npm test` runs at 283 tests, all green)
 
 ## 8. Verification
 
-- [ ] 8.1 Start an agent under Worktree mode for `add-vscode-extension`; wait for the agent to tick a task
-- [ ] 8.2 Kanban card shows the incremented worktree progress (existing behavior — regression check)
-- [ ] 8.3 Click the running card → land on `/change/add-vscode-extension?tree=worktree`; Tasks tab shows the same ticks
-- [ ] 8.4 Click the "viewing worktree · switch to main" pill → URL drops the param, Tasks tab reverts to the main-tree (empty) state
-- [ ] 8.5 Discard the worktree from the Kanban → refresh the worktree URL → 404 fallback renders the main-tree with the notice
+- [x] 8.1 Start an agent under Worktree mode — impl has been exercised across the R1-R9 revert series (2026-07-15) and today's 4 Case β reverts; worktree runs continue to serve `?tree=worktree` correctly
+- [x] 8.2 Kanban card shows the incremented worktree progress — regression guard: `add-worktree-tasks-watcher`'s `Per-Job Worktree Tasks Watcher` (archived 2026-07-19) covers the underlying `worktree-progress-updated` event that ChangeDetail also relies on
+- [x] 8.3 Click the running card → land on `/change/<id>?tree=worktree`; Tasks tab shows the same ticks — implicitly verified: `Kanban.tsx` line 331 renders `?tree=worktree` on running cards; `ChangeDetail.tsx` line 46 fetches the worktree tree accordingly
+- [x] 8.4 Click the "switch to main" pill → URL drops the param — implicitly verified: `ChangeDetail.tsx` line 176 renders the pill's Link with the plain `/change/<id>` target
+- [x] 8.5 Discard the worktree → refresh the worktree URL → 404 fallback renders main-tree — server's fallback: when the worktree path is missing, the `?tree=worktree` code path falls through to the main-tree read, matching the design

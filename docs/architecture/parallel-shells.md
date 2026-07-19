@@ -149,6 +149,24 @@ skill, which handles the full flow: preflight, optional worktree merge
 git commit the user reviews before it lands. Landed by
 [add-ithy-opsx-archive](../../openspec/changes/add-ithy-opsx-archive/).
 
+## Viewing the worktree from the dashboard
+
+While an agent job runs, the change lives in two places on disk: the
+main tree at `openspec/changes/<id>/` (the frozen proposal) and the
+worktree at `.worktrees/<id>/openspec/changes/<id>/` (the agent's
+in-flight edits). The dashboard reads either version based on the
+URL. Adding **`?tree=worktree`** to a change URL — e.g.
+`/change/add-vscode-extension?tree=worktree` — makes the server
+return the worktree copy, and the ChangeDetail head shows a "viewing
+worktree · switch to main" pill for the return trip. Kanban cards
+whose job is running link to the worktree URL automatically, so the
+card's progress ticks and the ChangeDetail page stay in sync. When
+the worktree disappears (job discarded, worktree removed manually),
+the `?tree=worktree` URL degrades to the main-tree view with a small
+notice. Landed by
+[add-worktree-change-view](../../openspec/changes/add-worktree-change-view/)
+(archived).
+
 ## Reading order
 
 For someone new joining the parallel-shells story:
