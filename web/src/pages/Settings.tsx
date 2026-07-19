@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setAgmsgConfig, setParallelExecution } from "../api";
+import {
+  initProject,
+  setAgmsgConfig,
+  setParallelExecution,
+  type InitProjectResult,
+} from "../api";
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -64,7 +69,181 @@ export function Settings() {
       </section>
 
       <AgmsgSection storeAgmsg={agmsg} disabled={busy} pushToast={pushToast} />
+
+      <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
+  );
+}
+
+// add-init-http-endpoint: minimal "New Project" form. The browser can't
+// reliably open a native folder picker, so we accept an absolute parent
+// path + project name and let the user paste from Finder / Explorer.
+// Electron and VS Code follow-up proposes will layer native pickers on top.
+function NewProjectSection(props: {
+  disabled: boolean;
+  pushToast: (kind: "info" | "error", msg: string) => void;
+}) {
+  const { disabled, pushToast } = props;
+  const [parent, setParent] = useState("");
+  const [name, setName] = useState("");
+  const [force, setForce] = useState(false);
+  const [skipGitignore, setSkipGitignore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<InitProjectResult | null>(null);
+
+  const canSubmit =
+    !disabled &&
+    !busy &&
+    parent.trim().length > 0 &&
+    parent.trim().startsWith("/") &&
+    name.trim().length > 0;
+
+  const onSubmit = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const dir = `${parent.trim().replace(/\/$/, "")}/${name.trim()}`;
+      const res = await initProject({
+        dir,
+        force,
+        skipGitignore,
+        autoCreateDir: true,
+        autoGitInit: true,
+      });
+      setResult(res);
+      if (res.ok) {
+        pushToast(
+          "info",
+          `Project scaffolded at ${res.target ?? dir}${
+            res.gitInitPerformed ? " (git init ran)" : ""
+          }`,
+        );
+      } else {
+        pushToast("error", res.reason ?? "init failed");
+      }
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="settings-section">
+      <h3>New Project</h3>
+      <p className="muted">
+        Scaffold a fresh directory with everything ithyno expects (CLAUDE.md,
+        the openspec-flow skill, agents.yaml.example, docs/, .gitignore). The
+        parent path plus project name are combined into an absolute target;
+        the directory is created and{" "}
+        <code>git init</code> runs if the target is not already a git repo.
+        You'll still need to run <code>openspec init</code> afterward to
+        install the <code>/opsx:*</code> commands (the Next Steps panel below
+        shows the exact command).
+      </p>
+
+      <div className="settings-field">
+        <label>
+          <span>
+            <strong>Parent directory</strong>
+            <p className="muted">Absolute path — paste from Finder / Explorer.</p>
+          </span>
+          <input
+            type="text"
+            value={parent}
+            placeholder="/Users/you/Documents/works"
+            disabled={disabled || busy}
+            onChange={(e) => setParent(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="settings-field">
+        <label>
+          <span>
+            <strong>Project name</strong>
+            <p className="muted">Kebab-case suggested; becomes the target dir name.</p>
+          </span>
+          <input
+            type="text"
+            value={name}
+            placeholder="my-new-project"
+            disabled={disabled || busy}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={force}
+          disabled={disabled || busy}
+          onChange={(e) => setForce(e.target.checked)}
+        />
+        <span>
+          <strong>Overwrite existing files</strong>
+          <p className="muted">
+            Skipped by default; enable to force-copy templates over existing
+            files at the target.
+          </p>
+        </span>
+      </label>
+
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={skipGitignore}
+          disabled={disabled || busy}
+          onChange={(e) => setSkipGitignore(e.target.checked)}
+        />
+        <span>
+          <strong>Skip .gitignore</strong>
+          <p className="muted">Do not append <code>.worktrees/</code> to <code>.gitignore</code>.</p>
+        </span>
+      </label>
+
+      <div className="settings-actions">
+        <button type="button" disabled={!canSubmit} onClick={() => void onSubmit()}>
+          {busy ? "Scaffolding…" : "Create project"}
+        </button>
+      </div>
+
+      {result && result.ok && (
+        <div className="settings-result">
+          <h4>Result</h4>
+          <p className="muted">Target: <code>{result.target}</code></p>
+          <ul className="settings-actions-list">
+            {(result.actions ?? []).map((a) => (
+              <li key={a.path}>
+                <code>{a.action}</code>: {a.path}
+              </li>
+            ))}
+            <li>
+              <code>gitignore</code>: {result.gitignoreResult}
+            </li>
+            {result.gitInitPerformed && (
+              <li><code>git init</code> ran on the target</li>
+            )}
+          </ul>
+          {result.openspecMissing && (
+            <div className="settings-next-steps">
+              <p><strong>Next steps</strong></p>
+              <pre><code>npx -y -p @fission-ai/openspec@latest openspec init {result.target} --tools claude</code></pre>
+              <p className="muted">
+                Then re-launch ithyno pointed at the new directory.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+      {result && !result.ok && (
+        <div className="settings-result">
+          <h4>Failed</h4>
+          <p className="muted"><code>{result.reason}</code></p>
+        </div>
+      )}
+    </section>
   );
 }
 

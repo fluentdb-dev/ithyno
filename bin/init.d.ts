@@ -23,6 +23,7 @@ export interface RunInitResult {
   gitignoreResult?: "appended" | "already-present" | "created" | "skipped";
   summary?: { created: number; overwritten: number; skipped: number };
   openspecMissing?: boolean;
+  gitInitPerformed?: boolean;
 }
 
 export function runInit(opts?: {
@@ -30,5 +31,7 @@ export function runInit(opts?: {
   force?: boolean;
   skipGitignore?: boolean;
   quiet?: boolean;
+  autoCreateDir?: boolean;
+  autoGitInit?: boolean;
   log?: (msg: string) => void;
 }): Promise<RunInitResult>;

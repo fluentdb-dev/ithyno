@@ -102,29 +102,52 @@ export async function runInit({
   force = false,
   skipGitignore = false,
   quiet = false,
+  autoCreateDir = false,
+  autoGitInit = false,
   log = console.log,
 } = {}) {
   const target = resolve(targetDir ?? process.cwd());
 
-  // Preflight: target exists?
+  // Preflight: target exists? (with optional autoCreateDir recovery)
+  let targetExists = false;
   try {
     const s = await stat(target);
     if (!s.isDirectory()) throw new Error("not a directory");
+    targetExists = true;
   } catch {
-    return {
-      ok: false,
-      exitCode: 2,
-      reason: `Target directory does not exist: ${target}`,
-    };
+    // fall through
+  }
+  if (!targetExists) {
+    if (!autoCreateDir) {
+      return {
+        ok: false,
+        exitCode: 2,
+        reason: `Target directory does not exist: ${target}`,
+      };
+    }
+    await mkdir(target, { recursive: true });
   }
 
-  // Preflight: git repo?
+  // Preflight: git repo? (with optional autoGitInit recovery)
+  let gitInitPerformed = false;
   if (!(await isGitRepo(target))) {
-    return {
-      ok: false,
-      exitCode: 2,
-      reason: `${target} is not a git repository. Run \`git init\` first — ithyno's agent runner needs a git working tree.`,
-    };
+    if (!autoGitInit) {
+      return {
+        ok: false,
+        exitCode: 2,
+        reason: `${target} is not a git repository. Run \`git init\` first — ithyno's agent runner needs a git working tree.`,
+      };
+    }
+    try {
+      await execFile("git", ["init"], { cwd: target });
+      gitInitPerformed = true;
+    } catch (err) {
+      return {
+        ok: false,
+        exitCode: 2,
+        reason: `git init failed in ${target}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   // Preflight (non-fatal): openspec/ initialized?
@@ -178,6 +201,7 @@ export async function runInit({
     ok: true,
     exitCode: 0,
     target,
+    gitInitPerformed,
     actions,
     gitignoreResult,
     summary: { created, overwritten, skipped },

@@ -284,6 +284,41 @@ export async function setAgmsgConfig(
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+// add-init-http-endpoint: POST /api/init client. Scaffolds a new project at
+// an absolute path. autoCreateDir + autoGitInit default to true here because
+// the UI's "New Project" flow expects one-shot creation.
+export interface InitProjectPayload {
+  dir: string;
+  force?: boolean;
+  skipGitignore?: boolean;
+  autoCreateDir?: boolean;
+  autoGitInit?: boolean;
+}
+export interface InitProjectResult {
+  ok: boolean;
+  exitCode?: number;
+  reason?: string;
+  target?: string;
+  actions?: Array<{ path: string; action: "create" | "skip" | "overwrite" }>;
+  gitignoreResult?: string;
+  summary?: { created: number; overwritten: number; skipped: number };
+  openspecMissing?: boolean;
+  gitInitPerformed?: boolean;
+}
+export async function initProject(
+  payload: InitProjectPayload,
+): Promise<InitProjectResult> {
+  const { status, data } = await postJson<InitProjectResult>("/api/init", {
+    autoCreateDir: true,
+    autoGitInit: true,
+    ...payload,
+  });
+  if (status >= 400 && !data.reason) {
+    throw new Error(`HTTP ${status}`);
+  }
+  return data;
+}
+
 export async function fetchAgentJobs(): Promise<{ jobs: JobSummary[] }> {
   const res = await fetch("/api/agents/jobs");
   if (!res.ok) throw new Error(`GET /api/agents/jobs failed: ${res.status}`);

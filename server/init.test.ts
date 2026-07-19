@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, stat } from "node:fs/promises";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { copyFile, updateGitignore } from "../bin/init.js";
+import { copyFile, updateGitignore, runInit } from "../bin/init.js";
+
+const execFile = promisify(execFileCb);
 
 let dir: string;
 
@@ -94,6 +99,63 @@ describe("updateGitignore — append-only-if-missing", () => {
     const raw = await readFile(join(dir, ".gitignore"), "utf8");
     const occurrences = raw.split(/\r?\n/).filter((l) => l.trim() === ".worktrees/").length;
     expect(occurrences).toBe(1);
+  });
+});
+
+describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () => {
+  it("autoCreateDir: true creates the missing target dir recursively before scaffolding", async () => {
+    const nested = join(dir, "nested", "child");
+    const res = await runInit({
+      targetDir: nested,
+      autoCreateDir: true,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+    expect((await stat(nested)).isDirectory()).toBe(true);
+    expect(res.gitInitPerformed).toBe(true);
+  });
+
+  it("autoCreateDir: false (default) refuses a missing target with exitCode 2", async () => {
+    const nested = join(dir, "missing");
+    const res = await runInit({ targetDir: nested, quiet: true });
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(2);
+    expect(res.reason).toContain("Target directory does not exist");
+    expect(existsSync(nested)).toBe(false);
+  });
+
+  it("autoGitInit: true runs git init in a non-git dir and reports gitInitPerformed", async () => {
+    // dir exists (mkdtemp) but is NOT a git repo.
+    expect(existsSync(join(dir, ".git"))).toBe(false);
+    const res = await runInit({
+      targetDir: dir,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.gitInitPerformed).toBe(true);
+    expect(existsSync(join(dir, ".git"))).toBe(true);
+  });
+
+  it("autoGitInit: false (default) refuses non-git dir with exitCode 2 and gitInitPerformed absent", async () => {
+    const res = await runInit({ targetDir: dir, quiet: true });
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(2);
+    expect(res.reason).toContain("not a git repository");
+    // Directory still not a git repo.
+    expect(existsSync(join(dir, ".git"))).toBe(false);
+  });
+
+  it("existing git repo does not trigger autoGitInit — gitInitPerformed is false", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({
+      targetDir: dir,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.gitInitPerformed).toBe(false);
   });
 });
 

@@ -99,15 +99,19 @@ Failure responses:
 
 - **HTTP 400** with `{ ok: false, reason: "..." }` when the body is
   malformed (missing `dir`, `dir` is not a string, `dir` is not absolute).
-- **HTTP 401** with `{ error: "auth required" }` when the request lacks
-  a valid CSRF token, matching the existing gated endpoints.
+- **HTTP 403** with `{ error: "local only" }` when the request originates
+  from a non-loopback address, matching the existing `isLocal` guard used
+  by `POST /api/git/init`, `POST /api/config/agmsg`, and the agent
+  runner endpoints.
 - **HTTP 500** with `{ ok: false, exitCode, reason }` when `runInit`
   fails preflight even after the auto-recovery flags. `exitCode` mirrors
   the CLI (2 for preflight failure).
 
-Authentication SHALL follow the existing pattern used by
-`POST /api/changes/:id/phase` and `POST /api/config/agmsg`: a CSRF token
-header issued to the same-origin dashboard session.
+Authentication SHALL follow the existing local-only guard used by
+`POST /api/git/init` and `POST /api/config/agmsg`: the request's remote
+address MUST be a loopback address (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`,
+or a `127.*` prefix). Non-local requests SHALL receive HTTP 403 with
+`{ error: "local only" }`.
 
 The endpoint SHALL reject relative paths in `dir` with HTTP 400 —
 resolving relative paths against the server's cwd is unsafe across
@@ -125,10 +129,10 @@ directories).
 - **WHEN** the endpoint validates the body
 - **THEN** it returns HTTP 400 with `reason` naming that `dir` must be absolute, and does not invoke `runInit`
 
-#### Scenario: unauthenticated rejected
-- **GIVEN** a request without a valid CSRF token
+#### Scenario: non-local request rejected
+- **GIVEN** a request from a remote address that is NOT a loopback address (e.g. `10.0.0.5`)
 - **WHEN** the endpoint receives it
-- **THEN** it returns HTTP 401 with `{ error: "auth required" }` before touching the body or filesystem
+- **THEN** it returns HTTP 403 with `{ error: "local only" }` before touching the body or filesystem
 
 #### Scenario: preflight failure surfaces as 500 with reason
 - **GIVEN** an authenticated request whose `dir` does not exist AND `autoCreateDir: false`

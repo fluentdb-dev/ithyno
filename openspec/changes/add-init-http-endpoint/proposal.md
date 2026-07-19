@@ -90,9 +90,9 @@ Response on success:
 Response on failure: HTTP 4xx/5xx with `{ ok: false, exitCode, reason }`
 (exit codes mirror the CLI: 2 for preflight failure).
 
-Auth: gated behind the existing CSRF-token middleware — same posture as
-the phase API and the `agmsg` config endpoint. Non-auth callers receive
-`{ error: "auth required" }`.
+Auth: gated by the existing `isLocal` guard — same posture as
+`POST /api/git/init` and `POST /api/config/agmsg`. Non-local callers
+receive HTTP 403 with `{ error: "local only" }`.
 
 Path validation: `dir` MUST be an absolute path. Relative paths are
 rejected with 400 — the server MUST NOT resolve relative to its own cwd
