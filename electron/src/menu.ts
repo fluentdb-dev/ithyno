@@ -3,6 +3,7 @@ import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions }
 
 export interface MenuHandlers {
   onOpenProject(): void;
+  onNewProject(): void;
   onOpenRecent(path: string): void;
   onQuit(): void;
   onOpenDocumentation(): void;
@@ -32,6 +33,11 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
         label: 'Open Project…',
         accelerator: 'CmdOrCtrl+O',
         click: () => handlers.onOpenProject(),
+      },
+      {
+        label: 'New Project…',
+        accelerator: 'CmdOrCtrl+Shift+N',
+        click: () => handlers.onNewProject(),
       },
       recentSubmenu,
       { type: 'separator' },

@@ -9,7 +9,7 @@ import {
   shell,
 } from 'electron';
 import { existsSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 const DEFAULT_CHROME_COLOR = '#0f1115';
@@ -52,6 +52,25 @@ function pickProjectDialog(parent?: BrowserWindow): string | null {
   const opts: Electron.OpenDialogSyncOptions = {
     title: 'Select an OpenSpec project folder',
     properties: ['openDirectory'],
+  };
+  const result = parent
+    ? dialog.showOpenDialogSync(parent, opts)
+    : dialog.showOpenDialogSync(opts);
+  if (!result || result.length === 0) return null;
+  return result[0];
+}
+
+/**
+ * Native picker for File → New Project…. Uses `createDirectory: true` so
+ * the OS dialog exposes the "New Folder" affordance and the user can
+ * create the target on the spot. Returns null on cancel.
+ * (add-electron-new-project-flow.)
+ */
+function pickNewProjectDialog(parent?: BrowserWindow): string | null {
+  const opts: Electron.OpenDialogSyncOptions = {
+    title: 'Select a folder for the new ithyno project',
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Create ithyno project here',
   };
   const result = parent
     ? dialog.showOpenDialogSync(parent, opts)
@@ -233,12 +252,79 @@ async function switchProject(projectRoot: string): Promise<void> {
   await createWindowForProject(projectRoot);
 }
 
+/**
+ * File → New Project… handler. Follows the agmsg-installer pattern:
+ * native OS dialog + direct `runInit` import + switch to the new
+ * project on success. No HTTP round-trip through the local server.
+ * (add-electron-new-project-flow.)
+ */
+async function onNewProject(): Promise<void> {
+  const parent = mainWindow ?? undefined;
+  const picked = pickNewProjectDialog(parent);
+  if (!picked) return; // user cancelled — silent
+
+  // Resolve bin/init.js next to bin/ithyno.js (same layout in dev + packaged).
+  const { pathToFileURL } = await import('node:url');
+  const initPath = join(dirname(resolveBinPath()), 'init.js');
+  const initUrl = pathToFileURL(initPath).href;
+
+  // bin/init.js is ES module; dynamic import works in CJS Electron main.
+  const mod = (await import(initUrl)) as {
+    runInit: (opts: {
+      targetDir: string;
+      autoCreateDir?: boolean;
+      autoGitInit?: boolean;
+      quiet?: boolean;
+    }) => Promise<{
+      ok: boolean;
+      target?: string;
+      reason?: string;
+      openspecMissing?: boolean;
+      gitInitPerformed?: boolean;
+    }>;
+  };
+  const res = await mod.runInit({
+    targetDir: picked,
+    autoCreateDir: true,
+    autoGitInit: true,
+    quiet: true,
+  });
+
+  if (!res.ok) {
+    dialog.showErrorBox('New Project failed', res.reason ?? 'runInit reported an unknown failure.');
+    return;
+  }
+
+  const detailLines: string[] = [`Target: ${res.target ?? picked}`];
+  if (res.gitInitPerformed) detailLines.push('git init ran on the target.');
+  if (res.openspecMissing) {
+    detailLines.push(
+      '',
+      'Next: install OpenSpec (needed for /opsx:* commands):',
+      `  npx -y -p @fission-ai/openspec@latest openspec init ${res.target ?? picked} --tools claude`,
+    );
+  }
+  await dialog.showMessageBox({
+    type: 'info',
+    title: 'Project ready',
+    message: 'ithyno project scaffolded.',
+    detail: detailLines.join('\n'),
+    buttons: ['Open'],
+    defaultId: 0,
+  });
+
+  await switchProject(res.target ?? picked);
+}
+
 function refreshMenu(): void {
   const menu = buildAppMenu({
     onOpenProject: () => {
       const parent = mainWindow ?? undefined;
       const picked = pickProjectDialog(parent);
       if (picked) void switchProject(picked);
+    },
+    onNewProject: () => {
+      void onNewProject();
     },
     onOpenRecent: (path) => {
       if (!isDirectory(path)) {

@@ -2,8 +2,9 @@
 tags: [feature/init, area/ui, area/electron, area/vscode, area/server]
 status: partly-promoted
 promoted_to:
-  - openspec/changes/add-init-http-endpoint/ (backbone: HTTP endpoint + runInit autoCreateDir/autoGitInit + browser UI)
-  # pending: add-electron-new-project-flow, add-vscode-new-project-command
+  - openspec/changes/archive/2026-07-19-add-init-http-endpoint/ (backbone: HTTP endpoint + runInit autoCreateDir/autoGitInit + browser UI)
+  - openspec/changes/add-electron-new-project-flow/ (Electron File → New Project menu; main-process runInit import)
+  # pending: add-vscode-new-project-command
 ---
 
 # `ithyno init` から UI 経由の「新規プロジェクト作成」に発展させる
