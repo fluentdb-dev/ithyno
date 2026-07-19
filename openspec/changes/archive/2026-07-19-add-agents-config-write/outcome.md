@@ -1,5 +1,24 @@
 # Outcome: add-agents-config-write
 
+## 📝 2026-07-19 delta trim
+
+Before archiving, the delta's payload shape was rewritten to match
+today's `agents.yaml` schema (`roles: string[]` + `mode` field +
+`prompts: {[role]: string}` map), replacing the pre-reshape shape
+(`role: string` + `runtime` / `prompt` split + `initialInput`).
+The endpoint's core behavior (atomic write, CSRF + isLocal gates,
+`404` on missing name, `400` on malformed payload, unrelated key
+preservation) was already correct and stays the same. See the
+proposal + delta spec in `openspec/changes/archive/2026-07-19-add-agents-config-write/`
+for the trimmed version.
+
+Curl-verified 2026-07-19 as part of the manager singleton smoke:
+`POST /api/agents/config` with a manager-delete or second-manager
+upsert payload returns HTTP 400 with the documented error
+message; `agents.yaml` stays byte-identical. The unit-test suite
+in `server/agents/config-writer.test.ts` continues to cover the
+delete-missing-name → 404 and atomic-write-success paths.
+
 ## ✅ Worked
 
 - **Atomic write via `.tmp` + rename.** Single syscall replacement —

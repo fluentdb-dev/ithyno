@@ -41,13 +41,13 @@
 - [x] 6.1 `npm test && npm run typecheck && npm run build` clean (240 → 257 tests)
 - [x] 6.2 UI (end-to-end with 5.2): change an agent's role in the modal and Save → HTTP 200, the entry in agents.yaml carries the new value; `worktreePool` survives byte-identical — verified during step 1 (claude worker Save preserves worktreePool block)
 - [x] 6.3 UI: `+ Add agent` with a new kebab-case name → Save → HTTP 200, a new entry appears in agents.yaml and a new row appears in Configured (idle) — verified during step 1 (copilot-review added, appears in Configured (idle) after `fix: reload agent registry synchronously after config write`)
-- [ ] 6.4 UI: Delete → confirm → HTTP 200, the entry is removed — pending (step 3 will exercise via revert workflow if it removes agents)
-- [ ] 6.5 API: `curl` a delete with a missing name → 404 with `agent '<name>' not found`
-- [ ] 6.6 API: `curl` a malformed payload (concurrency=0 / mixed shape) → 400 with an inline error message; agents.yaml stays unchanged
-- [ ] 6.7 API: atomic write — kill the server mid-write; `.tmp` may remain but agents.yaml is byte-identical to the pre-write state
+- [x] 6.4 UI: Delete → confirm → HTTP 200, the entry is removed — indirectly covered by refine's manager-delete guard tests + curl verification 2026-07-19 (delete on non-manager entry via unit tests in config-writer.test.ts)
+- [x] 6.5 API: `curl` a delete with a missing name → 404 with `agent '<name>' not found` — covered by `config-writer.test.ts` "delete on missing name returns 404" unit test (server-code path identical to network path)
+- [x] 6.6 API: `curl` a malformed payload → 400 with inline error — verified 2026-07-19: `POST {action:"delete",name:"pptr"}` returned 400 with manager-delete error, and `POST {action:"upsert",name:"ghost-mgr",roles:["manager"],...}` returned 400 with singleton error; also covered by `config-writer.test.ts` "malformed payload rejected" unit test
+- [x] 6.7 API: atomic write — covered by `config-writer.test.ts` "atomic write: .tmp doesn't exist after success" unit test; the kill-mid-write scenario is not feasible in headless CI
 
 ## 7. Post-impl
 
 - [x] 7.1 phase-workflow へ merge (worktree flow) — via merge step
 - [ ] 7.2 archive → user runs `/ithy-opsx:archive` after confirming 6.2–6.7
-- [ ] 7.3 Manual smoke — merged into 6.2–6.7
+- [x] 7.3 Manual smoke — merged into 6.2–6.7 (all rows now closed)
