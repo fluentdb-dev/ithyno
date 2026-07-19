@@ -57,8 +57,15 @@
 - [x] 9.7 UI: Edit on the existing manager keeps `manager` selectable — verified during step 1 (Manager Edit opens with manager chip active)
 - [~] 9.8 UI: `[Declare in agents.yaml]` keeps manager in dropdown — **partially**: dropdown replaced with locked "Manager" tag in reshape. `[Declare]` flow verified during step 1
 - [x] 9.9 UI: manager row shows only `Edit` — no `Delete` button — verified during step 1 (`man` row's action slot has only Edit)
-- [ ] 9.10 API: delete on manager → 400 — pending (would need curl test)
-- [ ] 9.11 API: second manager upsert → 400 — pending (Modal-level filter prevents this; API guard is a defense-in-depth check)
+- [x] 9.10 API: delete on manager → 400 — verified 2026-07-19 via
+  `POST /api/agents/config {action:"delete",name:"pptr"}` → HTTP 400
+  `{"error":"manager agents cannot be deleted from the UI..."}`;
+  agents.yaml untouched
+- [x] 9.11 API: second manager upsert → 400 — verified 2026-07-19 via
+  `POST /api/agents/config {action:"upsert",name:"ghost-mgr",roles:["manager"],...}`
+  → HTTP 400 `{"error":"only one agent may include 'manager' in roles"}`;
+  agents.yaml untouched (Modal-level filter is the primary gate; API is
+  defense-in-depth)
 
 ## 10. Post-impl
 
