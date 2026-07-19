@@ -19,6 +19,22 @@ A **working MVP** covering roadmap phases 0–2 (with parts of 3 and 4).
 - [`docs/architecture.md`](./docs/architecture.md) — architecture, tech choices, data model, and two-way sync design.
 - [`docs/roadmap.md`](./docs/roadmap.md) — phased implementation roadmap.
 
+### Onboarding an existing project
+
+The fastest way to try ithyno on your own project:
+
+```bash
+cd /path/to/your-project
+npx ithyno init .          # scaffolds CLAUDE.md, the openspec-flow skill,
+                            # agents.yaml.example, docs/ideas/, .gitignore
+npx ithyno                  # start the dashboard at http://localhost:4321
+```
+
+`ithyno init` is idempotent — safe to re-run; existing files are skipped
+unless you pass `--force`. See [`docs/migration-guide.md`](./docs/migration-guide.md)
+for the full walkthrough (OpenSpec install + Claude Code hookup + first
+change).
+
 ### Quick Start
 
 ```bash

@@ -1,0 +1,34 @@
+// Type declarations for bin/init.js — kept as JS so `npx ithyno init` runs
+// without a build step, but consumers (tests, future TS callers) get types.
+
+export function walkTemplates(rootDir: string): Promise<string[]>;
+
+export function copyFile(args: {
+  srcAbs: string;
+  destAbs: string;
+  force: boolean;
+}): Promise<"create" | "skip" | "overwrite">;
+
+export function updateGitignore(
+  projectRoot: string,
+  opts?: { disabled?: boolean },
+): Promise<"appended" | "already-present" | "created" | "skipped">;
+
+export interface RunInitResult {
+  ok: boolean;
+  exitCode: number;
+  reason?: string;
+  target?: string;
+  actions?: Array<{ path: string; action: "create" | "skip" | "overwrite" }>;
+  gitignoreResult?: "appended" | "already-present" | "created" | "skipped";
+  summary?: { created: number; overwritten: number; skipped: number };
+  openspecMissing?: boolean;
+}
+
+export function runInit(opts?: {
+  targetDir?: string;
+  force?: boolean;
+  skipGitignore?: boolean;
+  quiet?: boolean;
+  log?: (msg: string) => void;
+}): Promise<RunInitResult>;

@@ -32,17 +32,17 @@
 - [x] 5.4 `--quiet` reduces output to errors only
 
 ## 6. Tests
-- [ ] 6.1 Unit test for the file-action policy (create / skip / overwrite)
-- [ ] 6.2 Unit test for `.gitignore` append-only-if-missing
-- [ ] 6.3 Asserting `templates/.claude/skills/openspec-flow/SKILL.md` matches the in-repo skill (drift guard)
+- [x] 6.1 Unit test for the file-action policy (create / skip / overwrite)
+- [x] 6.2 Unit test for `.gitignore` append-only-if-missing
+- [x] 6.3 Asserting `templates/.claude/skills/openspec-flow/SKILL.md` matches the in-repo skill (drift guard)
 
 ## 7. Docs
-- [ ] 7.1 README: add the `openspec-ui init` line as the primary onboarding path
-- [ ] 7.2 Update `docs/migration-guide.md` to feature `openspec-ui init` first, with manual steps as fallback
+- [x] 7.1 README: add the `openspec-ui init` line as the primary onboarding path
+- [x] 7.2 Update `docs/migration-guide.md` to feature `openspec-ui init` first, with manual steps as fallback
 
 ## 8. Verification
-- [ ] 8.1 Running `openspec-ui init ./tmp-test-project` in a fresh git repo creates the expected files
-- [ ] 8.2 Re-running without `--force` skips everything
-- [ ] 8.3 Running with `--force` overwrites
-- [ ] 8.4 Running against a non-git directory exits non-zero with the right message
-- [ ] 8.5 `.gitignore` ends up with exactly one `.worktrees/` line regardless of how many times init runs
+- [x] 8.1 Running `openspec-ui init ./tmp-test-project` in a fresh git repo creates the expected files
+- [x] 8.2 Re-running without `--force` skips everything
+- [x] 8.3 Running with `--force` overwrites
+- [x] 8.4 Running against a non-git directory exits non-zero with the right message
+- [x] 8.5 `.gitignore` ends up with exactly one `.worktrees/` line regardless of how many times init runs

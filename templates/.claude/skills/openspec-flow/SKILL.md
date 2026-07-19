@@ -1,7 +1,6 @@
 ---
 name: openspec-flow
-description: The project's spec-driven workflow for OpenSpec UI. Use this BEFORE implementing any spec-level change — to decide whether a change proposal is needed and to run the propose → validate → implement → archive loop. This is a project-local skill that composes with the OpenSpec-installed skills (openspec-propose, openspec-apply-change, openspec-archive-change).
-license: MIT
+description: The project's spec-driven workflow. Use this BEFORE implementing any spec-level change — to decide whether a change proposal is needed and to run the propose → validate → implement → archive loop. This is a project-local skill that composes with the OpenSpec-installed skills (openspec-propose, openspec-apply-change, openspec-archive-change).
 license: MIT
 ---
 
@@ -381,11 +380,6 @@ npm run openspec -- archive <id>
 /opsx:archive <id>
 /opsx:sync <id>
 ```
-/opsx:propose "<description>"
-/opsx:apply <id>
-/opsx:archive <id>
-/opsx:sync <id>
-```
 
 ---
 
@@ -394,6 +388,32 @@ npm run openspec -- archive <id>
 Reverting a past change is a first-class workflow variant. It has
 its own naming convention and disposition rules, formalized by
 `add-revert-workflow`.
+
+### PENDING annotation (Hard rule for MODIFIED / REMOVED deltas)
+
+At **propose time** for any change carrying a MODIFIED or REMOVED
+delta against a landed requirement, insert a one-line notice directly
+under that requirement's heading in the current
+`openspec/specs/<capability>/spec.md`:
+
+```md
+### Requirement: <name>
+
+> ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
+
+<existing body — untouched>
+```
+
+Rationale: between propose and archive the spec still shows the
+requirement as if it were authoritative. Any agent / session reading
+the spec in that window follows the doomed requirement without
+seeing the pending revert. The annotation vanishes automatically at
+archive time (REMOVED requirement disappears; MODIFIED requirement
+gets its body replaced from the delta).
+
+Not needed for pure ADDED (the requirement does not yet exist in
+the current spec). Also not needed for changes that only touch
+non-spec artifacts (impl, tests, docs).
 
 ### Naming
 

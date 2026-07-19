@@ -5,8 +5,40 @@ tags: [feature/migration, area/docs]
 # Migrating an existing project to ithyno
 
 A step-by-step guide for adopting OpenSpec + this dashboard on a project that
-already exists. Three stages: install OpenSpec → run the dashboard → optionally
-add agent runner.
+already exists.
+
+## Fast path — `ithyno init`
+
+For projects that don't yet have OpenSpec or ithyno's project-side files, the
+one-shot bootstrap is:
+
+```bash
+cd /path/to/your-project
+git init                    # if the project is not already a git repo
+npx ithyno init .           # scaffold ithyno-side files (see below)
+npx -y -p @fission-ai/openspec@latest openspec init . --tools claude
+npx ithyno                  # start the dashboard at http://localhost:4321
+```
+
+`ithyno init` drops these files at your project root:
+
+- `CLAUDE.md` — generic project rules (uses your project's verification
+  commands via a placeholder — edit the `# Replace with your project's
+  verification commands` line).
+- `.claude/skills/openspec-flow/SKILL.md` — the spec-driven workflow skill,
+  synced from ithyno's in-repo copy.
+- `agents.yaml.example` — sample agent configuration.
+- `docs/`, `docs/ideas/` — placeholder directories for stage ① / ② docs.
+- `.gitignore` — appends `.worktrees/` if missing.
+
+Idempotent by default (existing files are skipped). Use `--force` to
+overwrite, `--no-gitignore` to leave the file alone, `--quiet` for
+minimal output. Preflight checks refuse to run against a non-git
+directory (exit 2 with a clear message).
+
+If you need to install OpenSpec / agent runner manually — for example
+because you want to customize the workflow skill or your project has a
+non-standard layout — read the sections below.
 
 ## Prerequisites
 
