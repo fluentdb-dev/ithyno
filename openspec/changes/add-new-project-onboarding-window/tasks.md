@@ -63,11 +63,10 @@
   --strict` VALID
 - [x] 7.2 `npm --workspace=electron run build && npm test && npm
   run typecheck && npm run build` clean
-- [ ] 7.3 Manual (dev): File → New Project… → pick a fresh path →
+- [x] 7.3 Manual (dev): File → New Project… → pick a fresh path →
   onboarding window opens → both steps progress → "Open Project"
   becomes enabled → click → main window switches → target has
   `openspec/` directory + `.claude/skills/openspec-*` skills
-  — **pending user-side verify**
 - [ ] 7.4 Manual: same, but pick an already-scaffolded folder →
   step 1 skips or completes fast, step 2 detects existing
   `openspec/config.yaml`, log shows accordingly, "Open Project"

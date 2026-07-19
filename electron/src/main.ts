@@ -290,11 +290,18 @@ async function onNewProjectImpl(): Promise<void> {
  * (add-new-project-onboarding-window.)
  */
 function openOnboardingWindow(target: string, serverUrl: string): void {
-  const base = serverUrl.replace(/\/$/, '');
+  // serverUrl has a `?token=<t>` query — the same token main-window's
+  // sessionStorage was bootstrapped with. The onboarding BrowserWindow
+  // has its own session storage, so we thread the token through the
+  // URL query so its own `bootstrapToken` picks it up.
+  const parsed = new URL(serverUrl);
+  const base = `${parsed.origin}`;
+  const token = parsed.searchParams.get('token');
   const params = new URLSearchParams({
     target,
     channel: 'electron',
   });
+  if (token) params.set('token', token);
   const url = `${base}/onboarding?${params.toString()}`;
 
   const win = new BrowserWindow({
