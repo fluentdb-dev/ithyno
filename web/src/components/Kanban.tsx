@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  DndContext,
-  PointerSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
@@ -19,13 +10,32 @@ import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
 import { ParallelStartLauncher } from "./ParallelStartLauncher";
+import { ERR } from "../lib/errorMessages";
 
-type ColumnId = "todo" | "inprogress" | "done";
+/**
+ * Kanban is a *state monitor* — it shows a classic three-column
+ * TODO / IN-PROGRESS / DONE view of every change, driven by task
+ * progress. Phase state (`change.phase`) is a Manager-internal
+ * concern and is NOT rendered on the board (revert-kanban-ui-lanes:
+ * the Kanban structure principle is "3 columns only").
+ *
+ * User-facing affordances are limited to:
+ *   - `+ New Change` (top toolbar) → proposal creation
+ *   - `Start` / `Apply` (per card) → hand-off to the agent runner
+ *   - `Archive` / `Merge` / `Discard` (per card) → post-completion openspec steps
+ *
+ * Changes escalated to `needs-human` render in their normal progress
+ * column with no badge — the escalation Q&A itself is handled agent-side
+ * (Manager spawns an interactive Claude session and reports via the
+ * notification chain). The dashboard has no needs-human affordance.
+ */
+
+type Slot = "todo" | "inprogress" | "done";
 
 type Buckets = {
   todo: Change[];
   inprogress: Change[];
-  done: Change[]; // active changes with done == total > 0 (ready to archive)
+  done: Change[];
 };
 
 function modalTitle(p: PendingDrag): string {
@@ -55,33 +65,46 @@ function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): strin
   return "Send cleanup";
 }
 
-
-function bucketize(changes: Change[], jobByChange: Map<string, JobSummary>): Buckets {
+/**
+ * Progress-derived bucketing. A change is:
+ *   - `done` if all tasks are ticked (progress complete),
+ *   - `inprogress` if there is a live/orphaned/completed job attached, else
+ *   - `todo` (no started work).
+ *
+ * `change.phase` is intentionally ignored — see the file-level comment.
+ */
+/**
+ * Folder-driven placement (post collapse-jobregistry-and-add-semaphore).
+ * Uses filesystem state only — no consultation of an in-memory job
+ * registry. Order (first match wins):
+ *
+ *   1. `.worktrees/<id>/openspec/changes/<id>/tasks.md` all-ticked → DONE
+ *   2. `.worktrees/<id>/` exists (worktree in flight)             → IN-PROGRESS
+ *   3. main-tree tasks all-ticked (total > 0)                     → DONE
+ *   4. main-tree progress.done > 0 (partial)                      → IN-PROGRESS
+ *   5. else                                                        → TODO
+ *
+ * Archive-based DONE is handled elsewhere — archived changes aren't in
+ * the `changes` array, they're in `state.archive`.
+ */
+function bucketize(changes: Change[]): Buckets {
   const todo: Change[] = [];
   const inprogress: Change[] = [];
   const done: Change[] = [];
   for (const c of changes) {
+    const wt = c.worktree;
+    if (wt) {
+      const wtp = wt.tasksProgress;
+      if (wtp.total > 0 && wtp.done === wtp.total) done.push(c);
+      else inprogress.push(c);
+      continue;
+    }
     const { done: d, total } = c.progress;
-    const job = jobByChange.get(c.id);
-    // A job that is running OR sitting post-run awaiting merge/discard means
-    // the change is IN-PROGRESS regardless of whether any tasks have been
-    // ticked yet — clicking Start should visibly move the card.
-    const hasActiveJob = !!job && (job.status === "running" || isPendingMergeOrDiscard(job));
-    if (d === total && total > 0) done.push(c);
-    else if (hasActiveJob) inprogress.push(c);
-    else if (total === 0 || d === 0) todo.push(c);
-    else inprogress.push(c);
+    if (total > 0 && d === total) done.push(c);
+    else if (d > 0) inprogress.push(c);
+    else todo.push(c);
   }
   return { todo, inprogress, done };
-}
-
-function isPendingMergeOrDiscard(job: JobSummary): boolean {
-  return (
-    job.status === "completed" ||
-    job.status === "crashed" ||
-    job.status === "cancelled" ||
-    job.status === "orphaned"
-  );
 }
 
 type PendingDrag =
@@ -89,6 +112,18 @@ type PendingDrag =
   | { kind: "archive"; change: Change }
   | { kind: "agent-merge"; change: Change; job: JobSummary }
   | { kind: "agent-discard"; change: Change; job: JobSummary };
+
+const COL_LABEL: Record<Slot, string> = {
+  todo: "TODO",
+  inprogress: "IN-PROGRESS",
+  done: "DONE",
+};
+
+const COL_EMPTY: Record<Slot, string> = {
+  todo: "No changes waiting to start.",
+  inprogress: "Nothing in progress.",
+  done: "Nothing ready to archive.",
+};
 
 export function KanbanBoard({
   changes,
@@ -100,14 +135,11 @@ export function KanbanBoard({
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
   const pushToast = useStore((s) => s.pushToast);
-  const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
   const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
   const [pending, setPending] = useState<PendingDrag | null>(null);
-  const [draggingFrom, setDraggingFrom] = useState<ColumnId | null>(null);
   const { startImplementation, startFlowModals } = useStartFlow();
 
-  // Build a per-change "latest job" lookup so cards can show status.
   const jobByChange = useMemo(() => {
     const m = new Map<string, JobSummary>();
     for (const j of Object.values(jobs)) {
@@ -117,40 +149,12 @@ export function KanbanBoard({
     return m;
   }, [jobs]);
 
-  const buckets = useMemo(() => bucketize(changes, jobByChange), [changes, jobByChange]);
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const onDragStart = (e: DragStartEvent) => {
-    const from = (e.active.data.current as { from?: ColumnId } | undefined)?.from;
-    setDraggingFrom(from ?? null);
-  };
-
-  const onDragEnd = (e: DragEndEvent) => {
-    setDraggingFrom(null);
-    const dropId = e.over?.id;
-    if (!dropId) return;
-    const fromCol = (e.active.data.current as { from?: ColumnId; id?: string } | undefined)?.from;
-    const id = (e.active.data.current as { id?: string } | undefined)?.id;
-    if (!fromCol || !id) return;
-    const change = changes.find((c) => c.id === id);
-    if (!change) return;
-
-    if (fromCol === "todo" && dropId === "inprogress") {
-      startImplementation(change).catch((err) => {
-        console.error("[start] unhandled:", err);
-        pushToast("error", err instanceof Error ? err.message : String(err));
-      });
-    }
-    // any other combo: silently ignore (UI already disables them visually)
-  };
+  const buckets = useMemo(() => bucketize(changes), [changes]);
 
   const onArchiveClick = (change: Change) => {
     setPending({ kind: "archive", change });
   };
 
-  // Start button click. Same handler as the drag gesture — the unified
-  // dispatcher picks worktree / terminal / picker as appropriate.
   const onStartClick = (change: Change) => {
     void startImplementation(change);
   };
@@ -166,97 +170,68 @@ export function KanbanBoard({
     const res = await injectPty(line, true);
     if ((res as any).status === "ok") {
       pushToast("info", "Sent to terminal");
-      // Merge / Discard both take the worktree out of play — clear the
-      // stale worktreeProgress so the card reverts to the main-tree value
-      // (which reflects the merged/discarded state).
       if (pending && (pending.kind === "agent-merge" || pending.kind === "agent-discard")) {
         clearWorktreeProgress(pending.change.id);
       }
       setPending(null);
     } else if ((res as any).status === "no-terminal") {
-      pushToast("error", (res as any).reason ?? "No terminal open. Open a change view to start one.");
+      pushToast("error", (res as any).reason ?? ERR.NO_TERMINAL);
     } else {
-      pushToast("error", (res as any).error ?? "Inject failed");
+      pushToast("error", (res as any).error ?? ERR.INJECT_FAILED);
     }
   };
 
+  const renderCard = (c: Change, slot: Slot) => (
+    <ChangeCard
+      key={c.id}
+      change={c}
+      slot={slot}
+      job={jobByChange.get(c.id)}
+      onStart={() => onStartClick(c)}
+      onArchive={() => onArchiveClick(c)}
+      onMerge={(j) => onMergeClick(c, j)}
+      onDiscard={(j) => onDiscardClick(c, j)}
+    />
+  );
+
+  const columns: Slot[] = ["todo", "inprogress", "done"];
+
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+    <>
       <div className="kanban-board">
-        <Column id="todo" title="TODO" count={buckets.todo.length} allowedFrom={null} draggingFrom={draggingFrom} onAdd={onNewChange}>
-          {buckets.todo.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="todo"
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onArchive={() => onArchiveClick(c)}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.todo.length === 0 && <p className="empty kanban-empty">No proposed changes.</p>}
-        </Column>
-
-        <Column
-          id="inprogress"
-          title="IN-PROGRESS"
-          count={buckets.inprogress.length}
-          allowedFrom="todo"
-          draggingFrom={draggingFrom}
-          headerAction={
-            <ParallelStartLauncher
-              changes={changes}
-              jobByChange={jobByChange}
-              startImplementation={startImplementation}
-            />
-          }
-        >
-          {buckets.inprogress.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="inprogress"
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onArchive={() => onArchiveClick(c)}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.inprogress.length === 0 && <p className="empty kanban-empty">No work in progress.</p>}
-        </Column>
-
-        <Column id="done" title="DONE" count={buckets.done.length} allowedFrom={null} draggingFrom={draggingFrom}>
-          {buckets.done.map((c) => (
-            <ChangeCard
-              key={c.id}
-              change={c}
-              column="done"
-              onArchive={() => onArchiveClick(c)}
-              job={jobByChange.get(c.id)}
-              hasAgents={agents.length > 0}
-              onStart={() => onStartClick(c)}
-              hasExecution={c.proposal?.execution != null}
-              onMerge={(j) => onMergeClick(c, j)}
-              onDiscard={(j) => onDiscardClick(c, j)}
-            />
-          ))}
-          {buckets.done.length === 0 && <p className="empty kanban-empty">Nothing waiting to archive.</p>}
-        </Column>
+        {columns.map((slot) => {
+          // Spec: TODO column carries "+ New Change"; IN-PROGRESS carries
+          // the parallel Start launcher (add-parallel-start-launcher's
+          // "IN-PROGRESS Column Start Launcher" requirement).
+          const headerAction =
+            slot === "todo" ? (
+              <button className="primary kanban-add" onClick={onNewChange}>
+                + New Change
+              </button>
+            ) : slot === "inprogress" ? (
+              <ParallelStartLauncher
+                changes={changes}
+                jobByChange={jobByChange}
+                startImplementation={startImplementation}
+              />
+            ) : null;
+          return (
+            <Column
+              key={slot}
+              title={COL_LABEL[slot]}
+              count={buckets[slot].length}
+              emptyText={COL_EMPTY[slot]}
+              headerAction={headerAction}
+            >
+              {buckets[slot].map((c) => renderCard(c, slot))}
+            </Column>
+          );
+        })}
       </div>
 
       {pending && (
         <CommandModal
           title={modalTitle(pending)}
-          // Archive and Merge both have a CLI equivalent (raw `npx openspec
-          // archive` / `git merge`); Apply is Claude-only, so the mode
-          // selector is hidden for it.
           mode={pending.kind === "archive" || pending.kind === "agent-merge" ? commandStyle : undefined}
           onModeChange={pending.kind === "archive" || pending.kind === "agent-merge" ? setCommandStyle : undefined}
           build={(_input, m) => buildPendingCommand(pending, m ?? "claude")}
@@ -281,104 +256,77 @@ export function KanbanBoard({
       )}
 
       {startFlowModals}
-    </DndContext>
+    </>
   );
 }
 
 function Column({
-  id,
   title,
   count,
-  allowedFrom,
-  draggingFrom,
-  children,
-  onAdd,
+  emptyText,
   headerAction,
+  children,
 }: {
-  id: ColumnId | "done";
   title: string;
   count: number;
-  allowedFrom: ColumnId | null;
-  draggingFrom: ColumnId | null;
-  children: React.ReactNode;
-  onAdd?: () => void;
+  emptyText: string;
   headerAction?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  // The "done" outer column itself isn't a drop target; the archived sub
-  // section inside is. So we only register a droppable for the inprogress
-  // column at this level.
-  const { setNodeRef, isOver } = useDroppable({ id, disabled: id !== "inprogress" });
-  const legal = draggingFrom != null && allowedFrom === draggingFrom;
-  const blocked =
-    draggingFrom != null && id !== draggingFrom && allowedFrom !== draggingFrom && id === "inprogress";
   return (
-    <section
-      ref={id === "inprogress" ? setNodeRef : undefined}
-      className={`kanban-col${legal && isOver ? " over-legal" : ""}${blocked && isOver ? " over-blocked" : ""}`}
-    >
+    <section className="kanban-col">
       <header className="kanban-col-head">
         <h3>
           {title} <span className="kanban-col-count">{count}</span>
         </h3>
-        {onAdd && (
-          <button className="primary kanban-add" onClick={onAdd}>
-            + New Change
-          </button>
-        )}
         {headerAction}
       </header>
-      <div className="kanban-col-body">{children}</div>
+      <div className="kanban-col-body">
+        {count === 0 ? <p className="empty kanban-empty">{emptyText}</p> : children}
+      </div>
     </section>
   );
 }
 
 function ChangeCard({
   change,
-  column,
+  slot,
   onArchive,
   job,
-  hasAgents,
   onStart,
-  hasExecution: _hasExecution,
   onMerge,
   onDiscard,
 }: {
   change: Change;
-  column: ColumnId;
-  onArchive?: () => void;
+  slot: Slot;
+  onArchive: () => void;
   job?: JobSummary;
-  hasAgents: boolean;
   onStart: () => void;
-  hasExecution: boolean;
   onMerge: (job: JobSummary) => void;
   onDiscard: (job: JobSummary) => void;
 }) {
-  // add-worktree-tasks-watcher: when a running / pending-merge / orphaned
-  // job exists for this change, prefer the live worktree progress from
-  // tasks.md ticks over the main-tree parse (which won't move until the
-  // branch is merged). Fall back to the job's own `worktreeProgress`
-  // snapshot (populated at startup by orphan adoption) if the WS event
-  // hasn't landed yet.
   const worktreeProgressFromWs = useStore((s) => s.worktreeProgress[change.id]);
   const worktreeProgress = worktreeProgressFromWs ?? job?.worktreeProgress;
   const showWorktreeProgress = !!worktreeProgress && !!job && job.status !== "cancelled";
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
-  // Cards are draggable from TODO only; IN-PROGRESS is read-only; DONE has the
-  // Archive button instead of being draggable.
-  const draggable = column === "todo";
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `card-${change.id}`,
-    data: { from: column, id: change.id },
-    disabled: !draggable,
-  });
+
+  const showReadyDot = slot === "done";
+
+  // Archive button in the done column, but never while a job is still
+  // running — clicking Archive on a live worktree would try to merge
+  // uncommitted agent state.
+  const jobStillRunning = job?.status === "running";
+  const showArchiveInSlot = !jobStillRunning && slot === "done";
+
+  // Start button: any non-done slot with no live job. UI does NOT gate on
+  // `hasAgents` — when agents.yaml lacks a code role, the skill falls back
+  // to Manager (which has built-in defaults). Post
+  // wire-role-to-cli-in-manager-skill (Phase 1).
+  const startEligibleSlot = slot === "todo" || slot === "inprogress";
+  const showStartArea = startEligibleSlot && !job;
 
   return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      className={`kanban-card${isDragging ? " dragging" : ""}${draggable ? " draggable" : ""}`}
-    >
+    <div className="kanban-card">
       <Link
         to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
         className="kanban-card-link"
@@ -386,7 +334,7 @@ function ChangeCard({
       >
         <div className="kanban-card-head">
           <h4>{change.id}</h4>
-          {column === "done" && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
+          {showReadyDot && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
           <AgentBadge job={job} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
@@ -400,14 +348,12 @@ function ChangeCard({
         )}
       </Link>
       {change.proposal?.tags && change.proposal.tags.length > 0 && (
-        // Tags live OUTSIDE the card's <Link> because each chip is itself a
-        // <Link to="/tags/…"> and HTML forbids nested <a>.
         <div className="kanban-card-tags">
           <TagChipList tags={change.proposal.tags} small />
         </div>
       )}
       <div className="kanban-card-actions">
-        {column === "done" && onArchive && (
+        {showArchiveInSlot && (
           <button
             className="action-btn ghost"
             onClick={(e) => {
@@ -420,9 +366,7 @@ function ChangeCard({
             {!change.hasOutcome && <span className="kanban-card-warn" title="No outcome.md yet">⚠</span>}
           </button>
         )}
-        {hasAgents &&
-          (column === "todo" || column === "inprogress") &&
-          !job &&
+        {showStartArea &&
           (hasNonVerifyWork(change.tasks) ? (
             <button
               className="action-btn"
@@ -431,13 +375,7 @@ function ChangeCard({
                 e.stopPropagation();
                 onStart();
               }}
-              title={
-                change.proposal?.execution === "worktree"
-                  ? "Start (worktree)"
-                  : change.proposal?.execution === "terminal"
-                    ? "Start (terminal)"
-                    : "Start (will ask how to execute)"
-              }
+              title="Start — opens modal to inject /ithy-opsx:dispatch into the terminal"
             >
               Start
             </button>
@@ -449,7 +387,7 @@ function ChangeCard({
               verify only
             </span>
           ))}
-        {hasAgents && job?.status === "orphaned" && onArchive && (
+        {job?.status === "orphaned" && (
           <button
             className="action-btn"
             onClick={(e) => {
@@ -462,7 +400,7 @@ function ChangeCard({
             Archive
           </button>
         )}
-        {hasAgents && job && job.status !== "running" && isMergeable(job) && (
+        {job && job.status !== "running" && isMergeable(job) && (
           <>
             <Link
               to={`/agents?job=${encodeURIComponent(job.id)}&tab=diff`}
@@ -531,8 +469,6 @@ function AgentBadge({ job }: { job?: JobSummary }) {
 }
 
 function isMergeable(job: JobSummary): boolean {
-  // Show Merge/Discard when a worktree is sitting around (any post-run state,
-  // including one we adopted from disk with no prior run in this session).
   return (
     job.status === "completed" ||
     job.status === "crashed" ||
@@ -541,3 +477,4 @@ function isMergeable(job: JobSummary): boolean {
   );
 }
 
+export { bucketize };

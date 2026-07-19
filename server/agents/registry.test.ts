@@ -40,9 +40,11 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(true);
     expect(cfg.agents).toHaveLength(1);
-    expect(cfg.agents[0].role).toBe("coder");
-    expect(cfg.agents[0].specialties).toEqual([]);
-    expect(cfg.agents[0].concurrency).toBe(1);
+    // Post reshape: default role is `code` (canonical). Pre-reshape
+    // default was `coder` — the normalizer maps `coder → code`.
+    expect(cfg.agents[0].role).toBe("code");
+    expect(cfg.agents[0].roles).toEqual(["code"]);
+    expect(cfg.agents[0].mode).toBe("single-prompt");
   });
 
   it("fully specified agent round-trips through the loader", async () => {
@@ -51,17 +53,15 @@ describe("AgentRegistry role / specialties / concurrency", () => {
   - name: reviewer-web
     command: claude
     args: []
-    role: reviewer
-    specialties: [area/web, feature/ui]
-    concurrency: 2
+    roles: [review]
+    mode: single-prompt
 `,
     );
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(true);
     const a = cfg.agents[0];
-    expect(a.role).toBe("reviewer");
-    expect(a.specialties).toEqual(["area/web", "feature/ui"]);
-    expect(a.concurrency).toBe(2);
+    expect(a.roles).toEqual(["review"]);
+    expect(a.mode).toBe("single-prompt");
   });
 
   it("partially specified agent (only role) gets defaults for the rest", async () => {
@@ -77,8 +77,6 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.ok).toBe(true);
     const a = cfg.agents[0];
     expect(a.role).toBe("proposer");
-    expect(a.specialties).toEqual([]);
-    expect(a.concurrency).toBe(1);
   });
 
   it("arbitrary role strings are accepted (open set)", async () => {
@@ -95,62 +93,9 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.agents[0].role).toBe("archivist");
   });
 
-  it("rejects non-integer concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: 1.5
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-    expect(cfg.error).toMatch(/integer/);
-  });
-
-  it("rejects zero concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: 0
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-  });
-
-  it("rejects negative concurrency", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    concurrency: -1
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.concurrency/);
-  });
-
-  it("rejects non-string specialty element", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    specialties: [area/web, 42]
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.specialties/);
-  });
+  // concurrency / specialties validation tests removed by
+  // revert-agents-yaml-schema-fields (R8). Both fields now trigger
+  // "unknown key" errors from the general validator.
 
   it("rejects empty-string role", async () => {
     const reg = await loadWith(
@@ -180,124 +125,7 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(cfg.error).toMatch(/agents\[0\]\.specialties/);
   });
 
-  it("dedicated defaults to true when omitted", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: legacy
-    command: claude
-    args: []
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(true);
-    expect(cfg.agents[0].dedicated).toBe(true);
-  });
-
-  it("dedicated: false is accepted", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: pool-agent
-    command: claude
-    args: []
-    dedicated: false
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(true);
-    expect(cfg.agents[0].dedicated).toBe(false);
-  });
-
-  it("rejects non-boolean dedicated", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: bad
-    command: claude
-    args: []
-    dedicated: "yes"
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/agents\[0\]\.dedicated/);
-  });
-
-  it("worktreePool defaults are applied when block omitted", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: any
-    command: claude
-    args: []
-`,
-    );
-    const pool = reg.worktreePoolConfig();
-    expect(pool.max).toBe(5);
-    expect(pool.namePrefix).toBe("pool");
-    expect(pool.cleanupBetweenJobs).toBe("git-clean");
-  });
-
-  it("worktreePool custom values round-trip", async () => {
-    const reg = await loadWith(
-      `worktreePool:
-  max: 3
-  namePrefix: agent-pool
-  cleanupBetweenJobs: git-clean
-agents:
-  - name: any
-    command: claude
-    args: []
-`,
-    );
-    const pool = reg.worktreePoolConfig();
-    expect(pool.max).toBe(3);
-    expect(pool.namePrefix).toBe("agent-pool");
-  });
-
-  it("worktreePool rejects max: 0", async () => {
-    const reg = await loadWith(
-      `worktreePool:
-  max: 0
-agents:
-  - name: any
-    command: claude
-    args: []
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/worktreePool\.max/);
-  });
-
-  it("worktreePool rejects cleanupBetweenJobs: recreate as not yet supported", async () => {
-    const reg = await loadWith(
-      `worktreePool:
-  cleanupBetweenJobs: recreate
-agents:
-  - name: any
-    command: claude
-    args: []
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/worktreePool\.cleanupBetweenJobs/);
-    expect(cfg.error).toMatch(/not yet supported/);
-  });
-
-  it("worktreePool rejects unknown keys (idleReleaseAfter, typos)", async () => {
-    const reg = await loadWith(
-      `worktreePool:
-  idleReleaseAfter: 300
-agents:
-  - name: any
-    command: claude
-    args: []
-`,
-    );
-    const cfg = reg.publicConfig();
-    expect(cfg.ok).toBe(false);
-    expect(cfg.error).toMatch(/worktreePool\.idleReleaseAfter/);
-    expect(cfg.error).toMatch(/unknown key/);
-  });
+  // dedicated / worktreePool tests removed by revert-worktree-pool (R5).
 
   it("role-annotated agent still resolves spawn args identically", async () => {
     const reg = await loadWith(
@@ -305,8 +133,7 @@ agents:
   - name: reviewer-web
     command: claude
     args: ["/opsx:apply", "\${change_id}"]
-    role: reviewer
-    specialties: [area/server]
+    role: review
 `,
     );
     const def = reg.find("reviewer-web");
@@ -316,6 +143,233 @@ agents:
       worktree_path: "/w/add-foo",
       branch: "agent/add-foo",
     });
+    // Post reshape: command-only agents own their args entirely — no
+    // auto-append. The user is expected to include the prompt in args.
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
+  });
+});
+
+describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
+  it("returns null when no manager-role entry exists", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    expect(reg.managerAgent()).toBeNull();
+  });
+
+  it("returns the first manager-role entry when one is declared", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+    initialInput: /opsx:manage
+  - name: coder
+    role: code
+    command: claude
+    args: [-p]
+`,
+    );
+    const m = reg.managerAgent();
+    expect(m).not.toBeNull();
+    expect(m!.name).toBe("primary");
+    expect(m!.command).toBe("claude");
+    expect(m!.args).toEqual(["--continue"]);
+    expect(m!.initialInput).toBe("/opsx:manage");
+  });
+
+  it("rejects two manager entries at load (refine-agents-config-modal)", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: first-mgr
+    role: manager
+    command: claude
+    args: [--continue]
+  - name: second-mgr
+    role: manager
+    command: aider
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(/only one agent may include 'manager'/i);
+      expect(cfg.error).toContain("agents[1]");
+    }
+  });
+
+  it.skip("rejects a runtime-backed manager at load (obsolete: reshape-agents-yaml-mode-roles allows runtime-referenced managers)", async () => {
+    const reg = await loadWith(
+      `runtimes:
+  claude:
+    command: claude
+    baseArgs: []
+    promptStyle: cli-arg
+    supports:
+      interactive: true
+      artifactOutput: true
+      diff: git
+agents:
+  - name: bad-mgr
+    role: manager
+    runtime: claude
+    prompt: /opsx:manage
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/manager/);
+  });
+});
+
+describe("AgentRegistry parallelExecution (add-parallel-execution-config)", () => {
+  it("defaults parallelExecution to false when the key is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.parallelExecution).toBe(false);
+  });
+
+  it("accepts a boolean true and surfaces it in publicConfig", async () => {
+    const reg = await loadWith(
+      `parallelExecution: true
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.parallelExecution).toBe(true);
+  });
+
+  it("rejects a non-boolean parallelExecution", async () => {
+    const reg = await loadWith(
+      `parallelExecution: "yes"
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/parallelExecution/);
+  });
+});
+
+describe("AgentRegistry agmsg block (add-agmsg-config-block)", () => {
+  it("defaults agmsg to null when the block is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toBeNull();
+    expect(reg.agmsg()).toBeNull();
+  });
+
+  it("accepts a block with just team and populates AgmsgConfig", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toEqual({ team: "alpha" });
+    expect(reg.agmsg()).toEqual({ team: "alpha" });
+  });
+
+  it("accepts team + storage and surfaces both fields", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+  storage: .worktrees/.agmsg.sqlite
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.agmsg).toEqual({
+      team: "alpha",
+      storage: ".worktrees/.agmsg.sqlite",
+    });
+  });
+
+  it("rejects agmsg block missing team", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  storage: .worktrees/.agmsg.sqlite
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(
+        /agmsg\.team is required when the agmsg block is present/,
+      );
+    }
+  });
+
+  it("rejects agmsg block with empty team", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: ""
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) {
+      expect(cfg.error).toMatch(
+        /agmsg\.team is required when the agmsg block is present/,
+      );
+    }
+  });
+
+  it("rejects non-string storage", async () => {
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+  storage: 42
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/agmsg\.storage/);
   });
 });

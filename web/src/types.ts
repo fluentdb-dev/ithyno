@@ -8,6 +8,17 @@ export type WorkspaceState = {
   changes: Change[];
   archive: ChangeSummary[];
   gitStatus: GitStatus;
+  /** `.worktrees/.lock` state — null when no lock is held. Consumed by
+   *  the Start button to gate when `parallelExecution: false` and the
+   *  lock is held by a different change. Landed by
+   *  collapse-jobregistry-and-add-semaphore. */
+  lock: WorktreeLock | null;
+};
+
+export type WorktreeLock = {
+  change: string;
+  acquiredAt: string;
+  pid: number | null;
 };
 
 export type GitStatus =
@@ -32,6 +43,30 @@ export type Change = {
   deltaSpecs: SpecDomain[];
   progress: Progress;
   hasOutcome: boolean;
+  /** Workflow phase persisted in `.openspec.yaml`. Undefined = unphased
+   *  (Kanban renders in the legacy fallback section). `needs-human` is a
+   *  valid value but does not place the card in a dedicated lane; the
+   *  card stays in its `priorPhase` lane with a WaitBadge. The client
+   *  narrows unknown strings to undefined. */
+  phase?: import("./phases").PersistedPhase;
+  /** Restored when a `needs-human` escalation is answered. Also read by
+   *  the Kanban to place the card in its home lane while escalated. */
+  priorPhase?: import("./phases").PersistedPhase;
+  /** ISO 8601 timestamp of the escalation. Rendered as a WaitBadge on
+   *  the card while `phase === "needs-human"`. */
+  escalatedAt?: string;
+  /** Question surfaced from `needs-human.md` and shown on the Kanban
+   *  card head while `phase === "needs-human"`. */
+  needsHumanQuestion?: string;
+  /** Populated when `.worktrees/<id>/` exists on disk. Presence drives
+   *  Kanban's IN-PROGRESS placement (collapse-jobregistry-and-add-
+   *  semaphore). `tasksProgress` reflects the worktree's own tasks.md,
+   *  which typically differs from `progress` (the main tree copy). */
+  worktree?: {
+    path: string;
+    branch: string;
+    tasksProgress: Progress;
+  };
 };
 
 export type ChangeSummary = {
@@ -138,19 +173,81 @@ export type TagDetail = {
 };
 
 // ---- agent-runner ----------------------------------------------------------
+export type AgentMode = "single-prompt" | "live-shell";
+
 export type AgentPublic = {
   name: string;
   description?: string;
-  command: string;
-  args: string[];
+  command?: string;
+  args?: string[];
   hasEnv: boolean;
+  /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
+  mode: AgentMode;
+  /** Dispatch labels. Always non-empty. Single-role legacy agents have
+   *  `roles.length === 1`. */
+  roles: string[];
+  /** Per-role prompt overrides. When absent, built-in defaults kick in. */
+  prompts?: Record<string, string>;
+
+  // ---- deprecated read aliases (populated by the loader from the
+  // normalized fields for downstream consumers that predate the reshape) ----
+  /** Deprecated. Equals `roles[0]`. */
+  role: string;
+  /** Deprecated. Populated from `prompts[roles[0]]`. */
   initialInput?: string;
+  /** Deprecated. Populated from `prompts[roles[0]]`. */
+  prompt?: string;
 };
+
+/** Manager section source-of-truth (add-agents-tab-manager-section).
+ *  Reflects the resolved PTY startup so the tab can be honest about
+ *  what's actually running, even when no `role: manager` entry exists. */
+export type ManagerStatus = {
+  agentEntry: AgentPublic | null;
+  resolvedStartup: string | null;
+  initialInput: string | null;
+  fallbackSource: "declared" | "env" | "default";
+  terminalActive: boolean;
+};
+
+/** Write shape sent by AgentConfigModal to `POST /api/agents/config`.
+ *  Post-reshape (reshape-agents-yaml-mode-roles): the payload speaks the
+ *  new `mode + roles + prompts` schema. */
+export type AgentConfigPayload =
+  | {
+      action: "upsert";
+      /** Kebab-case; when editing an existing agent this must match
+       *  the row being edited. When adding, this must not already
+       *  exist server-side. */
+      name: string;
+      /** Dispatch labels. Non-empty. */
+      roles: string[];
+      /** Spawn mode. `single-prompt` for headless workers; `live-shell`
+       *  for interactive Manager. Manager roles require `live-shell`. */
+      mode: AgentMode;
+      /** Per-role prompt overrides. Built-in defaults kick in for absent
+       *  entries. */
+      prompts?: Record<string, string>;
+      command?: string;
+      args?: string[];
+      description?: string;
+    }
+  | { action: "delete"; name: string };
 
 export type AgentConfigResponse = {
   ok: boolean;
   error?: string;
   agents: AgentPublic[];
+  parallelExecution: boolean;
+  agmsg: AgmsgConfig | null;
+};
+
+/** Top-level `agmsg` block from agents.yaml, mirrored via
+ *  `GET /api/agents/config` and the `agents-updated` WS event.
+ *  Landed by add-agmsg-config-block. */
+export type AgmsgConfig = {
+  team: string;
+  storage?: string;
 };
 
 export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";
@@ -166,6 +263,9 @@ export type JobSummary = {
   finishedAt?: number;
   exitCode?: number | null;
   worktreeProgress?: Progress;
+  /** add-review-artifact: parsed review.md verdict when the job
+   *  produced one, otherwise undefined. */
+  verdict?: import("./reviewTypes").ReviewArtifact;
 };
 
 export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };

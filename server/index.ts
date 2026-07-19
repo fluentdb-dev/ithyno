@@ -5,16 +5,18 @@ import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { resolveOpenspecDir, scanWorkspace, parseChange, changeIdForPath } from "./parser/workspace.js";
 import { parseSpec } from "./parser/spec.js";
 import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount } from "./sync/pty.js";
-import { AgentRegistry } from "./agents/registry.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
+import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
+import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
 import { sha1 } from "./util/hash.js";
@@ -31,6 +33,9 @@ import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
 import { gitInit } from "./git/init.js";
 import { getChangeGitState, commitChangeProposal } from "./git/change-state.js";
+import { PHASES, isPhase, isReservedPhase, NEEDS_HUMAN, type Phase } from "./phases.js";
+import { readSidecar, writeSidecar, extractSidecarFields } from "./sidecar.js";
+import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -103,7 +108,16 @@ type ServerEvent =
   | { type: "agent-job-finished"; jobId: string; status: JobStatus; exitCode: number | null }
   | { type: "agent-job-removed"; jobId: string; changeId: string }
   | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: { done: number; total: number } }
-  | { type: "git-status-updated"; gitStatus: GitStatus };
+  | { type: "git-status-updated"; gitStatus: GitStatus }
+  | {
+      type: "agents-updated";
+      ok: boolean;
+      error?: string;
+      agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
+      parallelExecution: boolean;
+      agmsg: import("./agents/registry.js").AgmsgConfig | null;
+      warnings: string[];
+    };
 
 function broadcast(event: ServerEvent): void {
   const payload = JSON.stringify(event);
@@ -121,6 +135,35 @@ if (openspecDir) {
       if (filePath.endsWith(".md")) broadcast({ type: "tags-updated" });
       const changeId = changeIdForPath(openspecDir, filePath);
       if (changeId) {
+        // add-needs-human-phase editor fallback: if the changed file is
+        // `needs-human.md`, guard on the current phase BEFORE parsing so a
+        // duplicate chokidar fire (or a manual re-save after resolution) is
+        // a no-op — we've already restored on the first event. When the
+        // guard passes and the footer reads `answered: true`, run the same
+        // restore path the /answer API uses.
+        //
+        // Match on basename (cross-platform: chokidar uses `\` on Windows)
+        // AND require the file lives directly at
+        // `openspec/changes/<changeId>/needs-human.md` (not a subdir with
+        // a coincidentally-named template file).
+        const isDirectNeedsHuman =
+          basename(filePath) === "needs-human.md" &&
+          dirname(filePath) === join(openspecDir, "changes", changeId);
+        if (event !== "unlink" && isDirectNeedsHuman) {
+          const raw = await readSidecar(PROJECT_ROOT, changeId);
+          const cur = extractSidecarFields(raw, changeId);
+          if (cur.phase === NEEDS_HUMAN) {
+            const doc = await parseNeedsHuman(PROJECT_ROOT, changeId);
+            if (doc?.answered) {
+              const restored = cur.priorPhase ?? "proposed";
+              await writeSidecar(PROJECT_ROOT, changeId, {
+                phase: restored,
+                priorPhase: undefined,
+                escalatedAt: undefined,
+              }, watcher ?? undefined);
+            }
+          }
+        }
         const change = await parseChange(openspecDir, changeId);
         broadcast({ type: "change-updated", changeId, change });
         return;
@@ -164,6 +207,16 @@ if (existsSync(DOCS_DIR)) {
 // ---- Agent runner ----------------------------------------------------------
 const agentRegistry = new AgentRegistry(PROJECT_ROOT);
 await agentRegistry.load();
+// auto-sync-agmsg-spawn-options: on boot, ensure ~/.agmsg/config/spawn_options.yaml
+// mirrors non-`--model` args of live-shell workers in agents.yaml. Silent on failure —
+// this is a defensive sync that also runs on POST /api/agents/config.
+try {
+  await syncSpawnOptions(agentRegistry.publicConfig() as unknown as import("./agents/registry.js").AgentConfig);
+} catch (err) {
+  console.warn(
+    `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+}
 const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadcast(ev));
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
@@ -173,7 +226,30 @@ const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadca
 // this init and misses the one-shot `agent-job-started` events.
 // See add-orphan-worktree-adoption.
 await agentRunner.adoptOrphanWorktrees();
-void agentRegistry.startWatching();
+// Debounced broadcast of the fresh registry state on `agents.yaml`
+// file-system changes. Debouncing collapses atomic-write patterns
+// (`.tmp → rename` fires multiple fs.watch events on macOS) into a
+// single event. See add-agents-broadcast-on-file-event.
+let agentsBroadcastTimer: NodeJS.Timeout | null = null;
+void agentRegistry.startWatching(() => {
+  if (agentsBroadcastTimer) clearTimeout(agentsBroadcastTimer);
+  agentsBroadcastTimer = setTimeout(() => {
+    agentsBroadcastTimer = null;
+    const cfg = agentRegistry.publicConfig();
+    console.log(
+      `[registry] broadcasting agents-updated (${cfg.agents.length} agents, ${cfg.warnings.length} warnings)`,
+    );
+    broadcast({
+      type: "agents-updated",
+      ok: cfg.ok,
+      error: cfg.error,
+      agents: cfg.agents,
+      parallelExecution: cfg.parallelExecution,
+      agmsg: cfg.agmsg,
+      warnings: cfg.warnings,
+    });
+  }, 100);
+});
 
 process.on("SIGINT", () => {
   agentRunner.shutdown();
@@ -377,10 +453,260 @@ fastify.post<{ Params: { id: string } }>(
   },
 );
 
+// ---- phase state machine (add-phase-state-machine) ------------------------
+// GET returns the persisted phase for a change (null when unphased).
+// POST validates against the active enum, rejects reserved values with a
+// pointer to the phase-gates idea note, writes the sidecar, and rebroadcasts
+// the change via the existing `change-updated` WS event (state-updated
+// equivalent — no new event variant added).
+fastify.get<{ Params: { id: string } }>(
+  "/api/changes/:id/phase",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+    const raw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const { phase } = extractSidecarFields(raw, req.params.id);
+    return { phase: phase ?? null };
+  },
+);
+
+type PhasePostBody = { phase?: unknown };
+fastify.post<{ Params: { id: string }; Body: PhasePostBody }>(
+  "/api/changes/:id/phase",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const requested = req.body?.phase;
+    if (isReservedPhase(requested)) {
+      return reply.code(400).send({
+        error: `phase '${requested}' is reserved for Phase 4 (see docs/ideas/2026-07-04-phase-gates-and-putback.md); not yet supported`,
+      });
+    }
+    if (!isPhase(requested)) {
+      return reply.code(400).send({
+        error: `unknown phase '${String(requested)}'; expected one of ${PHASES.join(", ")}`,
+      });
+    }
+
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: requested },
+      watcher ?? undefined,
+    );
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: requested satisfies Phase };
+  },
+);
+
+// ---- needs-human escalation (add-needs-human-phase) -----------------------
+// Phase-agnostic escalation state that lives on top of the phase machine.
+// A change escalates *from* any phase (defaulting to `proposed` when
+// unphased) and *returns* to that phase when the escalation is answered.
+// Both routes inherit CSRF protection from the global onRequest hook.
+
+type EscalatePostBody = { question?: unknown; context?: unknown };
+fastify.post<{ Params: { id: string }; Body: EscalatePostBody }>(
+  "/api/changes/:id/needs-human",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+    if (!question) return reply.code(400).send({ error: "question required" });
+    const context = typeof req.body?.context === "string" ? req.body.context : undefined;
+
+    // 409 when already escalated — one open escalation per change.
+    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const current = extractSidecarFields(currentRaw, req.params.id);
+    if (current.phase === NEEDS_HUMAN) {
+      return reply.code(409).send({ error: "change already escalated" });
+    }
+
+    const priorPhase = current.phase ?? "proposed";
+    const escalatedAt = new Date().toISOString();
+    await writeNeedsHuman(PROJECT_ROOT, req.params.id, question, context);
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: NEEDS_HUMAN, priorPhase, escalatedAt },
+      watcher ?? undefined,
+    );
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: NEEDS_HUMAN, priorPhase, escalatedAt };
+  },
+);
+
+type AnswerPostBody = { answer?: unknown };
+fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
+  "/api/changes/:id/needs-human/answer",
+  async (req, reply) => {
+    if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
+    if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
+    const changeDir = join(openspecDir, "changes", req.params.id);
+    if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
+
+    const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
+    if (!answer) return reply.code(400).send({ error: "answer required" });
+
+    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const current = extractSidecarFields(currentRaw, req.params.id);
+    if (current.phase !== NEEDS_HUMAN) {
+      return reply.code(409).send({ error: "change is not in needs-human" });
+    }
+
+    await appendAnswer(PROJECT_ROOT, req.params.id, answer);
+    // Restore prior phase; clear escalation fields (undefined DELETES them
+    // via the writeSidecar contract).
+    const restored = current.priorPhase ?? "proposed";
+    await writeSidecar(
+      PROJECT_ROOT,
+      req.params.id,
+      { phase: restored, priorPhase: undefined, escalatedAt: undefined },
+      watcher ?? undefined,
+    );
+
+    const change = await parseChange(openspecDir, req.params.id);
+    broadcast({ type: "change-updated", changeId: req.params.id, change });
+    return { ok: true, phase: restored };
+  },
+);
+
 // ---- agent-runner endpoints ------------------------------------------------
 fastify.get("/api/agents/config", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   return agentRegistry.publicConfig();
+});
+
+// Write endpoint (Phase 5.3: add-agents-config-write). Accepts an upsert
+// or delete payload from the Agents tab modal and atomically rewrites
+// agents.yaml. The registry's file watcher picks up the change and
+// reloads on its own — no manual load() here.
+fastify.post("/api/agents/config", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const coerced = coercePayload(req.body);
+  if ("error" in coerced) {
+    return reply.code(400).send({ error: coerced.error });
+  }
+  const result = await applyAgentConfigPayload(PROJECT_ROOT, coerced);
+  if (!result.ok) {
+    return reply.code(result.status).send({ error: result.error });
+  }
+  // Force a synchronous reload so the immediately-following
+  // `GET /api/agents/config` returns the just-written state. The
+  // fs.watch-based auto-reload on registry.startWatching() is
+  // asynchronous and can race the client's re-fetch on macOS
+  // (rename events sometimes fire after a delay).
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Parallel-execution config toggle (add-parallel-execution-config).
+// Writes the top-level `parallelExecution: boolean` field in agents.yaml
+// and reloads the registry so the change is reflected on next fetch.
+fastify.post<{ Body: { value?: unknown } }>("/api/config/parallel-execution", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const value = (req.body ?? {}).value;
+  if (typeof value !== "boolean") {
+    return reply.code(400).send({ error: "value must be a boolean" });
+  }
+  const result = await writeParallelExecution(PROJECT_ROOT, value);
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
+  // Registry reload — same rationale as /api/agents/config's POST handler:
+  // watcher is best-effort, race with client refetch.
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Agmsg config write endpoint (add-agmsg-config-write).
+// Enable/disable and edit the top-level `agmsg:` block in agents.yaml.
+// Follows the same shape as /api/config/parallel-execution.
+fastify.post<{
+  Body: { enabled?: unknown; team?: unknown; storage?: unknown };
+}>("/api/config/agmsg", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const body = req.body ?? {};
+  if (typeof body.enabled !== "boolean") {
+    return reply.code(400).send({ error: "enabled must be a boolean" });
+  }
+  let block: { team: string; storage?: string } | null;
+  if (body.enabled) {
+    if (typeof body.team !== "string" || body.team.length === 0) {
+      return reply.code(400).send({
+        error: "agmsg.team is required when the agmsg block is present",
+      });
+    }
+    block = { team: body.team };
+    if (body.storage !== undefined && body.storage !== null && body.storage !== "") {
+      if (typeof body.storage !== "string") {
+        return reply.code(400).send({ error: "agmsg.storage must be a string" });
+      }
+      block.storage = body.storage;
+    }
+  } else {
+    block = null;
+  }
+  const result = await writeAgmsg(PROJECT_ROOT, block);
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Manager status endpoint (add-agents-tab-manager-section). Reflects
+// the actual resolved PTY startup — so the Agents tab can be honest
+// about what's running, even when no role:manager entry exists.
+fastify.get("/api/manager/status", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const managerEntry = agentRegistry.managerAgent();
+  const resolved = ptyStartup(agentRegistry);
+  let fallbackSource: "declared" | "env" | "default";
+  if (managerEntry) {
+    fallbackSource = "declared";
+  } else if (process.env.ITHYNO_TERMINAL_STARTUP !== undefined) {
+    fallbackSource = "env";
+  } else {
+    fallbackSource = "default";
+  }
+  // Public projection of the manager agent — mirror what /api/agents/config
+  // returns for individual agents (strip env, add hasEnv).
+  const agentEntry = managerEntry
+    ? {
+        name: managerEntry.name,
+        description: managerEntry.description,
+        command: managerEntry.command,
+        args: managerEntry.args,
+        hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
+        initialInput: managerEntry.initialInput,
+        prompt: managerEntry.prompt,
+        role: managerEntry.role,
+      }
+    : null;
+  return {
+    agentEntry,
+    resolvedStartup: resolved.startup || null,
+    initialInput: resolved.initialInput ?? null,
+    fallbackSource,
+    terminalActive: activeTerminalCount() > 0,
+  };
 });
 
 fastify.get("/api/agents/jobs", async (req, reply) => {
@@ -631,7 +957,7 @@ ptyWss.on("connection", async (ws) => {
   const cwd = openspecDir
     ? resolve(openspecDir, "..") // project root, not openspec/ itself
     : PROJECT_ROOT;
-  const result = await attachPtyToSocket(ws, { cwd });
+  const result = await attachPtyToSocket(ws, { cwd, registry: agentRegistry });
   if (!result.ok) {
     try {
       ws.send(`\r\n[ithyno] terminal unavailable: ${result.reason}\r\n`);
@@ -644,6 +970,18 @@ ptyWss.on("connection", async (ws) => {
 
 // ---- Boot ------------------------------------------------------------------
 try {
+  // Stale worktree lock cleanup — see server/agents/worktree-lock.ts.
+  // Runs before we start serving so the first workspace scan sees the
+  // clean state.
+  const { cleanupStaleLock } = await import("./agents/worktree-lock.js");
+  const cleaned = await cleanupStaleLock(PROJECT_ROOT);
+  if (cleaned === null) {
+    // Either no lock existed, or we just removed a stale one. Either
+    // way, the current state is "no lock held" — nothing to log unless
+    // we actually removed something. cleanupStaleLock does not
+    // currently report which case; if we care, extend the return type.
+  }
+
   await fastify.listen({ port: PORT, host: "127.0.0.1" });
   // Rebuild the allow-list against the final port (in case it differs from the
   // requested PORT in some edge case).

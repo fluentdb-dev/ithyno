@@ -10,6 +10,25 @@ export type WorkspaceState = {
   changes: Change[];
   archive: ChangeSummary[];
   gitStatus: GitStatus;
+  /** Contents of `.worktrees/.lock` when present. Null when no lock
+   *  is held. Consumed by the UI to gate the Kanban Start button when
+   *  `parallelExecution: false` and the lock is held by another
+   *  change. Landed by collapse-jobregistry-and-add-semaphore. */
+  lock: WorktreeLock | null;
+};
+
+export type WorktreeLock = {
+  change: string;
+  acquiredAt: string;
+  pid: number | null;
+};
+
+/** Top-level `agmsg` block from agents.yaml, mirrored to clients via
+ *  `GET /api/agents/config` and the `agents-updated` WS event. Landed
+ *  by add-agmsg-config-block. Metadata-only in P1. */
+export type AgmsgConfig = {
+  team: string;
+  storage?: string;
 };
 
 export type GitStatus =
@@ -37,6 +56,42 @@ export type Change = {
   progress: Progress;
   /** True when an `outcome.md` file sits next to the change's other artifacts. */
   hasOutcome: boolean;
+  /** Explicit workflow phase persisted in `.openspec.yaml`. Undefined =
+   *  unphased (renders in the Kanban's legacy fallback section). Landed by
+   *  add-phase-state-machine. `needs-human` is a valid value but never
+   *  places a card in a dedicated lane — see the notes on `priorPhase`. */
+  phase?: import("./phases.js").PersistedPhase;
+  /** The phase to restore when a `needs-human` escalation is answered.
+   *  Populated only while `phase === "needs-human"`. The Kanban also
+   *  reads this to place the card in its "home" lane (falling back to
+   *  `proposed` when missing). */
+  priorPhase?: import("./phases.js").PersistedPhase;
+  /** ISO 8601 timestamp of the escalation. Populated only while
+   *  `phase === "needs-human"`. Kanban card renders it as a WaitBadge
+   *  (`⏳ Nh` elapsed) in the head. */
+  escalatedAt?: string;
+  /** First-line H1 of `needs-human.md`, surfaced on the Kanban card as
+   *  the escalation question. Populated only while
+   *  `phase === "needs-human"` AND the artifact exists on disk. */
+  needsHumanQuestion?: string;
+  /** Populated when `.worktrees/<id>/` exists on disk. The presence of
+   *  this field is the primary signal for Kanban's IN-PROGRESS
+   *  placement (see collapse-jobregistry-and-add-semaphore). The
+   *  `tasksProgress` reflects the worktree's own copy of tasks.md
+   *  (impl-in-flight state), which typically differs from the main
+   *  tree's `progress` field. */
+  worktree?: {
+    /** Absolute path to `.worktrees/<id>/`. */
+    path: string;
+    /** Conventional branch name: `agent/<id>`. Populated even when we
+     *  don't spawn git to verify — the convention is enforced at
+     *  `git worktree add` time by the dispatcher. */
+    branch: string;
+    /** Progress computed from `.worktrees/<id>/openspec/changes/<id>/tasks.md`.
+     *  Zero (`{done:0,total:0}`) when the worktree exists but its
+     *  tasks.md is missing or unparseable. */
+    tasksProgress: Progress;
+  };
 };
 
 export type ChangeSummary = {

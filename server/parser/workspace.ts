@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFile, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, relative, sep, isAbsolute } from "node:path";
+import { dirname, join, relative, sep, isAbsolute } from "node:path";
 import { parseTasks, countProgress } from "./tasks.js";
 import { parseSpec } from "./spec.js";
 import { parseProposal } from "./proposal.js";
 import type { Change, ChangeSummary, RawDoc, SpecDomain, WorkspaceState } from "../model.js";
+import { readSidecar, extractSidecarFields } from "../sidecar.js";
+import { parseNeedsHuman } from "../needs-human.js";
 import { getGitStatus } from "../git/status.js";
+import { readLock } from "../agents/worktree-lock.js";
 
 /** Locate the openspec/ directory under a project root. */
 export function resolveOpenspecDir(projectRoot: string): string | null {
@@ -41,6 +44,26 @@ async function parseSpecsDir(specsDir: string): Promise<SpecDomain[]> {
   return out;
 }
 
+/** Read a change's worktree state — `.worktrees/<id>/` presence + its
+ *  own tasks.md progress. Returns undefined when the worktree does not
+ *  exist. Landed by collapse-jobregistry-and-add-semaphore for the
+ *  folder-driven Kanban placement. */
+async function readWorktreeState(
+  projectRoot: string,
+  id: string,
+): Promise<Change["worktree"]> {
+  const path = join(projectRoot, ".worktrees", id);
+  if (!existsSync(path)) return undefined;
+  const tasksPath = join(path, "openspec", "changes", id, "tasks.md");
+  const tasksRaw = await readIfExists(tasksPath);
+  const tasks = tasksRaw != null ? parseTasks(tasksPath, tasksRaw) : null;
+  return {
+    path,
+    branch: `agent/${id}`,
+    tasksProgress: countProgress(tasks),
+  };
+}
+
 export async function parseChange(openspecDir: string, id: string): Promise<Change> {
   const dir = join(openspecDir, "changes", id);
 
@@ -54,6 +77,25 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
   const proposal = proposalRaw != null ? parseProposal(join(dir, "proposal.md"), proposalRaw) : null;
   const deltaSpecs = await parseSpecsDir(join(dir, "specs"));
 
+  // Sidecar-persisted workflow phase. `dirname(openspecDir)` is the project
+  // root, which is the API the sidecar module expects.
+  const projectRoot = dirname(openspecDir);
+  const sidecarRaw = await readSidecar(projectRoot, id);
+  const { phase, priorPhase, escalatedAt } = extractSidecarFields(sidecarRaw, id);
+
+  // Surface the escalation question when the change is currently in
+  // needs-human AND the artifact exists on disk. Reading it here means the
+  // Kanban card can render the question without a separate fetch. When phase
+  // is anything else the file is ignored — a lingering file from a past
+  // escalation shouldn't render as a live question.
+  let needsHumanQuestion: string | undefined;
+  if (phase === "needs-human") {
+    const doc = await parseNeedsHuman(projectRoot, id);
+    if (doc?.question) needsHumanQuestion = doc.question;
+  }
+
+  const worktree = await readWorktreeState(projectRoot, id);
+
   return {
     id,
     proposal,
@@ -62,6 +104,11 @@ export async function parseChange(openspecDir: string, id: string): Promise<Chan
     deltaSpecs,
     progress: countProgress(tasks),
     hasOutcome,
+    phase,
+    priorPhase,
+    escalatedAt,
+    needsHumanQuestion,
+    worktree,
   };
 }
 
@@ -86,8 +133,9 @@ export async function scanWorkspace(
   projectRoot: string,
 ): Promise<WorkspaceState> {
   const gitStatus = await getGitStatus(projectRoot);
+  const lock = await readLock(projectRoot);
   if (!openspecDir) {
-    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus };
+    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus, lock };
   }
 
   const specs = await parseSpecsDir(join(openspecDir, "specs"));
@@ -103,7 +151,7 @@ export async function scanWorkspace(
   changes.sort((a, b) => a.id.localeCompare(b.id));
   archive.sort((a, b) => b.id.localeCompare(a.id));
 
-  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus };
+  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock };
 }
 
 /**

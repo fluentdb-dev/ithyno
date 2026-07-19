@@ -7,6 +7,7 @@ import { CommandModal, kebabCaseValid } from "../components/CommandModal";
 import { KanbanBoard } from "../components/Kanban";
 import { TagChipList } from "../components/TagChip";
 import { injectPty } from "../api";
+import { ERR } from "../lib/errorMessages";
 
 function quoteForShell(s: string): string {
   // Single-quote for POSIX shells; escape embedded quotes by closing + escaping
@@ -32,12 +33,12 @@ export function Overview() {
   const runInject = async (line: string) => {
     const res = await injectPty(line, true);
     if ((res as any).status === "ok") {
-      pushToast("info", "Sent to terminal");
+      pushToast("info", ERR.SENT_TO_TERMINAL);
       setProposeOpen(false);
     } else if ((res as any).status === "no-terminal") {
-      pushToast("error", (res as any).reason ?? "No terminal open. Open a change to start one.");
+      pushToast("error", (res as any).reason ?? ERR.NO_TERMINAL);
     } else {
-      pushToast("error", (res as any).error ?? "Inject failed");
+      pushToast("error", (res as any).error ?? ERR.INJECT_FAILED);
     }
   };
 

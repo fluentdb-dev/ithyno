@@ -1,0 +1,4 @@
+[submodule "vendor/agmsg"]
+	path = vendor/agmsg
+	url = https://github.com/fujibee/agmsg.git
+	shallow = true

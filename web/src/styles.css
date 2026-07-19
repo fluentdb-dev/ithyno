@@ -589,6 +589,12 @@ a:hover {
   font-size: 13px;
 }
 
+/* Canonical inline banner for load-time / server errors (per the
+ * `Error Display Convention` — normalize-error-display).
+ * Markup: `<div className="parse-error">⚠ <message></div>` — always
+ * a div, always with the ⚠ prefix. Toast-based transient errors use
+ * `.toast.error` instead; form-field validation uses
+ * `.form-field-error`. */
 .parse-error {
   color: var(--amber);
 }
@@ -624,7 +630,9 @@ a:hover {
   display: block;
 }
 
-/* Kanban board */
+/* Kanban board — 3 columns: TODO / IN-PROGRESS / DONE. Phase state is a
+   Manager-internal concern and is NOT rendered on the board (see
+   revert-kanban-ui-lanes). */
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -636,6 +644,7 @@ a:hover {
     grid-template-columns: 1fr;
   }
 }
+
 .kanban-col {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -978,117 +987,6 @@ a:hover {
   50% { opacity: 0.4; transform: scale(0.7); }
 }
 
-/* Execution picker modal */
-.modal.execution-picker {
-  max-width: 640px;
-}
-.execution-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin: 12px 0 14px;
-}
-@media (max-width: 640px) {
-  .execution-options {
-    grid-template-columns: 1fr;
-  }
-}
-.execution-option {
-  text-align: left;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.execution-option:hover:not(.disabled) {
-  border-color: var(--accent);
-}
-.execution-option.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.execution-option-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 14px;
-}
-.execution-option code {
-  background: var(--panel-2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-}
-.execution-option p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.execution-disabled-reason {
-  color: var(--amber, #e5a70a);
-  font-weight: 600;
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: color-mix(in oklab, var(--amber, #e5a70a) 12%, transparent);
-  border-left: 3px solid var(--amber, #e5a70a);
-  border-radius: 2px;
-  display: block;
-}
-.execution-disabled-reason .link {
-  background: none;
-  border: none;
-  color: inherit;
-  padding: 0;
-  margin-left: 4px;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.execution-save {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-
-/* Agent picker modal */
-.agent-picker {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.agent-picker button {
-  width: 100%;
-  text-align: left;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.agent-picker button:hover {
-  border-color: var(--accent);
-}
-.agent-picker-name {
-  font-weight: 600;
-}
-
 /* Agents page */
 .agents-page h2 {
   margin: 0 0 18px;
@@ -1131,6 +1029,338 @@ a:hover {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+/* Agents tab: agent row (idle) */
+.agent-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-row:last-child {
+  border-bottom: none;
+}
+.agent-row-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Agents tab: + Add agent button (add-agents-config-ui Phase 5.2) */
+.agents-add-btn {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* Agent config modal (add-agents-config-ui Phase 5.2 +
+   reshape-agents-yaml-mode-roles: scroll + collapsible Advanced) */
+.agent-config-modal {
+  max-width: 560px;
+  width: 92vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  /* Anchor to a stable position: top of the viewport with a margin.
+     Prevents the whole dialog from jumping when Advanced expands or
+     collapses (the backdrop's flex-centering would otherwise re-center
+     the modal on its new height). */
+  align-self: flex-start;
+  margin-top: 5vh;
+  min-height: 0;
+}
+.agent-config-modal h3 {
+  margin: 0 0 12px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-config-manager-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent, #2563eb) 20%, transparent);
+  color: var(--accent, #2563eb);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.agent-config-modal form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; /* allow the body child to actually scroll */
+  overflow: hidden;
+}
+.agent-config-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 4px 8px 2px;
+}
+.agent-config-modal .modal-actions {
+  flex: 0 0 auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.agent-config-advanced {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.agent-config-advanced-toggle {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+.agent-config-advanced-toggle:hover {
+  color: var(--text);
+}
+.agent-config-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+.agent-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.agent-config-field > span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.agent-config-field input[type="text"],
+.agent-config-field input[type="number"],
+.agent-config-field select,
+.agent-config-field textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.agent-config-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.agent-config-field-inline input[type="number"] {
+  width: 80px;
+}
+.agent-config-shape,
+.agent-config-mode,
+.agent-config-roles-multi,
+.agent-config-prompts {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 0;
+}
+.agent-config-shape legend,
+.agent-config-mode legend,
+.agent-config-roles-multi legend,
+.agent-config-prompts legend {
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.agent-config-shape label,
+.agent-config-mode label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 2px 0;
+}
+.agent-config-role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.agent-config-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--bg);
+}
+.agent-config-role-chip input[type="checkbox"] {
+  margin: 0;
+}
+.agent-config-role-chip-on {
+  background: color-mix(in oklab, var(--accent, #2563eb) 15%, transparent);
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 60%, var(--border));
+}
+.agent-config-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.agent-config-prompt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0;
+}
+.agent-config-prompt-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.agent-config-prompt-chain-hint {
+  font-size: 10px;
+  font-style: italic;
+}
+/* (Deleted `.agent-config-error` and `.agent-config-server-error` by
+ * normalize-error-display. Inline field validation now uses
+ * `.form-field-error`; modal server error banners use `.parse-error`.) */
+
+/* Manager section (add-agents-tab-manager-section) */
+.manager-section {
+  border-left: 3px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+  padding-left: 12px;
+}
+.manager-startup {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel));
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.manager-fallback-card {
+  background: color-mix(in oklab, var(--muted) 6%, transparent);
+  border: 1px dashed color-mix(in oklab, var(--muted) 40%, var(--border));
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Runtimes section (add-agents-tab-live-panel Phase 5.1) */
+.runtimes-section {
+  background: color-mix(in oklab, var(--accent) 3%, var(--panel));
+  border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.runtimes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.runtimes-refresh {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+.runtime-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.runtime-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.runtime-row:last-child {
+  border-bottom: none;
+}
+.runtime-row.installed .runtime-indicator {
+  color: var(--green);
+  font-weight: 700;
+}
+.runtime-row.missing .runtime-indicator {
+  color: var(--muted);
+}
+.runtime-name {
+  font-weight: 600;
+  min-width: 100px;
+}
+.runtime-row.installed .runtime-status {
+  color: var(--green);
+  font-size: 12px;
+}
+.runtime-row.missing .runtime-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.runtime-capabilities {
+  font-size: 11px;
+}
+.runtime-error {
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Job / agent badges — used by both Live and Recent job rows plus the
+   Configured (idle) agent rows. */
+.job-role-badge {
+  display: inline-flex;
+  align-items: center;
+  background: color-mix(in oklab, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.job-runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.job-verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.job-verdict-badge.pass {
+  background: color-mix(in oklab, var(--green) 20%, transparent);
+  color: var(--green);
+}
+.job-verdict-badge.rework {
+  background: color-mix(in oklab, var(--amber) 20%, transparent);
+  color: var(--amber);
 }
 
 .job-row {
@@ -2045,7 +2275,11 @@ a:hover {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.field-error {
+/* Canonical form-field validation error (per the `Error Display
+ * Convention` — normalize-error-display). Replaces the pre-cleanup
+ * mix of `.field-error` (CommandModal) and `.agent-config-error`
+ * (AgentConfigModal), which rendered nearly identical output. */
+.form-field-error {
   display: block;
   color: var(--red);
   font-size: 11px;
@@ -2119,49 +2353,6 @@ a:hover {
   gap: 8px;
 }
 
-.modal.uncommitted-proposal-modal {
-  width: min(560px, 92vw);
-}
-.uncommitted-proposal-intro {
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0 0 12px;
-}
-.uncommitted-proposal-intro code {
-  font-size: 11px;
-}
-.uncommitted-proposal-files {
-  max-height: 260px;
-  overflow-y: auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 14px;
-}
-.uncommitted-proposal-heading {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin: 6px 0 4px;
-}
-.uncommitted-proposal-heading:first-child {
-  margin-top: 0;
-}
-.uncommitted-proposal-files ul {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.uncommitted-proposal-files code {
-  font-size: 12px;
-  color: var(--text);
-}
-
 /* Session expired full-page banner */
 .auth-expired {
   max-width: 560px;
@@ -2208,4 +2399,109 @@ a:hover {
 }
 .toast.info {
   border-left-color: var(--accent);
+}
+
+/* Settings page (add-parallel-execution-config) */
+.settings-page {
+  max-width: 720px;
+}
+.settings-page h2 {
+  margin: 0 0 20px;
+}
+.settings-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  background: var(--panel);
+}
+.settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.settings-toggle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.settings-toggle input[type="checkbox"] {
+  margin-top: 4px;
+}
+.settings-toggle strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.settings-toggle p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-toggle code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* add-agmsg-config-write: Settings form fields + actions */
+.settings-field {
+  margin-top: 12px;
+}
+.settings-field label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+.settings-field label > span {
+  min-width: 0;
+}
+.settings-field label > span strong {
+  display: block;
+  font-size: 14px;
+}
+.settings-field label > span p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-field label > span code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.settings-field input[type="text"] {
+  min-width: 280px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--fg);
+  font-size: 14px;
+}
+.settings-field input[type="text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings-actions {
+  margin-top: 16px;
+}
+.settings-actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--fg));
+  font-size: 14px;
+  cursor: pointer;
+}
+.settings-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

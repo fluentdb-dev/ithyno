@@ -7,6 +7,7 @@ import {
   fetchTagIndex,
   fetchAgentConfig,
   fetchAgentJobs,
+  fetchManagerStatus,
   fetchGitConfig,
   fetchGitStatus,
   checkAuth,
@@ -22,6 +23,7 @@ import type {
   GitConfig,
   JobStatus,
   JobSummary,
+  ManagerStatus,
   OutputLine,
   Progress,
   SpecDomain,
@@ -58,6 +60,19 @@ type Store = {
   tagIndexStale: boolean;
   agents: AgentPublic[];
   agentConfigError: string | null;
+  /** Top-level parallelExecution flag from agents.yaml. Drives Start
+   *  flow's mode selection (worktree if true, terminal inject if false).
+   *  Landed by add-parallel-execution-config. */
+  parallelExecution: boolean;
+  /** Top-level `agmsg` block from agents.yaml, or null when absent
+   *  (default). Landed by add-agmsg-config-block. Metadata-only in P1;
+   *  consumers surface it only for future features. */
+  agmsg: import("./types").AgmsgConfig | null;
+  /** Resolved Manager status — declared entry, running fallback, or
+   *  idle (no terminal, no declaration). Null before the first fetch.
+   *  Landed by add-agents-tab-manager-section. */
+  managerStatus: ManagerStatus | null;
+  managerStatusError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
   /** Per-change live progress derived from the running job's worktree
@@ -83,6 +98,7 @@ type Store = {
   openDocPath: (path: string | null) => Promise<void>;
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
+  loadManagerStatus: () => Promise<void>;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -160,6 +176,10 @@ export const useStore = create<Store>((set, get) => ({
   tagIndexStale: false,
   agents: [],
   agentConfigError: null,
+  parallelExecution: false,
+  agmsg: null,
+  managerStatus: null,
+  managerStatusError: null,
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
@@ -169,9 +189,22 @@ export const useStore = create<Store>((set, get) => ({
   loadAgents: async () => {
     try {
       const cfg = await fetchAgentConfig();
-      set({ agents: cfg.agents, agentConfigError: cfg.ok ? null : cfg.error ?? "config error" });
+      set({
+        agents: cfg.agents,
+        parallelExecution: cfg.parallelExecution,
+        agmsg: cfg.agmsg,
+        agentConfigError: cfg.ok ? null : cfg.error ?? "config error",
+      });
     } catch (err) {
       set({ agentConfigError: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  loadManagerStatus: async () => {
+    try {
+      const managerStatus = await fetchManagerStatus();
+      set({ managerStatus, managerStatusError: null });
+    } catch (err) {
+      set({ managerStatusError: err instanceof Error ? err.message : String(err) });
     }
   },
   loadJobs: async () => {
@@ -378,13 +411,20 @@ export const useStore = create<Store>((set, get) => ({
       } catch {
         return;
       }
+      // NOTE: Do NOT early-return when `state` is null. Several message
+      // types (agents-updated, tags-updated, git-status-updated,
+      // worktree-change-updated, doc-updated) do not depend on the
+      // workspace state at all and MUST be processed even before the
+      // first workspace load resolves. Only the handlers that mutate
+      // `state` in place gate on its presence — inlined below.
       const cur = get().state;
-      if (!cur) return;
       if (msg.type === "change-updated") {
+        if (!cur) return;
         set({ state: replaceChange(cur, msg.change) });
       } else if (msg.type === "worktree-change-updated") {
         set((s) => ({ worktreeChangeById: { ...s.worktreeChangeById, [msg.changeId]: msg.change } }));
       } else if (msg.type === "spec-updated") {
+        if (!cur) return;
         set({ state: replaceSpec(cur, msg.domain, msg.spec) });
       } else if (msg.type === "state-replaced") {
         void get().load();
@@ -438,6 +478,23 @@ export const useStore = create<Store>((set, get) => ({
         if (s) set({ state: { ...s, gitStatus: msg.gitStatus } });
         if (msg.gitStatus.isRepo) void get().loadGitConfig();
         else set({ gitConfig: null });
+      } else if (msg.type === "agents-updated") {
+        // add-agents-broadcast-on-file-event — server fires this when
+        // agents.yaml changes on disk (external edit OR Modal Save's
+        // fs.watch follow-up). Payload IS the fresh state — no
+        // separate GET needed for `agents`.
+        set({
+          agents: msg.agents,
+          parallelExecution: msg.parallelExecution,
+          agmsg: msg.agmsg,
+          agentConfigError: msg.ok ? null : msg.error ?? "config error",
+        });
+        // Manager section is driven by `managerStatus` (a separate
+        // /api/manager/status endpoint that resolves the PTY startup
+        // chain). agents.yaml edits change whether a `role: manager`
+        // entry is declared and its command/args — the Manager section
+        // must reflect that too. Fire-and-forget refetch.
+        void get().loadManagerStatus();
       }
     };
   },

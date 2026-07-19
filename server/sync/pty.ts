@@ -5,7 +5,9 @@
 // Loaded lazily so the dashboard still starts if the native module fails to
 // build/install (feature detection — see /api/health).
 
+import { spawnSync } from "node:child_process";
 import type { WebSocket } from "ws";
+import type { AgentRegistry } from "../agents/registry.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -38,19 +40,112 @@ export function defaultShell(): { cmd: string; args: string[] } {
 }
 
 /**
- * Command auto-launched inside a freshly-spawned PTY. Defaults to
- * `claude --continue` so the embedded terminal resumes the last session
- * for this project — matches the mental model of "same terminal, same
- * conversation". Users can force a fresh session from inside Claude via
- * `/clear`.
- *
- * Override with `ITHYNO_TERMINAL_STARTUP=<cmd>` for a different agent
- * (e.g. `claude` for always-new, `aider` for a different CLI), or set it
- * to an empty string to disable auto-launch (raw shell).
+ * Cache for `hasTmux()`. `null` = uncached; boolean = last probe result.
+ * Reset only via `_setTmuxCacheForTest()` (test-only override).
  */
-export function ptyStartupCommand(): string {
-  const v = process.env.ITHYNO_TERMINAL_STARTUP;
-  return v ?? "claude --continue";
+let tmuxCache: boolean | null = null;
+
+/** Is the `tmux` binary on `PATH`? Probes once, caches. Consulted by
+ *  `ptyStartup()` when the workspace has an `agmsg:` block configured.
+ *  Landed by wrap-embedded-pty-in-tmux. */
+export function hasTmux(): boolean {
+  if (tmuxCache !== null) return tmuxCache;
+  try {
+    const r = spawnSync("which", ["tmux"], { encoding: "utf8" });
+    tmuxCache = r.status === 0;
+  } catch {
+    tmuxCache = false;
+  }
+  return tmuxCache;
+}
+
+/** Test-only: override `hasTmux()`'s cached value. Pass `null` to reset
+ *  and re-probe on next call. Not part of the public API. */
+export function _setTmuxCacheForTest(v: boolean | null): void {
+  tmuxCache = v;
+}
+
+/**
+ * Command auto-launched inside a freshly-spawned PTY, plus an optional
+ * `initialInput` line the caller writes after the command settles.
+ *
+ * Priority (add-manager-agent-config):
+ *   1. `registry.managerAgent()` — the first `role: manager` entry
+ *      from agents.yaml. Its command / args form the startup line;
+ *      its `initialInput` (if set) is auto-injected after.
+ *   2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
+ *      string. Backward compat with the pre-manager-config setup.
+ *   3. Hardcoded default `claude --continue` — the mental model of
+ *      "same terminal, same conversation" for Claude Code users.
+ *
+ * An empty `startup` string disables auto-launch (raw shell).
+ *
+ * When `registry.agmsg()` is non-null (workspace opted into the
+ * PTY→tmux→agmsg flavor via `add-agmsg-config-block`), the resolved
+ * manager command is further wrapped in
+ * `tmux new-session -A -s <name> -- <cmd> <args…>` where `<name>` is
+ * `$ITHYNO_TMUX_SESSION` when set (non-empty) else `ithyno`. When
+ * `tmux` is not on `PATH` the wrap is skipped and the startup line
+ * becomes a `printf`-based fallback banner; `initialInput` is
+ * suppressed in the fallback since the manager isn't running.
+ * See wrap-embedded-pty-in-tmux.
+ */
+export function ptyStartup(registry: AgentRegistry | null): {
+  startup: string;
+  initialInput?: string;
+} {
+  const manager = registry?.managerAgent() ?? null;
+  const agmsg = registry?.agmsg() ?? null;
+
+  let baseStartup: string;
+  let initialInput: string | undefined;
+  if (manager && manager.command) {
+    const args = manager.args ?? [];
+    baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    initialInput = manager.initialInput;
+  } else {
+    const v = process.env.ITHYNO_TERMINAL_STARTUP;
+    baseStartup = v ?? "claude --continue";
+    initialInput = undefined;
+  }
+
+  if (agmsg === null) {
+    return initialInput === undefined
+      ? { startup: baseStartup }
+      : { startup: baseStartup, initialInput };
+  }
+
+  // agmsg configured — wrap in tmux (or fall back with a banner).
+  if (!hasTmux()) {
+    return { startup: tmuxMissingFallback() };
+  }
+  if (!baseStartup) {
+    // Empty startup means "raw shell" — nothing to hand to tmux;
+    // keep the raw-shell behavior even under agmsg configuration.
+    return initialInput === undefined
+      ? { startup: baseStartup }
+      : { startup: baseStartup, initialInput };
+  }
+  const session = process.env.ITHYNO_TMUX_SESSION || "ithyno";
+  const startup = `tmux new-session -A -s ${shellQuote(session)} -- ${baseStartup}`;
+  return initialInput === undefined
+    ? { startup }
+    : { startup, initialInput };
+}
+
+function tmuxMissingFallback(): string {
+  const line1 = "\\n\\u26a0\\ufe0f  agmsg is configured in agents.yaml but tmux was not found on PATH.";
+  const line2 = "Install tmux (brew install tmux on macOS, apt/pacman/dnf on Linux) and reopen";
+  const line3 = "the Terminal panel, or remove the agmsg: block to fall back to direct spawn.\\n";
+  return `printf '${line1}\\n${line2}\\n${line3}\\n'`;
+}
+
+/** Wrap `s` in single quotes when it contains characters a shell would
+ *  interpret. Kept intentionally minimal — the manager agent's args
+ *  are usually clean flags like `--continue`. */
+function shellQuote(s: string): string {
+  if (/^[a-zA-Z0-9._\-/:@=]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 type ClientMessage =
@@ -94,7 +189,15 @@ export function activeTerminalCount(): number {
  */
 export async function attachPtyToSocket(
   ws: WebSocket,
-  opts: { cwd: string; cols?: number; rows?: number },
+  opts: {
+    cwd: string;
+    cols?: number;
+    rows?: number;
+    /** When present, ptyStartup() derives the startup command + auto-inject
+     *  line from `registry.managerAgent()`. Pass null to use the env-var /
+     *  hardcoded fallback chain. See add-manager-agent-config. */
+    registry?: AgentRegistry | null;
+  },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const pty = await loadPty();
   if (!pty.available) return { ok: false, reason: pty.reason };
@@ -111,11 +214,13 @@ export async function attachPtyToSocket(
   const entry: LiveTerminal = { term, ws };
   live.push(entry);
 
-  // Auto-launch the configured startup command (default: `claude`) so
-  // Terminal execution has a receiver from the moment the terminal opens.
-  // The small delay lets the shell finish printing its prompt so the injected
-  // line appears at the prompt, not before it.
-  const startup = ptyStartupCommand();
+  // Auto-launch the resolved startup command so the Terminal panel has
+  // a receiver from the moment it opens. The 300 ms delay lets the shell
+  // finish printing its prompt so the typed line appears at the prompt,
+  // not before it. If the manager entry declared an `initialInput`,
+  // inject it 300 ms after the startup command so the Manager has time
+  // to boot and render its own prompt.
+  const { startup, initialInput } = ptyStartup(opts.registry ?? null);
   if (startup) {
     setTimeout(() => {
       try {
@@ -123,6 +228,16 @@ export async function attachPtyToSocket(
         term.write(`${startup}\r`);
       } catch {
         /* term already dead */
+      }
+      if (initialInput) {
+        setTimeout(() => {
+          try {
+            console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
+            term.write(`${initialInput}\r`);
+          } catch {
+            /* term already dead */
+          }
+        }, 300);
       }
     }, 300);
   }

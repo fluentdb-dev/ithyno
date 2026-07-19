@@ -2,6 +2,8 @@
 tags: [feature/agents, area/server]
 ---
 
+> **REVERTED** by [revert-agents-yaml-schema-fields](../../changes/revert-agents-yaml-schema-fields/) — specialties/concurrency は R1 の dispatch endpoint 撤去後 unused、schema slim 化のため 3 requirements 全 REMOVE。`role` は `roles[]` に進化して reshape-agents-yaml-mode-roles が別途担保。
+
 ## Why
 
 Later phases introduce a dispatcher that routes jobs to agents by role and

@@ -35,6 +35,32 @@ naming convention, Case α (archived target → MODIFIED/REMOVED delta) vs
 Case β (in-flight target → ADDED delta + reverted-target archive)
 classification, and the reverted-target archive procedure.
 
+## In-flight spec 注記 (Hard rule)
+
+When you propose a change with **MODIFIED** or **REMOVED** deltas against
+an already-landed requirement, immediately add a `PENDING` annotation to
+that requirement in the current `openspec/specs/<capability>/spec.md`.
+
+Why: between propose and archive, the spec still shows the requirement as
+authoritative. Another agent (or a future session) reading the spec will
+follow the doomed requirement without knowing a revert / rewrite is in
+flight. The annotation closes that gap; `openspec archive` rewrites or
+removes the requirement anyway, so the annotation disappears automatically.
+
+Format (insert directly under the `### Requirement:` heading):
+
+```md
+### Requirement: <name>
+
+> ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
+
+<existing requirement body>
+```
+
+Applies to `revert-*`, spec-tightening, and any propose that shifts an
+existing contract. Not needed for pure ADDED (the requirement doesn't
+exist yet in the spec).
+
 ## Idea capture (stage ①)
 
 When a design conversation produces a conclusion worth keeping but NOT yet a

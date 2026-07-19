@@ -31,7 +31,12 @@ export class Watcher {
     });
 
     const handle = async (event: "change" | "add" | "unlink", filePath: string) => {
-      if (!filePath.endsWith(".md")) return;
+      // .md is the historical scope; `.openspec.yaml` per-change sidecars
+      // carry mutable machine state (phase, priorPhase, escalatedAt) that
+      // must propagate to clients on external edit — landed by
+      // add-phase-state-machine.
+      const isTracked = filePath.endsWith(".md") || filePath.endsWith(".openspec.yaml");
+      if (!isTracked) return;
 
       if (event === "unlink") {
         this.writtenHashes.delete(filePath);

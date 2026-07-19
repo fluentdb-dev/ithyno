@@ -2,6 +2,8 @@
 tags: [feature/worktree, feature/agents, area/server]
 ---
 
+> **REVERTED** by [revert-worktree-pool](../../changes/revert-worktree-pool/) — runtime-collapse pivot 方針で pool 撤廃、agent は常に dedicated worktree で spawn する初期形に戻す。4 requirements 全 REMOVE。
+
 ## Why
 
 Today every job gets a fresh `.worktrees/<change-id>/` worktree: a full

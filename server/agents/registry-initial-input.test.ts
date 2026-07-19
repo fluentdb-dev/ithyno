@@ -3,82 +3,105 @@ import { describe, it, expect } from "vitest";
 import { AgentRegistry } from "./registry.js";
 
 /**
- * Tests for the `initialInput` field: parse acceptance, template
- * substitution in `resolve()`, and rejection when the field type is
- * wrong. We reach into the private cache via `load()`-independent APIs
- * where possible; where we must inspect the parsed shape, we use
- * `publicConfig()`.
+ * Tests for prompt resolution and template substitution in `resolve()`.
+ *
+ * Post reshape-agents-yaml-mode-roles: prompts are per-role via the
+ * `prompts` map (agent → runtime → built-in default). `initialInput` on
+ * AgentPublic / AgentDef is retained as a read-alias populated from
+ * `prompts[roles[0]]` after normalization, but `resolve()` itself reads
+ * from the `prompts` map plus built-in defaults.
  */
 
 function stubRegistry() {
   return new AgentRegistry("/tmp/nowhere-that-does-not-exist");
 }
 
-describe("AgentRegistry initialInput", () => {
-  it("resolve substitutes template variables in initialInput", () => {
+describe("AgentRegistry resolve — per-role prompts", () => {
+  // NOTE: post reshape, command-only agents "own" their args — resolve()
+  // does NOT auto-append `-p <prompt>` for them. The prompt for a
+  // command-only single-prompt agent lives in args (user hand-authored).
+  // Only agents that reference a runtime get automatic prompt-injection.
+  //
+  // For live-shell agents, initialInput carries the resolved prompt (typed
+  // into PTY). For single-prompt command-only agents, initialInput stays
+  // undefined — args are the source of truth.
+
+  it("live-shell agent gets resolved prompt in initialInput (PTY delivery)", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "claude-mgr",
+      command: "claude",
+      args: ["--continue"],
+      mode: "live-shell" as const,
+      roles: ["manager"],
+      role: "manager",
+      prompts: { manager: "/opsx:manage ${change_id}" },
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    };
+    const r = reg.resolve(
+      def,
+      { change_id: "add-foo", worktree_path: "/w", branch: "b" },
+      "manager",
+    );
+    expect(r.initialInput).toBe("/opsx:manage add-foo");
+    // Worker live-shell = stdin delivery (no PTY). Manager PTY handling
+    // lives in attachPtyToSocket and never reaches resolve(). Even if a
+    // caller wires a Manager through resolve() by hand, the return
+    // value now says "stdin" — the semantic is "prompt delivered via
+    // stdin write" rather than "runner opens a PTY".
+    expect(r.initialInputMode).toBe("stdin");
+    expect(r.args).toEqual(["--continue"]);
+  });
+
+  it("command-only single-prompt agent leaves args untouched (user owns them)", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "claude",
+      command: "claude",
+      args: ["--dangerously-skip-permissions", "-p", "/opsx:apply ${change_id}"],
+      mode: "single-prompt" as const,
+      roles: ["code"],
+      role: "code",
+      specialties: [],
+      concurrency: 1,
+      dedicated: true,
+    };
+    const r = reg.resolve(
+      def,
+      { change_id: "add-bar", worktree_path: "/w", branch: "b" },
+      "code",
+    );
+    expect(r.args).toEqual([
+      "--dangerously-skip-permissions",
+      "-p",
+      "/opsx:apply add-bar",
+    ]);
+    expect(r.initialInput).toBeUndefined();
+    expect(r.initialInputMode).toBe("cli-arg");
+  });
+
+  it("substitutes template variables in env independently", () => {
     const reg = stubRegistry();
     const def = {
       name: "claude",
       command: "claude",
       args: [],
-      initialInput: "/opsx:apply ${change_id} on ${branch}",
-      role: "coder",
-      specialties: [],
-      concurrency: 1,
-      dedicated: true,
-    };
-    const r = reg.resolve(def, {
-      change_id: "add-foo",
-      worktree_path: "/w/add-foo",
-      branch: "agent/add-foo",
-    });
-    expect(r.initialInput).toBe("/opsx:apply add-foo on agent/add-foo");
-  });
-
-  it("resolve leaves initialInput undefined when the def has none", () => {
-    const reg = stubRegistry();
-    const def = {
-      name: "no-input",
-      command: "echo",
-      args: ["hi"],
-      role: "coder",
-      specialties: [],
-      concurrency: 1,
-      dedicated: true,
-    };
-    const r = reg.resolve(def, {
-      change_id: "c",
-      worktree_path: "/w",
-      branch: "b",
-    });
-    expect(r.initialInput).toBeUndefined();
-  });
-
-  it("resolve does not modify args or env when initialInput is used", () => {
-    const reg = stubRegistry();
-    const def = {
-      name: "claude",
-      command: "claude",
-      args: ["--dangerously-skip-permissions"],
       env: { HELLO: "${change_id}" },
-      initialInput: "/opsx:apply ${change_id}",
-      role: "coder",
+      mode: "single-prompt" as const,
+      roles: ["code"],
+      role: "code",
       specialties: [],
       concurrency: 1,
       dedicated: true,
     };
-    const r = reg.resolve(def, {
-      change_id: "add-bar",
-      worktree_path: "/w",
-      branch: "b",
-    });
-    expect(r.args).toEqual(["--dangerously-skip-permissions"]);
-    expect(r.env).toEqual({ HELLO: "add-bar" });
-    expect(r.initialInput).toBe("/opsx:apply add-bar");
+    const r = reg.resolve(
+      def,
+      { change_id: "add-x", worktree_path: "/w", branch: "b" },
+      "code",
+    );
+    expect(r.env).toEqual({ HELLO: "add-x" });
   });
 });
 
-// Note: parse-side validation (rejecting a non-string initialInput) is
-// exercised as part of the full-file load path; we test that behavior in
-// the runner-initial-input suite alongside the write mechanics, since
-// AgentRegistry.load requires a real file on disk and is exercised there.

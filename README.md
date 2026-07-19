@@ -22,6 +22,8 @@ A **working MVP** covering roadmap phases 0–2 (with parts of 3 and 4).
 ### Quick Start
 
 ```bash
+# Repo contains a git submodule (fujibee/agmsg for multi-agent workflows).
+git clone --recursive <this-repo-url>   # or `git submodule update --init` after clone
 npm install
 
 # Development (API on 4321, Vite UI on 5173 — open http://localhost:5173)
@@ -54,6 +56,8 @@ The same dashboard ships through three entry points — pick whichever fits your
 | **Electron desktop app** | Vim / JetBrains / Sublime / editor-agnostic | Download the DMG / NSIS / AppImage and launch (see [`electron/README.md`](./electron/README.md) for dev setup) |
 
 All three channels wrap the same `bin/ithyno.js` (Fastify + Vite build). Electron's BrowserWindow just loads the localhost server URL; the VS Code webview panel loads the same URL in an iframe. No implementation branches. VS Code extension details: [`vscode-extension/README.md`](./vscode-extension/README.md).
+
+**agmsg (multi-agent workflows)** — the Electron shell auto-installs [fujibee/agmsg](https://github.com/fujibee/agmsg) on first launch (a modal asks Install / Skip / Never ask; the vendored MIT scripts land at `~/.agents/skills/agmsg/`). CLI and VS Code users install it themselves via `/plugin marketplace add fujibee/agmsg` inside their Claude session when they want the dispatcher's agmsg branch active.
 
 > Implementation note: UI styles are plain CSS (`web/src/styles.css`), not Tailwind. The design intent (utility CSS for fast iteration) is unchanged; the dependency + build surface stays small.
 

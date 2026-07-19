@@ -4,6 +4,7 @@ web/dist/
 .DS_Store
 .switchboard/
 .worktrees/
+.ithyno/
 server-dist/
 electron/out/
 electron/dist/

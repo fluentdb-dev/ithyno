@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type {
+  AgentConfigPayload,
   AgentConfigResponse,
   Change,
   DiffPayload,
@@ -10,6 +11,7 @@ import type {
   GitStatus,
   Job,
   JobSummary,
+  ManagerStatus,
   TagDetail,
   TagIndex,
   ToggleResponse,
@@ -122,6 +124,41 @@ export async function setProposalExecution(id: string, mode: "worktree" | "termi
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Set the workflow phase for a change (add-phase-state-machine). */
+export async function setChangePhase(id: string, phase: string): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/phase`,
+    { phase },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/**
+ * Escalate a change to the needs-human state (add-needs-human-phase).
+ * Writes `needs-human.md`, sets `phase: needs-human`, records
+ * `priorPhase` and `escalatedAt` in the sidecar.
+ */
+export async function escalateChange(
+  id: string,
+  question: string,
+  context?: string,
+): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/needs-human`,
+    { question, context },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Answer an open escalation; restores the change's prior phase. */
+export async function answerEscalation(id: string, answer: string): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    `/api/changes/${encodeURIComponent(id)}/needs-human/answer`,
+    { answer },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 export async function toggleTask(input: {
   filePath: string;
   line: number;
@@ -190,6 +227,61 @@ export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
   const res = await fetch("/api/agents/config");
   if (!res.ok) throw new Error(`GET /api/agents/config failed: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Write agents.yaml via `POST /api/agents/config`. The endpoint lands
+ * in Phase 5.3 (`add-agents-config-write`) — until then a 404 is
+ * expected. Callers should surface a toast with a hint about the
+ * missing endpoint.
+ */
+/**
+ * Fetch the resolved Manager status (add-agents-tab-manager-section):
+ * the `role: manager` agents.yaml entry if declared, plus the actual
+ * PTY startup command that would run and whether the Terminal panel
+ * is currently open. Powers the Manager section on the Agents tab.
+ */
+export async function fetchManagerStatus(): Promise<ManagerStatus> {
+  const res = await fetch("/api/manager/status");
+  if (!res.ok) throw new Error(`GET /api/manager/status failed: ${res.status}`);
+  return res.json();
+}
+
+export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/agents/config",
+    payload,
+  );
+  if (status === 404) {
+    throw new Error(
+      "POST /api/agents/config is not implemented yet (Phase 5.3: add-agents-config-write). The UI is ready but the server write endpoint has not landed.",
+    );
+  }
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Toggle the top-level parallelExecution flag in agents.yaml. Landed by
+ *  add-parallel-execution-config. */
+export async function setParallelExecution(value: boolean): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/parallel-execution",
+    { value },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Enable/disable + upsert/remove the top-level `agmsg:` block in
+ *  agents.yaml. Landed by add-agmsg-config-write. */
+export async function setAgmsgConfig(
+  payload:
+    | { enabled: true; team: string; storage?: string }
+    | { enabled: false },
+): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/agmsg",
+    payload,
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
 export async function fetchAgentJobs(): Promise<{ jobs: JobSummary[] }> {

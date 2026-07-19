@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { startableCandidates } from "./changeState";
-import type { AgentPublic, Change, JobSummary, TaskList } from "../types";
-
-const agents: AgentPublic[] = [
-  { name: "claude", command: "claude", args: ["/opsx:apply", "${change_id}"], hasEnv: false },
-];
+import type { Change, JobSummary, TaskList } from "../types";
 
 function tasks(sections: Array<{ title: string; done: number; total: number }>): TaskList {
   return {
@@ -54,21 +50,25 @@ function runningJob(changeId: string): JobSummary {
 }
 
 describe("startableCandidates", () => {
-  it("returns empty when no agents are defined", () => {
+  // Post wire-role-to-cli-in-manager-skill (Phase 1): the util no longer
+  // takes `agents` as input; agents-empty is a skill-layer fallback
+  // concern (Manager defaults), not a UI gate.
+
+  it("returns changes even when agents.yaml is empty (skill falls back to Manager)", () => {
     const changes = [makeChange("a")];
-    expect(startableCandidates(changes, new Map(), [])).toEqual([]);
+    expect(startableCandidates(changes, new Map())).toHaveLength(1);
   });
 
   it("excludes changes with a running job", () => {
     const changes = [makeChange("a"), makeChange("b")];
     const jobs = new Map([["a", runningJob("a")]]);
-    const res = startableCandidates(changes, jobs, agents);
+    const res = startableCandidates(changes, jobs);
     expect(res.map((c) => c.id)).toEqual(["b"]);
   });
 
   it("excludes DONE changes", () => {
     const changes = [makeChange("a", { done: 3, total: 3 })];
-    expect(startableCandidates(changes, new Map(), agents)).toEqual([]);
+    expect(startableCandidates(changes, new Map())).toEqual([]);
   });
 
   it("excludes verify-only changes", () => {
@@ -80,18 +80,18 @@ describe("startableCandidates", () => {
       done: 2,
       total: 4,
     });
-    expect(startableCandidates([change], new Map(), agents)).toEqual([]);
+    expect(startableCandidates([change], new Map())).toEqual([]);
   });
 
   it("returns fresh TODO changes", () => {
     const changes = [makeChange("a"), makeChange("b")];
-    const res = startableCandidates(changes, new Map(), agents);
+    const res = startableCandidates(changes, new Map());
     expect(res.map((c) => c.id)).toEqual(["a", "b"]);
   });
 
   it("returns partially-done changes that have no active job", () => {
     const change = makeChange("a", { done: 1, total: 3 });
-    expect(startableCandidates([change], new Map(), agents)).toHaveLength(1);
+    expect(startableCandidates([change], new Map())).toHaveLength(1);
   });
 
   it("mixes filtering: keeps only the actionable ones", () => {
@@ -109,12 +109,12 @@ describe("startableCandidates", () => {
       }),
     ];
     const jobs = new Map([["running", runningJob("running")]]);
-    const res = startableCandidates(changes, jobs, agents);
+    const res = startableCandidates(changes, jobs);
     expect(res.map((c) => c.id)).toEqual(["ready"]);
   });
 
   it("null tasks are treated as startable (cannot prove no work)", () => {
     const change: Change = { ...makeChange("a"), tasks: null, progress: { done: 0, total: 0 } };
-    expect(startableCandidates([change], new Map(), agents)).toHaveLength(1);
+    expect(startableCandidates([change], new Map())).toHaveLength(1);
   });
 });
