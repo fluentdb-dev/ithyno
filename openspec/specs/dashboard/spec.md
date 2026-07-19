@@ -2535,6 +2535,8 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
+> ⚠️ **PENDING MODIFIED** by [pty-startup-uses-project-session-id](../../changes/pty-startup-uses-project-session-id/): tier-3 fallback becomes create-or-resume via a per-project UUID at `.ithyno/session-id` (mint on first launch, `claude --session-id`; resume thereafter, `claude --resume`). Adds fallback scenarios for first-launch mint, subsequent resume, empty-file recovery, and Claude session deleted externally.
+
 The embedded PTY session SHALL wrap the resolved manager startup
 command in a `tmux new-session` invocation whenever `agents.yaml`
 includes a valid top-level `agmsg` block, and SHALL spawn the manager

@@ -51,28 +51,51 @@ describe("copyFile — file-action policy", () => {
   });
 });
 
-describe("updateGitignore — append-only-if-missing", () => {
-  it("returns 'created' and writes the line when .gitignore does not exist", async () => {
+describe("updateGitignore — append-only-if-missing (both .worktrees/ and .ithyno/)", () => {
+  it("returns 'created' and writes both lines when .gitignore does not exist", async () => {
     const result = await updateGitignore(dir);
     expect(result).toBe("created");
-    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(".worktrees/\n");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
+      ".worktrees/\n.ithyno/\n",
+    );
   });
 
-  it("returns 'appended' and adds one line when .gitignore exists without it", async () => {
+  it("returns 'appended' and adds both when .gitignore exists with neither", async () => {
     await writeFile(join(dir, ".gitignore"), "node_modules/\n");
     const result = await updateGitignore(dir);
     expect(result).toBe("appended");
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
-      "node_modules/\n.worktrees/\n",
+      "node_modules/\n.worktrees/\n.ithyno/\n",
     );
   });
 
-  it("returns 'already-present' and does NOT duplicate the line when .gitignore already has it", async () => {
+  it("appends only .ithyno/ when .worktrees/ is already present", async () => {
     await writeFile(join(dir, ".gitignore"), "node_modules/\n.worktrees/\n");
+    const result = await updateGitignore(dir);
+    expect(result).toBe("appended");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
+      "node_modules/\n.worktrees/\n.ithyno/\n",
+    );
+  });
+
+  it("appends only .worktrees/ when .ithyno/ is already present", async () => {
+    await writeFile(join(dir, ".gitignore"), "node_modules/\n.ithyno/\n");
+    const result = await updateGitignore(dir);
+    expect(result).toBe("appended");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
+      "node_modules/\n.ithyno/\n.worktrees/\n",
+    );
+  });
+
+  it("returns 'already-present' when both lines exist and file is untouched", async () => {
+    await writeFile(
+      join(dir, ".gitignore"),
+      "node_modules/\n.worktrees/\n.ithyno/\n",
+    );
     const result = await updateGitignore(dir);
     expect(result).toBe("already-present");
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
-      "node_modules/\n.worktrees/\n",
+      "node_modules/\n.worktrees/\n.ithyno/\n",
     );
   });
 
@@ -81,7 +104,7 @@ describe("updateGitignore — append-only-if-missing", () => {
     const result = await updateGitignore(dir);
     expect(result).toBe("appended");
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(
-      "node_modules/\n.worktrees/\n",
+      "node_modules/\n.worktrees/\n.ithyno/\n",
     );
   });
 
@@ -92,13 +115,15 @@ describe("updateGitignore — append-only-if-missing", () => {
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("keep me\n");
   });
 
-  it("ends up with exactly one .worktrees/ line regardless of how many times init runs (task 8.5)", async () => {
+  it("ends up with exactly one .worktrees/ and one .ithyno/ line regardless of how many times init runs (idempotence)", async () => {
     for (let i = 0; i < 5; i++) {
       await updateGitignore(dir);
     }
     const raw = await readFile(join(dir, ".gitignore"), "utf8");
-    const occurrences = raw.split(/\r?\n/).filter((l) => l.trim() === ".worktrees/").length;
-    expect(occurrences).toBe(1);
+    const worktrees = raw.split(/\r?\n/).filter((l) => l.trim() === ".worktrees/").length;
+    const ithyno = raw.split(/\r?\n/).filter((l) => l.trim() === ".ithyno/").length;
+    expect(worktrees).toBe(1);
+    expect(ithyno).toBe(1);
   });
 });
 

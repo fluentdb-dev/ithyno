@@ -105,6 +105,9 @@ each release.
 - **THEN** it contains generic placeholders for project-specific commands (no `npm test`-style references that would mislead non-Node projects)
 
 ### Requirement: .gitignore Maintenance
+
+> ⚠️ **PENDING MODIFIED** by [pty-startup-uses-project-session-id](../../changes/pty-startup-uses-project-session-id/): `updateGitignore` now ensures both `.worktrees/` AND `.ithyno/` are present (append-only-if-missing per line). `.ithyno/` holds project-local ithyno state including the per-project Claude Code session UUID.
+
 The system SHALL ensure `.worktrees/` appears in the target project's
 `.gitignore`, creating the file if necessary and otherwise appending only when
 the line is missing.

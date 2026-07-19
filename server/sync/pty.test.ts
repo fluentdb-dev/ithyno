@@ -44,11 +44,71 @@ async function loadWith(yaml: string): Promise<AgentRegistry> {
 }
 
 describe("ptyStartup — priority chain", () => {
-  it("null registry + no env → fallback is fresh `claude` (no --continue)", () => {
-    // pty-startup-default-fresh-session: was `claude --continue`, now
-    // `claude` so freshly-scaffolded projects don't hit "No conversation
-    // found to continue" on first PTY open.
+  it("null registry + no env + no projectRoot → fallback is fresh `claude`", () => {
+    // pty-startup-uses-project-session-id: without a projectRoot,
+    // there's nowhere to persist a session id, so we fall through to
+    // plain `claude` (fresh). Same as pre-2026-07-19 for tests /
+    // callers that don't yet pass a projectRoot.
     expect(ptyStartup(null)).toEqual({ startup: "claude" });
+  });
+
+  it("null registry + no env + projectRoot without .ithyno/session-id → mints UUID and emits --session-id", async () => {
+    const { mkdtempSync, rmSync, existsSync, readFileSync } = await import(
+      "node:fs"
+    );
+    const { tmpdir: osTmpdir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-fresh-"));
+    try {
+      const result = ptyStartup(null, proj);
+      expect(result.startup).toMatch(
+        /^claude --session-id [0-9a-f-]{36}$/,
+      );
+      // Session-id file was created and contains the same UUID.
+      const idPath = pathJoin(proj, ".ithyno", "session-id");
+      expect(existsSync(idPath)).toBe(true);
+      const stored = readFileSync(idPath, "utf8").trim();
+      expect(result.startup).toContain(stored);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("null registry + no env + projectRoot WITH .ithyno/session-id → --resume", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
+      "node:fs"
+    );
+    const { tmpdir: osTmpdir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-resume-"));
+    const uuid = "12345678-1234-1234-1234-123456789012";
+    try {
+      mkdirSync(pathJoin(proj, ".ithyno"), { recursive: true });
+      writeFileSync(pathJoin(proj, ".ithyno", "session-id"), `${uuid}\n`);
+      const result = ptyStartup(null, proj);
+      expect(result.startup).toBe(`claude --resume ${uuid}`);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("empty session-id file → mints fresh", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
+      "node:fs"
+    );
+    const { tmpdir: osTmpdir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-empty-"));
+    try {
+      mkdirSync(pathJoin(proj, ".ithyno"), { recursive: true });
+      writeFileSync(pathJoin(proj, ".ithyno", "session-id"), "   \n");
+      const result = ptyStartup(null, proj);
+      expect(result.startup).toMatch(
+        /^claude --session-id [0-9a-f-]{36}$/,
+      );
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
   });
 
   it("null registry + env var → uses env var", () => {

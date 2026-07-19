@@ -23,6 +23,8 @@ const PACKAGE_ROOT = resolve(__dirname, "..");
 const TEMPLATES_DIR = join(PACKAGE_ROOT, "templates");
 
 const WORKTREES_LINE = ".worktrees/";
+const ITHYNO_LINE = ".ithyno/";
+const REQUIRED_LINES = [WORKTREES_LINE, ITHYNO_LINE];
 
 /**
  * Recursively walk a directory and yield every file's path **relative** to
@@ -61,22 +63,29 @@ export async function copyFile({ srcAbs, destAbs, force }) {
 }
 
 /**
- * Append `.worktrees/` to .gitignore if (and only if) it is missing. Returns
- * one of: "appended", "already-present", "created", "skipped" (when disabled),
- * or "untouched" when the file existed but didn't need a change.
+ * Ensure `.worktrees/` and `.ithyno/` are both present in .gitignore.
+ * Per-line append-only-if-missing — adding one line doesn't remove
+ * or reorder the other. Landed by pty-startup-uses-project-session-id.
+ *
+ * Returns one of:
+ * - "created"        — file didn't exist, wrote both lines
+ * - "appended"       — file existed, added at least one missing line
+ * - "already-present"— file existed with both lines
+ * - "skipped"        — `disabled: true`
  */
 export async function updateGitignore(projectRoot, { disabled = false } = {}) {
   if (disabled) return "skipped";
   const path = join(projectRoot, ".gitignore");
   if (!existsSync(path)) {
-    await writeFile(path, `${WORKTREES_LINE}\n`);
+    await writeFile(path, REQUIRED_LINES.map((l) => `${l}\n`).join(""));
     return "created";
   }
   const raw = await readFile(path, "utf8");
-  const hasLine = raw.split(/\r?\n/).some((line) => line.trim() === WORKTREES_LINE);
-  if (hasLine) return "already-present";
+  const lines = raw.split(/\r?\n/).map((l) => l.trim());
+  const missing = REQUIRED_LINES.filter((req) => !lines.includes(req));
+  if (missing.length === 0) return "already-present";
   const sep = raw.endsWith("\n") ? "" : "\n";
-  await writeFile(path, `${raw}${sep}${WORKTREES_LINE}\n`);
+  await writeFile(path, `${raw}${sep}${missing.map((l) => `${l}\n`).join("")}`);
   return "appended";
 }
 

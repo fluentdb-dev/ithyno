@@ -36,14 +36,19 @@ overwrite, `--no-gitignore` to leave the file alone, `--quiet` for
 minimal output. Preflight checks refuse to run against a non-git
 directory (exit 2 with a clear message).
 
-Once the dashboard opens, the embedded Terminal spawns a **fresh
-`claude` session** by default. To resume a specific prior
-conversation, use `/resume` from inside Claude Code, or add a
-`manager` agent entry with `args: [--resume, <session-id>]` in
-`agents.yaml` (see the `agents.yaml.example` sample block).
-`--continue` is intentionally not the default — freshly-scaffolded
-projects have no prior conversation, and the "No conversation found
-to continue" error stalls the terminal.
+Once the dashboard opens, the embedded Terminal auto-manages a
+**per-project Claude Code session**. On first open, ithyno mints a
+UUID and writes it to `.ithyno/session-id`, then starts
+`claude --session-id <uuid>` — a fresh conversation bound to that
+id. On every subsequent open, ithyno reads the same file and starts
+`claude --resume <uuid>`, resuming the conversation with its history
+intact. `.ithyno/` is added to `.gitignore` automatically (it's
+local project state, not source of truth). To reset the session
+(start a brand-new conversation), delete `.ithyno/session-id` and
+reopen the Terminal. Users who prefer a different flow — a manager
+entry, a specific `--resume <fixed-id>`, or a plain fresh `claude`
+each time — override this via a `roles: [manager]` entry in
+`agents.yaml` or the `ITHYNO_TERMINAL_STARTUP` env var.
 
 If you need to install OpenSpec / agent runner manually — for example
 because you want to customize the workflow skill or your project has a

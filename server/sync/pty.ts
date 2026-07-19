@@ -6,6 +6,14 @@
 // build/install (feature detection — see /api/health).
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import type { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 
@@ -75,15 +83,22 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  *      its `initialInput` (if set) is auto-injected after.
  *   2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
  *      string. Backward compat with the pre-manager-config setup.
- *   3. Hardcoded default `claude` — a plain fresh Claude Code
- *      session (no flags). Applies to fresh projects where the user
- *      hasn't declared a manager and has no env override. MUST NOT
- *      emit `--continue`: newly-scaffolded projects have no prior
- *      conversation and `claude --continue` prints "No conversation
- *      found to continue" which stalls the embedded terminal. Users
- *      wanting session persistence declare a `manager` entry with
- *      `args: [--continue]` or `args: [--resume, <id>]`. Landed by
- *      pty-startup-default-fresh-session (2026-07-19).
+ *   3. Per-project Claude Code session id fallback. When neither
+ *      priority 1 nor 2 supplies a command AND a `projectRoot` is
+ *      known (typical: `attachPtyToSocket` was called with cwd =
+ *      project root), ithyno reads / mints a UUID at
+ *      `<projectRoot>/.ithyno/session-id` and picks:
+ *        - `claude --session-id <uuid>` on first launch (file
+ *          missing or empty — mints a fresh UUID and writes it),
+ *          which tells Claude Code to create a fresh conversation
+ *          with that specific id.
+ *        - `claude --resume <uuid>` on subsequent launches (file
+ *          present, non-empty), resuming the previously-minted
+ *          session.
+ *      MUST NOT emit `--continue` — its opaque "most recent" pick
+ *      errors on a truly fresh project. When no `projectRoot` is
+ *      known (older callers), falls back to plain `claude`.
+ *      Landed by pty-startup-uses-project-session-id (2026-07-19).
  *
  * An empty `startup` string disables auto-launch (raw shell).
  *
@@ -97,7 +112,45 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * suppressed in the fallback since the manager isn't running.
  * See wrap-embedded-pty-in-tmux.
  */
-export function ptyStartup(registry: AgentRegistry | null): {
+/**
+ * Read `<projectRoot>/.ithyno/session-id` and pick the corresponding
+ * `claude` startup. Mints a fresh UUID (and writes the file) on first
+ * launch or when the file is missing / empty. Returns plain `claude`
+ * when no `projectRoot` is available (older callers, tests).
+ *
+ * Landed by pty-startup-uses-project-session-id.
+ */
+function resolveSessionIdStartup(projectRoot: string | undefined): string {
+  if (!projectRoot) return "claude";
+  const idPath = join(projectRoot, ".ithyno", "session-id");
+  let uuid = "";
+  if (existsSync(idPath)) {
+    try {
+      uuid = readFileSync(idPath, "utf8").trim();
+    } catch {
+      /* fall through to mint */
+    }
+  }
+  if (uuid) {
+    return `claude --resume ${shellQuote(uuid)}`;
+  }
+  // First launch (or empty/corrupt file): mint + write + create.
+  const fresh = randomUUID();
+  try {
+    mkdirSync(dirname(idPath), { recursive: true });
+    writeFileSync(idPath, `${fresh}\n`);
+  } catch {
+    /* if the write fails we still return the session-id line — Claude
+     * will create the conversation, we just won't be able to resume
+     * next time. Better than a broken shell. */
+  }
+  return `claude --session-id ${shellQuote(fresh)}`;
+}
+
+export function ptyStartup(
+  registry: AgentRegistry | null,
+  projectRoot?: string,
+): {
   startup: string;
   initialInput?: string;
 } {
@@ -112,7 +165,13 @@ export function ptyStartup(registry: AgentRegistry | null): {
     initialInput = manager.initialInput;
   } else {
     const v = process.env.ITHYNO_TERMINAL_STARTUP;
-    baseStartup = v ?? "claude";
+    if (v !== undefined) {
+      baseStartup = v;
+    } else {
+      // Priority 3: per-project session UUID at .ithyno/session-id.
+      // See doc comment above.
+      baseStartup = resolveSessionIdStartup(projectRoot);
+    }
     initialInput = undefined;
   }
 
@@ -227,7 +286,7 @@ export async function attachPtyToSocket(
   // not before it. If the manager entry declared an `initialInput`,
   // inject it 300 ms after the startup command so the Manager has time
   // to boot and render its own prompt.
-  const { startup, initialInput } = ptyStartup(opts.registry ?? null);
+  const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
   if (startup) {
     setTimeout(() => {
       try {
