@@ -2535,8 +2535,6 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
-> ⚠️ **PENDING MODIFIED** by [pty-startup-uses-project-session-id](../../changes/pty-startup-uses-project-session-id/): tier-3 fallback becomes create-or-resume via a per-project UUID at `.ithyno/session-id` (mint on first launch, `claude --session-id`; resume thereafter, `claude --resume`). Adds fallback scenarios for first-launch mint, subsequent resume, empty-file recovery, and Claude session deleted externally.
-
 The embedded PTY session SHALL wrap the resolved manager startup
 command in a `tmux new-session` invocation whenever `agents.yaml`
 includes a valid top-level `agmsg` block, and SHALL spawn the manager
@@ -2554,8 +2552,8 @@ reconnect / dev reload). The session name SHALL default to `ithyno`;
 when `ITHYNO_TMUX_SESSION` is set to a non-empty string in the
 environment, that value SHALL be used instead. The `--` separator
 SHALL be emitted between tmux's own flags and the wrapped command so
-manager flags (`--continue`, `--resume`, etc.) are not misinterpreted
-as tmux options.
+manager flags (`--resume`, `--session-id`, etc.) are not
+misinterpreted as tmux options.
 
 The `initialInput` string (the Manager's declared first-message line
 from `agents.yaml`) SHALL continue to be written to the PTY's stdin
@@ -2577,15 +2575,26 @@ priority:
    startup line; its `initialInput` (if set) is auto-injected after.
 2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
    string. Backward compat with the pre-manager-config setup.
-3. **Fallback: `claude`** (a plain fresh Claude Code session, no
-   flags). This tier applies to fresh projects — user hasn't yet
-   declared a manager, no env override — and MUST NOT emit
-   `--continue`. A newly-scaffolded project has no prior
-   conversation to continue, and running `claude --continue` in
-   that state prints "No conversation found to continue" and stalls
-   the embedded terminal. Users who want session persistence
-   declare a `manager` entry with `args: ['--continue']` or
-   `args: ['--resume', '<id>']` in their `agents.yaml`.
+3. **Fallback: per-project Claude Code session id**. When neither
+   priority 1 nor 2 supplies a command, ithyno SHALL manage a
+   persistent UUID at `<project-root>/.ithyno/session-id` and
+   choose between `claude --session-id <uuid>` (first launch) and
+   `claude --resume <uuid>` (subsequent launches):
+
+   - Read `<project-root>/.ithyno/session-id`. Trim whitespace.
+   - **File missing OR empty** → mint a new UUID v4, ensure
+     `<project-root>/.ithyno/` exists (`mkdir -p`), write
+     `<uuid>\n` to the file, then set the startup command to
+     `claude --session-id <uuid>` (Claude Code creates a fresh
+     conversation with that specific id).
+   - **File present, non-empty** → set the startup command to
+     `claude --resume <uuid>` (Claude Code resumes the previously-
+     minted session).
+
+   `--continue` MUST NOT be used at this tier — its "most recent"
+   picking is opaque and it errors on a truly fresh project. Users
+   who want a different startup command declare a manager entry
+   (tier 1) or set `ITHYNO_TERMINAL_STARTUP` (tier 2).
 
 This requirement establishes tmux hosting only. It does NOT invoke
 any `agmsg` binary, does NOT change dispatcher routing, and does NOT
@@ -2599,10 +2608,10 @@ follow-up changes P2b and P2c.
 - **AND** the process tree does NOT contain `tmux`
 
 #### Scenario: agmsg block present with tmux installed → tmux wrap
-- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }` and a `role: manager` agent whose command is `claude` and args are `[--continue]`
+- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }` and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
 - **AND** the `tmux` binary is on `PATH`
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the resolved startup line is `tmux new-session -A -s ithyno -- claude --continue`
+- **THEN** the resolved startup line is `tmux new-session -A -s ithyno -- claude --resume <id>`
 - **AND** the manager's `initialInput` is written to the PTY after the tmux session bootstraps
 
 #### Scenario: agmsg block present with tmux missing → fallback banner
@@ -2622,17 +2631,37 @@ follow-up changes P2b and P2c.
 - **WHEN** the Terminal panel opens a new PTY
 - **THEN** `tmux new-session -A -s ithyno` attaches to the existing session (does NOT error, does NOT create a duplicate); the user sees the same tmux state as before the disconnect
 
-#### Scenario: no manager agent, no env override → fresh `claude`
+#### Scenario: fallback first launch mints a session id
 - **GIVEN** a project whose `agents.yaml` has NO entry with `roles: [manager]`
 - **AND** the environment has no `ITHYNO_TERMINAL_STARTUP`
-- **WHEN** the Terminal panel opens a PTY (with or without an `agmsg` block)
-- **THEN** the resolved startup line is `claude` (fresh session — no `--continue` flag), OR when agmsg is configured, `tmux new-session -A -s ithyno -- claude`
-- **AND** the terminal does NOT print "No conversation found to continue" — the user lands in a fresh Claude Code session where they can `/resume` if they want a prior conversation
-
-#### Scenario: manager entry with `--continue` restores session persistence
-- **GIVEN** a user who wants auto-continue on their established project adds a manager entry `{ name: manager, mode: live-shell, roles: [manager], command: claude, args: [--continue] }` to `agents.yaml`
+- **AND** `<project-root>/.ithyno/session-id` does NOT exist
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the resolved startup line is `claude --continue` (or the tmux-wrapped variant when agmsg is configured) — the fallback default is opt-out, not surprise-default
+- **THEN** ithyno mints a fresh UUID v4, creates `<project-root>/.ithyno/session-id` containing that UUID, and the resolved startup line is `claude --session-id <uuid>` (or the tmux-wrapped variant when agmsg is configured)
+- **AND** the terminal does NOT print "No conversation found" — Claude Code starts a fresh conversation bound to the newly-minted id
+
+#### Scenario: fallback subsequent launch resumes
+- **GIVEN** a project with no manager and no env override
+- **AND** `<project-root>/.ithyno/session-id` already exists containing UUID `f0e1d2c3-...`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the resolved startup line is `claude --resume f0e1d2c3-...` (or the tmux-wrapped variant)
+- **AND** the Claude Code conversation from the previous PTY is resumed with its history intact
+- **AND** no new UUID is minted; `.ithyno/session-id` is unchanged
+
+#### Scenario: fallback with empty or whitespace session-id file → fresh mint
+- **GIVEN** `<project-root>/.ithyno/session-id` exists but is empty or contains only whitespace
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** ithyno treats it as "missing", mints a new UUID, overwrites the file, and starts `claude --session-id <new-uuid>` — no broken `claude --resume ` line is emitted
+
+#### Scenario: user deletes ~/.claude session externally → --resume errors
+- **GIVEN** `<project-root>/.ithyno/session-id` contains a UUID
+- **AND** the user has deleted the corresponding `~/.claude/projects/<encoded>/<uuid>.jsonl`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the startup line is `claude --resume <uuid>` and Claude Code emits "No conversation found with session ID: <uuid>" — the user recovers by deleting `<project-root>/.ithyno/session-id` and re-opening the Terminal (which mints a fresh id per the first-launch scenario above)
+
+#### Scenario: manager entry overrides the fallback
+- **GIVEN** a project whose `agents.yaml` declares a `roles: [manager]` entry with `command: claude` and `args: [--resume, my-fixed-uuid]`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the manager entry (priority 1) wins; ithyno does NOT read or write `.ithyno/session-id` and the startup line uses the manager's declared args verbatim
 
 ### Requirement: Electron First-Launch Auto-Installs Agmsg
 
