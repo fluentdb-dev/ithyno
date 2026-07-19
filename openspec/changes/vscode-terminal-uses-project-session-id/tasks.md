@@ -34,7 +34,10 @@
 - [x] 5.2 `npm --workspace=vscode-extension run build` clean
 - [x] 5.3 `npm test && npm run typecheck && npm run build` on the
   root clean
-- [ ] 5.4 Manual (best-effort — VS Code smoke pending user)
+- [x] 5.4 Manual VS Code smoke — user verified 2026-07-19; session-id file
+  mints on first launch and `claude --resume <uuid>` resumes after the first
+  message is sent (documented gap: Claude Code persists only after a user
+  message, see `docs/user-manual/troubleshooting.md`)
 
 ## 6. Post-impl
 

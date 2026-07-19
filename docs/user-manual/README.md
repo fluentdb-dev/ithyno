@@ -11,3 +11,5 @@ audience: end-user
 
 - [エージェント設定 — 対応 CLI と agents.yaml](./multi-agent-cli.md)
   claude / copilot / agy / codex をワーカーとして `agents.yaml` に書く方法。
+- [Troubleshooting](./troubleshooting.md)
+  よくあるエラーと回避方法 (session-id / サーバー起動失敗 / new project 途中終了 …)。

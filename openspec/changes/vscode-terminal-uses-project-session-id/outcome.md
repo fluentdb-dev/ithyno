@@ -39,10 +39,13 @@
 
 ## 🌱 Follow-ups
 
-- **VS Code smoke test on a user machine** — verify the injected
-  terminal actually runs `claude --session-id <uuid>` on first launch
-  and `--resume <same-uuid>` on subsequent. Not automatable in a
-  headless CI without a VS Code container.
+- **VS Code smoke test on a user machine** — verified 2026-07-19 as
+  part of the `add-vscode-extension-new-project` smoke: injected
+  terminal runs `claude --session-id <uuid>` on first launch and
+  `--resume <same-uuid>` on subsequent, provided the user sent at
+  least one message during the first session (Claude Code persists
+  only after a user message — see
+  `docs/user-manual/troubleshooting.md`).
 - **Extract `resolveSessionIdStartup` into a shared helper**
   (e.g. `bin/session-id.js` used by both `server/sync/pty.ts` and
   the VS Code extension). Deferred because the VS Code extension is

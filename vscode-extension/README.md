@@ -90,6 +90,12 @@ Two knobs govern the injected "ithyno" VS Code Terminal:
   is sent verbatim. Common choices: `claude` (fresh every time),
   `claude --continue` (legacy behavior), or any custom command.
 
+## Troubleshooting
+
+Common failure modes (session-id resume, server startup, aborted new project)
+are documented in the top-level user manual:
+[`docs/user-manual/troubleshooting.md`](../docs/user-manual/troubleshooting.md).
+
 ## Limitations
 
 - Multi-root workspaces use the first folder. A picker is future work.
