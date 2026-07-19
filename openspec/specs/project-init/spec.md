@@ -38,6 +38,9 @@ silently destroys user edits.
 - **THEN** the command creates the directories with `.gitkeep` so they survive `git add`
 
 ### Requirement: Preflight Checks
+
+> ⚠️ **PENDING MODIFIED** by [add-init-http-endpoint](../../changes/add-init-http-endpoint/): adds `autoCreateDir` and `autoGitInit` recovery flags (both default false) plus a `gitInitPerformed` result field for UI-driven "new project" flows.
+
 The system SHALL verify prerequisites before scaffolding and SHALL produce
 actionable messages when something is missing.
 
