@@ -12,12 +12,20 @@ import { Tags, TagDetailPage } from "./pages/Tags";
 import { Archive } from "./pages/Archive";
 import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
+import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
 
 export function App() {
+  // /onboarding renders a full-page onboarding UI without the App shell
+  // (topbar, terminal, project state gate). It works even when no
+  // OpenSpec project is loaded — that's the point.
+  if (window.location.pathname.startsWith("/onboarding")) {
+    return <OnboardingProject />;
+  }
+
   const load = useStore((s) => s.load);
   const connectWs = useStore((s) => s.connectWs);
   const connected = useStore((s) => s.connected);

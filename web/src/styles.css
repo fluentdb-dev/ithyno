@@ -2505,3 +2505,104 @@ a:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Onboarding page (add-new-project-onboarding-window) */
+.onboarding-page {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  min-height: 100vh;
+  background: var(--bg);
+}
+.onboarding-card {
+  width: 100%;
+  max-width: 640px;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+}
+.onboarding-target {
+  word-break: break-all;
+  margin: 4px 0 16px;
+}
+.onboarding-steps {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.onboarding-step:first-child { border-top: none; }
+.onboarding-icon {
+  display: inline-block;
+  width: 24px;
+  text-align: center;
+  font-size: 18px;
+}
+.onboarding-step.pending .onboarding-icon { color: var(--muted, #888); }
+.onboarding-step.in-progress .onboarding-icon { color: var(--accent, #4a9); animation: onboarding-pulse 1s infinite; }
+.onboarding-step.done .onboarding-icon { color: var(--ok, #4a9); }
+.onboarding-step.failed .onboarding-icon { color: var(--err, #d64); }
+@keyframes onboarding-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.onboarding-error {
+  background: rgba(220, 90, 60, 0.08);
+  border: 1px solid rgba(220, 90, 60, 0.4);
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.onboarding-log {
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.onboarding-log-empty {
+  color: var(--muted, #888);
+  font-style: italic;
+}
+.onboarding-log-line { white-space: pre-wrap; }
+.onboarding-log-line.stderr { color: var(--err, #d64); }
+.onboarding-log-step {
+  color: var(--muted, #888);
+  font-size: 0.9em;
+}
+.onboarding-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.onboarding-actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel, var(--bg));
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.onboarding-actions button:last-child {
+  background: var(--accent);
+  color: var(--accent-fg, var(--fg));
+}
+.onboarding-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

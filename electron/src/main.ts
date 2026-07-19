@@ -9,7 +9,7 @@ import {
   shell,
 } from 'electron';
 import { existsSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 const DEFAULT_CHROME_COLOR = '#0f1115';
@@ -259,61 +259,83 @@ async function switchProject(projectRoot: string): Promise<void> {
  * (add-electron-new-project-flow.)
  */
 async function onNewProject(): Promise<void> {
+  try {
+    await onNewProjectImpl();
+  } catch (err) {
+    const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+    console.error('[new-project] failed:', msg);
+    dialog.showErrorBox('New Project failed', msg);
+  }
+}
+
+async function onNewProjectImpl(): Promise<void> {
   const parent = mainWindow ?? undefined;
   const picked = pickNewProjectDialog(parent);
   if (!picked) return; // user cancelled — silent
-
-  // Resolve bin/init.js next to bin/ithyno.js (same layout in dev + packaged).
-  const { pathToFileURL } = await import('node:url');
-  const initPath = join(dirname(resolveBinPath()), 'init.js');
-  const initUrl = pathToFileURL(initPath).href;
-
-  // bin/init.js is ES module; dynamic import works in CJS Electron main.
-  const mod = (await import(initUrl)) as {
-    runInit: (opts: {
-      targetDir: string;
-      autoCreateDir?: boolean;
-      autoGitInit?: boolean;
-      quiet?: boolean;
-    }) => Promise<{
-      ok: boolean;
-      target?: string;
-      reason?: string;
-      openspecMissing?: boolean;
-      gitInitPerformed?: boolean;
-    }>;
-  };
-  const res = await mod.runInit({
-    targetDir: picked,
-    autoCreateDir: true,
-    autoGitInit: true,
-    quiet: true,
-  });
-
-  if (!res.ok) {
-    dialog.showErrorBox('New Project failed', res.reason ?? 'runInit reported an unknown failure.');
+  if (!currentSpawn) {
+    dialog.showErrorBox(
+      'New Project failed',
+      'ithyno server is not running yet — open a project first, then try again.',
+    );
     return;
   }
+  openOnboardingWindow(picked, currentSpawn.url);
+}
 
-  const detailLines: string[] = [`Target: ${res.target ?? picked}`];
-  if (res.gitInitPerformed) detailLines.push('git init ran on the target.');
-  if (res.openspecMissing) {
-    detailLines.push(
-      '',
-      'Next: install OpenSpec (needed for /opsx:* commands):',
-      `  npx -y -p @fission-ai/openspec@latest openspec init ${res.target ?? picked} --tools claude`,
-    );
-  }
-  await dialog.showMessageBox({
-    type: 'info',
-    title: 'Project ready',
-    message: 'ithyno project scaffolded.',
-    detail: detailLines.join('\n'),
-    buttons: ['Open'],
-    defaultId: 0,
+/**
+ * Open a small child BrowserWindow that loads the shared /onboarding
+ * page from the local server. The page drives runInit + openspec init
+ * via POST /api/init/stream and — when the user clicks "Open Project"
+ * — sends `onboarding-open` IPC so we can switchProject in main.
+ * (add-new-project-onboarding-window.)
+ */
+function openOnboardingWindow(target: string, serverUrl: string): void {
+  const base = serverUrl.replace(/\/$/, '');
+  const params = new URLSearchParams({
+    target,
+    channel: 'electron',
   });
+  const url = `${base}/onboarding?${params.toString()}`;
 
-  await switchProject(res.target ?? picked);
+  const win = new BrowserWindow({
+    parent: mainWindow ?? undefined,
+    width: 640,
+    height: 540,
+    title: 'ithyno — New Project',
+    modal: false,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: resolveOnboardingPreload(),
+    },
+  });
+  void win.loadURL(url);
+
+  const openHandler = (_e: Electron.IpcMainEvent, requested: string): void => {
+    if (win.isDestroyed()) return;
+    win.close();
+    void switchProject(requested);
+  };
+  const closeHandler = (): void => {
+    if (!win.isDestroyed()) win.close();
+  };
+  ipcMain.on('onboarding-open', openHandler);
+  ipcMain.on('onboarding-close', closeHandler);
+  win.on('closed', () => {
+    ipcMain.removeListener('onboarding-open', openHandler);
+    ipcMain.removeListener('onboarding-close', closeHandler);
+  });
+}
+
+function resolveOnboardingPreload(): string {
+  // Same layout resolution as resolveBinPath / agmsg-installer.
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'app', 'electron', 'out', 'onboarding-preload.js');
+  }
+  return resolve(app.getAppPath(), 'out', 'onboarding-preload.js');
 }
 
 function refreshMenu(): void {

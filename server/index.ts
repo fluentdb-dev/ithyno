@@ -379,22 +379,32 @@ type InitBody = {
   autoCreateDir?: unknown;
   autoGitInit?: unknown;
 };
+// Shared body validator for both /api/init and /api/init/stream so
+// behavior stays identical (add-new-project-onboarding-window).
+async function validateInitBody(body: InitBody): Promise<
+  | { ok: true; dir: string }
+  | { ok: false; status: 400; reason: string }
+> {
+  if (typeof body.dir !== "string" || body.dir.length === 0) {
+    return { ok: false, status: 400, reason: "`dir` is required and must be a string" };
+  }
+  const { isAbsolute } = await import("node:path");
+  if (!isAbsolute(body.dir)) {
+    return { ok: false, status: 400, reason: "`dir` must be an absolute path" };
+  }
+  return { ok: true, dir: body.dir };
+}
+
 fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     return reply.code(403).send({ error: "local only" });
   }
   const body = req.body ?? {};
-  if (typeof body.dir !== "string" || body.dir.length === 0) {
-    return reply.code(400).send({ ok: false, reason: "`dir` is required and must be a string" });
-  }
-  // Reject relative paths — resolving against the server cwd is ambiguous.
-  const { isAbsolute } = await import("node:path");
-  if (!isAbsolute(body.dir)) {
-    return reply.code(400).send({ ok: false, reason: "`dir` must be an absolute path" });
-  }
+  const v = await validateInitBody(body);
+  if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
   const { runInit } = await import("../bin/init.js");
   const result = await runInit({
-    targetDir: body.dir,
+    targetDir: v.dir,
     force: body.force === true,
     skipGitignore: body.skipGitignore === true,
     autoCreateDir: body.autoCreateDir === true,
@@ -402,10 +412,53 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
     quiet: true,
   });
   if (!result.ok) {
-    // Preflight failure → surface with 500 + full runInit shape.
     return reply.code(500).send(result);
   }
   return result;
+});
+
+// POST /api/init/stream — SSE sibling that runs runNewProjectChain
+// (runInit + `npx openspec init`) and streams ChainEvents. Consumed
+// by the shared /onboarding React page (add-new-project-onboarding-
+// window).
+fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const body = req.body ?? {};
+  const v = await validateInitBody(body);
+  if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
+
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  const { runNewProjectChain } = await import("../bin/new-project-chain.js");
+  let clientAlive = true;
+  reply.raw.on("close", () => {
+    clientAlive = false;
+  });
+
+  const write = (event: unknown): void => {
+    if (!clientAlive) return;
+    try {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      clientAlive = false;
+    }
+  };
+
+  await runNewProjectChain(v.dir, write);
+
+  if (clientAlive) {
+    try {
+      reply.raw.end();
+    } catch {
+      /* client already closed */
+    }
+  }
 });
 
 fastify.get<{ Params: { id: string }; Querystring: { tree?: string } }>(
