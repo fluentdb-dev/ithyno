@@ -2535,8 +2535,6 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
-> ⚠️ **PENDING MODIFIED** by [pty-startup-default-fresh-session](../../changes/pty-startup-default-fresh-session/): manager-startup fallback (no manager entry, no env override) becomes plain `claude` (fresh session) instead of `claude --continue`. Adds a fallback scenario and one showing how users restore continue-on-startup via a manager entry.
-
 The embedded PTY session SHALL wrap the resolved manager startup
 command in a `tmux new-session` invocation whenever `agents.yaml`
 includes a valid top-level `agmsg` block, and SHALL spawn the manager
@@ -2568,6 +2566,24 @@ the missing dependency, the platform install hint, and a note that
 removing the `agmsg:` block reverts to the direct-spawn path. The
 WebSocket connection SHALL NOT close in this fallback — the user
 retains a usable shell.
+
+The manager startup command SHALL be resolved via a three-tier
+priority:
+
+1. `registry.managerAgent()` — the first `agents.yaml` entry whose
+   `roles` array contains `manager`. Its `command` + `args` form the
+   startup line; its `initialInput` (if set) is auto-injected after.
+2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
+   string. Backward compat with the pre-manager-config setup.
+3. **Fallback: `claude`** (a plain fresh Claude Code session, no
+   flags). This tier applies to fresh projects — user hasn't yet
+   declared a manager, no env override — and MUST NOT emit
+   `--continue`. A newly-scaffolded project has no prior
+   conversation to continue, and running `claude --continue` in
+   that state prints "No conversation found to continue" and stalls
+   the embedded terminal. Users who want session persistence
+   declare a `manager` entry with `args: ['--continue']` or
+   `args: ['--resume', '<id>']` in their `agents.yaml`.
 
 This requirement establishes tmux hosting only. It does NOT invoke
 any `agmsg` binary, does NOT change dispatcher routing, and does NOT
@@ -2603,6 +2619,18 @@ follow-up changes P2b and P2c.
 - **GIVEN** an `agmsg:`-configured workspace whose tmux session `ithyno` is already running (previous PTY closed but session was detached, not killed)
 - **WHEN** the Terminal panel opens a new PTY
 - **THEN** `tmux new-session -A -s ithyno` attaches to the existing session (does NOT error, does NOT create a duplicate); the user sees the same tmux state as before the disconnect
+
+#### Scenario: no manager agent, no env override → fresh `claude`
+- **GIVEN** a project whose `agents.yaml` has NO entry with `roles: [manager]`
+- **AND** the environment has no `ITHYNO_TERMINAL_STARTUP`
+- **WHEN** the Terminal panel opens a PTY (with or without an `agmsg` block)
+- **THEN** the resolved startup line is `claude` (fresh session — no `--continue` flag), OR when agmsg is configured, `tmux new-session -A -s ithyno -- claude`
+- **AND** the terminal does NOT print "No conversation found to continue" — the user lands in a fresh Claude Code session where they can `/resume` if they want a prior conversation
+
+#### Scenario: manager entry with `--continue` restores session persistence
+- **GIVEN** a user who wants auto-continue on their established project adds a manager entry `{ name: manager, mode: live-shell, roles: [manager], command: claude, args: [--continue] }` to `agents.yaml`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the resolved startup line is `claude --continue` (or the tmux-wrapped variant when agmsg is configured) — the fallback default is opt-out, not surprise-default
 
 ### Requirement: Electron First-Launch Auto-Installs Agmsg
 
