@@ -25,6 +25,34 @@
 # opted in, the pool block is inert and behavior is identical to the
 # pre-pool per-change worktree flow. Landed by add-worktree-pool.
 
+# --- Optional: declare a `manager` agent ---------------------------------
+# The embedded Terminal panel spawns whatever the `manager` agent
+# declares (its `command` + `args`). Without a manager entry, ithyno
+# opens a fresh `claude` session — safe for both new and existing
+# projects; from inside Claude Code you can `/resume` to pick a
+# specific prior conversation when you want one.
+#
+# `--continue` is intentionally NOT documented here: it auto-picks
+# "some prior session" opaquely, and fails outright with "No
+# conversation found to continue" on a freshly-scaffolded project.
+# Prefer explicit `--resume <id>` when you want to pin to a specific
+# session; otherwise let the default fresh `claude` handle it.
+#
+# Uncomment ONE of the samples below to override the default:
+#
+# agents:
+#   - name: manager
+#     mode: live-shell
+#     roles: [manager]
+#     command: claude                        # explicit fresh session (same as default)
+#
+#   - name: manager
+#     mode: live-shell
+#     roles: [manager]
+#     command: claude
+#     args: [--resume, <session-id>]         # pin to a specific past session
+
+# --- Worker agents -------------------------------------------------------
 agents:
   - name: claude
     description: Implements the change using Claude Code via /opsx:apply.

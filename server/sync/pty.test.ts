@@ -11,7 +11,7 @@ import { _setTmuxCacheForTest, ptyStartup } from "./pty.js";
  * (add-manager-agent-config):
  *   1. `registry.managerAgent()` (first `role: manager` entry)
  *   2. `ITHYNO_TERMINAL_STARTUP` env var
- *   3. hardcoded `claude --continue`
+ *   3. hardcoded `claude` (fresh session — pty-startup-default-fresh-session)
  */
 
 let dir: string;
@@ -44,8 +44,11 @@ async function loadWith(yaml: string): Promise<AgentRegistry> {
 }
 
 describe("ptyStartup — priority chain", () => {
-  it("null registry + no env → hardcoded default", () => {
-    expect(ptyStartup(null)).toEqual({ startup: "claude --continue" });
+  it("null registry + no env → fallback is fresh `claude` (no --continue)", () => {
+    // pty-startup-default-fresh-session: was `claude --continue`, now
+    // `claude` so freshly-scaffolded projects don't hit "No conversation
+    // found to continue" on first PTY open.
+    expect(ptyStartup(null)).toEqual({ startup: "claude" });
   });
 
   it("null registry + env var → uses env var", () => {

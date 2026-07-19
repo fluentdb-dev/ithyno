@@ -2535,6 +2535,8 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
+> ⚠️ **PENDING MODIFIED** by [pty-startup-default-fresh-session](../../changes/pty-startup-default-fresh-session/): manager-startup fallback (no manager entry, no env override) becomes plain `claude` (fresh session) instead of `claude --continue`. Adds a fallback scenario and one showing how users restore continue-on-startup via a manager entry.
+
 The embedded PTY session SHALL wrap the resolved manager startup
 command in a `tmux new-session` invocation whenever `agents.yaml`
 includes a valid top-level `agmsg` block, and SHALL spawn the manager

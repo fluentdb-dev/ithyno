@@ -36,6 +36,15 @@ overwrite, `--no-gitignore` to leave the file alone, `--quiet` for
 minimal output. Preflight checks refuse to run against a non-git
 directory (exit 2 with a clear message).
 
+Once the dashboard opens, the embedded Terminal spawns a **fresh
+`claude` session** by default. To resume a specific prior
+conversation, use `/resume` from inside Claude Code, or add a
+`manager` agent entry with `args: [--resume, <session-id>]` in
+`agents.yaml` (see the `agents.yaml.example` sample block).
+`--continue` is intentionally not the default — freshly-scaffolded
+projects have no prior conversation, and the "No conversation found
+to continue" error stalls the terminal.
+
 If you need to install OpenSpec / agent runner manually — for example
 because you want to customize the workflow skill or your project has a
 non-standard layout — read the sections below.

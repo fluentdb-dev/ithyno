@@ -75,8 +75,15 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  *      its `initialInput` (if set) is auto-injected after.
  *   2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
  *      string. Backward compat with the pre-manager-config setup.
- *   3. Hardcoded default `claude --continue` — the mental model of
- *      "same terminal, same conversation" for Claude Code users.
+ *   3. Hardcoded default `claude` — a plain fresh Claude Code
+ *      session (no flags). Applies to fresh projects where the user
+ *      hasn't declared a manager and has no env override. MUST NOT
+ *      emit `--continue`: newly-scaffolded projects have no prior
+ *      conversation and `claude --continue` prints "No conversation
+ *      found to continue" which stalls the embedded terminal. Users
+ *      wanting session persistence declare a `manager` entry with
+ *      `args: [--continue]` or `args: [--resume, <id>]`. Landed by
+ *      pty-startup-default-fresh-session (2026-07-19).
  *
  * An empty `startup` string disables auto-launch (raw shell).
  *
@@ -105,7 +112,7 @@ export function ptyStartup(registry: AgentRegistry | null): {
     initialInput = manager.initialInput;
   } else {
     const v = process.env.ITHYNO_TERMINAL_STARTUP;
-    baseStartup = v ?? "claude --continue";
+    baseStartup = v ?? "claude";
     initialInput = undefined;
   }
 
