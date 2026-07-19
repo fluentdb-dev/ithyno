@@ -34,7 +34,7 @@ export function pickFreePort(): Promise<number> {
 }
 
 /** Poll GET /api/health at 50ms intervals until 200 or timeout. */
-export function waitForHealth(port: number, timeoutMs = 5000): Promise<void> {
+export function waitForHealth(port: number, timeoutMs = 20000): Promise<void> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     const tick = () => {
@@ -135,8 +135,8 @@ export async function spawnServer(opts: {
       if (!token) reject(new Error(`server exited before printing launch URL (code ${code})`));
     });
     setTimeout(() => {
-      if (!token) reject(new Error("did not observe launch URL within 5000ms"));
-    }, 5000);
+      if (!token) reject(new Error("did not observe launch URL within 20000ms"));
+    }, 20000);
   });
   child.stderr?.on("data", (b) => log.append(b.toString()));
 

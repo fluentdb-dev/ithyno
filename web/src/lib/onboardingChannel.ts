@@ -24,6 +24,14 @@ declare global {
   }
 }
 
+function isInIframe(): boolean {
+  try {
+    return window.parent !== window;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Pick a channel. Priority:
  *   1. explicit `?channel=` query param
@@ -41,6 +49,31 @@ export function detectChannel(): OnboardingChannel {
   return "browser";
 }
 
+function postToVsCode(msg: unknown): boolean {
+  if (typeof window.acquireVsCodeApi === "function") {
+    try {
+      const vscode = window.acquireVsCodeApi() as VsCodeApi;
+      vscode.postMessage(msg);
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
+  // Iframe fallback: `acquireVsCodeApi` is only injected into the top-level
+  // webview document. When the onboarding page is iframed (see
+  // vscode-extension/src/webview-html.ts `renderOnboardingHtml`), we bubble
+  // the message up to the parent shell which owns the VS Code API.
+  if (isInIframe()) {
+    try {
+      window.parent.postMessage(msg, "*");
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
+  return false;
+}
+
 /**
  * Fire the channel-specific "Close" behavior. Falls back to
  * `history.back()` when the page has a history stack, else navigates
@@ -51,14 +84,8 @@ export function closeOnboarding(channel: OnboardingChannel): void {
     window.ithynoOnboarding.onboardingClose();
     return;
   }
-  if (channel === "vscode" && typeof window.acquireVsCodeApi === "function") {
-    try {
-      const vscode = window.acquireVsCodeApi() as VsCodeApi;
-      vscode.postMessage({ type: "onboarding-close" });
-      return;
-    } catch {
-      /* fall through */
-    }
+  if (channel === "vscode" && postToVsCode({ type: "onboarding-close" })) {
+    return;
   }
   if (window.history.length > 1) {
     window.history.back();
@@ -76,14 +103,11 @@ export function openProject(channel: OnboardingChannel, target: string): void {
     window.ithynoOnboarding.onboardingOpen(target);
     return;
   }
-  if (channel === "vscode" && typeof window.acquireVsCodeApi === "function") {
-    try {
-      const vscode = window.acquireVsCodeApi() as VsCodeApi;
-      vscode.postMessage({ type: "onboarding-open", target });
-      return;
-    } catch {
-      /* fall through */
-    }
+  if (
+    channel === "vscode" &&
+    postToVsCode({ type: "onboarding-open", target })
+  ) {
+    return;
   }
   // Browser fallback: navigate to root with ?dir=<target>. The server
   // is expected to pick up the new PROJECT_ROOT on a fresh page load.

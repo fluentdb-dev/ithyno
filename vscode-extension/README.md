@@ -5,7 +5,12 @@ workspace folder is used as the OpenSpec project root; the extension spawns
 the existing Fastify server on a free localhost port and hosts the React UI
 in a panel beside the editor.
 
-Command exposed: **OpenSpec UI: Show Dashboard** (`openspecUI.show`).
+Commands exposed:
+
+- **ithyno: Show Dashboard** (`ithyno.show`) — opens the dashboard for the
+  current workspace folder.
+- **ithyno: New Project** (`ithyno.newProject`) — scaffolds a fresh
+  ithyno project without leaving VS Code. See below.
 
 ## Install from VSIX
 
@@ -43,10 +48,35 @@ recompile on save.
 - On panel disposal or extension deactivate the spawned server is
   `SIGTERM`'d.
 
-## Terminal auto-launch (`ithyno.terminalStartup`)
+## New Project (`ithyno.newProject`)
 
-The injected VS Code Terminal ("OpenSpec UI") auto-launches a startup
-command so slash commands land in Claude Code's REPL. Behavior:
+Command Palette → **ithyno: New Project** walks a folder picker → optional
+subdirectory name → onboarding panel that shows scaffold + `openspec init`
+progress live. On completion, clicking **Open Project** invokes
+`vscode.openFolder` which **reloads the current VS Code window** into the
+new project. After the reload, run `ithyno: Show Dashboard` to open the
+dashboard in the new project.
+
+- The picked folder is the *parent*; leave the subdir empty to use the
+  picked folder itself as the project root.
+- The onboarding panel spawns a short-lived server that disposes when
+  the panel closes (or when `Open Project` triggers the reload).
+- If you close the panel mid-init, the scaffold subprocess is not
+  killed — the target folder may be left partially initialized. Delete
+  it and re-run if that happens.
+
+## Terminal auto-launch (`ithyno.terminalStartup` / `ithyno.autoLaunchTerminal`)
+
+Two knobs govern the injected "ithyno" VS Code Terminal:
+
+- **`ithyno.autoLaunchTerminal`** (boolean, default `true`) — when
+  `true`, opening the dashboard immediately creates the terminal and
+  fires the startup command (parity with Electron/browser). When
+  `false`, the terminal is created lazily on the first button press
+  (Apply / Archive / Merge / Run). Flip to `false` if you dislike the
+  Terminal panel opening alongside the dashboard.
+- **`ithyno.terminalStartup`** (string, default empty) — the startup
+  command sent to the terminal when it's created:
 
 - **Empty / unset (default)**: the extension auto-manages a
   per-project Claude Code session at

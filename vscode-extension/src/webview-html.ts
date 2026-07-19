@@ -50,3 +50,58 @@ export function renderWebviewHtml(serverUrl: string): string {
   </body>
 </html>`;
 }
+
+/**
+ * HTML shell for the onboarding webview.
+ *
+ * Loads `<server>/onboarding?target=<encoded>&channel=vscode` in an iframe
+ * and forwards `onboarding-*` postMessages between the iframed React app
+ * and the extension host. Same iframe-parent bridge pattern as
+ * renderWebviewHtml, but the message filter is `onboarding-*` (open, close)
+ * instead of `pty.*`.
+ *
+ * Landed by add-vscode-extension-new-project (2026-07-19).
+ */
+export function renderOnboardingHtml(
+  serverUrl: string,
+  target: string,
+): string {
+  const url = new URL(serverUrl);
+  url.pathname = "/onboarding";
+  url.searchParams.set("target", target);
+  url.searchParams.set("channel", "vscode");
+  const iframeSrc = url.toString();
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
+      iframe { border: 0; width: 100%; height: 100%; display: block; }
+    </style>
+  </head>
+  <body>
+    <iframe id="app" src="${iframeSrc}" allow="clipboard-read; clipboard-write"></iframe>
+    <script>
+      const vscode = acquireVsCodeApi();
+      const app = document.getElementById('app');
+      window.addEventListener('message', (event) => {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object') return;
+        if (event.source === app.contentWindow) {
+          if (
+            data.type === 'onboarding-open' ||
+            data.type === 'onboarding-close'
+          ) {
+            vscode.postMessage(data);
+          }
+          return;
+        }
+        if (app.contentWindow) {
+          app.contentWindow.postMessage(data, '*');
+        }
+      });
+    </script>
+  </body>
+</html>`;
+}

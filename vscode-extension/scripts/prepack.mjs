@@ -63,4 +63,15 @@ execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts", {
   stdio: "inherit",
 });
 
+// Copy the repo-root LICENSE next to package.json so `vsce` finds it
+// (it looks for LICENSE / LICENSE.md / LICENSE.txt in the package root
+// and warns when absent). Kept out of git via .gitignore since it's a
+// build artifact; the source of truth is repoRoot/LICENSE.
+const licenseSrc = resolve(repoRoot, "LICENSE");
+const licenseDst = resolve(extRoot, "LICENSE");
+if (existsSync(licenseSrc)) {
+  cpSync(licenseSrc, licenseDst);
+  console.log(`[prepack] copied LICENSE → ${licenseDst}`);
+}
+
 console.log("[prepack] done");
