@@ -26,8 +26,8 @@
       "properties": {
         "ithyno.terminalStartup": {
           "type": "string",
-          "default": "claude --continue",
-          "description": "Command auto-launched when the ithyno terminal is created (so slash commands land in Claude's REPL). Set to an empty string to disable and stay in the raw shell."
+          "default": "",
+          "description": "Command auto-launched when the ithyno terminal is created. Empty (the default) means ithyno auto-manages a per-project Claude Code session id in `.ithyno/session-id` — mints on first launch (`claude --session-id <uuid>`) and resumes thereafter (`claude --resume <uuid>`). Set explicitly to override: `claude` for fresh-every-time, `claude --continue` for the legacy behavior, or any custom command."
         }
       }
     }

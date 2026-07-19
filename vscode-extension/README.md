@@ -43,6 +43,23 @@ recompile on save.
 - On panel disposal or extension deactivate the spawned server is
   `SIGTERM`'d.
 
+## Terminal auto-launch (`ithyno.terminalStartup`)
+
+The injected VS Code Terminal ("OpenSpec UI") auto-launches a startup
+command so slash commands land in Claude Code's REPL. Behavior:
+
+- **Empty / unset (default)**: the extension auto-manages a
+  per-project Claude Code session at
+  `<workspace>/.ithyno/session-id`. First launch mints a UUID and
+  runs `claude --session-id <uuid>`. Subsequent launches read the
+  same UUID and run `claude --resume <uuid>`, resuming the
+  conversation with its history intact. Delete `.ithyno/session-id`
+  to reset (the next launch mints a new one). Add `.ithyno/` to your
+  workspace's `.gitignore` — it's local state, not source of truth.
+- **Non-empty override**: whatever you set in `ithyno.terminalStartup`
+  is sent verbatim. Common choices: `claude` (fresh every time),
+  `claude --continue` (legacy behavior), or any custom command.
+
 ## Limitations
 
 - Multi-root workspaces use the first folder. A picker is future work.

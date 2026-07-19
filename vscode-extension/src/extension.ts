@@ -1,7 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderWebviewHtml } from "./webview-html";
+
+/**
+ * Choose the startup command sent to the injected terminal.
+ *
+ * - Non-empty config value → verbatim override.
+ * - Empty / unset → session-id logic against
+ *   `<workspaceRoot>/.ithyno/session-id`:
+ *     - file missing / empty → mint UUID, write, emit `claude --session-id`
+ *     - file present, non-empty → emit `claude --resume`
+ * - On write failure → fall back to `claude` (fresh) + console.warn.
+ *
+ * Landed by vscode-terminal-uses-project-session-id (2026-07-19).
+ */
+function resolveInjectedStartup(
+  workspaceRoot: string,
+  configValue: string | undefined,
+): string {
+  if (configValue && configValue.trim().length > 0) {
+    return configValue;
+  }
+  const idPath = join(workspaceRoot, ".ithyno", "session-id");
+  let uuid = "";
+  if (existsSync(idPath)) {
+    try {
+      uuid = readFileSync(idPath, "utf8").trim();
+    } catch {
+      /* fall through to mint */
+    }
+  }
+  if (uuid) {
+    return `claude --resume ${uuid}`;
+  }
+  const fresh = randomUUID();
+  try {
+    mkdirSync(dirname(idPath), { recursive: true });
+    writeFileSync(idPath, `${fresh}\n`);
+  } catch (err) {
+    console.warn(
+      "[ithyno] failed to persist session-id, falling back to fresh claude:",
+      err,
+    );
+    return "claude";
+  }
+  return `claude --session-id ${fresh}`;
+}
 
 type PanelSession = {
   panel: vscode.WebviewPanel;
@@ -62,14 +115,14 @@ export function activate(context: vscode.ExtensionContext): void {
             name: "ithyno",
             cwd: s.workspaceRoot,
           });
-          // Auto-launch the same startup command the embedded PTY uses (see
-          // server/sync/pty.ts::ptyStartupCommand) so `/opsx:*` slash
-          // commands land in Claude's REPL rather than dropping to the raw
-          // shell. Configurable via `ithyno.terminalStartup` — set it
-          // to "" for a raw shell.
-          const startup = vscode.workspace
+          // Auto-launch the startup command per `ithyno.terminalStartup`.
+          // Empty / unset → session-id auto-manage (mirrors server-side
+          // pty.ts fallback). Non-empty → user override, sent verbatim.
+          // See vscode-terminal-uses-project-session-id.
+          const configValue = vscode.workspace
             .getConfiguration("ithyno")
-            .get<string>("terminalStartup", "claude --continue");
+            .get<string>("terminalStartup", "");
+          const startup = resolveInjectedStartup(s.workspaceRoot, configValue);
           if (startup && startup.trim().length > 0) {
             s.terminal.sendText(startup, true);
           }
