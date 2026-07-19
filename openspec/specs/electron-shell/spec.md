@@ -114,7 +114,7 @@ the same source.
 
 ### Requirement: New Project Menu
 
-> ⚠️ **PENDING MODIFIED** by [add-new-project-onboarding-window](../../changes/add-new-project-onboarding-window/): replaces the inline runInit + dialog + switchProject chain with a dedicated onboarding BrowserWindow that runs `runInit` and then auto-chains `openspec init`, streaming step + log events into a step list and log pane; user clicks "Open Project" to switch. Closes the Electron-alone completability gap that manual verify surfaced.
+> ⚠️ **PENDING MODIFIED** by [add-new-project-onboarding-window](../../changes/add-new-project-onboarding-window/): replaces the inline runInit + dialog + switchProject chain with a child BrowserWindow that loads the shared `/onboarding` React page from the local server; the page drives the two-step chain (runInit + openspec init) via SSE and the user clicks "Open Project" to switch. Closes the Electron-alone completability gap surfaced by manual verify.
 
 The Electron shell SHALL provide a "File → New Project…" menu item that
 scaffolds a fresh ithyno project at a user-picked path and switches the

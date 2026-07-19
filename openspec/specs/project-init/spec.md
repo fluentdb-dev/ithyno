@@ -132,6 +132,8 @@ next-step commands the user should run, so the path from "ran init" to
 
 ### Requirement: Init HTTP Endpoint
 
+> ⚠️ **PENDING MODIFIED** by [add-new-project-onboarding-window](../../changes/add-new-project-onboarding-window/): adds `POST /api/init/stream` — a streaming sibling that runs the two-step new-project chain (`runInit` then `openspec init`) and emits SSE events for the shared `/onboarding` React page. Synchronous `POST /api/init` unchanged.
+
 The system SHALL expose the `runInit` scaffold as an HTTP endpoint at
 `POST /api/init` on the Ithyno server, so UI channels (the browser
 dashboard directly, Electron and VS Code through follow-up integrations)

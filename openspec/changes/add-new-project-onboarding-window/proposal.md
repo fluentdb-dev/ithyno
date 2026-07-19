@@ -1,8 +1,8 @@
 ---
-tags: [feature/init, area/electron, area/ui]
+tags: [feature/init, area/electron, area/server, area/ui]
 ---
 
-# New Project onboarding window + openspec init auto-chain
+# Onboarding page (shared React) + openspec init auto-chain across channels
 
 ## Why
 
@@ -14,33 +14,26 @@ scaffolds ithyno-side files (`CLAUDE.md`, `.claude/skills/`,
 **separate** `openspec init` invocation. Without them, Ithyno's
 window shows "No OpenSpec project found" and the user has to switch
 to a terminal, paste the `npx -y -p @fission-ai/openspec@latest
-openspec init <target> --tools claude` line from the success
-dialog, and re-open the project. **Electron alone cannot complete
-the initialization.**
+openspec init <target> --tools claude` line from the success dialog,
+and re-open the project. **Electron alone cannot complete the
+initialization.**
 
-This change closes the gap by:
-
-1. **Auto-chaining `openspec init` after `runInit`** in the Electron
-   New Project flow.
-2. **Introducing an onboarding window** that opens as soon as the
-   user picks a folder — a small, purpose-built window that shows
-   the initialization steps, their status, and the live stdout of
-   each subprocess. The user sees exactly what is happening and how
-   long it will take.
-3. **Auto-switching the main window** to the new project after the
-   onboarding window reports success — no manual "Open Project"
-   step needed.
-
-`openspec init` takes 10–30 seconds on first run (npx package
-download) and 1–3 seconds subsequently (npx cache warm). A hidden
-progress state during that window is unacceptable — hence the
-dedicated onboarding page.
+The first draft of this change scoped a fix Electron-only (a
+dedicated onboarding BrowserWindow that runs `runInit` then
+`openspec init`). A design pass surfaced that the same problem
+exists in the browser channel (Settings' NewProjectSection stops at
+"Next steps" text) and will exist for the VS Code extension. The
+onboarding UI itself is channel-agnostic — a target path plus a step
+list plus a log pane — so **the fix should be shared**, with each
+channel differing only in how it opens the container that shows
+the page.
 
 ## What Changes
 
-### 1. Main-process orchestration: `runNewProjectChain`
+### 1. Shared backbone: `runNewProjectChain`
 
-New helper in `electron/src/new-project.ts`:
+Extract the two-step chain to `bin/new-project-chain.js` (mirror of
+`bin/init.js`'s stateless-orchestrator shape):
 
 ```ts
 type Step = 'scaffold' | 'openspec-init';
@@ -51,137 +44,145 @@ type ChainEvent =
   | { type: 'complete'; target: string }
   | { type: 'error'; step: Step; message: string };
 
-async function runNewProjectChain(
+export async function runNewProjectChain(
   target: string,
   onEvent: (e: ChainEvent) => void,
 ): Promise<{ ok: boolean; target: string }>;
 ```
 
-The chain runs two sequential steps:
+- **`scaffold`** — call the existing `runInit({ targetDir: target,
+  autoCreateDir: true, autoGitInit: true, quiet: true, log })` and
+  forward its log lines as `log` events.
+- **`openspec-init`** — `child_process.spawn('npx', ['-y', '-p',
+  '@fission-ai/openspec@latest', 'openspec', 'init', target,
+  '--tools', 'claude'], { cwd: target })`. Stdout/stderr chunks are
+  line-split and emitted as `log` events.
 
-1. **`scaffold`** — call the existing `runInit({ targetDir: target,
-   autoCreateDir: true, autoGitInit: true, quiet: true, log: line
-   => onEvent({ type: 'log', step: 'scaffold', line, stream:
-   'stdout' }) })`. `runInit`'s `log` parameter already exists; we
-   pipe each line through as an event.
-2. **`openspec-init`** — `child_process.spawn('npx', ['-y', '-p',
-   '@fission-ai/openspec@latest', 'openspec', 'init', target,
-   '--tools', 'claude'])` with `cwd: target`. Every stdout/stderr
-   chunk becomes a `log` event.
+Never throws. Failures resolve `{ ok: false }` after emitting
+`error`.
 
-On any step failure, emit `{ type: 'error', step, message }` and
-resolve with `{ ok: false }`. Do NOT throw — the onboarding window
-displays the error and lets the user close the window without
-switching.
+### 2. Streaming HTTP endpoint: `POST /api/init/stream`
 
-### 2. Onboarding window (`electron/src/onboarding-window.ts` +
-`electron/assets/onboarding.html`)
+New endpoint that authenticates the same way as `POST /api/init` and
+`POST /api/git/init` (existing token check + `isLocal`), then invokes
+`runNewProjectChain` and streams events as **Server-Sent Events**
+(text/event-stream) — each `ChainEvent` is one SSE frame. Body shape
+is the same as `POST /api/init` (validates `dir` absolute, applies
+`force` / `skipGitignore` if present).
 
-A dedicated 640×480 BrowserWindow that loads a static HTML file
-(`electron/assets/onboarding.html`). No React, no bundler — plain
-HTML + CSS + a small `<script>` that listens on `window.electronAPI`
-(exposed via a new preload `onboarding-preload.ts`).
+The synchronous `POST /api/init` endpoint remains available and
+unchanged for callers that don't want streaming (Electron using the
+shared function directly bypasses HTTP entirely).
 
-Layout:
+### 3. Shared onboarding page: `/onboarding?target=<path>`
 
-```
-┌────────────────────────────────────────┐
-│  Setting up ithyno project             │
-│  <target-path>                          │
-├────────────────────────────────────────┤
-│  [○] Scaffold ithyno files             │
-│  [○] Install OpenSpec                  │
-│                                         │
-│  ▼ Log                                  │
-│  ┌──────────────────────────────────┐  │
-│  │  create:   .gitignore            │  │
-│  │  create:   CLAUDE.md             │  │
-│  │  - Creating OpenSpec structure…  │  │
-│  │  ✔  OpenSpec structure created   │  │
-│  └──────────────────────────────────┘  │
-│                                         │
-│  [Close]              [Open Project]   │
-└────────────────────────────────────────┘
-```
+New React route at `web/src/pages/OnboardingProject.tsx`:
 
-- Steps show `○` (pending), `⏵` (in progress, animated), `✓` (done),
-  or `✗` (failed).
-- Log pane auto-scrolls to bottom on new lines, ~200 line ring
-  buffer.
-- "Open Project" button disabled until `type: 'complete'` arrives;
-  enabling triggers `switchProject(target)` in main + closes the
-  onboarding window.
-- "Close" (always enabled) closes without switching. On error, the
-  step icon turns red and Close is the only sensible action.
+- Reads `target` from the query string.
+- On mount, opens an `EventSource` against `POST /api/init/stream`
+  (using `fetch` with `Accept: text/event-stream`, or the browser's
+  SSE API depending on POST support — falling back to a WebSocket
+  `init-progress` broadcast if SSE-with-POST is awkward). Details
+  below.
+- Renders:
+  - Header: "Setting up ithyno project" + target path
+  - Step list: `scaffold`, `openspec-init` — each with an icon
+    (`pending` / `in-progress` / `done` / `failed`) and a label.
+  - Log pane: auto-scroll, ring buffer capped at ~500 lines.
+  - **"Close"** — always enabled. Behavior differs by channel (see
+    below).
+  - **"Open Project"** — disabled until `complete`. Behavior differs
+    by channel.
 
-The onboarding window is modal-ish (parent = mainWindow) but
-NON-blocking — the main window remains interactive. Killing the
-onboarding window mid-flow does NOT kill the subprocess (the chain
-runs to completion in main-process); progress events after a closed
-window are simply dropped.
+The page posts a channel signal at mount so it knows how to close:
+either via URL param (`?channel=electron`) OR via a runtime detection
+already present in `web/src/runtime` (checks `window.electronAPI`).
 
-### 3. Menu handler rewire
+### 4. Channel-specific containers
 
-Instead of `runInit` + `dialog.showMessageBox` + `switchProject`
-inline, `onNewProject` now:
+Each channel opens `/onboarding?target=<path>&channel=<c>` in its own
+container.
 
-1. `pickNewProjectDialog` (unchanged) → target
-2. `openOnboardingWindow(target)` — creates the window, wires the
-   IPC bridge, kicks off `runNewProjectChain`
-3. Returns immediately — no `await`. The window drives itself.
+| channel | container | on "Open Project" | on "Close" |
+| --- | --- | --- | --- |
+| **Electron** | small BrowserWindow (parent = main), `loadURL(server + path)` | IPC `onboarding-open` → main `switchProject(target)` + close window | close window; main untouched |
+| **Browser** | React Router navigate to `/onboarding` (full page in the current window) | React Router navigate to root with `?dir=<target>` so the store re-scans | navigate back to previous route |
+| **VS Code** | `vscode.window.createWebviewPanel` loading the same URL | webview close + `vscode.commands.executeCommand('vscode.openFolder', ...)` | dispose the panel |
 
-### 4. What this change does NOT touch
+The React page dispatches to the right handler via a small
+`onboardingApi` module that checks `window.electronAPI` /
+`window.vscode` / falls through to the browser default.
 
-- **`runInit` implementation** in `bin/init.js` — untouched. The
-  `log` callback already exists; we just consume it.
-- **`POST /api/init` endpoint** — untouched. Browser mode continues
-  to use it (with the manual "Next steps" panel). Bringing the
-  onboarding flow to browser mode is a separate follow-up.
-- **`openspec init` chain in the HTTP endpoint** — NOT added.
-  Chaining is Electron-only for now. The HTTP endpoint remains
-  minimal.
-- **agmsg installer** — untouched. Runs on Electron startup;
-  independent of New Project.
+### 5. Menu / settings rewire
 
-## Spec deltas (`electron-shell` capability)
+- **Electron `onNewProject`**: after `pickNewProjectDialog`, open a
+  new BrowserWindow that loads `server + '/onboarding?target=<path>
+  &channel=electron'`. Register the IPC bridge for "Open Project".
+  Remove the previous inline dialog chain.
+- **Browser `NewProjectSection`** (Settings tab): instead of
+  awaiting `initProject` synchronously and showing the "Next steps"
+  panel, on Submit navigate to `/onboarding?target=<parent>/<name>
+  &channel=browser`. The page drives the rest.
+- **VS Code**: separate follow-up (`add-vscode-new-project-command`)
+  will call `vscode.window.createWebviewPanel` with the same URL.
+  This propose lays the groundwork; the VS Code side is not
+  implemented here.
 
-- **MODIFIED** `New Project Menu` — instead of the sync
-  runInit+dialog+switch chain landed by `add-electron-new-project-
-  flow`, the menu opens a dedicated onboarding window that runs
-  the two-step chain (runInit → openspec init) with visible
-  progress and a manual "Open Project" gate.
+### 6. What this change does NOT touch
+
+- **`runInit` in `bin/init.js`** — untouched. The chain wraps it.
+- **`POST /api/init` (non-streaming)** — untouched. Left in place for
+  synchronous callers.
+- **VS Code extension code** — untouched here. Groundwork only.
+- **agmsg installer** — separate concern.
+
+## Spec deltas
+
+- **`electron-shell`** — **MODIFIED** `New Project Menu` (now opens
+  the shared onboarding URL in a BrowserWindow instead of running
+  the inline runInit + dialog chain).
+- **`project-init`** — **MODIFIED** `Init HTTP Endpoint` (adds the
+  streaming sibling `POST /api/init/stream` that runs the two-step
+  chain and emits SSE events; synchronous endpoint retained).
+- **`dashboard`** — **ADDED** `Onboarding Project Page` — the
+  `/onboarding` route, its query params, its rendering contract,
+  and its channel-aware close/open handlers.
 
 ## Impact
 
-- **Affected specs**: `electron-shell` — 1 MODIFIED
+- **Affected specs**: `electron-shell` 1 MODIFIED, `project-init` 1
+  MODIFIED, `dashboard` 1 ADDED
 - **Affected code**:
-  - `electron/src/main.ts`: replace `onNewProject`'s inline chain
-    with `openOnboardingWindow` call
-  - `electron/src/new-project.ts` (new): `runNewProjectChain`
-  - `electron/src/onboarding-window.ts` (new): window lifecycle +
+  - `bin/new-project-chain.js` (new) + `.d.ts`
+  - `server/index.ts` (new endpoint + SSE writer)
+  - `web/src/api.ts` (`initProjectStream` SSE client)
+  - `web/src/pages/OnboardingProject.tsx` (new)
+  - `web/src/App.tsx` (add route)
+  - `web/src/pages/Settings.tsx` (rewire NewProjectSection Submit)
+  - `electron/src/main.ts` (rewire `onNewProject` to load
+    onboarding URL in child BrowserWindow)
+  - `electron/src/preload.ts` + a new `onboarding-preload.ts` for
     IPC bridge
-  - `electron/src/onboarding-preload.ts` (new): `contextBridge`
-    exposure of `openProject()` and `onEvent(handler)`
-  - `electron/assets/onboarding.html` (new): the UI
-  - `electron/tsconfig.json` / `package.json` `files` if needed to
-    include `assets/`
 - **Risk**:
-  - **npx cold-start latency (10–30 s)** — user impatience risk
-    mitigated by the visible step + log. First-launch expectation
-    set by the log ("Downloading openspec@1.4.1..." or similar).
-  - **Concurrent openspec init runs** — user could open File →
-    New Project… twice. Fine: separate onboarding windows,
-    separate subprocesses. No global lock needed.
-  - **Node process crash mid-chain** — the target dir is left in
-    a half-scaffolded state. Documented behavior; user can retry
-    with `--force` or delete + start over.
+  - **SSE-over-POST browser support** — modern browsers accept
+    `fetch` with a streaming body reader, but the classic
+    `EventSource` API is GET-only. Client uses `fetch` +
+    `response.body.getReader()`. Documented fallback path if
+    encountering a browser that mishandles the stream: fall back to
+    WS `init-progress` broadcast (already used by other server →
+    client streams in Ithyno).
+  - **npx cold-start latency (10–30 s)** — the log surface makes it
+    visible.
+  - **Long-running subprocess if user closes** — mid-chain close
+    does NOT kill the subprocess; the chain runs to completion,
+    post-close events are dropped. Target dir might be left in
+    partial state; documented behavior.
 - **Migration**: none.
 
 ## Related
 
 - `openspec/changes/archive/2026-07-19-add-electron-new-project-flow/`
-  — the flow this change extends.
-- `docs/ideas/2026-07-19-init-from-ui.md` — the design conversation.
-- `electron/src/agmsg-installer.ts` — reference pattern for
-  Electron-native install flow (though agmsg has no progress UI —
-  init is instant, unlike openspec init).
+- `openspec/changes/archive/2026-07-19-add-init-http-endpoint/`
+- `docs/ideas/2026-07-19-init-from-ui.md`
+- `electron/src/agmsg-installer.ts` — Electron-native install pattern
+  reference.
