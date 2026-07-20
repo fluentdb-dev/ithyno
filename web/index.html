@@ -5,6 +5,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ithyno</title>
+    <script>
+      // FOUC guard (add-light-dark-mode): resolve the persisted theme choice
+      // BEFORE React mounts so the first paint uses the right palette.
+      // Mirrors web/src/hooks/useAppliedTheme.ts — keep them in sync.
+      (function () {
+        try {
+          var raw = null;
+          try { raw = localStorage.getItem("ithyno.theme"); } catch (_) { /* ignore */ }
+          var pref = raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+          var applied = pref;
+          if (pref === "system") {
+            var mm = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+            applied = mm && mm.matches ? "dark" : "light";
+          }
+          document.documentElement.dataset.theme = applied;
+        } catch (_) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

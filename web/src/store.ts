@@ -42,6 +42,12 @@ type Conflict = { newText: string; message: string };
 
 export type CommandStyle = "claude" | "cli";
 export type OverviewLayout = "board" | "cards";
+/** User preference for palette. `"system"` follows OS
+ *  `prefers-color-scheme`; `"light"` / `"dark"` are hard overrides that
+ *  ignore the OS. See `web/src/hooks/useAppliedTheme.ts` for the
+ *  resolver that turns this into an actually-applied `"light" | "dark"`
+ *  value on `<html data-theme=…>`. Landed by add-light-dark-mode. */
+export type ThemePreference = "system" | "light" | "dark";
 
 type Store = {
   state: WorkspaceState | null;
@@ -54,6 +60,10 @@ type Store = {
   terminalVisible: boolean;
   commandStyle: CommandStyle;
   overviewLayout: OverviewLayout;
+  /** Tri-state theme preference (see `ThemePreference`). Persisted to
+   *  `localStorage["ithyno.theme"]`; hydrated at module load so the
+   *  first render already matches the FOUC-guard's inline resolution. */
+  theme: ThemePreference;
   docs: DocsTree | null;
   openDoc: DocsFile | null;
   tagIndex: TagIndex | null;
@@ -94,6 +104,7 @@ type Store = {
   setTerminalVisible: (v: boolean) => void;
   setCommandStyle: (v: CommandStyle) => void;
   setOverviewLayout: (v: OverviewLayout) => void;
+  setTheme: (v: ThemePreference) => void;
   loadDocs: () => Promise<void>;
   openDocPath: (path: string | null) => Promise<void>;
   loadTagIndex: () => Promise<void>;
@@ -151,6 +162,20 @@ function readOverviewLayout(): OverviewLayout {
   }
 }
 
+/** Storage key MUST match the FOUC guard in web/index.html — the guard
+ *  reads it before React mounts to pick the initial palette. Any rename
+ *  breaks first-paint synchronization. */
+const THEME_KEY = "ithyno.theme";
+function readTheme(): ThemePreference {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "light" || v === "dark" || v === "system") return v;
+    return "system";
+  } catch {
+    return "system";
+  }
+}
+
 function replaceChange(state: WorkspaceState, change: Change): WorkspaceState {
   return { ...state, changes: state.changes.map((c) => (c.id === change.id ? change : c)) };
 }
@@ -170,6 +195,7 @@ export const useStore = create<Store>((set, get) => ({
   terminalVisible: readTerminalVisible(),
   commandStyle: readCommandStyle(),
   overviewLayout: readOverviewLayout(),
+  theme: readTheme(),
   docs: null,
   openDoc: null,
   tagIndex: null,
@@ -322,6 +348,14 @@ export const useStore = create<Store>((set, get) => ({
       /* ignore */
     }
     set({ overviewLayout: v });
+  },
+  setTheme: (v) => {
+    try {
+      localStorage.setItem(THEME_KEY, v);
+    } catch {
+      /* ignore quota / private-mode errors — theme reverts to default on reload */
+    }
+    set({ theme: v });
   },
 
   pushToast: (kind, message) => {

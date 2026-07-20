@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { setAgmsgConfig, setParallelExecution } from "../api";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -38,6 +39,23 @@ export function Settings() {
   return (
     <div className="settings-page">
       <h2>Settings</h2>
+
+      <section className="settings-section">
+        <h3>Appearance</h3>
+        <div className="settings-toggle">
+          <ThemeToggle />
+          <span>
+            <strong>Theme</strong>
+            <p className="muted">
+              Auto follows your OS preference (
+              <code>prefers-color-scheme</code>). Light / Dark override the
+              system choice for this browser only. Persisted to{" "}
+              <code>localStorage["ithyno.theme"]</code>; the embedded terminal
+              re-colors live on change.
+            </p>
+          </span>
+        </div>
+      </section>
 
       <section className="settings-section">
         <h3>Execution</h3>
