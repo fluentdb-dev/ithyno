@@ -630,6 +630,33 @@ a:hover {
   display: block;
 }
 
+/* Overview → Kanban filter (add-kanban-search-filter). Sits between the
+   summary/progress cluster and the layout toggle. Session-only local state
+   in Overview.tsx; Cmd+F / Ctrl+F focuses this input while the Overview
+   page is mounted. Escape (while focused) clears + blurs. */
+.kanban-filter {
+  width: 320px;
+  max-width: 100%;
+  padding: 6px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.kanban-filter::placeholder {
+  color: var(--muted);
+}
+.kanban-filter:hover {
+  border-color: color-mix(in oklab, var(--accent) 25%, var(--border));
+}
+.kanban-filter:focus {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
 /* Kanban board — 3 columns: TODO / IN-PROGRESS / DONE. Phase state is a
    Manager-internal concern and is NOT rendered on the board (see
    revert-kanban-ui-lanes). */
