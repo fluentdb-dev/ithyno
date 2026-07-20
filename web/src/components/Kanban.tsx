@@ -305,9 +305,18 @@ function ChangeCard({
   onMerge: (job: JobSummary) => void;
   onDiscard: (job: JobSummary) => void;
 }) {
+  // Priority: WS-driven (live watcher) → job snapshot → server-scanned
+  // filesystem state (`c.worktree.tasksProgress`). The last covers the
+  // case where a worktree exists WITHOUT a live/orphan job (manual
+  // `git worktree add`, mid-dispatch state), which bucketize already
+  // uses for DONE-lane placement. Without this fallback the card lands
+  // in DONE per bucketize but the progress bar shows main-tree 0/N.
   const worktreeProgressFromWs = useStore((s) => s.worktreeProgress[change.id]);
-  const worktreeProgress = worktreeProgressFromWs ?? job?.worktreeProgress;
-  const showWorktreeProgress = !!worktreeProgress && !!job && job.status !== "cancelled";
+  const wtFsProgress = change.worktree?.tasksProgress;
+  const worktreeProgress =
+    worktreeProgressFromWs ?? job?.worktreeProgress ?? wtFsProgress;
+  const showWorktreeProgress =
+    !!worktreeProgress && (!job || job.status !== "cancelled");
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
 
   const showReadyDot = slot === "done";
