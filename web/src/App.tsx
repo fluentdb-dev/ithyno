@@ -15,6 +15,7 @@ import { Settings } from "./pages/Settings";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
 import { GitIdentityChip } from "./components/GitIdentityChip";
+import { AboutButton } from "./components/AboutButton";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
@@ -132,6 +133,7 @@ export function App() {
         </nav>
         <div className="topbar-right">
           {!isVsCodeShell() && <GitIdentityChip />}
+          <AboutButton />
           <div className={`conn ${connected ? "on" : "off"}`} title={connected ? "Live" : "Reconnecting…"}>
             <span className="dot" /> {connected ? "Live" : "Offline"}
           </div>

@@ -12,7 +12,8 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onCommand:ithyno.show",
-    "onCommand:ithyno.newProject"
+    "onCommand:ithyno.newProject",
+    "onCommand:ithyno.about"
   ],
   "contributes": {
     "commands": [
@@ -24,6 +25,11 @@
       {
         "command": "ithyno.newProject",
         "title": "ithyno: New Project",
+        "category": "ithyno"
+      },
+      {
+        "command": "ithyno.about",
+        "title": "ithyno: About",
         "category": "ithyno"
       }
     ],

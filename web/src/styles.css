@@ -327,6 +327,51 @@ a:hover {
   white-space: nowrap;
 }
 
+/* About button — small circular "?" in topbar-right */
+.about-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+}
+.about-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* About modal */
+.about-modal {
+  min-width: 380px;
+  max-width: 480px;
+}
+.about-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.about-description {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.about-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Git identity modal */
 .git-modal {
   min-width: 420px;
@@ -2455,6 +2500,20 @@ a:hover {
 .modal h3 {
   margin: 0 0 14px;
   font-size: 16px;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-header h3 {
+  margin: 0;
+}
+.modal-close {
+  padding: 2px 8px;
+  font-size: 18px;
+  line-height: 1;
 }
 .modal-mode {
   display: flex;

@@ -59,6 +59,10 @@
       {
         "from": "../vendor/agmsg",
         "to": "app/vendor/agmsg"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "app/LICENSE"
       }
     ],
     "mac": {

@@ -36,6 +36,7 @@ import { getChangeGitState, commitChangeProposal } from "./git/change-state.js";
 import { PHASES, isPhase, isReservedPhase, NEEDS_HUMAN, type Phase } from "./phases.js";
 import { readSidecar, writeSidecar, extractSidecarFields } from "./sidecar.js";
 import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js";
+import { getAboutInfo } from "./about.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -300,6 +301,8 @@ fastify.get("/api/health", async () => {
       : { available: false as const, reason: pty.reason },
   };
 });
+
+fastify.get("/api/about", async () => getAboutInfo());
 
 // Dedicated lightweight token-validity check so the UI can detect a stale
 // token at first load (typically after a server restart) without waiting for

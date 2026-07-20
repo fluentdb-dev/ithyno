@@ -8,7 +8,7 @@ import {
   screen,
   shell,
 } from 'electron';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
@@ -18,8 +18,62 @@ const OVERLAY_HEIGHT = 32;
 
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
-import { buildAppMenu } from './menu';
+import { buildAppMenu, type AboutConfig } from './menu';
 import { ensureAgmsgInstalled } from './agmsg-installer';
+
+/**
+ * Read the root package.json and return an AboutConfig object.
+ * In packaged mode the file is at `extraResources/app/package.json`.
+ * In dev mode it lives one directory above the electron app root.
+ */
+function readAboutConfig(): AboutConfig {
+  const pkgPath = app.isPackaged
+    ? join(process.resourcesPath, 'app', 'package.json')
+    : resolve(app.getAppPath(), '..', 'package.json');
+  try {
+    const raw = readFileSync(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as {
+      name?: string;
+      version?: string;
+      license?: string;
+      description?: string;
+      repository?: { url?: string } | string;
+      bugs?: { url?: string } | string;
+    };
+    const repositoryUrl =
+      typeof pkg.repository === 'string'
+        ? pkg.repository
+        : (pkg.repository?.url ?? 'https://github.com/fluentdb-dev/ithyno');
+    const issuesUrl =
+      typeof pkg.bugs === 'string'
+        ? pkg.bugs
+        : (pkg.bugs?.url ?? `${repositoryUrl}/issues`);
+    return {
+      name: pkg.name ?? 'ithyno',
+      version: pkg.version ?? '0.0.0',
+      license: pkg.license ?? 'GPL-3.0-or-later',
+      description: pkg.description ?? '',
+      repositoryUrl,
+      issuesUrl,
+      releasesUrl: `${repositoryUrl}/releases/latest`,
+      licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
+      sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
+    };
+  } catch (err) {
+    console.warn('[about] failed to read package.json:', err);
+    return {
+      name: 'ithyno',
+      version: '0.0.0',
+      license: 'GPL-3.0-or-later',
+      description: '',
+      repositoryUrl: 'https://github.com/fluentdb-dev/ithyno',
+      issuesUrl: 'https://github.com/fluentdb-dev/ithyno/issues',
+      releasesUrl: 'https://github.com/fluentdb-dev/ithyno/releases/latest',
+      licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
+      sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
+    };
+  }
+}
 
 const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
@@ -345,8 +399,23 @@ function resolveOnboardingPreload(): string {
   return resolve(app.getAppPath(), 'out', 'onboarding-preload.js');
 }
 
-function refreshMenu(): void {
+let _aboutConfig: AboutConfig | null = null;
+
+function refreshMenu(aboutConfig?: AboutConfig): void {
+  if (aboutConfig) _aboutConfig = aboutConfig;
+  const about = _aboutConfig ?? {
+    name: 'ithyno',
+    version: app.getVersion(),
+    license: 'GPL-3.0-or-later',
+    description: '',
+    repositoryUrl: 'https://github.com/fluentdb-dev/ithyno',
+    issuesUrl: 'https://github.com/fluentdb-dev/ithyno/issues',
+    releasesUrl: 'https://github.com/fluentdb-dev/ithyno/releases/latest',
+    licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
+    sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
+  };
   const menu = buildAppMenu({
+    about,
     onOpenProject: () => {
       const parent = mainWindow ?? undefined;
       const picked = pickProjectDialog(parent);
@@ -433,7 +502,13 @@ if (!gotLock) {
   );
 
   void app.whenReady().then(async () => {
-    refreshMenu();
+    const aboutConfig = readAboutConfig();
+    app.setAboutPanelOptions({
+      applicationName: aboutConfig.name,
+      applicationVersion: aboutConfig.version,
+      copyright: `License: ${aboutConfig.license}`,
+    });
+    refreshMenu(aboutConfig);
     await ensureAgmsgInstalled();
     const project = await ensureProject();
     if (!project) {

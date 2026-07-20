@@ -1,7 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 
+export type SponsorLink = { label: string; url: string };
+
+export interface AboutConfig {
+  name: string;
+  version: string;
+  license: string;
+  description: string;
+  repositoryUrl: string;
+  issuesUrl: string;
+  releasesUrl: string;
+  licenseUrl: string;
+  sponsors: SponsorLink[];
+}
+
 export interface MenuHandlers {
+  about: AboutConfig;
   onOpenProject(): void;
   onNewProject(): void;
   onOpenRecent(path: string): void;
@@ -14,6 +29,7 @@ export interface MenuHandlers {
 export function buildAppMenu(handlers: MenuHandlers): Menu {
   const isMac = process.platform === 'darwin';
   const recent = handlers.getRecent();
+  const { about } = handlers;
 
   const recentSubmenu: MenuItemConstructorOptions =
     recent.length === 0
@@ -113,11 +129,48 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
           label: 'Documentation',
           click: () => handlers.onOpenDocumentation(),
         },
+        { type: 'separator' },
+        // On macOS "About ithyno" is auto-inserted under the app menu — skip
+        // it here so there's no duplicate About item under Help.
+        ...(isMac
+          ? []
+          : [
+              {
+                label: `About ${about.name}`,
+                click: () => app.showAboutPanel(),
+              } as MenuItemConstructorOptions,
+              { type: 'separator' as const },
+            ]),
+        // Sponsor entries — one item per sponsors array entry. When there's
+        // only one entry, render directly (no submenu). When multiple entries
+        // exist (future GitHub Sponsors), wrap in a "Sponsor" submenu.
+        ...(about.sponsors.length === 1
+          ? [
+              {
+                label: `Sponsor via ${about.sponsors[0]!.label}`,
+                click: () => void shell.openExternal(about.sponsors[0]!.url),
+              } as MenuItemConstructorOptions,
+            ]
+          : [
+              {
+                label: 'Sponsor',
+                submenu: about.sponsors.map((s) => ({
+                  label: s.label,
+                  click: () => void shell.openExternal(s.url),
+                })),
+              } as MenuItemConstructorOptions,
+            ]),
+        {
+          label: 'Check for Updates…',
+          click: () => void shell.openExternal(about.releasesUrl),
+        },
         {
           label: 'Report an Issue',
-          click: () => {
-            void shell.openExternal('https://github.com/anthropics/openspec-ui/issues');
-          },
+          click: () => void shell.openExternal(about.issuesUrl),
+        },
+        {
+          label: 'View License',
+          click: () => void shell.openExternal(about.licenseUrl),
         },
       ],
     },
