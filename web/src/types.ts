@@ -239,6 +239,10 @@ export type AgentConfigResponse = {
   error?: string;
   agents: AgentPublic[];
   parallelExecution: boolean;
+  /** Max concurrent worker spawns for `/ithy-opsx:dispatch-multi`
+   *  (default 3, range [1, 10]). Landed by
+   *  add-multi-dispatch-orchestrator. */
+  maxParallel: number;
   agmsg: AgmsgConfig | null;
 };
 

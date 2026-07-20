@@ -167,6 +167,35 @@ notice. Landed by
 [add-worktree-change-view](../../openspec/changes/add-worktree-change-view/)
 (archived).
 
+## Parallel dispatch across N changes
+
+`/ithy-opsx:dispatch <id>` (landed by add-manager-loop-skill) drives
+ONE change through `code → review → verify`. When multiple changes
+are ready to fan out, `/ithy-opsx:dispatch-multi <id1> [id2] ...`
+(landed by add-multi-dispatch-orchestrator) orchestrates them
+concurrently:
+
+- **Concurrency cap**: `agents.yaml.maxParallel` (default `3`,
+  range `[1, 10]`). Excess ids queue and start as running ones
+  finish.
+- **Message routing**: workers append `change:<id>` to their
+  report token (`stage:$S status:done change:<id>`) so a single
+  Manager inbox can disambiguate across in-flight changes. The
+  existing single-dispatch skill also emits the extended shape;
+  the Manager parser accepts both new and legacy shapes.
+- **Per-change independence**: one change escalating (e.g., after
+  `MAX_ITERATIONS = 5`) does NOT stop the others. Each change
+  advances on its own clock.
+- **Report**: on exit, a per-id summary lists the final phase,
+  iteration count, and elapsed time (or the escalation reason).
+
+Prefer `dispatch-multi` when you have 2+ ready-to-implement
+changes; the wall-clock drops from `sum(each)` to
+`max(slowest) + queue drain time`. Single dispatch stays correct
+for the common case of one change at a time. Landed by
+[add-multi-dispatch-orchestrator](../../openspec/changes/add-multi-dispatch-orchestrator/)
+(archived after impl).
+
 ## Reading order
 
 For someone new joining the parallel-shells story:

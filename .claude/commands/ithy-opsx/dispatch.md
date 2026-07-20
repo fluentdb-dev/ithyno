@@ -155,9 +155,17 @@ exist, create it first.
 When your task completes (whether the outcome is pass, needs-rework,
 or a blocker), send exactly ONE message to Manager via:
   ~/.agents/skills/agmsg/scripts/send.sh $AGMSG_TEAM $entry_name manager \\
-    'stage:$S status:done'
+    'stage:$S status:done change:<change-id>'
 This tells Manager to inspect the review.md artifact (or git log
 for code stage) and advance the workflow. Send exactly once.
+
+The 'change:<change-id>' suffix disambiguates messages when
+Manager is orchestrating multiple in-flight changes concurrently
+(via /ithy-opsx:dispatch-multi, landed by
+add-multi-dispatch-orchestrator). Single-dispatch invocations
+also emit it for consistency; the Manager parser accepts both
+the extended shape and the legacy 'stage:\$S status:done' shape
+without change:<id>.
 "
        # Manager registration guard (harden-dispatch-from-round3).
        # Before every spawn, ensure Manager is registered in the
@@ -299,6 +307,11 @@ RECEIVED=0
 while [ $ELAPSED -lt $CEILING ]; do
   sleep $POLL_INTERVAL
   ELAPSED=$((ELAPSED + POLL_INTERVAL))
+  # Accept both the extended shape (with 'change:<id>' suffix, emitted
+  # by workers spawned via add-multi-dispatch-orchestrator's updated
+  # report contract) AND the legacy shape (bare 'stage:$S status:done').
+  # For single-dispatch, either matches — there is only one in-flight
+  # change per entry.
   if ~/.agents/skills/agmsg/scripts/inbox.sh "$AGMSG_TEAM" manager 2>/dev/null | \
        grep -qE "\] $entry_name: .*stage:$S status:done"; then
     RECEIVED=1

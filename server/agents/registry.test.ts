@@ -269,6 +269,89 @@ agents:
   });
 });
 
+describe("AgentRegistry maxParallel (add-multi-dispatch-orchestrator)", () => {
+  it("defaults maxParallel to 3 when the key is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.maxParallel).toBe(3);
+  });
+
+  it("accepts a valid integer in range and surfaces it", async () => {
+    const reg = await loadWith(
+      `maxParallel: 2
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.maxParallel).toBe(2);
+  });
+
+  it("rejects maxParallel below the minimum (0)", async () => {
+    const reg = await loadWith(
+      `maxParallel: 0
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/maxParallel/);
+  });
+
+  it("rejects maxParallel above the maximum (11)", async () => {
+    const reg = await loadWith(
+      `maxParallel: 11
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/maxParallel/);
+  });
+
+  it("rejects non-integer maxParallel (float)", async () => {
+    const reg = await loadWith(
+      `maxParallel: 2.5
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/maxParallel/);
+  });
+
+  it("rejects a non-number maxParallel (string)", async () => {
+    const reg = await loadWith(
+      `maxParallel: "three"
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/maxParallel/);
+  });
+});
+
 describe("AgentRegistry agmsg block (add-agmsg-config-block)", () => {
   it("defaults agmsg to null when the block is absent", async () => {
     const reg = await loadWith(

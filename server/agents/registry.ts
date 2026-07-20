@@ -72,6 +72,7 @@ export type AgentConfig =
       ok: true;
       agents: AgentDef[];
       parallelExecution: boolean;
+      maxParallel: number;
       agmsg: AgmsgConfig | null;
       warnings: string[];
     }
@@ -79,10 +80,19 @@ export type AgentConfig =
       ok: false;
       agents: AgentDef[]; // last-known-good
       parallelExecution: boolean; // last-known-good
+      maxParallel: number; // last-known-good
       agmsg: AgmsgConfig | null; // last-known-good
       warnings: string[];
       error: string;
     };
+
+/** Default when `agents.yaml` omits `maxParallel`. Chosen with tmux
+ *  pane count + spawn worker cost in mind (each concurrent worker
+ *  is a full Claude / Copilot process). Landed by
+ *  add-multi-dispatch-orchestrator. */
+const DEFAULT_MAX_PARALLEL = 3;
+const MAX_PARALLEL_MIN = 1;
+const MAX_PARALLEL_MAX = 10;
 
 const AGENT_MODES: readonly AgentMode[] = ["single-prompt", "live-shell"];
 const KNOWN_AGENT_KEYS = new Set([
@@ -355,6 +365,26 @@ function validateParallelExecution(raw: unknown): boolean {
 }
 
 /**
+ * Validate top-level `maxParallel` field. Absent → DEFAULT_MAX_PARALLEL.
+ * Must be an integer in [MAX_PARALLEL_MIN, MAX_PARALLEL_MAX] when present.
+ * Landed by add-multi-dispatch-orchestrator.
+ */
+function validateMaxParallel(raw: unknown): number {
+  if (raw === undefined || raw === null) return DEFAULT_MAX_PARALLEL;
+  if (typeof raw !== "number" || !Number.isInteger(raw)) {
+    throw new Error(
+      `maxParallel must be an integer between ${MAX_PARALLEL_MIN} and ${MAX_PARALLEL_MAX} (got: ${JSON.stringify(raw)})`,
+    );
+  }
+  if (raw < MAX_PARALLEL_MIN || raw > MAX_PARALLEL_MAX) {
+    throw new Error(
+      `maxParallel must be between ${MAX_PARALLEL_MIN} and ${MAX_PARALLEL_MAX} (got: ${raw})`,
+    );
+  }
+  return raw;
+}
+
+/**
  * Validate top-level `agmsg` block. Absent → null (agmsg not
  * configured; default). When present, `team` is required and
  * non-empty. Landed by add-agmsg-config-block.
@@ -402,6 +432,7 @@ export class AgentRegistry {
     ok: true,
     agents: [],
     parallelExecution: false,
+    maxParallel: DEFAULT_MAX_PARALLEL,
     agmsg: null,
     warnings: [],
   };
@@ -419,6 +450,7 @@ export class AgentRegistry {
         ok: true,
         agents: [],
         parallelExecution: false,
+        maxParallel: DEFAULT_MAX_PARALLEL,
         agmsg: null,
         warnings: [],
       };
@@ -434,6 +466,11 @@ export class AgentRegistry {
           ? (parsed as Record<string, unknown>).parallelExecution
           : undefined,
       );
+      const maxParallel = validateMaxParallel(
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).maxParallel
+          : undefined,
+      );
       const agmsg = validateAgmsg(
         parsed && typeof parsed === "object"
           ? (parsed as Record<string, unknown>).agmsg
@@ -442,13 +479,21 @@ export class AgentRegistry {
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[registry] ${w}`);
       }
-      this.cache = { ok: true, agents, parallelExecution, agmsg, warnings };
+      this.cache = {
+        ok: true,
+        agents,
+        parallelExecution,
+        maxParallel,
+        agmsg,
+        warnings,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.cache = {
         ok: false,
         agents: this.cache.agents,
         parallelExecution: this.cache.parallelExecution,
+        maxParallel: this.cache.maxParallel,
         agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
         error: msg,
@@ -497,6 +542,7 @@ export class AgentRegistry {
     error?: string;
     agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
     parallelExecution: boolean;
+    maxParallel: number;
     agmsg: AgmsgConfig | null;
     warnings: string[];
   } {
@@ -510,6 +556,7 @@ export class AgentRegistry {
         error: this.cache.error,
         agents: sanitized,
         parallelExecution: this.cache.parallelExecution,
+        maxParallel: this.cache.maxParallel,
         agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
       };
@@ -518,6 +565,7 @@ export class AgentRegistry {
       ok: true,
       agents: sanitized,
       parallelExecution: this.cache.parallelExecution,
+      maxParallel: this.cache.maxParallel,
       agmsg: this.cache.agmsg,
       warnings: this.cache.warnings,
     };
