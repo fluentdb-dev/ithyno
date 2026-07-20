@@ -51,9 +51,11 @@ The system SHALL bind `Cmd/Ctrl+Shift+K` (with terminal focus) to trigger termin
 #### Scenario: Electron menu item
 
 - **GIVEN** the Electron menu is open
-- **THEN** a `View → Reload Terminal` item exists, showing the `Cmd/Ctrl+Shift+K` accelerator
+- **THEN** a `View → Reload Terminal` item exists, with its label including a `⇧⌘K` visual hint (macOS glyph or platform equivalent); the item does NOT register `Cmd/Ctrl+Shift+K` as a menu accelerator (Electron menu accelerators are global and would bypass the focus-scoping required by the sibling scenario). Users trigger the shortcut via the renderer's focus-scoped keydown handler; clicking the menu item is the mouse-driven equivalent.
 - **AND** clicking it restarts the terminal (same effect as pressing the shortcut)
 - **AND** the existing `Cmd/Ctrl+R` accelerator continues to reload the entire `BrowserWindow` — unchanged
+
+**Design rationale**: Electron `MenuItem.accelerator` fires regardless of focus, which contradicts the focus-scope requirement. Splitting shortcut delivery (renderer keydown) from menu discoverability (label hint) satisfies both goals.
 
 ### Requirement: PTY process cleanup on disconnect
 

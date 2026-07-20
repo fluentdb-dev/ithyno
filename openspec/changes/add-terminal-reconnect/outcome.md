@@ -29,6 +29,12 @@
 - The `CmdOrCtrl+Shift+K` Electron accelerator was registered unconditionally at the OS menu level, meaning it would fire the terminal restart even when focus was on Settings inputs, kanban cards, or modals — violating the spec's focus-scoping requirement. Removed `accelerator: 'CmdOrCtrl+Shift+K'` from the menu item; the renderer-side keydown listener already handles focus-scoping correctly. The menu label was updated to `'Reload Terminal (⇧⌘K)'` so the shortcut hint remains discoverable in the menu without the OS-level binding.
 - `useState(false)` in `Terminal.tsx` caused the reconnect button to render in warn style for ~100–500 ms on every fresh mount (the WS handshake window). Changed to `useState(true)` so the button only enters warn state when an actual disconnect or error occurs.
 
+## Round 3 rework (2026-07-20)
+
+### ⚠️ Surprises
+
+- R1 vs R2 review findings contradicted each other (accelerator required vs global-fire violates focus-scope). Real issue was spec self-contradiction — Electron menu accelerators can't be focus-scoped. Fixed by relaxing spec: label hint stays, accelerator dropped; renderer keydown handles the focus-scoped shortcut.
+
 ## Follow-ups
 
 - The reconnect button overlays the top-right corner of the xterm canvas. If the terminal prompt ever renders content directly under that corner (rare, but possible on narrow widths), the button could occlude text. A future pass could move it to the `.terminal-head` bar instead, where it sits outside the canvas.

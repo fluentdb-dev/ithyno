@@ -21,7 +21,7 @@
 
 ## 4. Electron menu + accelerator
 
-- [x] 4.1 In `electron/src/menu.ts`, add a new `View → Reload Terminal` menu item with accelerator `CmdOrCtrl+Shift+K` (matching the web shell shortcut). Do NOT bind `F5`.
+- [x] 4.1 In `electron/src/menu.ts`, add a new `View → Reload Terminal` menu item with label hint `⇧⌘K` (no accelerator registration — see spec design rationale). Do NOT bind `F5`.
 - [x] 4.2 The menu item's `click` handler sends an IPC message (e.g. `webContents.send("ithyno:terminal-restart")`) to the renderer. The renderer's preload script exposes this on `window.ithyno.onTerminalRestart(cb)` (or reuses an existing event bridge).
 - [x] 4.3 In `Terminal.tsx` (or better, in `App.tsx` alongside the keydown listener), subscribe to the IPC event when running under Electron and call `restartTerminal()`.
 - [x] 4.4 Keep the existing `role: 'reload'` (Cmd/Ctrl+R) for full window reload — unchanged.
