@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { ProgressBar } from "../components/ProgressBar";
@@ -8,11 +8,36 @@ import { KanbanBoard } from "../components/Kanban";
 import { TagChipList } from "../components/TagChip";
 import { injectPty } from "../api";
 import { ERR } from "../lib/errorMessages";
+import type { Change } from "../types";
 
 function quoteForShell(s: string): string {
   // Single-quote for POSIX shells; escape embedded quotes by closing + escaping
   // + reopening. Good enough for descriptions; Claude Code receives the literal.
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Case-insensitive substring filter over a change list. Matches against:
+ *   - `change.id`
+ *   - `change.proposal?.intent` (the closest thing this codebase has to a
+ *     proposal "title" — the shipped `ProposalDoc` type has no `title` field)
+ *   - any `change.proposal?.tags[]` entry (tags are `string[]` at runtime)
+ *
+ * Empty / whitespace-only filter text is a pass-through — returns the input
+ * array unchanged so cheap identity checks downstream (bucketize memo etc.)
+ * stay stable. Landed by add-kanban-search-filter.
+ */
+export function filterChanges(changes: Change[], filterText: string): Change[] {
+  const t = filterText.trim().toLowerCase();
+  if (!t) return changes;
+  return changes.filter((c) => {
+    if (c.id.toLowerCase().includes(t)) return true;
+    const intent = c.proposal?.intent;
+    if (intent && intent.toLowerCase().includes(t)) return true;
+    const tags = c.proposal?.tags;
+    if (tags && tags.some((tag) => tag.toLowerCase().includes(t))) return true;
+    return false;
+  });
 }
 
 export function Overview() {
@@ -23,12 +48,40 @@ export function Overview() {
   const overviewLayout = useStore((s) => s.overviewLayout);
   const setOverviewLayout = useStore((s) => s.setOverviewLayout);
   const [proposeOpen, setProposeOpen] = useState(false);
+  // Session-only filter (deliberately NOT persisted — a stale filter across
+  // reloads is a bigger footgun than losing the filter on refresh). See
+  // add-kanban-search-filter proposal.
+  const [filterText, setFilterText] = useState("");
+  const filterInputRef = useRef<HTMLInputElement | null>(null);
   const { changes } = state;
+
+  const visibleChanges = useMemo(() => filterChanges(changes, filterText), [changes, filterText]);
 
   const totals = changes.reduce(
     (acc, c) => ({ done: acc.done + c.progress.done, total: acc.total + c.progress.total }),
     { done: 0, total: 0 },
   );
+
+  // Cmd+F (macOS) / Ctrl+F (other): focus the filter input from anywhere on
+  // the Overview page. If the input is ALREADY the active element, we do NOT
+  // preempt — the user gets the browser's native find-in-page as a secondary
+  // escape hatch. Non-Overview pages never install this listener (this effect
+  // only runs while Overview is mounted), so Cmd+F is the browser's default
+  // there.
+  useEffect(() => {
+    const onKeydown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key !== "f" && e.key !== "F") return;
+      const input = filterInputRef.current;
+      if (!input) return;
+      if (document.activeElement === input) return;
+      e.preventDefault();
+      input.focus();
+      input.select();
+    };
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, []);
 
   const runInject = async (line: string) => {
     const res = await injectPty(line, true);
@@ -51,6 +104,25 @@ export function Overview() {
         <div className="summary-progress">
           <ProgressBar progress={totals} />
         </div>
+        <input
+          ref={filterInputRef}
+          className="kanban-filter"
+          type="search"
+          placeholder="Filter changes…"
+          aria-label="Filter changes by id, intent, or tag"
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              // Esc while focused: clear + blur. Prevent default so a browser
+              // that treats Esc-in-search-inputs as "clear only" doesn't
+              // fight us on the blur.
+              e.preventDefault();
+              setFilterText("");
+              e.currentTarget.blur();
+            }
+          }}
+        />
         <div className="layout-toggle" role="tablist" aria-label="Overview layout">
           <button
             role="tab"
@@ -85,12 +157,18 @@ export function Overview() {
       </div>
 
       {overviewLayout === "board" ? (
-        <KanbanBoard changes={changes} onNewChange={() => setProposeOpen(true)} />
+        <KanbanBoard changes={visibleChanges} onNewChange={() => setProposeOpen(true)} />
       ) : (
         <>
-          {changes.length === 0 && <p className="empty">No active changes under openspec/changes/.</p>}
+          {visibleChanges.length === 0 && (
+            <p className="empty">
+              {changes.length === 0
+                ? "No active changes under openspec/changes/."
+                : "No changes match the current filter."}
+            </p>
+          )}
           <div className="card-grid">
-            {changes.map((c) => (
+            {visibleChanges.map((c) => (
               // The clickable card body is a <Link>; tag chips live outside it
               // because each chip is itself a <Link to="/tags/…"> and HTML
               // forbids nested <a>.
