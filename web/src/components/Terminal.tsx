@@ -21,7 +21,7 @@ export function Terminal() {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const appliedTheme = useAppliedTheme();
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(true);
 
   useEffect(() => {
     const host = hostRef.current;

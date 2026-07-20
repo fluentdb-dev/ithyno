@@ -21,6 +21,14 @@
 - Task 4.5 (idempotency guard) does not require a debounce: the Electron accelerator sends the IPC message asynchronously through the main process, so the renderer keydown and the IPC callback never fire in the same synchronous tick. React would batch two closely-timed `restartTerminal()` calls into two separate renders (counter N→N+1→N+2), but each results in only one xterm remount. The net effect is correct; a formal debounce would add complexity without improving behavior.
 - The `↻` glyph is rendered via `&#x21BB;` (HTML entity) rather than a Unicode literal in the JSX source, which avoids any source-encoding assumptions.
 
+## Round 2 rework (2026-07-20)
+
+### ⚠️ Surprises
+
+- Copilot review caught global accelerator + initial warn-state — removed accelerator from Electron menu (keydown-only shortcut retained), flipped `connected` initial state to true.
+- The `CmdOrCtrl+Shift+K` Electron accelerator was registered unconditionally at the OS menu level, meaning it would fire the terminal restart even when focus was on Settings inputs, kanban cards, or modals — violating the spec's focus-scoping requirement. Removed `accelerator: 'CmdOrCtrl+Shift+K'` from the menu item; the renderer-side keydown listener already handles focus-scoping correctly. The menu label was updated to `'Reload Terminal (⇧⌘K)'` so the shortcut hint remains discoverable in the menu without the OS-level binding.
+- `useState(false)` in `Terminal.tsx` caused the reconnect button to render in warn style for ~100–500 ms on every fresh mount (the WS handshake window). Changed to `useState(true)` so the button only enters warn state when an actual disconnect or error occurs.
+
 ## Follow-ups
 
 - The reconnect button overlays the top-right corner of the xterm canvas. If the terminal prompt ever renders content directly under that corner (rare, but possible on narrow widths), the button could occlude text. A future pass could move it to the `.terminal-head` bar instead, where it sits outside the canvas.

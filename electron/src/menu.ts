@@ -92,8 +92,7 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
         { role: 'toggleDevTools' },
         { type: 'separator' },
         {
-          label: 'Reload Terminal',
-          accelerator: 'CmdOrCtrl+Shift+K',
+          label: 'Reload Terminal (⇧⌘K)',
           click: () => {
             const win = handlers.getWindow();
             if (win && !win.isDestroyed()) {
