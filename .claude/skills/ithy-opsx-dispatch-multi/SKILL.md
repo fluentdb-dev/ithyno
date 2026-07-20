@@ -70,11 +70,22 @@ Landed by `add-multi-dispatch-orchestrator`.
    `unknown change id: <id>` and STOP — do not spawn any workers.
 3. **Git identity**. Confirm `git config user.name` and `user.email`
    are set (needed for Manager-commit contract).
-4. **agmsg configured?** Read `agents.yaml`. If the top-level
-   `agmsg:` block is present, the flow uses agmsg branch spawns
-   (non-blocking). If absent, fall back to sequential Task-tool
-   dispatch per change — log a warning: `[dispatch-multi] agmsg
-   not configured; degrading to sequential dispatch`.
+4. **agmsg configured?** Read `agents.yaml`. Two parallel paths
+   exist; both achieve true concurrency:
+   - **agmsg branch** (when the top-level `agmsg:` block is
+     present): `/agmsg spawn` returns immediately per invocation,
+     so the Manager fires N spawns in a simple loop and the
+     workers run concurrently in separate tmux panes.
+   - **Task-tool parallel branch** (when `agmsg:` is absent AND
+     the code agent's `command == "claude"`): the Manager
+     dispatches all N code workers in a SINGLE assistant message
+     with N Task tool calls, which Claude Code executes in
+     parallel. The Manager awaits all of them together, then
+     proceeds to review / verify per change.
+
+   Only the subprocess-only branch (non-claude workers with no
+   agmsg) is strictly sequential — that path degrades to a
+   for-loop with a warning.
 
 ### 2. Capacity resolution
 
