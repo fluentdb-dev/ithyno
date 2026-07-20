@@ -17,10 +17,11 @@ The repository SHALL use a single semver-2.0.0-valid version string, shared acro
 
 #### Scenario: All owned package.json files agree
 
-- **GIVEN** the four owned manifests: `package.json`, `electron/package.json`, `vscode-extension/package.json`, `vscode-extension/host/package.json`
+- **GIVEN** the three owned manifests: `package.json`, `electron/package.json`, `vscode-extension/package.json`
 - **WHEN** a reader inspects the `version` field of each
-- **THEN** all four report the same value
+- **THEN** all three report the same value
 - **AND** `vendor/**` manifests are treated as vendored and are excluded from this rule
+- **AND** `vscode-extension/host/package.json` is a build artifact regenerated from `vscode-extension/package.json` by `prepack.mjs`; it is NOT an owned source and is not enumerated here
 
 ### Requirement: Coordinated version bump
 
@@ -30,7 +31,7 @@ The system SHALL provide an idempotent script that bumps the `version` field of 
 
 - **GIVEN** the current version is `0.0.1-alpha.0`
 - **WHEN** a maintainer runs `npm run release:version -- 0.0.1-alpha.1`
-- **THEN** all four owned `package.json` files are rewritten with `"version": "0.0.1-alpha.1"`
+- **THEN** all three owned `package.json` files are rewritten with `"version": "0.0.1-alpha.1"`
 - **AND** no other fields in those files are modified
 
 #### Scenario: Invalid version is rejected

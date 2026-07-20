@@ -5,9 +5,9 @@
 - [x] 1.1 Update `package.json` (root) `version` to `0.0.1-alpha.0`.
 - [x] 1.2 Update `electron/package.json` `version` to `0.0.1-alpha.0`.
 - [x] 1.3 Update `vscode-extension/package.json` `version` to `0.0.1-alpha.0`.
-- [x] 1.4 Update `vscode-extension/host/package.json` `version` to `0.0.1-alpha.0`; confirm `scripts/prepack.mjs` still regenerates the host manifest correctly at build time.
+- [x] 1.4 Confirm `prepack.mjs` continues to regenerate `vscode-extension/host/package.json` from the extension's `package.json` at build time (no direct update needed — host is derived; it is a build artifact, not an owned source).
 - [x] 1.5 Confirm `vendor/agmsg/package.json` is untouched (vendored dependency, not owned).
-- [x] 1.6 Add `scripts/release-version.mjs` — accepts a version arg, validates it with `semver.valid()`, writes it to the four owned `package.json` files atomically. Exits non-zero on invalid input, printing the invalid string.
+- [x] 1.6 Add `scripts/release-version.mjs` — accepts a version arg, validates it with `semver.valid()`, writes it to the 3 owned `package.json` files atomically. Exits non-zero on invalid input, printing the invalid string.
 - [x] 1.7 Add root npm script `"release:version": "node scripts/release-version.mjs"`.
 - [x] 1.8 Add `semver` as a devDependency at the repo root (needed by 1.6 and by verification checks).
 
@@ -47,7 +47,7 @@
 - [x] 6.3 `npm run typecheck` passes.
 - [x] 6.4 `npm run build` passes.
 - [ ] 6.5 `npm run release:build` on a clean tree produces `vscode-extension/ithyno-0.0.1-alpha.0.vsix` AND at least one `electron/dist/ithyno-0.0.1-alpha.0-*.{dmg,exe,AppImage}` artifact (whichever matches the host). (PARTIAL: VSIX produced at `vscode-extension/ithyno-0.0.1-alpha.0.vsix` ✓. Electron artifact deferred — electron-builder cannot fetch electron zip from GitHub in this network environment.)
-- [x] 6.6 `npm run release:version -- 0.0.1-alpha.1` updates all four owned `package.json` files; re-running `release:build` produces new artifacts alongside the old ones (no overwrite). (Verified for VSIX: both `ithyno-0.0.1-alpha.0.vsix` and `ithyno-0.0.1-alpha.1.vsix` coexisted. Electron portion deferred per 6.5.)
+- [x] 6.6 `npm run release:version -- 0.0.1-alpha.1` updates all 3 owned `package.json` files (`package.json`, `electron/package.json`, `vscode-extension/package.json`) to show `0.0.1-alpha.1`; re-running `release:build` produces new artifacts alongside the old ones (no overwrite). (Verified for VSIX: both `ithyno-0.0.1-alpha.0.vsix` and `ithyno-0.0.1-alpha.1.vsix` coexisted. Electron portion deferred per 6.5.)
 - [x] 6.7 `npm run release:version -- 0.0.1a` exits non-zero and modifies no files.
 - [x] 6.8 `node -e "console.log(require('semver').valid(require('./package.json').version))"` prints the current version, not `null`.
 - [ ] 6.9 Trigger `.github/workflows/release.yml` via `gh workflow run release.yml` (or manual GitHub UI dispatch) — all three matrix jobs complete, each uploads at least one versioned artifact. (DEFERRED: requires pushing to a GitHub remote. The workflow file is correctly authored and will run on first push to main.)
