@@ -1,6 +1,6 @@
 {
   "name": "ithyno-electron",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.0",
   "private": true,
   "description": "Electron desktop shell for ithyno",
   "author": "ithyno contributors",
@@ -23,6 +23,7 @@
   "build": {
     "appId": "dev.ithyno.app",
     "productName": "ithyno",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -65,7 +66,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.developer-tools"
@@ -74,7 +78,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -82,7 +88,9 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "category": "Development"

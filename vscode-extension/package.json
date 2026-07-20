@@ -2,7 +2,7 @@
   "name": "ithyno-vscode",
   "displayName": "ithyno",
   "description": "ithyno dashboard for the OpenSpec workflow, embedded in VS Code as a webview panel.",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.0",
   "private": true,
   "license": "GPL-3.0-or-later",
   "publisher": "ithyno",
@@ -47,7 +47,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "prepack:host": "node scripts/prepack.mjs",
-    "package": "npm run build && npm run prepack:host && vsce package --no-dependencies --allow-missing-repository --out ithyno.vsix"
+    "package": "npm run build && npm run prepack:host && node scripts/vsix-package.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",

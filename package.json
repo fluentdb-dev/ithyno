@@ -1,6 +1,6 @@
 {
   "name": "ithyno",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.0",
   "description": "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.",
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -36,7 +36,9 @@
     "electron:package:mac": "npm run --workspace ithyno-electron package:mac",
     "electron:package:win": "npm run --workspace ithyno-electron package:win",
     "electron:package:linux": "npm run --workspace ithyno-electron package:linux",
-    "electron:package:all": "npm run --workspace ithyno-electron package:all"
+    "electron:package:all": "npm run --workspace ithyno-electron package:all",
+    "release:build": "node scripts/release-build.mjs",
+    "release:version": "node scripts/release-version.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -72,6 +74,7 @@
     "react-router-dom": "^7.2.0",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",
+    "semver": "^7.7.2",
     "vitest": "^3.0.7",
     "zustand": "^5.0.3"
   }
