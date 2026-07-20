@@ -37,24 +37,36 @@ const manifests = [
   resolve(repoRoot, "vscode-extension", "host", "package.json"),
 ];
 
-// Read all first so we fail before writing anything if a file is missing.
-const parsed = manifests.map((p) => {
+// Existence check — fail before any write if a manifest is missing.
+const missing = manifests.filter((p) => {
   try {
-    return { path: p, data: JSON.parse(readFileSync(p, "utf8")) };
+    readFileSync(p);
+    return false;
   } catch (err) {
-    if (err.code === "ENOENT") {
-      // host/package.json is generated at build time; skip if absent.
-      return { path: p, data: null };
-    }
+    if (err.code === "ENOENT") return true;
     throw err;
   }
 });
+if (missing.length > 0) {
+  console.error(
+    `Cannot bump version: the following manifest(s) are missing:\n` +
+      missing.map((p) => `  ${p.replace(repoRoot + "/", "")}`).join("\n") +
+      `\nNo files were modified.`
+  );
+  process.exit(1);
+}
 
-// Write atomically (all or nothing).
+// Read all manifests into memory, then write in a batch.
+const parsed = manifests.map((p) => ({
+  path: p,
+  data: JSON.parse(readFileSync(p, "utf8")),
+}));
+
+let written = 0;
 for (const { path: p, data } of parsed) {
-  if (data === null) continue;
   data.version = valid;
   writeFileSync(p, JSON.stringify(data, null, 2) + "\n", "utf8");
+  written += 1;
   console.log(`Updated ${p.replace(repoRoot + "/", "")}`);
 }
 

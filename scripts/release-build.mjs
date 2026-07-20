@@ -31,6 +31,7 @@ if (platform === "darwin") {
 run("typecheck", "npm run typecheck");
 run("test", "npm test");
 run("build (web)", "npm run build");
+run("electron compile (TypeScript)", "npm run --workspace ithyno-electron build");
 run("vscode-extension package", "npm run --workspace ithyno-vscode package");
 run(
   `electron package (${platform})`,

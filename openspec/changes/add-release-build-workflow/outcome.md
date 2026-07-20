@@ -55,3 +55,17 @@
 - **Auto-update wiring**: `electron-updater` requires a signed update manifest (`latest-mac.yml`) hosted on a CDN or GitHub Releases. Depends on signing + Release automation being in place.
 
 - **electron-builder download reliability**: Add a step in CI to pre-populate the electron download cache, or pin a mirror URL via `ELECTRON_MIRROR` / `ELECTRON_BUILDER_BINARIES_MIRROR` to avoid GitHub release download timeouts.
+
+---
+
+## Round 2 rework (2026-07-20)
+
+Copilot review returned `verdict: needs-rework` with 2 blocking findings on Round 1 (`b8d91e5`).
+
+### Surprises
+
+- **Copilot review caught 2 issues on Round 1 — electron compile missing from orchestrator, and release-version.mjs skipping missing manifests instead of failing atomic.**
+
+  Finding 1 (high): `scripts/release-build.mjs` jumped from the root Vite build (`npm run build`) straight to electron packaging, never compiling the TypeScript in `electron/`. On a clean checkout, `electron/out/main.js` doesn't exist, so electron-builder would package a broken app. Fix: inserted `npm run --workspace ithyno-electron build` as a new step between "build (web)" and "electron package".
+
+  Finding 2 (medium): `scripts/release-version.mjs` silently skipped `vscode-extension/host/package.json` with `return { path: p, data: null }` when the file was absent (ENOENT). The outcome.md from Round 1 incorrectly described this file as a build artifact. It is in fact committed to the repo. Fix: replaced the ENOENT-skip pattern with an upfront existence check over all four manifests — if any are missing, the script exits non-zero with a clear message before writing anything. The write phase no longer has a `null` guard or skip branch.
