@@ -42,7 +42,8 @@ export function Settings() {
 
       <section className="settings-section">
         <h3>Appearance</h3>
-        <div className="settings-row">
+        <div className="settings-toggle">
+          <ThemeToggle />
           <span>
             <strong>Theme</strong>
             <p className="muted">
@@ -53,7 +54,6 @@ export function Settings() {
               re-colors live on change.
             </p>
           </span>
-          <ThemeToggle />
         </div>
       </section>
 

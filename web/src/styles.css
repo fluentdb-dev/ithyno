@@ -75,20 +75,23 @@
 }
 
 :root[data-theme="light"] {
-  /* Backgrounds — GitHub-style light palette. Page is off-white so
-   * elevated panels can stay pure white without banding. */
-  --bg-page: #f6f8fa;
-  --bg-panel: #ffffff;
-  --bg-panel-2: #f0f3f6;
+  /* Backgrounds — GitHub-style light palette with a slightly darker page
+   * so pure-white cards visibly elevate above it (Elevated Design). */
+  --bg-page: #f1f5f9;      /* Slate 100 — layer 0 */
+  --bg-panel: #ffffff;     /* pure white — layer 2 (cards, inputs) */
+  --bg-panel-2: #f8fafc;   /* Slate 50 — layer 1 (columns, section backdrops) */
   --bg-hover: rgba(27, 31, 36, 0.06);
 
-  /* Foregrounds. */
+  /* Foregrounds — bump muted to Slate 500 for WCAG-friendly contrast. */
   --fg-primary: #1f2328;
-  --fg-muted: #656d76;
+  --fg-muted: #64748b;     /* Slate 500 */
 
   /* Borders. */
   --border: #d0d7de;
   --border-strong: #afb8c1;
+
+  /* Card elevation shadow (light mode only — dark mode uses border for depth). */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06);
 
   /* Accent (interactive) + tinted variants. */
   --accent: #0969da;
@@ -161,6 +164,32 @@
   --green: var(--success);
   --red: var(--danger);
   --amber: var(--warning);
+}
+
+/* Light-mode-specific polish (per light_mode_review.md):
+ * - ORPHANED badge: darker orange text on soft orange bg (WCAG AA).
+ * - Input fields: pure white bg so the border reads as "input" not "block".
+ * - Save/primary button on accent bg: force white text (accent-fg-on-solid).
+ * - Theme toggle active pill: add border + card shadow to stand out.
+ */
+:root[data-theme="light"] .agent-badge.orphaned {
+  background: #ffedd5;
+  color: #c2410c;
+}
+:root[data-theme="light"] .settings-field input[type="text"] {
+  background: var(--panel);
+}
+:root[data-theme="light"] .settings-actions button {
+  color: var(--accent-fg-on-solid);
+}
+:root[data-theme="light"] .settings-actions button:disabled {
+  background: #dbeafe;  /* Blue 100 — soft */
+  color: #1e40af;       /* Blue 800 — readable on soft */
+  opacity: 1;
+}
+:root[data-theme="light"] .theme-toggle-btn.active {
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-card);
 }
 
 * {
@@ -797,7 +826,7 @@ a:hover {
 }
 
 .kanban-col {
-  background: var(--panel);
+  background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: flex;
@@ -942,10 +971,11 @@ a:hover {
   font-size: 12px;
 }
 .kanban-card {
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0;
+  box-shadow: var(--shadow-card, none);
   transition: border-color 0.15s, transform 0.05s;
 }
 .kanban-card.draggable {
