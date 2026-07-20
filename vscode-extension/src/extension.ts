@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderOnboardingHtml, renderWebviewHtml } from "./webview-html";
+import { buildAboutInfo, LICENSE_URL } from "./about-config";
 
 /**
  * Choose the startup command sent to the injected terminal.
@@ -286,36 +287,24 @@ async function runNewProjectFlow(
  * Open a small About webview panel.
  * `enableScripts: false` — no JavaScript, only static HTML + <a href> links.
  * VS Code intercepts external links and opens them via `vscode.env.openExternal`.
+ *
+ * All About data (sponsors, URLs, constants) comes from ./about-config — edit
+ * there to add new sponsor entries without touching this function.
  */
 function openAboutPanel(context: vscode.ExtensionContext): void {
   // Read the extension's own package.json — version always matches root
   // because `release:version` keeps them in sync.
   const pkgPath = join(context.extensionPath, "package.json");
-  let pkg: {
-    name?: string;
-    version?: string;
-    license?: string;
-    description?: string;
-  } = {};
+  let pkg: Parameters<typeof buildAboutInfo>[0] = {};
   try {
     pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as typeof pkg;
   } catch {
     // fall through with defaults
   }
 
-  const name = "ithyno";
-  const version = pkg.version ?? "0.0.0";
-  const license = pkg.license ?? "GPL-3.0-or-later";
-  const description = pkg.description ?? "";
-  const repositoryUrl = "https://github.com/fluentdb-dev/ithyno";
-  const issuesUrl = "https://github.com/fluentdb-dev/ithyno/issues";
-  const releasesUrl = "https://github.com/fluentdb-dev/ithyno/releases/latest";
-  const licenseUrl = "https://www.gnu.org/licenses/gpl-3.0.html";
-  // Sponsors list — mirrors server/about.ts. Append new entries here to add
-  // a second sponsor link; the webview HTML template auto-renders all entries.
-  const sponsors: Array<{ label: string; url: string }> = [
-    { label: "Ko-fi", url: "https://ko-fi.com/hamnbeans" },
-  ];
+  const info = buildAboutInfo(pkg);
+  // Use canonical "ithyno" as display name regardless of extension manifest name.
+  const displayName = "ithyno";
 
   const panel = vscode.window.createWebviewPanel(
     "ithyno.about",
@@ -324,7 +313,7 @@ function openAboutPanel(context: vscode.ExtensionContext): void {
     { enableScripts: false, localResourceRoots: [] },
   );
 
-  const sponsorLinks = sponsors
+  const sponsorLinks = info.sponsors
     .map((s) => `    <a href="${s.url}">Sponsor via ${s.label}</a>`)
     .join("\n");
 
@@ -346,18 +335,18 @@ function openAboutPanel(context: vscode.ExtensionContext): void {
   </style>
 </head>
 <body>
-  <h1>${name}</h1>
+  <h1>${displayName}</h1>
   <table>
-    <tr><td>Version</td><td><code>${version}</code></td></tr>
-    <tr><td>License</td><td><a href="${licenseUrl}">${license}</a></td></tr>
-    ${description ? `<tr><td>Description</td><td>${description}</td></tr>` : ""}
+    <tr><td>Version</td><td><code>${info.version}</code></td></tr>
+    <tr><td>License</td><td><a href="${LICENSE_URL}">${info.license}</a></td></tr>
+    ${info.description ? `<tr><td>Description</td><td>${info.description}</td></tr>` : ""}
   </table>
   <div class="links">
-    <a href="${repositoryUrl}">Open Repository</a>
-    <a href="${issuesUrl}">Report an Issue</a>
+    <a href="${info.repositoryUrl}">Open Repository</a>
+    <a href="${info.issuesUrl}">Report an Issue</a>
 ${sponsorLinks}
-    <a href="${releasesUrl}">Check for Updates</a>
-    <a href="${licenseUrl}">View License</a>
+    <a href="${info.releasesUrl}">Check for Updates</a>
+    <a href="${info.licenseUrl}">View License</a>
   </div>
 </body>
 </html>`;

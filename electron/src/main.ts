@@ -20,11 +20,15 @@ import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu, type AboutConfig } from './menu';
 import { ensureAgmsgInstalled } from './agmsg-installer';
+import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
 
 /**
  * Read the root package.json and return an AboutConfig object.
  * In packaged mode the file is at `extraResources/app/package.json`.
  * In dev mode it lives one directory above the electron app root.
+ *
+ * Sponsors list and URL constants come from ./about-config — edit there to
+ * add new sponsor entries without touching this file.
  */
 function readAboutConfig(): AboutConfig {
   const pkgPath = app.isPackaged
@@ -32,33 +36,8 @@ function readAboutConfig(): AboutConfig {
     : resolve(app.getAppPath(), '..', 'package.json');
   try {
     const raw = readFileSync(pkgPath, 'utf-8');
-    const pkg = JSON.parse(raw) as {
-      name?: string;
-      version?: string;
-      license?: string;
-      description?: string;
-      repository?: { url?: string } | string;
-      bugs?: { url?: string } | string;
-    };
-    const repositoryUrl =
-      typeof pkg.repository === 'string'
-        ? pkg.repository
-        : (pkg.repository?.url ?? 'https://github.com/fluentdb-dev/ithyno');
-    const issuesUrl =
-      typeof pkg.bugs === 'string'
-        ? pkg.bugs
-        : (pkg.bugs?.url ?? `${repositoryUrl}/issues`);
-    return {
-      name: pkg.name ?? 'ithyno',
-      version: pkg.version ?? '0.0.0',
-      license: pkg.license ?? 'GPL-3.0-or-later',
-      description: pkg.description ?? '',
-      repositoryUrl,
-      issuesUrl,
-      releasesUrl: `${repositoryUrl}/releases/latest`,
-      licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
-      sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
-    };
+    const pkg = JSON.parse(raw) as Parameters<typeof buildAboutInfo>[0];
+    return buildAboutInfo(pkg);
   } catch (err) {
     console.warn('[about] failed to read package.json:', err);
     return {
@@ -66,11 +45,11 @@ function readAboutConfig(): AboutConfig {
       version: '0.0.0',
       license: 'GPL-3.0-or-later',
       description: '',
-      repositoryUrl: 'https://github.com/fluentdb-dev/ithyno',
-      issuesUrl: 'https://github.com/fluentdb-dev/ithyno/issues',
-      releasesUrl: 'https://github.com/fluentdb-dev/ithyno/releases/latest',
-      licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
-      sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
+      repositoryUrl: REPO_URL,
+      issuesUrl: `${REPO_URL}/issues`,
+      releasesUrl: `${REPO_URL}/releases/latest`,
+      licenseUrl: LICENSE_URL,
+      sponsors: SPONSORS,
     };
   }
 }
@@ -408,11 +387,11 @@ function refreshMenu(aboutConfig?: AboutConfig): void {
     version: app.getVersion(),
     license: 'GPL-3.0-or-later',
     description: '',
-    repositoryUrl: 'https://github.com/fluentdb-dev/ithyno',
-    issuesUrl: 'https://github.com/fluentdb-dev/ithyno/issues',
-    releasesUrl: 'https://github.com/fluentdb-dev/ithyno/releases/latest',
-    licenseUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
-    sponsors: [{ label: 'Ko-fi', url: 'https://ko-fi.com/hamnbeans' }],
+    repositoryUrl: REPO_URL,
+    issuesUrl: `${REPO_URL}/issues`,
+    releasesUrl: `${REPO_URL}/releases/latest`,
+    licenseUrl: LICENSE_URL,
+    sponsors: SPONSORS,
   };
   const menu = buildAppMenu({
     about,
