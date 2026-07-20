@@ -7,7 +7,7 @@
 // vscode-extension/scripts/prepack.mjs at package time; it is NOT an owned
 // source manifest and is NOT updated here.
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,18 +59,43 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-// Read all manifests into memory, then write in a batch.
-const parsed = manifests.map((p) => ({
-  path: p,
-  data: JSON.parse(readFileSync(p, "utf8")),
-}));
-
-let written = 0;
-for (const { path: p, data } of parsed) {
+// Phase 1 — parse and build all new JSON strings in memory.
+// No disk writes yet; if anything fails here no files are touched.
+const updates = manifests.map((p) => {
+  const data = JSON.parse(readFileSync(p, "utf8"));
   data.version = valid;
-  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", "utf8");
-  written += 1;
-  console.log(`Updated ${p.replace(repoRoot + "/", "")}`);
+  return { final: p, content: JSON.stringify(data, null, 2) + "\n" };
+});
+
+// Phase 2 — write each manifest to a sibling temp file, then rename.
+// rename(2) is atomic on the same filesystem, so each individual manifest
+// transitions from old to new atomically. We write ALL temps before renaming
+// ANY target: if a temp-write fails, we clean up temps created so far and
+// exit non-zero — no target file is modified.
+const pid = process.pid;
+const temps = [];
+try {
+  // Step 2a: write temp files.
+  for (const { final, content } of updates) {
+    const tmp = `${final}.tmp-${pid}`;
+    writeFileSync(tmp, content, "utf8");
+    temps.push({ tmp, final });
+  }
+  // Step 2b: rename each temp to its final location.
+  // All temp writes succeeded — proceed with renames.
+  for (const { tmp, final } of temps) {
+    renameSync(tmp, final);
+    console.log(`Updated ${final.replace(repoRoot + "/", "")}`);
+  }
+} catch (err) {
+  // Clean up any temp files that were created before the failure.
+  for (const { tmp } of temps) {
+    try { unlinkSync(tmp); } catch { /* ignore cleanup errors */ }
+  }
+  console.error(
+    `Version bump failed — no target manifests were modified.\n${err.message}`
+  );
+  process.exit(1);
 }
 
 console.log(`Version bumped to ${valid}`);
