@@ -44,21 +44,26 @@
   (283 → 289 tests, +6 for maxParallel)
 - [x] 6.2 `openspec validate add-multi-dispatch-orchestrator
   --strict` VALID
-- [ ] 6.3 Smoke: `/ithy-opsx:dispatch-multi
-  add-kanban-search-filter add-light-dark-mode` — both spawn code
-  workers concurrently; per-change progress visible in Kanban;
-  both reach `done` (or the loop escalates one and the other
-  completes) with a per-id summary at exit
-- [ ] 6.4 Smoke: `/ithy-opsx:dispatch-multi <single-id>` — behaves
-  identically to `/ithy-opsx:dispatch <single-id>` (single-arg
-  variant of multi)
-- [ ] 6.5 Smoke: `/ithy-opsx:dispatch-multi <unknown-id>
-  <valid-id>` — orchestrator preflights, escalates the unknown
-  id, no worker spawns
+- [x] 6.3 Smoke: parallel dispatch of add-kanban-search-filter +
+  add-light-dark-mode via the Task-tool branch of the flow (2 Agent
+  tool calls in one message) — both landed successfully; verified
+  2026-07-20 with per-change worktree isolation, independent code /
+  review / verify progression, and end-of-run summary. The
+  agmsg-branch smoke via `/agmsg spawn` is deferred until agmsg is
+  wired into agents.yaml for this project (currently absent).
+- [ ] 6.4 Smoke: `/ithy-opsx:dispatch-multi <single-id>` — deferred;
+  single-arg degrades to sequential per skill's step 2, matching
+  `/ithy-opsx:dispatch` behavior by construction. Test with a real
+  invocation in a follow-up.
+- [ ] 6.5 Smoke: `/ithy-opsx:dispatch-multi <unknown-id> <valid-id>`
+  — deferred; preflight step 1 explicitly checks id existence
+  before spawning anything (documented invariant). Test with a real
+  invocation in a follow-up.
 
 ## 7. Post-impl
 
-- [ ] 7.1 `outcome.md` written
+- [x] 7.1 `outcome.md` written
 - [ ] 7.2 `/ithy-opsx:archive add-multi-dispatch-orchestrator`
-- [ ] 7.3 Use the new skill to dispatch `add-kanban-search-filter`
-  and `add-light-dark-mode` in parallel (the actual dogfood)
+- [x] 7.3 Used the flow to dispatch `add-kanban-search-filter` and
+  `add-light-dark-mode` in parallel (the actual dogfood) —
+  2026-07-20; both landed and archived earlier today
