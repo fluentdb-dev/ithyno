@@ -216,6 +216,16 @@ Multi-dispatch complete.
   add-c       escalated  code stage subprocess failed with exit code 1
 ```
 
+**Next step for the user (not automated)**: run
+`/ithy-opsx:archive <id>` for each `done` change individually. That
+skill's Cleanup step offers to remove the worktree + delete the
+agent branch. `dispatch-multi` deliberately does NOT chain archive
+— per-change human confirmation of the archive commit is still
+valuable, and batching archive across changes would fight the
+"one archive per commit" convention. If you find yourself running
+N archives back-to-back frequently, that's a signal for a
+dedicated `archive-multi` skill (not this one's job).
+
 ### 8. Failure recovery ladder
 
 Same 3-step ladder as `/ithy-opsx:dispatch`:
