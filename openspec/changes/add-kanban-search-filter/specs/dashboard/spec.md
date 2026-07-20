@@ -1,6 +1,7 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Kanban Filter Input
+
 The Overview page SHALL expose a filter input above the Kanban
 columns that removes non-matching change cards from view
 (case-insensitive substring match against `change.id`, proposal
