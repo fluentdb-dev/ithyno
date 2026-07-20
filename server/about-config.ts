@@ -6,10 +6,14 @@
  * any surface (HTTP server, Electron main, VS Code extension) that can read a
  * parsed package.json object.
  *
- * UPDATE ALL PARALLEL COPIES when changing SPONSORS or LICENSE_URL:
- *   - server/about-config.ts       ← this file (server / web surface)
- *   - electron/src/about-config.ts ← Electron shell
- *   - vscode-extension/src/about-config.ts ← VS Code extension
+ * This file is the SINGLE SOURCE OF TRUTH for all About constants.
+ * The sync script (scripts/sync-about-config.mjs) copies it verbatim into:
+ *   - electron/src/about-config.ts          (generated; gitignored)
+ *   - vscode-extension/src/about-config.ts  (generated; gitignored)
+ *
+ * To add a new sponsor, change a URL, or update the canonical description:
+ * edit only THIS file and run `node scripts/sync-about-config.mjs` (or just
+ * rebuild — the sync runs automatically before tsc in every surface).
  */
 
 export type SponsorLink = {
@@ -28,6 +32,15 @@ export type AboutInfo = {
   licenseUrl: string;
   sponsors: SponsorLink[];
 };
+
+/**
+ * Canonical product description from the root package.json.
+ * Surfaces that read a surface-local package.json (e.g. the VS Code extension)
+ * should override `pkg.description` with this constant so all About panels
+ * show the same description regardless of which package.json was loaded.
+ */
+export const ROOT_DESCRIPTION =
+  "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.";
 
 /**
  * Sponsor entries rendered on all About surfaces.
@@ -81,7 +94,7 @@ export function buildAboutInfo(pkg: {
     name: pkg.name ?? "ithyno",
     version: pkg.version ?? "0.0.0",
     license: pkg.license ?? "GPL-3.0-or-later",
-    description: pkg.description ?? "",
+    description: pkg.description ?? ROOT_DESCRIPTION,
     repositoryUrl,
     issuesUrl,
     releasesUrl,

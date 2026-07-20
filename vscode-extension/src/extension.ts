@@ -10,7 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderOnboardingHtml, renderWebviewHtml } from "./webview-html";
-import { buildAboutInfo, LICENSE_URL } from "./about-config";
+import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
 
 /**
  * Choose the startup command sent to the injected terminal.
@@ -302,7 +302,10 @@ function openAboutPanel(context: vscode.ExtensionContext): void {
     // fall through with defaults
   }
 
-  const info = buildAboutInfo(pkg);
+  // The extension reads its own package.json whose description field is
+  // VS Code Marketplace copy, not the canonical product description.
+  // Override with ROOT_DESCRIPTION so all About surfaces show the same text.
+  const info = buildAboutInfo({ ...pkg, description: ROOT_DESCRIPTION });
   // Use canonical "ithyno" as display name regardless of extension manifest name.
   const displayName = "ithyno";
 
