@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 
+export const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
+
 export interface MenuHandlers {
   onOpenProject(): void;
   onNewProject(): void;
@@ -88,6 +90,17 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
         { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
+        { type: 'separator' },
+        {
+          label: 'Reload Terminal',
+          accelerator: 'CmdOrCtrl+Shift+K',
+          click: () => {
+            const win = handlers.getWindow();
+            if (win && !win.isDestroyed()) {
+              win.webContents.send(IPC_TERMINAL_RESTART);
+            }
+          },
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },

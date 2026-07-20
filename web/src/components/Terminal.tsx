@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { getSessionToken } from "../runtime";
 import { useAppliedTheme, type AppliedTheme } from "../hooks/useAppliedTheme";
+import { useStore } from "../store";
 
 /**
  * Browser terminal pane. Streams bytes over a dedicated /pty WebSocket to a
@@ -20,6 +21,7 @@ export function Terminal() {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const appliedTheme = useAppliedTheme();
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -58,6 +60,7 @@ export function Terminal() {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      setConnected(true);
       fitNow();
       term.focus();
     };
@@ -66,9 +69,11 @@ export function Terminal() {
       term.write(data as any);
     };
     ws.onclose = () => {
+      setConnected(false);
       term.writeln("\r\n[disconnected]");
     };
     ws.onerror = () => {
+      setConnected(false);
       term.writeln("\r\n[connection error]");
     };
 
@@ -108,7 +113,18 @@ export function Terminal() {
     term.options.theme = buildXtermTheme(appliedTheme);
   }, [appliedTheme]);
 
-  return <div ref={hostRef} className="terminal-host" />;
+  return (
+    <div ref={hostRef} className="terminal-host">
+      <button
+        className={`terminal-reconnect${connected ? "" : " terminal-reconnect-warn"}`}
+        title="Restart terminal (Cmd/Ctrl+Shift+K)"
+        aria-label="Restart terminal"
+        onClick={() => useStore.getState().restartTerminal()}
+      >
+        &#x21BB;
+      </button>
+    </div>
+  );
 }
 
 /**
