@@ -35,6 +35,12 @@
 
 - R1 vs R2 review findings contradicted each other (accelerator required vs global-fire violates focus-scope). Real issue was spec self-contradiction — Electron menu accelerators can't be focus-scoped. Fixed by relaxing spec: label hint stays, accelerator dropped; renderer keydown handles the focus-scoped shortcut.
 
+## Round 4 rework (2026-07-20)
+
+### ⚠️ Surprises
+
+- R3 review caught macOS-only ⇧⌘K label — added platform detection (Ctrl+Shift+K for Win/Linux) in both Electron menu and web tooltip: `electron/src/menu.ts` now branches on `process.platform === 'darwin'`, and `Terminal.tsx` uses `/Mac/i.test(navigator.platform)` to pick between `⇧⌘K` and `Ctrl+Shift+K` in the button's `title` attribute.
+
 ## Follow-ups
 
 - The reconnect button overlays the top-right corner of the xterm canvas. If the terminal prompt ever renders content directly under that corner (rare, but possible on narrow widths), the button could occlude text. A future pass could move it to the `.terminal-head` bar instead, where it sits outside the canvas.

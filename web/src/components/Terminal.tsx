@@ -117,7 +117,7 @@ export function Terminal() {
     <div ref={hostRef} className="terminal-host">
       <button
         className={`terminal-reconnect${connected ? "" : " terminal-reconnect-warn"}`}
-        title="Restart terminal (Cmd/Ctrl+Shift+K)"
+        title={/Mac/i.test(navigator.platform) ? "Restart terminal (⇧⌘K)" : "Restart terminal (Ctrl+Shift+K)"}
         aria-label="Restart terminal"
         onClick={() => useStore.getState().restartTerminal()}
       >
