@@ -1,16 +1,22 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Job Status Vocabulary
-The `JobStatus` union SHALL include the value `"orphaned"` in addition
-to the existing `"running" | "completed" | "cancelled" | "crashed"` so
-that jobs adopted from an on-disk worktree — without a live process —
-carry a truthful label distinct from finished-run states.
+
+The `JobStatus` union SHALL be one of `"running" | "completed" |
+"cancelled" | "crashed" | "orphaned"`. The `"orphaned"` value
+carries a truthful label distinct from finished-run states for
+jobs adopted from an on-disk worktree without a live process
+handle.
 
 #### Scenario: Orphaned status distinct from completed
+
 - **WHEN** a job is inserted by orphan adoption
 - **THEN** its `status` is `"orphaned"`, never `"completed"` (the runner has no evidence the previous run succeeded) and never `"crashed"` (no evidence the previous run failed)
 
-## ADDED Requirements
+#### Scenario: Fresh run yields running then a terminal status
+
+- **WHEN** the runner spawns a fresh child that runs to exit
+- **THEN** the job transitions `"running"` → one of `"completed"`, `"cancelled"`, or `"crashed"` per the exit signal / code; `"orphaned"` is never assigned to a fresh run
 
 ### Requirement: Adopt Orphan Worktrees on Startup
 The agent runner SHALL, on startup, invoke `git worktree list --porcelain`

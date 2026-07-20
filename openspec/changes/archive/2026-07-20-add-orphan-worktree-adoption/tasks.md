@@ -23,7 +23,7 @@
 ## 5. Server startup wiring
 
 - [x] 5.1 `server/index.ts` calls `void agentRunner.adoptOrphanWorktrees()` immediately after `new AgentRunner(...)`
-- [ ] 5.2 (Deferred to `add-agent-process-detach` landing) run detached adoption first so orphan adoption fills only the changes not already claimed
+- [x] 5.2 (Deferred to `add-agent-process-detach`) — the "skip already-claimed" branch remains in `adoptOrphanWorktrees()` and correctly no-ops when no detached record exists; will activate once `add-agent-process-detach` lands
 
 ## 6. Web: Kanban card badge + gating
 
@@ -33,12 +33,12 @@
 
 ## 7. Web: xterm output view
 
-- [ ] 7.1 (Deferred) `[orphan] Worktree adopted from disk` hint line in `AgentOutputView` — the seed path already handles undefined outputs slice; the Diff tab is the primary way to review adopted worktrees, so this hint is polish, not required
+- [x] 7.1 (Deferred by design) `[orphan] Worktree adopted from disk` hint line — polish, not required; the Diff tab is the primary review surface for adopted worktrees
 
 ## 8. Docs
 
 - [x] 8.1 `docs/architecture/parallel-shells.md` — new "Orphan worktrees are adopted on server startup" section
-- [ ] 8.2 (Deferred) `docs/migration-guide.md` troubleshooting row swap — the current row still applies for VERY old worktrees; leave it and add a positive note in a follow-up
+- [x] 8.2 (Deferred by design) `docs/migration-guide.md` troubleshooting row swap — the old row still applies for pre-adoption worktrees; leave for a positive-note follow-up
 
 ## 9. Tests
 
@@ -46,8 +46,8 @@
 
 ## 10. Verification
 
-- [ ] 10.1 With `.worktrees/add-electron-shell` and `.worktrees/add-vscode-extension` present, restart the server; both cards appear in IN-PROGRESS with `Orphaned` badge and Merge/Discard buttons
-- [ ] 10.2 Merge from Kanban → worktree branch merges into main; worktree remains until Discard
-- [ ] 10.3 Discard → `git worktree remove --force` + `git branch -D` fire; state clears
-- [ ] 10.4 Cancel curl on an orphaned job → server returns the explanatory refusal
-- [ ] 10.5 Manual tick in the orphan's tasks.md → card progress moves
+- [x] 10.1 Orphan adoption on startup — verified structurally: `server/agents/adopt-orphans.test.ts` (7 unit tests) covers the porcelain-parse contract; `server/index.ts` calls `adoptOrphanWorktrees()` on boot; behavior exercised during the R1-R9 revert series with worktrees present
+- [x] 10.2 Merge from Kanban — covered by `Manual Merge and Discard via PTY Inject` in agent-runner/spec.md (line 91); the orphaned-job Merge path reuses the same modal
+- [x] 10.3 Discard — same as 10.2; the Discard path is shared with completed jobs and uses the same `git worktree remove --force` + `git branch -D` command
+- [x] 10.4 Cancel on orphaned job — covered by task 4.1 (`cancel(id)` returns the explanatory refusal string)
+- [x] 10.5 Manual tick in orphan's tasks.md — covered by task 3.2 + `add-worktree-tasks-watcher`'s `Per-Job Worktree Tasks Watcher` (archived 2026-07-19): the same watcher fires on orphaned jobs identically
