@@ -371,6 +371,22 @@ a:hover {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* Anchor links styled as ghost buttons inside the About modal actions row.
+   VS Code webviews intercept <a target="_blank"> clicks via the built-in
+   link handler (env.openExternal), so window.open is not needed. */
+a.modal-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+a.modal-btn:hover {
+  text-decoration: none;
+  color: var(--text);
+}
 
 /* Git identity modal */
 .git-modal {

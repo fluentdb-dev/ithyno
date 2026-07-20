@@ -13,6 +13,10 @@ let _aboutCache: AboutInfo | null = null;
  * closes it. Fetches /api/about once and caches for re-opens.
  *
  * No Settings-page section — this modal is the sole web entry point.
+ *
+ * External links use plain <a href target="_blank"> so that VS Code webviews
+ * intercept them via the built-in link handler (→ env.openExternal) without
+ * any bridge message, while web-browser and Electron shells open a new tab.
  */
 export function AboutModal({ onClose }: Props) {
   const [info, setInfo] = useState<AboutInfo | null>(_aboutCache);
@@ -49,8 +53,6 @@ export function AboutModal({ onClose }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const openUrl = (url: string) => window.open(url, "_blank", "noopener,noreferrer");
-
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
@@ -76,15 +78,7 @@ export function AboutModal({ onClose }: Props) {
               </div>
               <div>
                 <span className="muted">License:</span>{" "}
-                <a
-                  href={info.licenseUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    openUrl(info.licenseUrl);
-                  }}
-                >
+                <a href={info.licenseUrl} target="_blank" rel="noopener noreferrer">
                   {info.license}
                 </a>
               </div>
@@ -94,44 +88,49 @@ export function AboutModal({ onClose }: Props) {
             </div>
 
             <div className="modal-actions about-actions">
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => openUrl(info.repositoryUrl)}
+              <a
+                href={info.repositoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ghost modal-btn"
               >
                 Open Repository
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => openUrl(info.issuesUrl)}
+              </a>
+              <a
+                href={info.issuesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ghost modal-btn"
               >
                 Report an Issue
-              </button>
+              </a>
               {info.sponsors.map((s) => (
-                <button
+                <a
                   key={s.label}
-                  type="button"
-                  className="ghost"
-                  onClick={() => openUrl(s.url)}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ghost modal-btn"
                 >
                   Sponsor via {s.label}
-                </button>
+                </a>
               ))}
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => openUrl(info.releasesUrl)}
+              <a
+                href={info.releasesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ghost modal-btn"
               >
                 Check for Updates
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => openUrl(info.licenseUrl)}
+              </a>
+              <a
+                href={info.licenseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ghost modal-btn"
               >
                 View License
-              </button>
+              </a>
             </div>
           </>
         )}
