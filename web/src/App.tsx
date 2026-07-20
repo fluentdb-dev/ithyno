@@ -15,6 +15,7 @@ import { Settings } from "./pages/Settings";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
 import { GitIdentityChip } from "./components/GitIdentityChip";
+import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
 
@@ -41,6 +42,13 @@ export function App() {
   // `isVsCodeShell()` branch in `api.ts#injectPty`.
   const embeddedTerminalAvailable = !isVsCodeShell() && storeTerminalAvailable;
 
+  // Resolve + apply the current palette (`useAppliedTheme` writes
+  // `document.documentElement.dataset.theme` as a side effect and
+  // subscribes to `matchMedia("(prefers-color-scheme: dark)")` when the
+  // preference is `"system"`). The returned value drives palette-dependent
+  // effects below (e.g. Electron traffic-light title bar tint).
+  const appliedTheme = useAppliedTheme();
+
   // Bootstrap a "session expired" banner state. Two paths trigger it:
   //   1. No token at all on load (sessionStorage empty AND no ?token=) → banner.
   //   2. Any mutating API call returns 401/403 → banner.
@@ -56,11 +64,14 @@ export function App() {
   useEffect(() => {
     if (!isElectronShell()) return;
     if (isElectronMac()) document.body.classList.add("is-electron-mac");
+    // Re-read on every appliedTheme change so the Electron traffic-light
+    // tint tracks light↔dark flips (CSS vars have already been updated by
+    // useAppliedTheme by the time this effect runs).
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue("--bg").trim() || "#0f1115";
     const text = styles.getPropertyValue("--text").trim() || "#e6e9ef";
     setTitleBarColor(bg, text);
-  }, []);
+  }, [appliedTheme]);
 
   // Detect a stale token at first mount (e.g. after a server restart) by
   // hitting the lightweight check endpoint. If the token is missing or no
