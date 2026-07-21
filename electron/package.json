@@ -7,8 +7,8 @@
   "license": "GPL-3.0-or-later",
   "main": "out/main.js",
   "scripts": {
-    "build": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
-    "dev": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json && electron .",
+    "build": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
+    "dev": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json && electron .",
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
