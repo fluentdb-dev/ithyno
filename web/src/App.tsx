@@ -38,6 +38,8 @@ export function App() {
   const dismissToast = useStore((s) => s.dismissToast);
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
+  const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
+  const restartTerminal = useStore((s) => s.restartTerminal);
   // In VS Code the extension host owns a real terminal, so we skip the
   // embedded xterm pane entirely. Command injection still works — see
   // `isVsCodeShell()` branch in `api.ts#injectPty`.
@@ -93,6 +95,32 @@ export function App() {
     void load();
     connectWs();
   }, [load, connectWs, authExpired]);
+
+  // Cmd/Ctrl+Shift+K — restart terminal, but only when focus is inside
+  // `.terminal-host` or on the `.terminal-reconnect` button.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.key === "K" || e.key === "k") || !e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+      const active = document.activeElement;
+      const termHost = document.querySelector(".terminal-host");
+      const isInsideTerminal = termHost != null && termHost.contains(active);
+      const isReconnectBtn = active != null && (active as Element).classList?.contains("terminal-reconnect");
+      if (!isInsideTerminal && !isReconnectBtn) return;
+      e.preventDefault();
+      restartTerminal();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [restartTerminal]);
+
+  // Electron IPC: menu "Reload Terminal" sends `ithyno:terminal-restart`
+  // to the renderer. Subscribe when running under Electron.
+  useEffect(() => {
+    const w = window as any;
+    if (!w.ithyno?.onTerminalRestart) return;
+    const unsub = w.ithyno.onTerminalRestart(() => restartTerminal());
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [restartTerminal]);
 
   const showTerminal = embeddedTerminalAvailable && terminalVisible;
 
@@ -174,7 +202,7 @@ export function App() {
             <span>Terminal</span>
             <span className="muted">cwd: project root</span>
           </div>
-          <Terminal />
+          <Terminal key={terminalRestartCounter} />
         </aside>
       )}
 

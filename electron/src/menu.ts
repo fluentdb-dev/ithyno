@@ -15,6 +15,8 @@ export interface AboutConfig {
   sponsors: SponsorLink[];
 }
 
+export const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
+
 export interface MenuHandlers {
   about: AboutConfig;
   onOpenProject(): void;
@@ -104,6 +106,18 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
         { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
+        { type: 'separator' },
+        {
+          label: process.platform === 'darwin'
+            ? 'Reload Terminal (⇧⌘K)'
+            : 'Reload Terminal (Ctrl+Shift+K)',
+          click: () => {
+            const win = handlers.getWindow();
+            if (win && !win.isDestroyed()) {
+              win.webContents.send(IPC_TERMINAL_RESTART);
+            }
+          },
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },

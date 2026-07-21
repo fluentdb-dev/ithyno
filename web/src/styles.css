@@ -2018,6 +2018,46 @@ a.modal-btn:hover {
   flex: 1;
   min-height: 0;
   padding: 6px 8px 8px;
+  position: relative;
+}
+
+/* Reconnect button — top-right of the terminal pane, always visible */
+.terminal-reconnect {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+}
+.terminal-reconnect:hover {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* Warn state: PTY WebSocket has closed */
+.terminal-reconnect-warn {
+  opacity: 1;
+  color: var(--warning);
+  border-color: var(--warning);
+  background: color-mix(in oklab, var(--warning) 12%, transparent);
+  animation: terminal-reconnect-pulse 1.6s ease-in-out infinite;
+}
+@keyframes terminal-reconnect-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--warning) 30%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning) 0%, transparent); }
 }
 .terminal-host .xterm,
 .terminal-host .xterm-viewport,

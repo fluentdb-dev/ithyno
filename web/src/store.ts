@@ -58,6 +58,9 @@ type Store = {
   conflicts: Record<string, Conflict>; // keyed by taskKey
   terminalAvailable: boolean;
   terminalVisible: boolean;
+  /** Bumped by `restartTerminal()` to trigger a React remount of `<Terminal>`.
+   *  Consumer: `<Terminal key={terminalRestartCounter} />` in App.tsx. */
+  terminalRestartCounter: number;
   commandStyle: CommandStyle;
   overviewLayout: OverviewLayout;
   /** Tri-state theme preference (see `ThemePreference`). Persisted to
@@ -102,6 +105,7 @@ type Store = {
   pushToast: (kind: Toast["kind"], message: string) => void;
   dismissToast: (id: number) => void;
   setTerminalVisible: (v: boolean) => void;
+  restartTerminal: () => void;
   setCommandStyle: (v: CommandStyle) => void;
   setOverviewLayout: (v: OverviewLayout) => void;
   setTheme: (v: ThemePreference) => void;
@@ -193,6 +197,7 @@ export const useStore = create<Store>((set, get) => ({
   conflicts: {},
   terminalAvailable: false,
   terminalVisible: readTerminalVisible(),
+  terminalRestartCounter: 0,
   commandStyle: readCommandStyle(),
   overviewLayout: readOverviewLayout(),
   theme: readTheme(),
@@ -333,6 +338,7 @@ export const useStore = create<Store>((set, get) => ({
     }
     set({ terminalVisible: v });
   },
+  restartTerminal: () => set((s) => ({ terminalRestartCounter: s.terminalRestartCounter + 1 })),
   setCommandStyle: (v) => {
     try {
       localStorage.setItem(STYLE_KEY, v);
