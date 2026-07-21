@@ -2161,6 +2161,13 @@ a.modal-btn:hover {
   padding-right: calc(50% + 24px);
 }
 
+/* Hidden: the terminal panel stays in the DOM (component mounted, PTY /
+ * WebSocket alive) but is not shown. Restoring the terminal via the
+ * standalone anchor brings back the same shell + scrollback. */
+.global-terminal.terminal-hidden {
+  display: none;
+}
+
 /* Action buttons (Apply / Archive / New Change) */
 .action-btn,
 .new-change-btn,

@@ -129,6 +129,10 @@ export function App() {
   const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden";
 
   // Derive the layout class for the app root. "default" = no extra class.
+  // "hidden" doesn't reach this ternary — showTerminal is false when hidden
+  // (see line above), so the ternary short-circuits to "". The <aside> below
+  // still mounts on Hidden (visually hidden via `.terminal-hidden` CSS) so
+  // the PTY session persists.
   const terminalLayoutClass =
     !showTerminal
       ? ""
@@ -211,17 +215,24 @@ export function App() {
       </main>
 
       {embeddedTerminalAvailable && terminalSize === "hidden" && (
-        /* Hidden state: a compact terminal-glyph button just below the topbar
-           is the sole re-show entry point. Clicking it restores terminalSize
-           to "default". The panel body and full toggle are NOT rendered, so
-           the PTY WebSocket stays closed until the user opts back in. */
+        /* Hidden state: a compact terminal-glyph button flush at the top-right
+           corner is the sole re-show entry point. The <aside> BELOW stays
+           mounted (just visually hidden via CSS) so the PTY WebSocket and
+           the terminal session both persist — clicking restore surfaces the
+           same shell with intact scrollback. */
         <div className="terminal-hidden-anchor">
           <TerminalHiddenAnchor />
         </div>
       )}
 
-      {embeddedTerminalAvailable && terminalSize !== "hidden" && terminalVisible && (
-        <aside className="global-terminal">
+      {/* Mount the aside on ALL non-hidden states AND on hidden (with the
+          terminal-hidden CSS class = display:none). React keeps <Terminal />
+          mounted throughout, so the /pty WebSocket + PTY session persist
+          across every transition — including Hidden. */}
+      {embeddedTerminalAvailable && terminalVisible && (
+        <aside
+          className={`global-terminal${terminalSize === "hidden" ? " terminal-hidden" : ""}`}
+        >
           <div className="terminal-head">
             {/* Toggle is LEFT of the "Terminal" label per spec (task 3.1) */}
             <TerminalSizeToggle />
