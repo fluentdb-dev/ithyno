@@ -352,6 +352,90 @@ agents:
   });
 });
 
+describe("AgentRegistry maxReworkRounds (add-agents-max-rework-rounds-config)", () => {
+  it("defaults maxReworkRounds to 5 when the field is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.maxReworkRounds).toBe(5);
+  });
+
+  it("accepts a valid integer in range and surfaces it", async () => {
+    const reg = await loadWith(
+      `maxReworkRounds: 3
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.maxReworkRounds).toBe(3);
+  });
+
+  it("clamps maxReworkRounds 0 to minimum 1 with a warning", async () => {
+    const reg = await loadWith(
+      `maxReworkRounds: 0
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    // load still succeeds (clamp semantics, not throw)
+    expect(cfg.ok).toBe(true);
+    expect(cfg.maxReworkRounds).toBe(1);
+  });
+
+  it("clamps maxReworkRounds 11 to maximum 10 with a warning", async () => {
+    const reg = await loadWith(
+      `maxReworkRounds: 11
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.maxReworkRounds).toBe(10);
+  });
+
+  it("floors a float (5.7 → 5) with a warning", async () => {
+    const reg = await loadWith(
+      `maxReworkRounds: 5.7
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.maxReworkRounds).toBe(5);
+  });
+
+  it("returns default 5 for non-numeric string 'five' with a warning", async () => {
+    const reg = await loadWith(
+      `maxReworkRounds: "five"
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.maxReworkRounds).toBe(5);
+  });
+});
+
 describe("AgentRegistry agmsg block (add-agmsg-config-block)", () => {
   it("defaults agmsg to null when the block is absent", async () => {
     const reg = await loadWith(

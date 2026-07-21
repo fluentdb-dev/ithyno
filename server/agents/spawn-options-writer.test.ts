@@ -34,6 +34,7 @@ function cfg(partial: Partial<AgentConfig> & { agents: AgentConfig["agents"] }):
     agents: partial.agents,
     parallelExecution: partial.parallelExecution ?? false,
     maxParallel: partial.maxParallel ?? 3,
+    maxReworkRounds: (partial as { maxReworkRounds?: number }).maxReworkRounds ?? 5,
     agmsg: partial.agmsg ?? { team: "openspec-ui" },
     warnings: partial.warnings ?? [],
   };
@@ -233,6 +234,7 @@ describe("syncSpawnOptions integration", () => {
       agents: [],
       parallelExecution: false,
       maxParallel: 3,
+      maxReworkRounds: 5,
       agmsg: null,
       warnings: [],
     };
