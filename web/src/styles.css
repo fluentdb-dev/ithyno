@@ -358,8 +358,8 @@ a:hover {
 .about-meta {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 12px 0;
+  gap: 8px;
+  margin: 14px 0;
   font-size: 13px;
 }
 .about-description {
@@ -368,8 +368,10 @@ a:hover {
   line-height: 1.5;
 }
 .about-actions {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
+  margin-top: 16px;
 }
 /* Anchor links styled as ghost buttons inside the About modal actions row.
    VS Code webviews intercept <a target="_blank"> clicks via the built-in
@@ -377,15 +379,22 @@ a:hover {
 a.modal-btn {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  justify-content: center;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
   border-radius: var(--radius);
   font-size: 13px;
+  color: var(--text);
   cursor: pointer;
   text-decoration: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 a.modal-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
+  color: var(--accent);
   text-decoration: none;
-  color: var(--text);
 }
 
 /* Git identity modal */
@@ -2527,9 +2536,24 @@ a.modal-btn:hover {
   margin: 0;
 }
 .modal-close {
-  padding: 2px 8px;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 20px;
   line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.modal-close:hover {
+  background: var(--bg-hover, var(--panel));
+  color: var(--text);
 }
 .modal-mode {
   display: flex;
