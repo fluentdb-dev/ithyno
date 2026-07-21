@@ -20,10 +20,10 @@ export function TerminalSizeToggle() {
   const setTerminalSize = useStore((s) => s.setTerminalSize);
 
   const meta: Record<TerminalSize, { label: string; icon: ReactNode }> = {
-    default: { label: "今のサイズ", icon: <DefaultIcon /> },
-    half: { label: "半分", icon: <HalfIcon /> },
-    fullscreen: { label: "全画面", icon: <FullscreenIcon /> },
-    hidden: { label: "非表示", icon: <HiddenIcon /> },
+    default: { label: "Default", icon: <DefaultIcon /> },
+    half: { label: "Half", icon: <HalfIcon /> },
+    fullscreen: { label: "Fullscreen", icon: <FullscreenIcon /> },
+    hidden: { label: "Hidden", icon: <HiddenIcon /> },
   };
 
   const nextOf: Record<TerminalSize, TerminalSize> = {
