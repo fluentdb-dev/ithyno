@@ -2111,8 +2111,8 @@ a.modal-btn:hover {
  * which pane will restore. */
 .terminal-hidden-anchor {
   position: fixed;
-  top: 64px;
-  right: 12px;
+  top: 56px;
+  right: 0;
   z-index: 6;
 }
 .terminal-restore-btn {
@@ -2123,7 +2123,9 @@ a.modal-btn:hover {
   height: 32px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: none;
+  border-right: none;
+  border-radius: 0 0 0 8px;
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
