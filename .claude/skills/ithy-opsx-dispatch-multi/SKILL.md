@@ -256,6 +256,19 @@ Same 3-step ladder as `/ithy-opsx:dispatch`:
   changes happen in dispatched worker invocations.
 - **Do NOT retry a failed worker without changing input**. Same
   rule as single dispatch.
+- **Manager fallback is sequential**. If a stage falls back to the
+  Manager (either no agent defined for the role, or the configured
+  agent failed at runtime after retries), the Manager walks the
+  affected changes ONE AT A TIME. The Manager is a single session;
+  in-Manager execution has no wall-clock gain from parallel
+  invocation. This is a hard rule that overrides the standard
+  parallel-across-changes semantics for the fallen-back stage only.
+  Other changes' stages that still have working configured agents
+  continue in parallel around the sequential Manager work. Full
+  fallback rules (including runtime-failure ladder and the
+  distinction between Manager self-execution vs Manager-spawned
+  subagents) live in `.claude/commands/ithy-opsx/dispatch.md` under
+  "Manager fallback semantics".
 
 ## See also
 

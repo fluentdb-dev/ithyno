@@ -47,10 +47,68 @@ For each stage `S ∈ {code, review, verify}`:
    ```
 
    - **No entry found** for `S = code` → fall back to **Manager
-     self-dispatch**: invoke the Task tool with the resolved prompt,
-     letting Claude implement the change directly.
-   - **No entry found** for `S = review` or `S = verify` → escalate
-     with `no agent declared for role: <S>`.
+     self-dispatch**: see **Manager fallback semantics** below.
+   - **No entry found** for `S = review` or `S = verify` → fall back
+     to **Manager self-dispatch** (same rules as code) OR escalate
+     with `no agent declared for role: <S>` if the Manager cannot
+     perform the work itself (e.g. reviewer independence is required
+     by policy). Default is Manager fallback; escalate only when
+     explicitly configured to.
+
+   ### Manager fallback semantics
+
+   "Manager self-dispatch" and "Manager fallback" refer to the same
+   thing: the Manager (this Claude session) performs the stage's
+   work directly, in-session, instead of routing to a configured
+   worker CLI. This applies both when no agent entry exists for `S`
+   AND when the configured agent fails at runtime after retries
+   (sandbox block, API timeout, network error, missing binary).
+
+   The rules for Manager fallback are uniform across ALL stages
+   (`code`, `review`, `verify`):
+
+   - **Execution mode: sequential.** The Manager is a single
+     process/session. In-Manager execution (Bash, Read, Edit, Write,
+     etc.) runs one operation at a time — there is no wall-clock
+     gain from firing "parallel" Manager work. Even for multi-change
+     dispatch, if the Manager is the fallback executor, walk changes
+     one at a time.
+   - **Distinct from Manager-spawned subagents.** When the Manager
+     invokes the Task tool to spawn a subagent (e.g., the `code`
+     stage's Manager-fallback path spawning a fresh Claude Code
+     instance), that IS a form of ad-hoc agent definition, NOT
+     Manager fallback. Subagent spawn CAN run in parallel — it
+     follows the standard dispatch parallelism rules. The key
+     distinguisher is *who executes the work*: the Manager itself
+     (fallback, sequential) vs a distinct subagent instance the
+     Manager spawned (agent-like, parallel-eligible).
+   - **Runtime failure fallback ladder** (when a configured agent
+     fails):
+     1. Retry the configured agent once (transient network/API
+        error).
+     2. If still failing, invoke Manager fallback for the stage —
+        Manager performs the work in-session and writes the same
+        artifact contract the configured agent would have written
+        (e.g., review.md at `$REVIEW_MD_PATH` with `verdict:` in
+        frontmatter). Log clearly which stage is falling back and
+        why.
+     3. If Manager itself cannot perform (e.g., an external tool is
+        required that the Manager lacks access to), escalate to
+        needs-human per the standard escalate contract.
+   - **Verify fallback is the same shape.** When no verify agent is
+     defined and the Manager runs verify, it means: cd into the
+     worktree, run `npm test`, `npm run typecheck`, `npm run build`
+     in fail-fast order, write review.md at `$REVIEW_MD_PATH` with
+     `verdict: pass` if all three pass, `verdict: needs-rework` with
+     the failure output otherwise. Sequential across changes.
+   - **Review fallback is the same shape.** When the review agent is
+     unavailable, the Manager reads the diff (`git diff main...HEAD`
+     in the worktree), assesses against the change's spec/proposal,
+     and writes review.md with a verdict. Sequential across changes.
+     Note that Manager review lacks the independence-of-perspective
+     value of an external reviewer — for high-stakes changes,
+     escalate rather than self-review is often better; project
+     policy decides.
 
 2. **Resolve the prompt**: `entry.prompts[S]` if set, else the
    built-in default:
