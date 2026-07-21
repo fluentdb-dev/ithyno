@@ -386,7 +386,8 @@ a.modal-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   border-radius: var(--radius);
@@ -395,6 +396,9 @@ a.modal-btn {
   cursor: pointer;
   text-decoration: none;
   transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+a.modal-btn svg {
+  flex-shrink: 0;
 }
 a.modal-btn:hover {
   border-color: var(--accent);
