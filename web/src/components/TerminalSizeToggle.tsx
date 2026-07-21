@@ -45,7 +45,7 @@ export function TerminalSizeToggle() {
       aria-label={`Terminal size: ${current.label}. Click to switch to ${next.label}.`}
       onClick={() => setTerminalSize(nextValue)}
     >
-      {current.icon}
+      {next.icon}
     </button>
   );
 }
@@ -89,7 +89,13 @@ function TerminalGlyph() {
   );
 }
 
-// SVG icon components — 14×14, matching theme-toggle icon pattern.
+/* SVG icon components — 14×14 window-mock diagrams depicting the resulting
+ * terminal layout. The terminal is docked on the right, so:
+ *   Default    — narrow strip on the right of the window frame
+ *   Half       — right half filled (50/50 split)
+ *   Fullscreen — whole window filled
+ *   Hidden     — eye-off (universal hide glyph)
+ */
 
 function FullscreenIcon() {
   return (
@@ -104,10 +110,7 @@ function FullscreenIcon() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <polyline points="15 3 21 3 21 9" />
-      <polyline points="9 21 3 21 3 15" />
-      <line x1="21" y1="3" x2="14" y2="10" />
-      <line x1="3" y1="21" x2="10" y2="14" />
+      <rect x="3" y="5" width="18" height="14" rx="2" fill="currentColor" />
     </svg>
   );
 }
@@ -125,8 +128,8 @@ function HalfIcon() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <line x1="3" y1="12" x2="21" y2="12" />
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <rect x="12" y="5" width="9" height="14" fill="currentColor" />
     </svg>
   );
 }
@@ -144,10 +147,8 @@ function DefaultIcon() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <polyline points="4 14 10 14 10 20" />
-      <polyline points="20 10 14 10 14 4" />
-      <line x1="10" y1="14" x2="3" y2="21" />
-      <line x1="21" y1="3" x2="14" y2="10" />
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <rect x="17" y="5" width="4" height="14" fill="currentColor" />
     </svg>
   );
 }
