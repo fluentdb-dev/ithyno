@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderOnboardingHtml, renderWebviewHtml } from "./webview-html";
+import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
 
 /**
  * Choose the startup command sent to the injected terminal.
@@ -168,7 +169,11 @@ export function activate(context: vscode.ExtensionContext): void {
     () => runNewProjectFlow(context),
   );
 
-  context.subscriptions.push(cmd, newProjectCmd);
+  const aboutCmd = vscode.commands.registerCommand("ithyno.about", () =>
+    openAboutPanel(context),
+  );
+
+  context.subscriptions.push(cmd, newProjectCmd, aboutCmd);
 }
 
 /**
@@ -276,6 +281,78 @@ async function runNewProjectFlow(
     if (!disposed) disposed = true;
     server.dispose();
   });
+}
+
+/**
+ * Open a small About webview panel.
+ * `enableScripts: false` — no JavaScript, only static HTML + <a href> links.
+ * VS Code intercepts external links and opens them via `vscode.env.openExternal`.
+ *
+ * All About data (sponsors, URLs, constants) comes from ./about-config — edit
+ * there to add new sponsor entries without touching this function.
+ */
+function openAboutPanel(context: vscode.ExtensionContext): void {
+  // Read the extension's own package.json — version always matches root
+  // because `release:version` keeps them in sync.
+  const pkgPath = join(context.extensionPath, "package.json");
+  let pkg: Parameters<typeof buildAboutInfo>[0] = {};
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as typeof pkg;
+  } catch {
+    // fall through with defaults
+  }
+
+  // The extension reads its own package.json whose description field is
+  // VS Code Marketplace copy, not the canonical product description.
+  // Override with ROOT_DESCRIPTION so all About surfaces show the same text.
+  const info = buildAboutInfo({ ...pkg, description: ROOT_DESCRIPTION });
+  // Use canonical "ithyno" as display name regardless of extension manifest name.
+  const displayName = "ithyno";
+
+  const panel = vscode.window.createWebviewPanel(
+    "ithyno.about",
+    "About ithyno",
+    vscode.ViewColumn.Active,
+    { enableScripts: false, localResourceRoots: [] },
+  );
+
+  const sponsorLinks = info.sponsors
+    .map((s) => `    <a href="${s.url}">Sponsor via ${s.label}</a>`)
+    .join("\n");
+
+  panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About ithyno</title>
+  <style>
+    body { font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); }
+    h1 { font-size: 1.4em; margin-bottom: 8px; }
+    table { border-collapse: collapse; margin-bottom: 16px; }
+    td { padding: 3px 12px 3px 0; font-size: 0.95em; }
+    td:first-child { color: var(--vscode-descriptionForeground); }
+    .links { display: flex; flex-direction: column; gap: 6px; }
+    a { color: var(--vscode-textLink-foreground); }
+  </style>
+</head>
+<body>
+  <h1>${displayName}</h1>
+  <table>
+    <tr><td>Version</td><td><code>${info.version}</code></td></tr>
+    <tr><td>License</td><td><a href="${LICENSE_URL}">${info.license}</a></td></tr>
+    ${info.description ? `<tr><td>Description</td><td>${info.description}</td></tr>` : ""}
+  </table>
+  <div class="links">
+    <a href="${info.repositoryUrl}">Open Repository</a>
+    <a href="${info.issuesUrl}">Report an Issue</a>
+${sponsorLinks}
+    <a href="${info.releasesUrl}">Check for Updates</a>
+    <a href="${info.licenseUrl}">View License</a>
+  </div>
+</body>
+</html>`;
 }
 
 export function deactivate(): void {

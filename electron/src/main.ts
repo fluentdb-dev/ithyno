@@ -8,7 +8,7 @@ import {
   screen,
   shell,
 } from 'electron';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
@@ -18,8 +18,41 @@ const OVERLAY_HEIGHT = 32;
 
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
-import { buildAppMenu } from './menu';
+import { buildAppMenu, type AboutConfig } from './menu';
 import { ensureAgmsgInstalled } from './agmsg-installer';
+import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
+
+/**
+ * Read the root package.json and return an AboutConfig object.
+ * In packaged mode the file is at `extraResources/app/package.json`.
+ * In dev mode it lives one directory above the electron app root.
+ *
+ * Sponsors list and URL constants come from ./about-config — edit there to
+ * add new sponsor entries without touching this file.
+ */
+function readAboutConfig(): AboutConfig {
+  const pkgPath = app.isPackaged
+    ? join(process.resourcesPath, 'app', 'package.json')
+    : resolve(app.getAppPath(), '..', 'package.json');
+  try {
+    const raw = readFileSync(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as Parameters<typeof buildAboutInfo>[0];
+    return buildAboutInfo(pkg);
+  } catch (err) {
+    console.warn('[about] failed to read package.json:', err);
+    return {
+      name: 'ithyno',
+      version: '0.0.0',
+      license: 'GPL-3.0-or-later',
+      description: '',
+      repositoryUrl: REPO_URL,
+      issuesUrl: `${REPO_URL}/issues`,
+      releasesUrl: `${REPO_URL}/releases/latest`,
+      licenseUrl: LICENSE_URL,
+      sponsors: SPONSORS,
+    };
+  }
+}
 
 const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
@@ -345,8 +378,23 @@ function resolveOnboardingPreload(): string {
   return resolve(app.getAppPath(), 'out', 'onboarding-preload.js');
 }
 
-function refreshMenu(): void {
+let _aboutConfig: AboutConfig | null = null;
+
+function refreshMenu(aboutConfig?: AboutConfig): void {
+  if (aboutConfig) _aboutConfig = aboutConfig;
+  const about = _aboutConfig ?? {
+    name: 'ithyno',
+    version: app.getVersion(),
+    license: 'GPL-3.0-or-later',
+    description: '',
+    repositoryUrl: REPO_URL,
+    issuesUrl: `${REPO_URL}/issues`,
+    releasesUrl: `${REPO_URL}/releases/latest`,
+    licenseUrl: LICENSE_URL,
+    sponsors: SPONSORS,
+  };
   const menu = buildAppMenu({
+    about,
     onOpenProject: () => {
       const parent = mainWindow ?? undefined;
       const picked = pickProjectDialog(parent);
@@ -433,7 +481,13 @@ if (!gotLock) {
   );
 
   void app.whenReady().then(async () => {
-    refreshMenu();
+    const aboutConfig = readAboutConfig();
+    app.setAboutPanelOptions({
+      applicationName: aboutConfig.name,
+      applicationVersion: aboutConfig.version,
+      copyright: `License: ${aboutConfig.license}`,
+    });
+    refreshMenu(aboutConfig);
     await ensureAgmsgInstalled();
     const project = await ensureProject();
     if (!project) {

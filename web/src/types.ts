@@ -172,6 +172,24 @@ export type TagDetail = {
   artifacts: ArtifactEntry[];
 };
 
+// ---- about-panel -----------------------------------------------------------
+export type SponsorLink = {
+  label: string;
+  url: string;
+};
+
+export type AboutInfo = {
+  name: string;
+  version: string;
+  license: string;
+  description: string;
+  repositoryUrl: string;
+  issuesUrl: string;
+  releasesUrl: string;
+  licenseUrl: string;
+  sponsors: SponsorLink[];
+};
+
 // ---- agent-runner ----------------------------------------------------------
 export type AgentMode = "single-prompt" | "live-shell";
 

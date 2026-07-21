@@ -3,6 +3,13 @@
   "version": "0.0.1-alpha.0",
   "description": "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.",
   "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fluentdb-dev/ithyno"
+  },
+  "bugs": {
+    "url": "https://github.com/fluentdb-dev/ithyno/issues"
+  },
   "type": "module",
   "bin": {
     "ithyno": "bin/ithyno.js"

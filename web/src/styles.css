@@ -327,6 +327,86 @@ a:hover {
   white-space: nowrap;
 }
 
+/* About button — small circular "?" in topbar-right */
+.about-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+}
+.about-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* About modal */
+.about-modal {
+  min-width: 380px;
+  max-width: 480px;
+}
+.about-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+  font-size: 13px;
+}
+.about-description {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* Compound selector (.modal-actions.about-actions) intentionally raises
+   specificity above the later-declared `.modal-actions { display: flex;
+   justify-content: flex-end; }` (line 2637). Without this, the grid
+   layout below silently loses to the source-order-later flex rule and
+   the 5 action buttons cram into a single overflow row with vertically-
+   folded labels. */
+.modal-actions.about-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+/* Anchor links styled as ghost buttons inside the About modal actions row.
+   VS Code webviews intercept <a target="_blank"> clicks via the built-in
+   link handler (env.openExternal), so window.open is not needed. */
+a.modal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+a.modal-btn svg {
+  flex-shrink: 0;
+}
+a.modal-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
+  color: var(--accent);
+  text-decoration: none;
+}
+
 /* Git identity modal */
 .git-modal {
   min-width: 420px;
@@ -2455,6 +2535,35 @@ a:hover {
 .modal h3 {
   margin: 0 0 14px;
   font-size: 16px;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-header h3 {
+  margin: 0;
+}
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.modal-close:hover {
+  background: var(--bg-hover, var(--panel));
+  color: var(--text);
 }
 .modal-mode {
   display: flex;

@@ -12,7 +12,8 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onCommand:ithyno.show",
-    "onCommand:ithyno.newProject"
+    "onCommand:ithyno.newProject",
+    "onCommand:ithyno.about"
   ],
   "contributes": {
     "commands": [
@@ -24,6 +25,11 @@
       {
         "command": "ithyno.newProject",
         "title": "ithyno: New Project",
+        "category": "ithyno"
+      },
+      {
+        "command": "ithyno.about",
+        "title": "ithyno: About",
         "category": "ithyno"
       }
     ],
@@ -44,8 +50,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "watch": "tsc -p tsconfig.json --watch",
+    "build": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
+    "watch": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json --watch",
     "prepack:host": "node scripts/prepack.mjs",
     "package": "npm run build && npm run prepack:host && node scripts/vsix-package.mjs"
   },
