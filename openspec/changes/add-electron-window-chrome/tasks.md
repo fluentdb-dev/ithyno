@@ -11,6 +11,12 @@
 - [x] 2.2 In `web/src/styles.css`, `.is-electron-mac header` receives `padding-top: 28px` so header content doesn't slide under the traffic lights
 - [x] 2.3 Non-Electron and non-macOS Electron: no padding change
 
+## 2a. Draggable topbar (all platforms)
+
+- [x] 2a.1 Add a platform-agnostic `is-electron` body class in `web/src/App.tsx`, set whenever `isElectronShell()` is true (alongside the existing mac-only `is-electron-mac`)
+- [x] 2a.2 In `web/src/styles.css`, move `-webkit-app-region: drag` from the mac-scoped rule to `.is-electron .topbar` so it applies on Windows/Linux too; keep `.is-electron-mac .topbar` for the traffic-light padding/height only
+- [x] 2a.3 Keep `-webkit-app-region: no-drag` on interactive topbar children (`a`, `button`, `input`, `.conn`, `.topbar-right > *`) scoped to `.is-electron` so links/buttons stay clickable on every platform
+
 ## 3. IPC: dynamic recolor
 
 - [x] 3.1 New IPC channel name constant `IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color'`
@@ -34,3 +40,4 @@
 - [ ] 6.3 Windows / Linux (opportunistic): title bar area painted `#0f1115` with white window controls; no default OS gradient bar
 - [ ] 6.4 With `add-light-dark-mode` in place, flip the theme to Light → title bar area recolors to the light `--bg-page`
 - [ ] 6.5 Without Electron (CLI + browser), no rendering regressions — the runtime detection stays false, no safe-area padding applied
+- [ ] 6.6 Windows: dragging the topbar (avoiding nav links / Git identity chip) moves the window; double-click maximizes/restores

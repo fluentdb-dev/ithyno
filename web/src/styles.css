@@ -49,17 +49,22 @@ a:hover {
   top: 0;
   z-index: 10;
 }
+/* -webkit-app-region is honored on Windows/Linux too, not just macOS —
+   Electron just draws the min/max/close buttons itself there
+   (titleBarOverlay) instead of leaving room for traffic lights. */
+.is-electron .topbar {
+  -webkit-app-region: drag;
+}
+.is-electron .topbar a,
+.is-electron .topbar button,
+.is-electron .topbar input,
+.is-electron .topbar .conn,
+.is-electron .topbar .topbar-right > * {
+  -webkit-app-region: no-drag;
+}
 .is-electron-mac .topbar {
   padding-top: 28px;
   height: 84px;
-  -webkit-app-region: drag;
-}
-.is-electron-mac .topbar a,
-.is-electron-mac .topbar button,
-.is-electron-mac .topbar input,
-.is-electron-mac .topbar .conn,
-.is-electron-mac .topbar .topbar-right > * {
-  -webkit-app-region: no-drag;
 }
 .brand {
   font-weight: 700;

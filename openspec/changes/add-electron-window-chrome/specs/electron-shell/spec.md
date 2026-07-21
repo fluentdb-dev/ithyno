@@ -40,3 +40,21 @@ the dashboard's active theme (see `add-light-dark-mode`).
 - **THEN** none of the Electron-specific title-bar handling runs
 - **AND** the renderer's Electron-runtime detection returns false
 - **AND** no top-padding safe-area is applied
+
+### Requirement: Draggable Custom Topbar
+The renderer SHALL mark its custom topbar as a draggable region on every
+Electron platform (not just macOS), because hiding the OS title bar removes
+the OS's native drag handling everywhere — `titleBarOverlay` only draws the
+window control buttons, not a drag region. Interactive controls inside the
+topbar SHALL remain clickable.
+
+#### Scenario: Windows / Linux topbar drag
+- **WHEN** the Electron app is running on Windows or Linux
+- **THEN** the topbar (outside its links, buttons, inputs, and the Git identity chip) is marked `-webkit-app-region: drag`
+- **AND** dragging that area moves the window
+- **AND** double-clicking it maximizes/restores the window (native OS behavior over the drag region)
+
+#### Scenario: Topbar controls stay interactive
+- **WHEN** the Electron runtime applies the drag region to the topbar
+- **THEN** links, buttons, inputs, the connection indicator, and the topbar's right-hand controls are marked `-webkit-app-region: no-drag`
+- **AND** clicking them still works normally

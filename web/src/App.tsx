@@ -46,6 +46,7 @@ export function App() {
 
   useEffect(() => {
     if (!isElectronShell()) return;
+    document.body.classList.add("is-electron");
     if (isElectronMac()) document.body.classList.add("is-electron-mac");
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue("--bg").trim() || "#0f1115";

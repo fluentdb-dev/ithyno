@@ -56,6 +56,24 @@ a small IPC handshake.
 - Window creation site (`createWindowForProject`) gets the new
   options; every other behavior stays the same.
 
+### Draggable custom topbar (all platforms)
+
+Hiding the OS title bar removes the OS's native drag region on every
+platform, not just macOS — `titleBarOverlay` only draws the window
+control buttons (min/max/close); the rest of the custom topbar still
+needs an explicit `-webkit-app-region: drag` to be movable. The
+initial implementation only applied this CSS under the mac-only
+`is-electron-mac` body class, so dragging silently never worked on
+Windows/Linux. Fix:
+
+- Add a platform-agnostic `is-electron` body class (set whenever
+  `isElectronShell()`, regardless of OS).
+- `.is-electron .topbar` gets `-webkit-app-region: drag`; interactive
+  children (`a`, `button`, `input`, `.conn`, `.topbar-right > *`) get
+  `-webkit-app-region: no-drag` so links/buttons stay clickable.
+- `.is-electron-mac .topbar` keeps its mac-only traffic-light padding
+  (`padding-top`, extra `height`) layered on top of the shared rule.
+
 ## Capabilities
 
 ### Modified Capabilities
@@ -69,8 +87,11 @@ a small IPC handshake.
 
 - `electron/src/main.ts` — `titleBarStyle`, `titleBarOverlay`,
   `backgroundColor`, IPC handler for `openspec-ui:set-title-bar-color`
-- `web/src/styles.css` — top safe-area padding on macOS (`@media
-  (platform: mac)` via a runtime-detected class)
+- `web/src/styles.css` — top safe-area padding on macOS, plus
+  drag/no-drag regions on the topbar for all Electron platforms
+  (via runtime-detected `is-electron` / `is-electron-mac` classes)
+- `web/src/App.tsx` — sets `is-electron` / `is-electron-mac` body
+  classes from `runtime/electron.ts`
 - `web/src/preload.ts` (or wherever Electron IPC is exposed to
   renderer) — expose the setter
 - `web/src/hooks/useAppliedTheme.ts` (from `add-light-dark-mode`)
@@ -78,10 +99,10 @@ a small IPC handshake.
 
 ## Out of scope
 
-- **Custom window frame widgets** (draggable regions, min/max
-  buttons rendered by the renderer). Complex to get right per
-  platform; `titleBarOverlay` on Windows/Linux and traffic lights on
-  macOS are enough for v1.
+- **Custom min/max/close buttons rendered by the renderer.**
+  `titleBarOverlay` on Windows/Linux and traffic lights on macOS draw
+  the actual controls; the renderer only needs to mark the drag
+  region (see above), not reimplement the buttons themselves.
 - **Vibrancy / translucency effects** on macOS. Would look nice but
   interacts badly with dark palette + traffic-light contrast;
   deferred.

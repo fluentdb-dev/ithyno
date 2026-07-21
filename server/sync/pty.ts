@@ -6,6 +6,7 @@
 // build/install (feature detection — see /api/health).
 
 import type { WebSocket } from "ws";
+import { spawnSync } from "node:child_process";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -27,13 +28,32 @@ export async function loadPty(): Promise<PtyAvailability> {
   return cached;
 }
 
+/**
+ * Windows resolves a bare filename like "pwsh.exe" only via `CreateProcess`'s
+ * own PATH search, which ConPTY does not perform ahead of time — spawning a
+ * shell that isn't actually on PATH throws "File not found" from node-pty's
+ * native binding instead of falling back. `where` mirrors that PATH search
+ * without spawning anything, so we can check first and fall back in JS.
+ */
+function existsOnWindowsPath(cmd: string): boolean {
+  try {
+    return spawnSync("where", [cmd], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Pick a sensible default shell + args per platform. */
 export function defaultShell(): { cmd: string; args: string[] } {
+  if (process.env.ITHYNO_SHELL) {
+    return { cmd: process.env.ITHYNO_SHELL, args: [] };
+  }
   if (process.platform === "win32") {
     // Prefer pwsh.exe (PowerShell 7+) when on PATH; fall back to powershell.exe.
-    return { cmd: process.env.ITHYNO_SHELL ?? "pwsh.exe", args: [] };
+    const cmd = existsOnWindowsPath("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
+    return { cmd, args: [] };
   }
-  const sh = process.env.ITHYNO_SHELL ?? process.env.SHELL ?? "/bin/bash";
+  const sh = process.env.SHELL ?? "/bin/bash";
   return { cmd: sh, args: [] };
 }
 
