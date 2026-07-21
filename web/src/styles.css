@@ -2118,14 +2118,34 @@ a.modal-btn:hover {
   box-shadow: var(--shadow-card);
 }
 
-/* Standalone toggle anchor when terminalSize === "hidden".
- * Floats at the same bottom-right position where the terminal panel docks so
- * it stays discoverable. */
+/* Standalone terminal-restore button when terminalSize === "hidden".
+ * Docked just below the topbar (56px + margin) so the entry point is
+ * immediately visible after hiding; the terminal-chevron glyph identifies
+ * which pane will restore. */
 .terminal-hidden-anchor {
   position: fixed;
-  bottom: 12px;
+  top: 64px;
   right: 12px;
   z-index: 6;
+}
+.terminal-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.terminal-restore-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
 }
 
 /* Layout overrides for non-default terminal sizes (add-terminal-size-toggle).
