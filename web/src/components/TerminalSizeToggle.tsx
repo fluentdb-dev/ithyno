@@ -45,15 +45,16 @@ export function TerminalSizeToggle() {
   ];
 
   return (
-    <div className="terminal-size-toggle" role="group" aria-label="Terminal size">
+    <div className="terminal-size-toggle" role="radiogroup" aria-label="Terminal size">
       {options.map((opt) => {
         const active = terminalSize === opt.value;
         return (
           <button
             key={opt.value}
             type="button"
+            role="radio"
             className={`terminal-size-btn${active ? " active" : ""}`}
-            aria-pressed={active}
+            aria-checked={active}
             data-state={active ? "active" : "inactive"}
             title={opt.title}
             onClick={() => setTerminalSize(opt.value)}
@@ -63,6 +64,45 @@ export function TerminalSizeToggle() {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Standalone terminal-recognizable restore button rendered when
+ * `terminalSize === "hidden"`. Terminal chevron glyph makes it obvious
+ * which pane this restores. Clicking flips terminalSize back to "default".
+ */
+export function TerminalHiddenAnchor() {
+  const setTerminalSize = useStore((s) => s.setTerminalSize);
+  return (
+    <button
+      type="button"
+      className="terminal-restore-btn"
+      title="Show terminal"
+      aria-label="Show terminal"
+      onClick={() => setTerminalSize("default")}
+    >
+      <TerminalGlyph />
+    </button>
+  );
+}
+
+function TerminalGlyph() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
   );
 }
 

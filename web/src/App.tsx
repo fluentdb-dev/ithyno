@@ -14,7 +14,7 @@ import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
-import { TerminalSizeToggle } from "./components/TerminalSizeToggle";
+import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
@@ -211,11 +211,12 @@ export function App() {
       </main>
 
       {embeddedTerminalAvailable && terminalSize === "hidden" && (
-        /* Hidden state: only the size-toggle floats at the terminal dock corner
-           as the sole re-show entry point (task 5). The terminal panel body and
-           label are NOT rendered, so the PTY WebSocket also stays closed. */
+        /* Hidden state: a compact terminal-glyph button just below the topbar
+           is the sole re-show entry point. Clicking it restores terminalSize
+           to "default". The panel body and full toggle are NOT rendered, so
+           the PTY WebSocket stays closed until the user opts back in. */
         <div className="terminal-hidden-anchor">
-          <TerminalSizeToggle />
+          <TerminalHiddenAnchor />
         </div>
       )}
 
