@@ -6,6 +6,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "publisher": "ithyno",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },

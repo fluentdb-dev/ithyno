@@ -44,6 +44,7 @@
     "electron:package:win": "npm run --workspace ithyno-electron package:win",
     "electron:package:linux": "npm run --workspace ithyno-electron package:linux",
     "electron:package:all": "npm run --workspace ithyno-electron package:all",
+    "build:icons": "node scripts/build-icons.mjs",
     "release:build": "node scripts/release-build.mjs",
     "release:version": "node scripts/release-version.mjs"
   },
@@ -76,12 +77,14 @@
     "@types/ws": "^8.5.14",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "png2icons": "^2.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.2.0",
+    "semver": "^7.7.2",
+    "sharp": "^0.35.3",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",
-    "semver": "^7.7.2",
     "vitest": "^3.0.7",
     "zustand": "^5.0.3"
   }
