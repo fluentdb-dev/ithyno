@@ -14,6 +14,7 @@ import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
+import { TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
@@ -38,6 +39,7 @@ export function App() {
   const dismissToast = useStore((s) => s.dismissToast);
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
+  const terminalSize = useStore((s) => s.terminalSize);
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const restartTerminal = useStore((s) => s.restartTerminal);
   // In VS Code the extension host owns a real terminal, so we skip the
@@ -122,7 +124,19 @@ export function App() {
     return () => { if (typeof unsub === "function") unsub(); };
   }, [restartTerminal]);
 
-  const showTerminal = embeddedTerminalAvailable && terminalVisible;
+  // terminalSize "hidden" replaces the old terminalVisible=false path;
+  // terminalVisible is kept for backward compat (ChangeDetail still reads it).
+  const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden";
+
+  // Derive the layout class for the app root. "default" = no extra class.
+  const terminalLayoutClass =
+    !showTerminal
+      ? ""
+      : terminalSize === "fullscreen"
+        ? " terminal-fullscreen"
+        : terminalSize === "half"
+          ? " terminal-half"
+          : "";
 
   if (authExpired) {
     return (
@@ -143,7 +157,7 @@ export function App() {
   }
 
   return (
-    <div className={`app${showTerminal ? " with-terminal" : ""}`}>
+    <div className={`app${showTerminal ? " with-terminal" : ""}${terminalLayoutClass}`}>
       <header className="topbar">
         <div className="brand">
           <span className="logo">◑</span> ithyno
@@ -196,9 +210,20 @@ export function App() {
         )}
       </main>
 
-      {embeddedTerminalAvailable && (
-        <aside className={`global-terminal${terminalVisible ? "" : " hidden"}`}>
+      {embeddedTerminalAvailable && terminalSize === "hidden" && (
+        /* Hidden state: only the size-toggle floats at the terminal dock corner
+           as the sole re-show entry point (task 5). The terminal panel body and
+           label are NOT rendered, so the PTY WebSocket also stays closed. */
+        <div className="terminal-hidden-anchor">
+          <TerminalSizeToggle />
+        </div>
+      )}
+
+      {embeddedTerminalAvailable && terminalSize !== "hidden" && terminalVisible && (
+        <aside className="global-terminal">
           <div className="terminal-head">
+            {/* Toggle is LEFT of the "Terminal" label per spec (task 3.1) */}
+            <TerminalSizeToggle />
             <span>Terminal</span>
             <span className="muted">cwd: project root</span>
           </div>

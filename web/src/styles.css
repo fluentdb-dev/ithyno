@@ -2079,6 +2079,79 @@ a.modal-btn:hover {
   border-color: var(--accent);
 }
 
+/* Terminal size toggle — segmented icon-button row in the terminal header.
+ * Matches the theme-toggle pattern: 14×14 icons, rounded border, hover accent.
+ * Landed by add-terminal-size-toggle. */
+.terminal-size-toggle {
+  display: inline-flex;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 0;
+  flex-shrink: 0;
+}
+.terminal-size-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 4px 5px;
+  cursor: pointer;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  transition: color 0.12s, background 0.12s;
+}
+.terminal-size-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.terminal-size-btn.active {
+  background: var(--bg-panel);
+  color: var(--accent);
+}
+/* Light-mode active pill — matches theme-toggle treatment. */
+:root[data-theme="light"] .terminal-size-btn.active {
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-card);
+}
+
+/* Standalone toggle anchor when terminalSize === "hidden".
+ * Floats at the same bottom-right position where the terminal panel docks so
+ * it stays discoverable. */
+.terminal-hidden-anchor {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 6;
+}
+
+/* Layout overrides for non-default terminal sizes (add-terminal-size-toggle).
+ * Applied to the .app root via terminalLayoutClass in App.tsx.
+ * The terminal is docked as a right-side panel (position: fixed, top: 56px,
+ * right: 0). Fullscreen makes the terminal 100% wide + the content area
+ * invisible; Half sets terminal to 50% width + reserves matching content
+ * padding. */
+
+/* Fullscreen: content area collapses, terminal fills the content area. */
+.app.terminal-fullscreen .content {
+  display: none;
+}
+.app.terminal-fullscreen .global-terminal {
+  width: 100%;
+  left: 0;
+}
+
+/* Half: terminal takes 50% of the viewport width; content gets the other 50%. */
+.app.terminal-half .global-terminal {
+  width: 50%;
+}
+.app.terminal-half.with-terminal .content {
+  padding-right: calc(50% + 24px);
+}
+
 /* Action buttons (Apply / Archive / New Change) */
 .action-btn,
 .new-change-btn,
