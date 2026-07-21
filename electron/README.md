@@ -28,6 +28,45 @@ State lives at `app.getPath('userData')/state.json`:
 }
 ```
 
+## Preload sandbox
+
+The main `BrowserWindow` runs with `sandbox: true` in its `webPreferences`. In
+this mode the preload script (`electron/src/preload.ts`) runs in a restricted
+context that has **no access to Node.js APIs or Electron main-process modules**.
+Importing `app`, `Menu`, `shell`, `dialog`, `BrowserWindow`, `ipcMain`,
+`screen`, or any other main-process export — even transitively via a local
+helper file — throws at runtime and silently kills the preload, causing
+`window.openspecUI` to never be exposed.
+
+`scripts/check-preload-imports.mjs` is a pre-`tsc` guard that walks
+`preload.ts`'s full import graph and rejects anything outside the
+preload-safe allowlist:
+
+- **Allowed from `electron`**: only `contextBridge` and `ipcRenderer`.
+- **Allowed relative imports** (`./foo`, `../bar`): recursed into; the
+  resolved files are subject to the same allowlist.
+- **Everything else** (bare modules like `node:fs`, `node:path`, third-party
+  packages, any other `electron` named import): rejected with exit code 1.
+
+The check runs before `tsc` in both `build` and `dev` scripts, so violations
+surface at build time rather than as mysterious runtime failures.
+
+### Adding a new IPC channel safely
+
+Option A — inline the channel name constant directly in `preload.ts`:
+
+```ts
+const IPC_MY_EVENT = 'ithyno:my-event';
+ipcRenderer.on(IPC_MY_EVENT, ...);
+```
+
+Option B — extract it into a preload-safe shared file that imports **only**
+from `electron` (with `contextBridge`/`ipcRenderer` only, or nothing at all),
+then import that file from `preload.ts`. The guard will walk it and pass.
+
+Do **not** import the constant from a file that also imports `app`, `Menu`,
+or any other main-process module — the transitive guard will reject it.
+
 ## Dev loop
 
 Run from the repo root:
