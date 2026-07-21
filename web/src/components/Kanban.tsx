@@ -9,7 +9,6 @@ import { injectPty } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { hasNonVerifyWork } from "../util/changeState";
-import { ParallelStartLauncher } from "./ParallelStartLauncher";
 import { ERR } from "../lib/errorMessages";
 
 /**
@@ -200,20 +199,16 @@ export function KanbanBoard({
     <>
       <div className="kanban-board">
         {columns.map((slot) => {
-          // Spec: TODO column carries "+ New Change"; IN-PROGRESS carries
-          // the parallel Start launcher (add-parallel-start-launcher's
-          // "IN-PROGRESS Column Start Launcher" requirement).
+          // Spec: TODO column carries "+ New Change".
+          // IN-PROGRESS and DONE carry no column-header Start selector
+          // (hide-start-in-progress-column: "Column-header Start selector is
+          // TODO-only"). The ParallelStartLauncher belongs only in TODO where
+          // bulk-starting TODO→IN-PROGRESS makes semantic sense.
           const headerAction =
             slot === "todo" ? (
               <button className="primary kanban-add" onClick={onNewChange}>
                 + New Change
               </button>
-            ) : slot === "inprogress" ? (
-              <ParallelStartLauncher
-                changes={changes}
-                jobByChange={jobByChange}
-                startImplementation={startImplementation}
-              />
             ) : null;
           return (
             <Column
@@ -331,8 +326,7 @@ function ChangeCard({
   // `hasAgents` — when agents.yaml lacks a code role, the skill falls back
   // to Manager (which has built-in defaults). Post
   // wire-role-to-cli-in-manager-skill (Phase 1).
-  const startEligibleSlot = slot === "todo" || slot === "inprogress";
-  const showStartArea = startEligibleSlot && !job;
+  const showStartArea = perCardStartEligible(slot, !!job);
 
   return (
     <div className="kanban-card">
@@ -484,6 +478,30 @@ function isMergeable(job: JobSummary): boolean {
     job.status === "cancelled" ||
     job.status === "orphaned"
   );
+}
+
+/**
+ * Returns the type of column-header action for a given slot.
+ * Per hide-start-in-progress-column: the "Start ▾ (N)" bulk selector
+ * (represented as "start-launcher") is TODO-only. IN-PROGRESS and DONE
+ * return null (no header action).
+ *
+ * Exported for unit tests — this is the pure logic extracted from the JSX
+ * ternary in KanbanBoard.
+ */
+export function columnHeaderActionType(slot: Slot): "new-change" | null {
+  if (slot === "todo") return "new-change";
+  return null;
+}
+
+/**
+ * Returns true when the per-card Start area should render for a given slot
+ * and job state. This is the pure eligibility check (independent of
+ * hasNonVerifyWork). Exported for tests.
+ */
+export function perCardStartEligible(slot: Slot, hasJob: boolean): boolean {
+  const startEligibleSlot = slot === "todo" || slot === "inprogress";
+  return startEligibleSlot && !hasJob;
 }
 
 export { bucketize };

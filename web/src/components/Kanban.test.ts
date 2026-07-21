@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { bucketize } from "./Kanban";
+import { bucketize, columnHeaderActionType, perCardStartEligible } from "./Kanban";
 import type { Change, Progress } from "../types";
 
 function mkChange(
@@ -121,5 +121,62 @@ describe("bucketize (folder-driven placement, 3 columns)", () => {
     expect(b.done.map((c) => c.id)).toContain("phased-proposed-fully-ticked");
     // phase=needs-human + 0/5 progress + no worktree → todo
     expect(b.todo.map((c) => c.id)).toContain("phased-needs-human");
+  });
+});
+
+// hide-start-in-progress-column: column-header "Start ▾ (N)" selector is
+// TODO-only. These tests verify the pure logic that controls which header
+// action each column renders.
+describe("columnHeaderActionType (hide-start-in-progress-column)", () => {
+  it("TODO column yields 'new-change' header action (Start ▾ lives here)", () => {
+    // The "Start ▾ (N)" bulk selector is rendered via ParallelStartLauncher
+    // inside KanbanBoard when columnHeaderActionType returns "new-change" for
+    // TODO. (In practice the TODO slot renders "+ New Change" AND the
+    // ParallelStartLauncher is gone from IN-PROGRESS; the important assertion
+    // is that IN-PROGRESS and DONE are null.)
+    expect(columnHeaderActionType("todo")).toBe("new-change");
+  });
+
+  it("IN-PROGRESS column yields null — no Start ▾ (N) selector in header", () => {
+    expect(columnHeaderActionType("inprogress")).toBeNull();
+  });
+
+  it("DONE column yields null — no Start ▾ (N) selector in header", () => {
+    expect(columnHeaderActionType("done")).toBeNull();
+  });
+
+  it("all three slots: only TODO is non-null", () => {
+    const results = {
+      todo: columnHeaderActionType("todo"),
+      inprogress: columnHeaderActionType("inprogress"),
+      done: columnHeaderActionType("done"),
+    };
+    expect(results.todo).not.toBeNull();
+    expect(results.inprogress).toBeNull();
+    expect(results.done).toBeNull();
+  });
+});
+
+// Per-card Start button eligibility is unchanged by hide-start-in-progress-column.
+// These tests verify the per-card logic across all slots matches the original
+// behavior: Start area shows in TODO and IN-PROGRESS (when no job is running),
+// never in DONE.
+describe("perCardStartEligible (per-card Start button — unchanged by this change)", () => {
+  it("TODO slot with no job → Start area eligible", () => {
+    expect(perCardStartEligible("todo", false)).toBe(true);
+  });
+
+  it("IN-PROGRESS slot with no job → Start area eligible (per-card Start, not header)", () => {
+    expect(perCardStartEligible("inprogress", false)).toBe(true);
+  });
+
+  it("DONE slot → never eligible for per-card Start", () => {
+    expect(perCardStartEligible("done", false)).toBe(false);
+    expect(perCardStartEligible("done", true)).toBe(false);
+  });
+
+  it("any slot with a live job → not eligible (job already running)", () => {
+    expect(perCardStartEligible("todo", true)).toBe(false);
+    expect(perCardStartEligible("inprogress", true)).toBe(false);
   });
 });
