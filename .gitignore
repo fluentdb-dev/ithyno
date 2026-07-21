@@ -9,3 +9,7 @@ server-dist/
 electron/out/
 electron/dist/
 vscode-extension/out/
+vscode-extension/ithyno.vsix
+vscode-extension/ithyno-*.vsix
+vscode-extension/host/
+vscode-extension/LICENSE
