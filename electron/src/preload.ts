@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_TERMINAL_RESTART } from './menu';
+const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
 
 export const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 
