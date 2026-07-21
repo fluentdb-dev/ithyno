@@ -1,11 +1,11 @@
 ---
-verdict: needs-rework
+verdict: pass
 ---
 
 # Review: add-about-panel
 
 ## Findings
-- [high] web/src/components/AboutModal.tsx:52 — The topbar About modal is rendered on the VS Code shell too, but its actions always call `window.open(...)` from inside the dashboard iframe. In this shell the React app cannot call `vscode.env.openExternal` directly, and the extension bridge only forwards `pty.*` messages, so the new VS Code topbar About entry does not have a reliable path to open Repository / Issues / Sponsor / Updates / License links as required.
+- [low] vscode-extension/src/extension.ts:308 — The VS Code About panel still gets repository and issues links from the hardcoded `REPO_URL` fallback because `vscode-extension/package.json` does not declare `repository` / `bugs`. The links are correct today, but a future repo move would require a code edit instead of staying fully manifest-driven like the other surfaces.
 
 ## Verdict rationale
-The shared payload, web modal, Electron menu, and standalone VS Code About command are all present, but the implementation still misses one required cross-shell scenario: the web dashboard About button is supposed to work on all shells, including VS Code. Because the dashboard iframe never hands external-link actions to the extension host, this path can fail specifically on the VS Code surface, so the change still needs rework before it fully matches the spec.
+The implementation matches the required shipped behavior: the server exposes `/api/about`, the web dashboard shows the About button between the git identity chip and the connection indicator, Electron wires the native About panel plus Help-menu actions, and the VS Code extension provides a static `ithyno: About` webview with external links. I did not find any blocking correctness, security, or required-scenario gaps in the reviewed diff, so this change passes.
