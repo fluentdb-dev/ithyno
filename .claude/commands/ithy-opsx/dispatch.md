@@ -29,8 +29,26 @@ The dispatch advances the change through `proposed → coded → reviewed
 
 **Constants**:
 
-- `MAX_ITERATIONS = 5` — the code ↔ review loop halts and escalates
-  after this many attempts.
+- `MAX_REWORK_ROUNDS` — the code ↔ review loop halts and escalates
+  after this many attempts. Read from `agents.yaml` at dispatch time:
+
+  ```bash
+  MAX_REWORK_ROUNDS=$(awk '
+    /^maxReworkRounds:/ { sub(/^maxReworkRounds:[[:space:]]*/, ""); print; exit }
+  ' agents.yaml)
+  # Fallback to 5 when absent or non-numeric:
+  if ! echo "$MAX_REWORK_ROUNDS" | grep -qE '^[0-9]+$'; then
+    MAX_REWORK_ROUNDS=5
+  fi
+  ```
+
+  Default `5`. Valid range `[1, 10]`. Out-of-range values are clamped
+  server-side with a warning (see `validateMaxReworkRounds` in
+  `server/agents/registry.ts`) and surfaced via `GET /api/agents/config`
+  as `maxReworkRounds`. The awk read above applies only when the Manager
+  reads `agents.yaml` directly; the server-resolved value is the
+  canonical one.
+
 - `ITHYNO_BASE = http://localhost:4321` — adjust if the user's
   `ITHYNO_PORT` differs.
 
@@ -617,8 +635,8 @@ a message naming the leaked resource only after step 3 fails.
 
    ```
    iteration += 1
-   if iteration > MAX_ITERATIONS:
-     /opsx:escalate <change-id> "Dispatch loop did not converge after MAX_ITERATIONS iterations. Latest review findings: <priorFindings>"
+   if iteration > MAX_REWORK_ROUNDS:
+     /opsx:escalate <change-id> "Dispatch loop did not converge after MAX_REWORK_ROUNDS iterations. Latest review findings: <priorFindings>"
      exit
    ```
 
@@ -722,8 +740,9 @@ a message naming the leaked resource only after step 3 fails.
 
 ## Guardrails
 
-- **Convergence guard**: MAX_ITERATIONS is a hard ceiling. Do NOT
-  bypass it. If a change is stuck at needs-rework after 5 iterations,
+- **Convergence guard**: MAX_REWORK_ROUNDS is a hard ceiling. Do NOT
+  bypass it. If a change is stuck at needs-rework after MAX_REWORK_ROUNDS
+  iterations (default 5, configurable via `agents.yaml.maxReworkRounds`),
   human input is required.
 
 - **One phase update per stage**: only call `POST /api/changes/:id/phase`
@@ -782,8 +801,9 @@ a message naming the leaked resource only after step 3 fails.
 
 ## Follow-ups (not this file)
 
-- Per-project `manager.maxIterations` field in `agents.yaml`
-  (`docs/ideas/2026-07-11-manager-max-iterations-config.md`).
+- Per-role `maxReworkRounds` override (e.g., `agents[].maxReworkRounds`
+  overriding the top-level default). Deferred — the top-level field
+  landed by `add-agents-max-rework-rounds-config` covers the common case.
 - Per-project verify command
   (`docs/ideas/2026-07-11-verify-command-per-project.md`).
 - Explicit `agmsgType` field on `agents.yaml` agent entries when the

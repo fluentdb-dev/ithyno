@@ -261,6 +261,11 @@ export type AgentConfigResponse = {
    *  (default 3, range [1, 10]). Landed by
    *  add-multi-dispatch-orchestrator. */
   maxParallel: number;
+  /** Max code↔review rework iterations before escalation for
+   *  `/ithy-opsx:dispatch` and `/ithy-opsx:dispatch-multi`
+   *  (default 5, range [1, 10]). Landed by
+   *  add-agents-max-rework-rounds-config. */
+  maxReworkRounds: number;
   agmsg: AgmsgConfig | null;
 };
 

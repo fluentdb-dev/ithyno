@@ -29,8 +29,27 @@ Landed by `add-multi-dispatch-orchestrator`.
 
 ## Constants
 
-- `MAX_ITERATIONS = 5` — per-change code↔review cap (matches
-  `/ithy-opsx:dispatch`).
+- `MAX_REWORK_ROUNDS` — per-change code↔review cap (matches
+  `/ithy-opsx:dispatch`). Read from `agents.yaml` at dispatch time
+  (same awk pattern as `maxParallel`, both live at the top level):
+
+  ```bash
+  MAX_REWORK_ROUNDS=$(awk '
+    /^maxReworkRounds:/ { sub(/^maxReworkRounds:[[:space:]]*/, ""); print; exit }
+  ' agents.yaml)
+  if ! echo "$MAX_REWORK_ROUNDS" | grep -qE '^[0-9]+$'; then
+    MAX_REWORK_ROUNDS=5
+  fi
+  ```
+
+  Default `5`. Valid range `[1, 10]`. The cap is **per-change** (not
+  per-invocation) — each change in the concurrent set tracks its own
+  iteration counter independently. Out-of-range values are clamped
+  server-side; see `validateMaxReworkRounds` in
+  `server/agents/registry.ts`. Both `maxReworkRounds` and `maxParallel`
+  live at `agents.yaml` top-level and are surfaced via
+  `GET /api/agents/config`.
+
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
 - `ITHYNO_BASE = http://localhost:4321` — phase API endpoint.
 
@@ -198,7 +217,7 @@ done
 - **`stage: review`** with `verdict: pass` — advance to `reviewed`,
   spawn verify worker.
 - **`stage: review`** with `verdict: needs-rework` — if
-  `state[id].iterations < MAX_ITERATIONS`, increment and spawn a
+  `state[id].iterations < MAX_REWORK_ROUNDS`, increment and spawn a
   new code worker with prior findings; else mark `escalated`.
 - **`stage: verify`** with `verdict: pass` — mark `done`. If
   `QUEUE` non-empty, pop next id and spawn its code stage; add to

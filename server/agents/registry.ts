@@ -73,6 +73,7 @@ export type AgentConfig =
       agents: AgentDef[];
       parallelExecution: boolean;
       maxParallel: number;
+      maxReworkRounds: number;
       agmsg: AgmsgConfig | null;
       warnings: string[];
     }
@@ -81,6 +82,7 @@ export type AgentConfig =
       agents: AgentDef[]; // last-known-good
       parallelExecution: boolean; // last-known-good
       maxParallel: number; // last-known-good
+      maxReworkRounds: number; // last-known-good
       agmsg: AgmsgConfig | null; // last-known-good
       warnings: string[];
       error: string;
@@ -93,6 +95,13 @@ export type AgentConfig =
 const DEFAULT_MAX_PARALLEL = 3;
 const MAX_PARALLEL_MIN = 1;
 const MAX_PARALLEL_MAX = 10;
+
+/** Default when `agents.yaml` omits `maxReworkRounds`. Matches the
+ *  historic hard-coded MAX_ITERATIONS = 5 in the dispatch skills.
+ *  Landed by add-agents-max-rework-rounds-config. */
+export const DEFAULT_MAX_REWORK_ROUNDS = 5;
+export const MAX_REWORK_ROUNDS_MIN = 1;
+export const MAX_REWORK_ROUNDS_MAX = 10;
 
 const AGENT_MODES: readonly AgentMode[] = ["single-prompt", "live-shell"];
 const KNOWN_AGENT_KEYS = new Set([
@@ -385,6 +394,45 @@ function validateMaxParallel(raw: unknown): number {
 }
 
 /**
+ * Validate top-level `maxReworkRounds` field. Absent → DEFAULT_MAX_REWORK_ROUNDS.
+ * Non-numeric or missing → return default with a console warning.
+ * Float → floored with a warning.
+ * Out of range → clamped to [MAX_REWORK_ROUNDS_MIN, MAX_REWORK_ROUNDS_MAX] with a warning.
+ * Valid integer in range → returned as-is.
+ * Landed by add-agents-max-rework-rounds-config.
+ */
+function validateMaxReworkRounds(raw: unknown): number {
+  if (raw === undefined || raw === null) return DEFAULT_MAX_REWORK_ROUNDS;
+  if (typeof raw !== "number") {
+    console.warn(
+      `[registry] maxReworkRounds must be a number (got: ${JSON.stringify(raw)}); using default ${DEFAULT_MAX_REWORK_ROUNDS}`,
+    );
+    return DEFAULT_MAX_REWORK_ROUNDS;
+  }
+  let value = raw;
+  if (!Number.isInteger(value)) {
+    const floored = Math.floor(value);
+    console.warn(
+      `[registry] maxReworkRounds must be an integer (got: ${value}); flooring to ${floored}`,
+    );
+    value = floored;
+  }
+  if (value < MAX_REWORK_ROUNDS_MIN) {
+    console.warn(
+      `[registry] maxReworkRounds ${value} is below minimum ${MAX_REWORK_ROUNDS_MIN}; clamping`,
+    );
+    return MAX_REWORK_ROUNDS_MIN;
+  }
+  if (value > MAX_REWORK_ROUNDS_MAX) {
+    console.warn(
+      `[registry] maxReworkRounds ${value} exceeds maximum ${MAX_REWORK_ROUNDS_MAX}; clamping`,
+    );
+    return MAX_REWORK_ROUNDS_MAX;
+  }
+  return value;
+}
+
+/**
  * Validate top-level `agmsg` block. Absent → null (agmsg not
  * configured; default). When present, `team` is required and
  * non-empty. Landed by add-agmsg-config-block.
@@ -433,6 +481,7 @@ export class AgentRegistry {
     agents: [],
     parallelExecution: false,
     maxParallel: DEFAULT_MAX_PARALLEL,
+    maxReworkRounds: DEFAULT_MAX_REWORK_ROUNDS,
     agmsg: null,
     warnings: [],
   };
@@ -451,6 +500,7 @@ export class AgentRegistry {
         agents: [],
         parallelExecution: false,
         maxParallel: DEFAULT_MAX_PARALLEL,
+        maxReworkRounds: DEFAULT_MAX_REWORK_ROUNDS,
         agmsg: null,
         warnings: [],
       };
@@ -471,6 +521,11 @@ export class AgentRegistry {
           ? (parsed as Record<string, unknown>).maxParallel
           : undefined,
       );
+      const maxReworkRounds = validateMaxReworkRounds(
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).maxReworkRounds
+          : undefined,
+      );
       const agmsg = validateAgmsg(
         parsed && typeof parsed === "object"
           ? (parsed as Record<string, unknown>).agmsg
@@ -484,6 +539,7 @@ export class AgentRegistry {
         agents,
         parallelExecution,
         maxParallel,
+        maxReworkRounds,
         agmsg,
         warnings,
       };
@@ -494,6 +550,7 @@ export class AgentRegistry {
         agents: this.cache.agents,
         parallelExecution: this.cache.parallelExecution,
         maxParallel: this.cache.maxParallel,
+        maxReworkRounds: this.cache.maxReworkRounds,
         agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
         error: msg,
@@ -543,6 +600,7 @@ export class AgentRegistry {
     agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
     parallelExecution: boolean;
     maxParallel: number;
+    maxReworkRounds: number;
     agmsg: AgmsgConfig | null;
     warnings: string[];
   } {
@@ -557,6 +615,7 @@ export class AgentRegistry {
         agents: sanitized,
         parallelExecution: this.cache.parallelExecution,
         maxParallel: this.cache.maxParallel,
+        maxReworkRounds: this.cache.maxReworkRounds,
         agmsg: this.cache.agmsg,
         warnings: this.cache.warnings,
       };
@@ -566,6 +625,7 @@ export class AgentRegistry {
       agents: sanitized,
       parallelExecution: this.cache.parallelExecution,
       maxParallel: this.cache.maxParallel,
+      maxReworkRounds: this.cache.maxReworkRounds,
       agmsg: this.cache.agmsg,
       warnings: this.cache.warnings,
     };
