@@ -14,6 +14,7 @@ import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
+import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
@@ -38,6 +39,7 @@ export function App() {
   const dismissToast = useStore((s) => s.dismissToast);
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
+  const terminalSize = useStore((s) => s.terminalSize);
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const restartTerminal = useStore((s) => s.restartTerminal);
   // In VS Code the extension host owns a real terminal, so we skip the
@@ -122,7 +124,23 @@ export function App() {
     return () => { if (typeof unsub === "function") unsub(); };
   }, [restartTerminal]);
 
-  const showTerminal = embeddedTerminalAvailable && terminalVisible;
+  // terminalSize "hidden" replaces the old terminalVisible=false path;
+  // terminalVisible is kept for backward compat (ChangeDetail still reads it).
+  const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden";
+
+  // Derive the layout class for the app root. "default" = no extra class.
+  // "hidden" doesn't reach this ternary — showTerminal is false when hidden
+  // (see line above), so the ternary short-circuits to "". The <aside> below
+  // still mounts on Hidden (visually hidden via `.terminal-hidden` CSS) so
+  // the PTY session persists.
+  const terminalLayoutClass =
+    !showTerminal
+      ? ""
+      : terminalSize === "fullscreen"
+        ? " terminal-fullscreen"
+        : terminalSize === "half"
+          ? " terminal-half"
+          : "";
 
   if (authExpired) {
     return (
@@ -143,7 +161,7 @@ export function App() {
   }
 
   return (
-    <div className={`app${showTerminal ? " with-terminal" : ""}`}>
+    <div className={`app${showTerminal ? " with-terminal" : ""}${terminalLayoutClass}`}>
       <header className="topbar">
         <div className="brand">
           <span className="logo">◑</span> ithyno
@@ -196,9 +214,28 @@ export function App() {
         )}
       </main>
 
-      {embeddedTerminalAvailable && (
-        <aside className={`global-terminal${terminalVisible ? "" : " hidden"}`}>
+      {embeddedTerminalAvailable && terminalSize === "hidden" && (
+        /* Hidden state: a compact terminal-glyph button flush at the top-right
+           corner is the sole re-show entry point. The <aside> BELOW stays
+           mounted (just visually hidden via CSS) so the PTY WebSocket and
+           the terminal session both persist — clicking restore surfaces the
+           same shell with intact scrollback. */
+        <div className="terminal-hidden-anchor">
+          <TerminalHiddenAnchor />
+        </div>
+      )}
+
+      {/* Mount the aside on ALL non-hidden states AND on hidden (with the
+          terminal-hidden CSS class = display:none). React keeps <Terminal />
+          mounted throughout, so the /pty WebSocket + PTY session persist
+          across every transition — including Hidden. */}
+      {embeddedTerminalAvailable && terminalVisible && (
+        <aside
+          className={`global-terminal${terminalSize === "hidden" ? " terminal-hidden" : ""}`}
+        >
           <div className="terminal-head">
+            {/* Toggle is LEFT of the "Terminal" label per spec (task 3.1) */}
+            <TerminalSizeToggle />
             <span>Terminal</span>
             <span className="muted">cwd: project root</span>
           </div>

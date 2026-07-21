@@ -42,6 +42,9 @@ type Conflict = { newText: string; message: string };
 
 export type CommandStyle = "claude" | "cli";
 export type OverviewLayout = "board" | "cards";
+/** Four exclusive terminal size options. Not persisted — resets to
+ *  `"default"` on every page reload. Landed by add-terminal-size-toggle. */
+export type TerminalSize = "fullscreen" | "half" | "default" | "hidden";
 /** User preference for palette. `"system"` follows OS
  *  `prefers-color-scheme`; `"light"` / `"dark"` are hard overrides that
  *  ignore the OS. See `web/src/hooks/useAppliedTheme.ts` for the
@@ -58,6 +61,9 @@ type Store = {
   conflicts: Record<string, Conflict>; // keyed by taskKey
   terminalAvailable: boolean;
   terminalVisible: boolean;
+  /** Current terminal size choice. Not persisted — resets to `"default"` on
+   *  every page reload. Landed by add-terminal-size-toggle. */
+  terminalSize: TerminalSize;
   /** Bumped by `restartTerminal()` to trigger a React remount of `<Terminal>`.
    *  Consumer: `<Terminal key={terminalRestartCounter} />` in App.tsx. */
   terminalRestartCounter: number;
@@ -105,6 +111,7 @@ type Store = {
   pushToast: (kind: Toast["kind"], message: string) => void;
   dismissToast: (id: number) => void;
   setTerminalVisible: (v: boolean) => void;
+  setTerminalSize: (size: TerminalSize) => void;
   restartTerminal: () => void;
   setCommandStyle: (v: CommandStyle) => void;
   setOverviewLayout: (v: OverviewLayout) => void;
@@ -197,6 +204,7 @@ export const useStore = create<Store>((set, get) => ({
   conflicts: {},
   terminalAvailable: false,
   terminalVisible: readTerminalVisible(),
+  terminalSize: "default",
   terminalRestartCounter: 0,
   commandStyle: readCommandStyle(),
   overviewLayout: readOverviewLayout(),
@@ -338,6 +346,7 @@ export const useStore = create<Store>((set, get) => ({
     }
     set({ terminalVisible: v });
   },
+  setTerminalSize: (size) => set({ terminalSize: size }),
   restartTerminal: () => set((s) => ({ terminalRestartCounter: s.terminalRestartCounter + 1 })),
   setCommandStyle: (v) => {
     try {

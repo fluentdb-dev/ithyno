@@ -87,8 +87,6 @@ export function ChangeDetail() {
   // always possible — keep the action buttons enabled regardless of what the
   // server reports about its own PTY backend.
   const terminalAvailable = isVsCodeShell() ? true : storeTerminalAvailable;
-  const terminalVisible = useStore((s) => s.terminalVisible);
-  const setTerminalVisible = useStore((s) => s.setTerminalVisible);
   const pushToast = useStore((s) => s.pushToast);
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
@@ -276,19 +274,12 @@ export function ChangeDetail() {
           );
         })()}
         {terminalAvailable && (
-          <>
-            <button className="action-btn ghost" onClick={() => setPendingAction("archive")}>
-              Archive
-              <span className={`action-badge mode-${commandStyle}`}>
-                {commandStyle === "cli" ? "CLI" : "Claude"}
-              </span>
-            </button>
-            {!isVsCodeShell() && (
-              <button className="term-toggle" onClick={() => setTerminalVisible(!terminalVisible)}>
-                {terminalVisible ? "▸ Hide terminal" : "◂ Show terminal"}
-              </button>
-            )}
-          </>
+          <button className="action-btn ghost" onClick={() => setPendingAction("archive")}>
+            Archive
+            <span className={`action-badge mode-${commandStyle}`}>
+              {commandStyle === "cli" ? "CLI" : "Claude"}
+            </span>
+          </button>
         )}
       </div>
 

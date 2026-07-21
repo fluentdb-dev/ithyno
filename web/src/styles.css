@@ -2079,6 +2079,95 @@ a.modal-btn:hover {
   border-color: var(--accent);
 }
 
+/* Terminal size toggle — single icon button in the terminal header that
+ * cycles through the 4 terminalSize states on click. The rendered icon
+ * reflects the CURRENT state; hover reveals the next state.
+ * Landed by add-terminal-size-toggle. */
+.terminal-size-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 0;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.terminal-size-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
+}
+
+/* Standalone terminal-restore button when terminalSize === "hidden".
+ * Docked just below the topbar (56px + margin) so the entry point is
+ * immediately visible after hiding; the terminal-chevron glyph identifies
+ * which pane will restore. */
+.terminal-hidden-anchor {
+  position: fixed;
+  top: 56px;
+  right: 0;
+  z-index: 6;
+}
+.terminal-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-right: none;
+  border-radius: 0 0 0 8px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.terminal-restore-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
+}
+
+/* Layout overrides for non-default terminal sizes (add-terminal-size-toggle).
+ * Applied to the .app root via terminalLayoutClass in App.tsx.
+ * The terminal is docked as a right-side panel (position: fixed, top: 56px,
+ * right: 0). Fullscreen makes the terminal 100% wide + the content area
+ * invisible; Half sets terminal to 50% width + reserves matching content
+ * padding. */
+
+/* Fullscreen: content area collapses, terminal fills the content area. */
+.app.terminal-fullscreen .content {
+  display: none;
+}
+.app.terminal-fullscreen .global-terminal {
+  width: 100%;
+  left: 0;
+}
+
+/* Half: terminal takes 50% of the viewport width; content gets the other 50%. */
+.app.terminal-half .global-terminal {
+  width: 50%;
+}
+.app.terminal-half.with-terminal .content {
+  padding-right: calc(50% + 24px);
+}
+
+/* Hidden: the terminal panel stays in the DOM (component mounted, PTY /
+ * WebSocket alive) but is not shown. Restoring the terminal via the
+ * standalone anchor brings back the same shell + scrollback. */
+.global-terminal.terminal-hidden {
+  display: none;
+}
+
 /* Action buttons (Apply / Archive / New Change) */
 .action-btn,
 .new-change-btn,
