@@ -24,6 +24,8 @@
     "appId": "dev.ithyno.app",
     "productName": "ithyno",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
     "directories": {
       "output": "dist",
       "buildResources": "build"
