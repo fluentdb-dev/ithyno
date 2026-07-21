@@ -2079,43 +2079,30 @@ a.modal-btn:hover {
   border-color: var(--accent);
 }
 
-/* Terminal size toggle — segmented icon-button row in the terminal header.
- * Matches the theme-toggle pattern: 14×14 icons, rounded border, hover accent.
+/* Terminal size toggle — single icon button in the terminal header that
+ * cycles through the 4 terminalSize states on click. The rendered icon
+ * reflects the CURRENT state; hover reveals the next state.
  * Landed by add-terminal-size-toggle. */
 .terminal-size-toggle {
   display: inline-flex;
-  background: var(--bg-panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 0;
-  flex-shrink: 0;
-}
-.terminal-size-btn {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  padding: 4px 5px;
-  cursor: pointer;
-  border-radius: 5px;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
   line-height: 0;
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
-.terminal-size-btn:hover {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-.terminal-size-btn.active {
-  background: var(--bg-panel);
+.terminal-size-toggle:hover {
   color: var(--accent);
-}
-/* Light-mode active pill — matches theme-toggle treatment. */
-:root[data-theme="light"] .terminal-size-btn.active {
-  border: 1px solid var(--accent);
-  box-shadow: var(--shadow-card);
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--panel));
 }
 
 /* Standalone terminal-restore button when terminalSize === "hidden".

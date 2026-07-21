@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import { useStore, type TerminalSize } from "../store";
 
 /**
- * Four-option terminal size toggle rendered in the terminal panel header,
- * immediately to the left of the "Terminal" label. Exposes:
- *   Fullscreen — terminal fills the content area (page content collapses)
- *   Half       — 50/50 split between page content and terminal
- *   Default    — pre-toggle baseline size
- *   Hidden     — unmount terminal panel; only this toggle remains visible
+ * Single-icon terminal size cycler rendered in the terminal panel header,
+ * immediately to the left of the "Terminal" label. Clicking the button
+ * advances through the states in a fixed cycle:
+ *
+ *   default → half → fullscreen → hidden → (anchor restores → default)
+ *
+ * The rendered icon reflects the CURRENT state, and the tooltip names the
+ * NEXT state so users know what one click does.
  *
  * State lives in the global store (add-terminal-size-toggle); NOT persisted —
  * resets to "default" on every page reload.
@@ -17,53 +19,34 @@ export function TerminalSizeToggle() {
   const terminalSize = useStore((s) => s.terminalSize);
   const setTerminalSize = useStore((s) => s.setTerminalSize);
 
-  const options: { value: TerminalSize; label: string; title: string; icon: ReactNode }[] = [
-    {
-      value: "fullscreen",
-      label: "全画面",
-      title: "Fullscreen — terminal fills the content area",
-      icon: <FullscreenIcon />,
-    },
-    {
-      value: "half",
-      label: "半分",
-      title: "Half — split 50/50 with page content",
-      icon: <HalfIcon />,
-    },
-    {
-      value: "default",
-      label: "今のサイズ",
-      title: "Default — restore baseline terminal size",
-      icon: <DefaultIcon />,
-    },
-    {
-      value: "hidden",
-      label: "非表示",
-      title: "Hidden — unmount terminal panel",
-      icon: <HiddenIcon />,
-    },
-  ];
+  const meta: Record<TerminalSize, { label: string; icon: ReactNode }> = {
+    default: { label: "今のサイズ", icon: <DefaultIcon /> },
+    half: { label: "半分", icon: <HalfIcon /> },
+    fullscreen: { label: "全画面", icon: <FullscreenIcon /> },
+    hidden: { label: "非表示", icon: <HiddenIcon /> },
+  };
+
+  const nextOf: Record<TerminalSize, TerminalSize> = {
+    default: "half",
+    half: "fullscreen",
+    fullscreen: "hidden",
+    hidden: "default",
+  };
+
+  const current = meta[terminalSize];
+  const nextValue = nextOf[terminalSize];
+  const next = meta[nextValue];
 
   return (
-    <div className="terminal-size-toggle" role="radiogroup" aria-label="Terminal size">
-      {options.map((opt) => {
-        const active = terminalSize === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            className={`terminal-size-btn${active ? " active" : ""}`}
-            aria-checked={active}
-            data-state={active ? "active" : "inactive"}
-            title={opt.title}
-            onClick={() => setTerminalSize(opt.value)}
-          >
-            {opt.icon}
-          </button>
-        );
-      })}
-    </div>
+    <button
+      type="button"
+      className="terminal-size-toggle"
+      title={`Terminal size: ${current.label} — click to switch to ${next.label}`}
+      aria-label={`Terminal size: ${current.label}. Click to switch to ${next.label}.`}
+      onClick={() => setTerminalSize(nextValue)}
+    >
+      {current.icon}
+    </button>
   );
 }
 
