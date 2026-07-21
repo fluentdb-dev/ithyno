@@ -367,7 +367,13 @@ a:hover {
   font-size: 12px;
   line-height: 1.5;
 }
-.about-actions {
+/* Compound selector (.modal-actions.about-actions) intentionally raises
+   specificity above the later-declared `.modal-actions { display: flex;
+   justify-content: flex-end; }` (line 2637). Without this, the grid
+   layout below silently loses to the source-order-later flex rule and
+   the 5 action buttons cram into a single overflow row with vertically-
+   folded labels. */
+.modal-actions.about-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
