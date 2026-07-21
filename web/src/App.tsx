@@ -68,6 +68,7 @@ export function App() {
 
   useEffect(() => {
     if (!isElectronShell()) return;
+    document.body.classList.add("is-electron");
     if (isElectronMac()) document.body.classList.add("is-electron-mac");
     // Re-read on every appliedTheme change so the Electron traffic-light
     // tint tracks light↔dark flips (CSS vars have already been updated by
