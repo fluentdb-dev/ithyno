@@ -87,3 +87,52 @@ defensive guard in `App.tsx`'s `showTerminal` expression.
 - **Electron "Cancel" feedback**: Currently Cancel in Electron immediately
   invokes the dialog. A brief confirmation or "returning to project picker"
   toast might improve perceived responsiveness.
+
+---
+
+## Rework round 2
+
+Addressed all blocking and minor issues raised by the review pass.
+
+### Fixes applied
+
+**Critical (Finding 1) — symlink escape via `path.resolve()`**
+Replaced `resolve(joined)` in `resolveSafePath` with `await realpath(joined)`.
+`path.resolve()` is pure string normalization and does not follow symlinks on
+the filesystem; `fs.promises.realpath()` does. Additionally, `realpath` is now
+used for the project root itself (`await realpath(projectRoot)`) so the
+containment check works even when `PROJECT_ROOT` is itself a symlink (as is
+common on macOS where `/var` → `/private/var`). The string-level pre-check is
+still done with `resolve()` so paths to non-existent files still get the `..`
+guard without requiring I/O.
+
+**Major (Finding 2) — no extension guard on `/api/browse/markdown`**
+Added an explicit `.md` / `.markdown` extension check in `server/index.ts`
+immediately after `resolveSafePath` succeeds. Any other file extension now
+returns 400 `"only markdown files may be read"`, consistent with
+`server/parser/docs.ts` which already enforces `.md`-only reads.
+
+**Minor (Finding 3) — missing symlink regression test**
+Added a test case in `server/browse.test.ts` `describe("resolveSafePath")`:
+creates a temp directory as project root, writes a file outside the root,
+plants a symlink inside the root pointing to it, and asserts `ok: false`.
+The new symlink test passes and joins the 14 existing browse tests.
+
+**Minor (Finding 4) — `browseMode` stuck after external `openspec init`**
+In `web/src/store.ts`, the `state-replaced` WebSocket handler now chains a
+`.then()` on `get().load()` that calls `get().setBrowseMode(false)` when the
+freshly-loaded state has `exists === true`. This ensures that if another
+process creates `openspec/` out-of-band while the user is in browse mode,
+the dashboard transitions cleanly instead of leaving the user stranded in
+the read-only browse UI.
+
+### Sanity checks
+
+- `openspec validate unify-open-project-3-branch --strict` → VALID
+- `npm test` → 369 passed / 1 skipped / 1 pre-existing failure
+  (the `scripts/build-icons.test.mjs` failure is a pre-existing environment
+  issue — the `sharp` native package is not installed in this worktree;
+  confirmed by `npm ls sharp` returning empty; unrelated to this change)
+- `npm run typecheck` → clean (also removed now-unused `stat` import from
+  `browse.ts` that was left from the original symlink guard)
+- `npm run build` → clean Vite production build, 830 kB bundle

@@ -10,7 +10,7 @@
  *  - resolveSafePath accepts valid relative paths.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildMarkdownTree, resolveSafePath } from "./browse.js";
@@ -150,5 +150,25 @@ describe("resolveSafePath", () => {
     // A nonexistent file still resolves within root — the endpoint returns 404.
     const result = await resolveSafePath(dir, "missing.md");
     expect(result.ok).toBe(true);
+  });
+
+  it("rejects a symlink inside root that points to a file outside root", async () => {
+    // Create an external file outside the project root.
+    const externalDir = await mkdtemp(join(tmpdir(), "ithyno-browse-ext-"));
+    try {
+      const externalFile = join(externalDir, "secret.txt");
+      await writeFile(externalFile, "top secret contents");
+
+      // Plant a symlink inside the project root that points to the external file.
+      await symlink(externalFile, join(dir, "escape.md"));
+
+      const result = await resolveSafePath(dir, "escape.md");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toMatch(/symlink|outside/i);
+      }
+    } finally {
+      await rm(externalDir, { recursive: true, force: true });
+    }
   });
 });

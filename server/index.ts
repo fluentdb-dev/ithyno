@@ -339,6 +339,9 @@ fastify.get<{ Querystring: { path?: string } }>(
     if (!resolved.ok) {
       return reply.code(400).send({ error: resolved.reason });
     }
+    if (!resolved.abs.endsWith(".md") && !resolved.abs.endsWith(".markdown")) {
+      return reply.code(400).send({ error: "only markdown files may be read" });
+    }
     let content: string;
     try {
       const { readFile: rf } = await import("node:fs/promises");

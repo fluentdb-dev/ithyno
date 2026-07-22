@@ -10,7 +10,7 @@
  *   single markdown file. Path is validated to stay within the project root.
  */
 
-import { readdir as _readdir, stat, lstat } from "node:fs/promises";
+import { readdir as _readdir, lstat, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import type { Dirent } from "node:fs";
@@ -190,27 +190,41 @@ export async function resolveSafePath(
   }
 
   const joined = join(projectRoot, relPath);
-  const realRoot = resolve(projectRoot);
 
-  // Check if the joined path starts within the root.
-  const rel = relative(realRoot, joined);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  // String-level pre-check against the lexically-resolved root. This catches
+  // ".." traversal for both existing and non-existent paths without I/O.
+  const lexRoot = resolve(projectRoot);
+  const lexRel = relative(lexRoot, resolve(joined));
+  if (lexRel.startsWith("..") || isAbsolute(lexRel)) {
     return { ok: false, reason: "path resolves outside the project root" };
   }
 
-  // Resolve symlinks via lstat — if the target is a symlink, check its real path.
+  // Resolve the real (canonical) project root, following any symlinks in the
+  // root path itself (e.g. macOS /var → /private/var, or PROJECT_ROOT is a
+  // symlink). Use the real root for all subsequent containment checks.
+  let realRoot: string;
+  try {
+    realRoot = await realpath(projectRoot);
+  } catch {
+    realRoot = lexRoot;
+  }
+
+  // Fully resolve symlinks in the joined path. If the file exists and is (or
+  // contains) a symlink, its resolved real path must still be within the real
+  // project root. This is the key guard — fs.realpath() follows the chain.
   try {
     const lstats = await lstat(joined);
     if (lstats.isSymbolicLink()) {
+      // File is a symlink — follow the full chain and check real destination.
+      let realAbs: string;
       try {
-        const realAbs = resolve(joined);
-        await stat(realAbs); // verify it resolves
-        const relReal = relative(realRoot, realAbs);
-        if (relReal.startsWith("..") || isAbsolute(relReal)) {
-          return { ok: false, reason: "symlink target resolves outside the project root" };
-        }
+        realAbs = await realpath(joined);
       } catch {
         return { ok: false, reason: "path is a broken symlink" };
+      }
+      const relReal = relative(realRoot, realAbs);
+      if (relReal.startsWith("..") || isAbsolute(relReal)) {
+        return { ok: false, reason: "symlink target resolves outside the project root" };
       }
     }
   } catch {

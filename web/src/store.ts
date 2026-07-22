@@ -483,7 +483,12 @@ export const useStore = create<Store>((set, get) => ({
         if (!cur) return;
         set({ state: replaceSpec(cur, msg.domain, msg.spec) });
       } else if (msg.type === "state-replaced") {
-        void get().load();
+        void get().load().then(() => {
+          // If openspec/ was created out-of-band (e.g. `openspec init` in a
+          // terminal), the workspace now exists — clear browse mode so the
+          // user lands on the real dashboard instead of the stuck browse UI.
+          if (get().state?.exists) get().setBrowseMode(false);
+        });
       } else if (msg.type === "doc-updated") {
         // Refresh tree always; refresh open file only if it's the one that changed.
         if (msg.tree) set({ docs: msg.tree });
