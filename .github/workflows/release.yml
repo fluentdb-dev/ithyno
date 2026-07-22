@@ -18,10 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest temporarily excluded — the Windows-specific SyntaxError
-        # in check-preload-imports.test.mjs is being investigated on a Windows
-        # host directly. Re-add once resolved.
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout

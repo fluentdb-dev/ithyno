@@ -84,5 +84,5 @@ describe("build-icons pipeline", () => {
       expect(buf.length, `${rel} byte length must be identical on second run`).toBe(len);
       expect(buf.slice(0, 16).toString("hex"), `${rel} first 16 bytes must match on second run`).toBe(start);
     }
-  });
+  }, 20000); // sharp reprocesses 7 real images via a child process — can exceed the 5s default under parallel CI load
 });
