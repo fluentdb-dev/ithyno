@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
-import { _setTmuxCacheForTest, ptyStartup } from "./pty.js";
+import { _setTmuxCacheForTest, attachPtyToSocket, ptyStartup } from "./pty.js";
 
 /**
  * Priority chain for the Terminal panel's PTY startup command
@@ -329,5 +329,21 @@ describe("auto-launch guard: hasAgentsYaml + ptyStartup composition", () => {
     expect(hasAgentsYaml(dir)).toBe(true);
     const { startup } = ptyStartup(reg, dir);
     expect(startup).toBe("claude --continue");
+  });
+});
+
+// ---- guard round 2: attachPtyToSocket refuses to spawn PTY without agents.yaml ----
+describe("attachPtyToSocket refuses PTY spawn when agents.yaml is absent", () => {
+  it("returns { ok: false, reason: 'no-agents-yaml' } when agents.yaml is missing", async () => {
+    // No agents.yaml in `dir`. Even a well-formed WebSocket stand-in
+    // should be turned away before a PTY process is spawned.
+    const fakeWs = {
+      send: () => {},
+      close: () => {},
+      on: () => fakeWs,
+    } as unknown as import("ws").WebSocket;
+    const result = await attachPtyToSocket(fakeWs, { cwd: dir });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("no-agents-yaml");
   });
 });

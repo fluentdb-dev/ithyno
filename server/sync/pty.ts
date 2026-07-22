@@ -285,6 +285,16 @@ export async function attachPtyToSocket(
     registry?: AgentRegistry | null;
   },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // Guard (guard-terminal-autolaunch-on-agents-yaml round 2): refuse to
+  // spawn a PTY at all when the project has no `agents.yaml`. The client
+  // dashboard already gates the aside render on `hasAgentsYaml`, so this
+  // branch normally does not fire — it is a defense-in-depth against
+  // direct `/pty` WebSocket clients.
+  if (!hasAgentsYaml(opts.cwd)) {
+    console.log(`[pty] spawn skipped — no agents.yaml at ${opts.cwd}`);
+    return { ok: false, reason: "no-agents-yaml" };
+  }
+
   const pty = await loadPty();
   if (!pty.available) return { ok: false, reason: pty.reason };
 

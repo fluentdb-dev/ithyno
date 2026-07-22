@@ -27,6 +27,20 @@
 - [x] 5.1 In `server/agents/registry.test.ts` (or a new file), test the `hasAgentsYaml` helper: returns true when file exists, false when missing, false on directory-at-path, false on symlink-to-directory.
 - [x] 5.2 Integration-ish test: spawn a PTY in a fixture project WITHOUT agents.yaml, assert the auto-launch injection is NOT sent. Repeat WITH agents.yaml, assert injection IS sent.
 
+## 5A. Tighten: hide terminal view entirely (round 2)
+
+The initial implementation only suppressed the Claude-startup injection on
+web/Electron — the aside pane still rendered with a plain bash/zsh shell.
+User feedback (2026-07-22): "開かない" means the terminal VIEW itself
+should not appear at all when `agents.yaml` is absent. This section
+tightens the spec.
+
+- [x] 5A.1 In `web/src/App.tsx`, gate the `<aside class="global-terminal">` render on `state?.hasAgentsYaml === true`. When false, do NOT render the aside.
+- [x] 5A.2 Also gate the `<div class="terminal-hidden-anchor">` render on `state?.hasAgentsYaml === true` — no restore-button entry point when the terminal view is disabled.
+- [x] 5A.3 In `server/sync/pty.ts` `attachPtyToSocket()`, short-circuit with `{ ok: false, reason: "no-agents-yaml" }` when the project has no `agents.yaml`. Client-side gating in 5A.1/5A.2 prevents the connection attempt in the normal path; this server-side rejection defends against direct WS clients.
+- [x] 5A.4 Update `web/src/pages/Settings.tsx` `.info-banner` copy to reflect the tighter behavior — the terminal is entirely off; user needs to add `agents.yaml` to enable it.
+- [x] 5A.5 Regression test in `server/sync/pty.test.ts`: assert `attachPtyToSocket` returns `no-agents-yaml` when the project has no `agents.yaml`.
+
 ## 6. Verification
 
 - [x] 6.1 `npm run openspec -- validate guard-terminal-autolaunch-on-agents-yaml --strict` passes.

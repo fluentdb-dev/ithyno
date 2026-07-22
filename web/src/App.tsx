@@ -289,7 +289,10 @@ export function App() {
         )}
       </main>
 
-      {embeddedTerminalAvailable && terminalSize === "hidden" && (
+      {/* Terminal view is fully gated on agents.yaml presence
+          (guard-terminal-autolaunch-on-agents-yaml round 2). Absent
+          agents.yaml → no aside, no hidden-state anchor, no PTY. */}
+      {state?.hasAgentsYaml && embeddedTerminalAvailable && terminalSize === "hidden" && (
         /* Hidden state: a compact terminal-glyph button flush at the top-right
            corner is the sole re-show entry point. The <aside> BELOW stays
            mounted (just visually hidden via CSS) so the PTY WebSocket and
@@ -304,7 +307,7 @@ export function App() {
           terminal-hidden CSS class = display:none). React keeps <Terminal />
           mounted throughout, so the /pty WebSocket + PTY session persist
           across every transition — including Hidden. */}
-      {embeddedTerminalAvailable && terminalVisible && (
+      {state?.hasAgentsYaml && embeddedTerminalAvailable && terminalVisible && (
         <aside
           className={`global-terminal${terminalSize === "hidden" ? " terminal-hidden" : ""}`}
         >

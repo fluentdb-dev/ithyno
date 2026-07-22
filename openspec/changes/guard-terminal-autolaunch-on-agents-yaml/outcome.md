@@ -57,3 +57,33 @@
   suppressed (no status-bar item or message). A low-priority follow-up could
   show a one-time info notification on first activation with a no-agents-yaml
   workspace.
+
+## Round 2 tighten (2026-07-22)
+
+User feedback: "Terminalはagents.yamlがなければ開かないようにする" —
+「開かない」= the terminal VIEW itself should not appear at all.
+Round 1's narrow interpretation (only auto-launch suppressed; aside still
+rendered with a plain shell) did not match user intent.
+
+Changes:
+
+- `web/src/App.tsx` — gated the `<aside class="global-terminal">` render
+  AND the `<div class="terminal-hidden-anchor">` render on
+  `state?.hasAgentsYaml === true`. Absent agents.yaml → neither element is
+  in the DOM.
+- `server/sync/pty.ts` `attachPtyToSocket()` — refuses to spawn a PTY at
+  all when `hasAgentsYaml(opts.cwd)` is false, returning
+  `{ ok: false, reason: "no-agents-yaml" }`. Defense-in-depth against a
+  direct `/pty` WebSocket client bypassing the dashboard.
+- `web/src/pages/Settings.tsx` — updated `.info-banner` copy from
+  "…or open the terminal manually via the size toggle" to
+  "Add one at the project root to enable agent dispatch and the ithyno
+  terminal panel." The manual-open affordance is gone.
+- `server/sync/pty.test.ts` — added a regression test asserting
+  `attachPtyToSocket` returns `no-agents-yaml` when the fixture has no
+  `agents.yaml`.
+- Spec: replaced Requirement "Auto-launch is gated…" with the tighter
+  "Terminal view is gated on agents.yaml presence" — same scenarios
+  plus explicit assertions that no aside, no anchor, no PTY, no WS
+  connection when agents.yaml is absent.
+

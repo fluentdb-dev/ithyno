@@ -1,15 +1,19 @@
 ## ADDED Requirements
 
-### Requirement: Auto-launch is gated on agents.yaml presence
+### Requirement: Terminal view is gated on agents.yaml presence
 
-The embedded terminal's auto-launch (both the PTY-injected startup command on the web/Electron shells AND the VS Code extension's `autoLaunchTerminal` setting) SHALL check for `<project-root>/agents.yaml` before firing. When `agents.yaml` is absent, the auto-launch SHALL be suppressed regardless of user configuration.
+The embedded terminal (the whole `<aside class="global-terminal">` pane on the web/Electron shell, plus the VS Code extension's terminal-panel auto-open) SHALL check for `<project-root>/agents.yaml` before rendering or opening. When `agents.yaml` is absent, the terminal view SHALL be suppressed entirely — no aside pane, no hidden-state anchor, no PTY WebSocket, and no VS Code terminal panel — regardless of user configuration.
 
-#### Scenario: No agents.yaml — auto-launch suppressed on web/Electron
+The rationale: absent `agents.yaml`, there is no dispatch runtime to drive; a terminal without agent orchestration is out of scope for ithyno. Users who want a plain shell can still open one in their host terminal.
+
+#### Scenario: No agents.yaml — terminal view hidden on web/Electron
 
 - **GIVEN** a project whose root does NOT contain `agents.yaml`
 - **WHEN** the user opens that project in the ithyno dashboard (browser or Electron shell)
-- **THEN** the embedded terminal's PTY spawns a plain shell (bash / zsh) as before
-- **AND** the previously-injected Claude startup command (`claude --resume <session-id>` or the configured alternative) is NOT auto-sent
+- **THEN** the `<aside class="global-terminal">` pane is NOT rendered
+- **AND** the `<div class="terminal-hidden-anchor">` restore button is NOT rendered
+- **AND** no `/pty` WebSocket connection is opened by the dashboard
+- **AND** the server does NOT spawn a PTY for that project
 - **AND** the server logs `[pty] auto-launch skipped — no agents.yaml at <project-root>` for observability
 
 #### Scenario: No agents.yaml — VS Code extension does not open terminal
@@ -24,12 +28,11 @@ The embedded terminal's auto-launch (both the PTY-injected startup command on th
 
 - **GIVEN** a project whose root contains `agents.yaml`
 - **WHEN** the user opens that project
-- **THEN** the auto-launch fires as before this requirement
+- **THEN** the terminal aside renders and the auto-launch fires as before this requirement
 - **AND** the Manager Claude Code process starts per the existing per-project session-id logic
 
-#### Scenario: Manual terminal open remains available
+#### Scenario: User is nudged to add agents.yaml
 
-- **GIVEN** a project without `agents.yaml` in the dashboard
-- **WHEN** the user manually invokes the terminal (via the size toggle from `add-terminal-size-toggle`, or any other explicit affordance)
-- **THEN** the PTY is created and a plain shell prompt appears
-- **AND** the user can start Claude Code manually if they wish (`claude` from the shell) — auto-launch's absence does not block manual use
+- **GIVEN** a project whose root does NOT contain `agents.yaml`
+- **WHEN** the user opens the Settings page
+- **THEN** an unobtrusive `.info-banner` renders explaining that terminal auto-launch is off and pointing at `agents.yaml` as the enabler

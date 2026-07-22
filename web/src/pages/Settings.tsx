@@ -43,10 +43,9 @@ export function Settings() {
 
       {!hasAgentsYaml && (
         <div className="info-banner">
-          <strong>Terminal auto-launch is off</strong> — this project has no{" "}
-          <code>agents.yaml</code>. Add one to enable agent dispatch and
-          automatic terminal startup, or open the terminal manually via the
-          size toggle.
+          <strong>Embedded terminal is off</strong> — this project has no{" "}
+          <code>agents.yaml</code>. Add one at the project root to enable
+          agent dispatch and the ithyno terminal panel.
         </div>
       )}
 
