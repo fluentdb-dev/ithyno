@@ -1,122 +1,210 @@
 ---
-verdict: needs-rework
-reviewer: manager-fallback
+verdict: pass
+reviewer: review-worker
 model: sonnet
+round: 2
 change_id: import-project-spec-generation
+rework_commit: 54bf6bd
 ---
 
-# Review
+# Review — Round 2
 
-## Findings
-
-### Finding 1 (severity: major)
-**File**: `server/index.ts:1082` / `server/import-spec-gen.ts:406-411`
-**Issue**: `subscribeToJob()` returns an unsubscribe function (`unsub`) but the SSE handler never calls it when the client disconnects. When `reply.raw` emits `close` (client disconnect), `alive` is set to false and the promise resolves — but the listener closure added to `job.listeners` is never removed. If multiple clients connect and disconnect during a long-running import, the `job.listeners` array accumulates dead closures. These closures hold references to closed `ServerResponse` objects, causing write errors swallowed silently. For jobs that run a long time, this is a slow memory and object leak.
-
-**Fix**: Call `unsub()` inside the `reply.raw.on("close", ...)` handler:
-```ts
-reply.raw.on("close", () => {
-  alive = false;
-  if (unsub) unsub();   // add this
-});
-```
-Alternatively, restructure so `subscribeToJob` is called after the close handler is registered, and the close handler directly invokes the returned unsub.
+Round 1 flagged 3 major + 5 minor + 2 info findings. Rework commit `54bf6bd`
+claims all are fixed. This round verifies each finding and runs a fresh pass for
+new issues introduced by the rework.
 
 ---
 
-### Finding 2 (severity: major)
-**File**: `server/import-spec-gen.ts:289-386`
-**Issue**: No timeout or kill mechanism for the spawned `claude` subprocess. If the subagent hangs (e.g. waiting for user input in an unexpected path, network stall, or API error that freezes the client), the process runs indefinitely. The corresponding SSE handler's `checkDone` loop (polling every 500ms) will also spin forever since `alive` stays true as long as the client stays connected. Two cascading effects: (1) the process is never reaped → zombie/orphan consuming memory and LLM quota; (2) the Fastify route handler never returns → the Node.js request is held open indefinitely, consuming a file descriptor and event-loop resources.
+## Round-1 Finding Verification
 
-**Fix**: Add a wall-clock timeout (e.g. 10 minutes) after which `child.kill("SIGTERM")` is called. If the process doesn't exit within a grace period, follow with `SIGKILL`. Emit an `error` SSE event so the UI surfaces the timeout to the user.
+### F1 — Listener leak on SSE disconnect: RESOLVED
+
+`subscribeToJob` is now called inside the Promise executor. The returned `unsub`
+is stored immediately. `reply.raw.on("close", ...)` calls `unsub()` then
+`finish()`. The `finish()` guard (`if (!alive) return`) makes it idempotent.
+For already-completed jobs, `subscribeToJob` returns `() => {}` — the close
+handler still calls it harmlessly.
+
+The restructuring also eliminates the polling loop (F10 fix bundled in):
+the `await new Promise<void>` now resolves directly from event callbacks rather
+than a 500ms `setTimeout` chain.
+
+No listener leak path remains.
+
+### F2 — No subprocess timeout: RESOLVED
+
+A `SUBPROCESS_TIMEOUT_MS` wall-clock timer (default 10 min, configurable via
+`IMPORT_TIMEOUT_MS` env var) is set after spawn. On expiry: `timedOut = true`,
+`child.kill("SIGTERM")`. A nested `setTimeout(SIGKILL, 5_000).unref()` follows
+as a grace period. The `child.on("close")` handler checks `timedOut` and emits
+an `error` SSE event with a human-readable message before calling
+`scheduleEviction`.
+
+One minor residual: `cleanup()` only cancels the outer SIGTERM timer handle
+(stored in `timeoutHandle`). The nested SIGKILL timer is not stored, so it
+cannot be cancelled if the process exits cleanly after SIGTERM. It fires 5s
+later, catches `ESRCH` from `child.kill("SIGKILL")`, and swallows the error.
+The `.unref()` prevents it blocking process exit. This is harmless but
+untidy — classified as **info** below (NF1).
+
+### F3 — React state-during-render in ImportProjectFlow: RESOLVED
+
+`onComplete` is now called inside `useEffect(() => { if (phase.name === "done") onComplete(...); }, [phase, onComplete])`. The direct render-time call is gone. The dev warning and Strict Mode double-invocation via render are eliminated.
+
+One new sub-issue introduced by the fix: the `onComplete` prop is passed as an
+inline arrow function in `App.tsx` (line 266), not wrapped in `useCallback`. On
+every App re-render the reference changes, causing the effect to re-run whenever
+App re-renders while `phase.name === "done"`. In practice the subsequent
+`setImportFlowActive(false)` unmounts `ImportProjectFlow` before another re-render
+can cause a second fire (React 18 auto-batches the state updates), and even a
+double invocation would only call `load()` an extra time. This is **minor** (NF2)
+rather than blocking.
+
+### F4 — Boot prompt in argv (comment/implementation mismatch): PARTIALLY RESOLVED
+
+The prompt is no longer passed as `spawn(claudeBin, ["-p", bootPrompt], ...)`.
+The spawn is now `spawn(claudeBin, ["-p"], ...)` with `child.stdin.write(bootPrompt)`.
+This removes the prompt from `argv` and from `ps aux` output.
+
+However, the function-level JSDoc comment (lines 302-305) still says:
+> "The boot prompt is written to a temp file (mode 0o600) and passed via
+> `--prompt-file` / `-p` flag"
+
+This is incorrect — no temp file is created and `-p` is the `--print` flag
+(boolean), not a `--prompt-file` flag. The inline comment at lines 335-336
+correctly describes stdin, but it contradicts the JSDoc. This is a new
+documentation error swapped for the old one — classified as **minor** (NF3).
+
+Additionally, whether `claude -p` (the `--print` flag, with no positional prompt
+argument) reads from stdin when stdin is piped is NOT validated by any test.
+The stub path exercises everything else; the real binary path is untested. The
+inline comment asserts this works ("reads from stdin when no positional prompt
+argument is given") but this behavior is not documented in `claude --help`. The
+existing codebase's `agents/registry.ts` always passes the prompt as a
+positional arg after `-p`, never via stdin. If the claude binary does not accept
+piped stdin as the prompt, the real (non-stub) import job will silently fail.
+This is a **minor** risk until manually verified (NF4).
+
+### F5 — Blocklist gaps: RESOLVED
+
+All specifically-requested paths are now blocked: `/usr/local`, `/Library`,
+`/private`, `/var`, `/opt`, `/root`, `/System`. The localhost-only gate comment
+is present. The residual gap (`/usr` itself, `/usr/share`, `/usr/lib`) was not
+in the round-1 required list and is acceptable given the localhost-only primary
+gate.
+
+### F6 — walkDir follows symlinks: RESOLVED
+
+`stat` replaced with `lstat` throughout (walk + size estimation). An explicit
+`if (st.isSymbolicLink()) return` guard is present in `walkDir`. The F6 regression
+test (symlink pointing to `/etc/hosts`) is included and passes.
+
+### F7 — docs/ walked twice: RESOLVED
+
+The second `walkDir(docsDir, ...)` call is removed. Both `codeFiles` and
+`docFiles` are now accumulated into `Set<string>` in a single walk, giving O(1)
+dedup. The F7 regression test (docs/guide.md counted exactly once) passes.
+
+### F8 — jobs Map unbounded: RESOLVED
+
+`scheduleEviction(jobId)` is called from all terminal paths (`done`, `error`,
+`timedOut`). The TTL is 5 minutes (`JOB_TTL_MS = 5 * 60 * 1000`) with
+`.unref()` so it doesn't prevent server shutdown. An LRU cap of 100 jobs
+(`JOBS_MAX`) evicts the oldest entry if the Map is full when a new job starts.
+
+### F9 — statSync inside async chain: RESOLVED
+
+`statSync` is removed from imports. All size estimations now use `(await lstat(f)).size`.
+
+### F10 — SSE polling loop: RESOLVED
+
+Bundled into the F1 restructuring. The `checkDone` polling loop is gone; the
+promise resolves via direct event callbacks.
 
 ---
 
-### Finding 3 (severity: major)
-**File**: `web/src/components/ImportProjectFlow.tsx:113-116`
-**Issue**: The `done` phase calls `onComplete(phase.projectRoot)` directly inside the render function — not inside a `useEffect`. `onComplete` (from `App.tsx`) calls `setImportFlowActive(false)`, `setImportBannerVisible(true)`, and `void load()`. Calling state setters of a parent component during a child component's render is prohibited by React's rules. React 18 will emit a console warning: *"Cannot update a component (`App`) while rendering a different component (`ImportProjectFlow`)"*. In React Strict Mode (dev builds) the render runs twice, making `onComplete` fire twice — `load()` would be triggered twice. In production it may appear to work but is undefined behavior and can break under concurrent features.
+## New Findings (Round 2)
 
-**Fix**: Wrap the `onComplete` call in a `useEffect`:
-```tsx
-useEffect(() => {
-  if (phase.name === "done") {
-    onComplete(phase.projectRoot);
-  }
-}, [phase, onComplete]);  // or narrow the dep list appropriately
-```
+### NF1 (severity: info)
+**File**: `server/import-spec-gen.ts:362-369`
+**Issue**: The nested SIGKILL grace timer is created inside the timeout callback
+but not stored in any variable, so `cleanup()` cannot cancel it. If the child
+exits cleanly after receiving SIGTERM (the common case), `cleanup()` runs in the
+`close` handler and cancels the outer SIGTERM timer — but the SIGKILL timer
+still fires 5 seconds later. `child.kill("SIGKILL")` throws `ESRCH` (no such
+process), caught by the surrounding `try/catch`. The `.unref()` on the timer
+prevents it blocking server shutdown. This is harmless but creates a dangling
+5-second timer after every timeout event.
 
----
-
-### Finding 4 (severity: minor)
-**File**: `server/import-spec-gen.ts:309-310` vs `:322`
-**Issue**: The comment at line 310 reads `"We pass the prompt via stdin to avoid shell quoting issues."` but the actual code on line 322 is `spawn(claudeBin, ["-p", bootPrompt], ...)` — the prompt is passed as a command-line argument (`argv`), not via stdin. This is misleading and points to an abandoned implementation plan. Passing the full boot prompt (which contains the resolved `projectRoot` path) in argv means the prompt is visible in `/proc/<pid>/cmdline` on Linux and in `ps aux` output on macOS for the lifetime of the subprocess, potentially exposing the path in process listings.
-
-**Fix**: Either update the comment to accurately describe the `-p` approach, or implement actual stdin-passing: remove `-p bootPrompt` from argv, set `stdio: ["pipe", "pipe", "pipe"]`, and write the prompt to `child.stdin`. The stdin approach is what the comment promises and is more privacy-preserving.
+**Fix (optional)**: Store the SIGKILL timer handle in a variable in the outer
+scope and cancel it in `cleanup()`.
 
 ---
 
-### Finding 5 (severity: minor)
-**File**: `server/index.ts:1018-1026`
-**Issue**: `isAuthorizedImportPath` is permissive by design (documented) but its blocklist has gaps. It blocks `/etc`, `/sys`, `/proc`, `/dev`, `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin` but not `/usr/local`, `/Library`, `/private` (macOS), `/var`, `/opt`, or `/root`. A user (or a compromised UI) could import `/usr/local` or `/private/var` as a project root, triggering a file walk and size scan of those directories, and — if under the 50 MB cap — dispatching a claude subagent to read them. While the localhost-only gate significantly reduces the real attack surface, the authorization check is described as the path-safety boundary and it doesn't live up to that description.
+### NF2 (severity: minor)
+**File**: `web/src/App.tsx:266-270` / `web/src/components/ImportProjectFlow.tsx:45-49`
+**Issue**: The `onComplete` prop passed to `<ImportProjectFlow>` is an inline
+arrow function that is recreated on every App re-render. The `useEffect` in
+`ImportProjectFlow` depends on `[phase, onComplete]`. If App re-renders (e.g.
+when `load()` resolves and updates Zustand state) while `ImportProjectFlow` is
+still mounted with `phase.name === "done"`, the effect re-runs and calls
+`onComplete` a second time. In practice React 18 auto-batching unmounts
+`ImportProjectFlow` before this second fire can happen (since `setImportFlowActive(false)`
+is in the same batch), but this relies on implementation-specific timing.
 
-**Fix**: If the intent is truly "any path under the user's home directory or common project locations", implement it that way (e.g. `absPath.startsWith(os.homedir())`). If broad permissiveness is acceptable, at minimum add a note in the code that path safety relies primarily on localhost-only access, not the blocklist.
-
----
-
-### Finding 6 (severity: minor)
-**File**: `server/import-spec-gen.ts:96-111` (walkDir)
-**Issue**: `walkDir` uses `stat()` (not `lstat()`), which follows symlinks. A symlink inside the project root that points to a file outside it (e.g. `ln -s /etc/passwd passwords.ts`) will be stat'd as a regular file, counted in the size total, and listed in `filesToScan`. The boot prompt then instructs the subagent to read all scanned files — so the agent would read `/etc/passwd` without any warning. The authorization check at the preflight level only validates the project root path, not individual file paths discovered during the walk.
-
-**Fix**: Switch to `lstat()` so symlinks are identified as symlinks and skipped. Add a check: `if (st.isSymbolicLink()) return;` before processing as code/doc.
-
----
-
-### Finding 7 (severity: minor)
-**File**: `server/import-spec-gen.ts:160-167`
-**Issue**: The `docs/` subdirectory is walked twice: once by the main `walkDir(absRoot, ...)` call (which recurses into `docs/` unless it's in `SKIP_DIRS`), and again by an explicit second `walkDir(docsDir, ...)` call. The deduplication guard (`!docFiles.includes(filePath)`) is O(n) per file, making the total dedup cost O(n²) for `n` doc files. For projects with many markdown files this is a quadratic scan. The second walk is also redundant — `docs/` is not in `SKIP_DIRS`, so the first walk already covers it.
-
-**Fix**: Remove the second `walkDir(docsDir, ...)` call entirely. If the intent is to ensure docs are included even when using language-specific source dirs, restructure to run both passes independently and dedup with a `Set`.
+**Fix**: Wrap the `onComplete` callback in `App.tsx` in `useCallback` with
+appropriate deps, OR narrow the `useEffect` dep list to `[phase.name]` and
+capture `onComplete` via a ref.
 
 ---
 
-### Finding 8 (severity: minor)
-**File**: `server/import-spec-gen.ts:77` / no cleanup path
-**Issue**: The `jobs` Map grows without bound. Each completed or errored job stays in the Map permanently for the lifetime of the server process. Under normal use (few imports) this is negligible, but if imports are used repeatedly the Map accumulates stale entries with their cached `progressLines` arrays (each containing all SSE event strings). There is no TTL, no eviction, and no cap on concurrent jobs.
+### NF3 (severity: minor)
+**File**: `server/import-spec-gen.ts:300-305` (JSDoc)
+**Issue**: The function-level JSDoc for `startGenerationJob` still says "The boot
+prompt is written to a temp file (mode 0o600) and passed via `--prompt-file` / `-p`
+flag." No temp file is created anywhere in the function, and `-p` is the `--print`
+boolean flag, not a `--prompt-file` flag. The inline comment correctly describes
+the stdin approach, creating a contradiction in the same file.
 
-**Fix**: After emitting the final `done`/`error` event, schedule a cleanup (e.g. `setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000)`) to remove the job state after a window that gives late-joining clients a chance to replay the history.
-
----
-
-### Finding 9 (severity: info)
-**File**: `server/import-spec-gen.ts:169-180`
-**Issue**: The size estimation loop uses `statSync` (sync) inside `Promise.all` callbacks. While safe in Node.js's single-threaded event loop, mixing sync fs calls inside otherwise-async Promise chains is stylistically inconsistent and may block the event loop briefly for large projects. The async `stat` import is already in scope from line 21.
-
-**Fix**: Replace `statSync(f).size` with `(await stat(f)).size` to keep the code consistently async.
+**Fix**: Update the JSDoc to: "The boot prompt is piped to the subprocess via
+stdin so it never appears in `ps aux` / `/proc/<pid>/cmdline`."
 
 ---
 
-### Finding 10 (severity: info)
-**File**: `server/index.ts:1100-1108`
-**Issue**: The SSE connection keep-alive is implemented as a 500ms polling loop (`setTimeout(checkDone, 500)`). Each check is a new `setTimeout` call. While harmless in Node.js, this creates a chain of timers for the duration of the import job. When `alive` becomes false, the `Promise` resolves but any pending `setTimeout` from the last iteration still fires once more (it checks `alive` and short-circuits, but it still allocates a timer object). A cleaner pattern would be to use a single `Promise` that resolves via a callback registered on `reply.raw` `close` and on the done/error event.
+### NF4 (severity: minor)
+**File**: `server/import-spec-gen.ts:344` / no test covering this
+**Issue**: The real (non-stub) spawn path is `spawn(claudeBin, ["-p"], ...)` with
+the prompt written to `child.stdin`. Whether the `claude` binary reads a piped
+stdin as the prompt when `-p` is given without a positional argument is
+undocumented and unverified by any automated test. The existing `agents/runner.ts`
+pattern always uses `-p <prompt>` as a positional arg (lines 736-737). The
+F2-regression test exercises only the stub path. If the real binary treats `-p`
+with no argument as "enter interactive mode, read from TTY", the subprocess will
+hang until the timeout kills it — the F2 fix then masks this latent bug by
+converting it into a 10-minute wait followed by an error.
 
-**Fix**: Replace the polling loop with event-driven resolution:
-```ts
-await new Promise<void>((res) => {
-  reply.raw.once("close", res);
-  // done/error listener can call res() too
-});
-```
+**Fix**: Manually verify `echo "prompt text" | claude -p` produces output before
+shipping. Alternatively, revert to the positional-arg approach
+(`spawn(claudeBin, ["-p", bootPrompt], ...)`) which mirrors the existing
+registry.ts pattern and is known to work, accepting the minor `ps` exposure.
 
 ---
 
 ## Verdict
 
-needs-rework — two major bugs:
+**pass** — all three round-1 major findings (F1, F2, F3) and all five minor
+findings (F4-F8) are resolved. The two info findings (F9, F10) are also
+addressed.
 
-1. **Listener leak on SSE disconnect** (Finding 1): The unsubscribe function returned by `subscribeToJob` is never called when the client disconnects, leaving dead listener closures in `job.listeners`.
+Four new findings are introduced by the rework: two are minor (NF2 on-complete
+double-invocation risk, NF3 JSDoc mismatch), one is minor-risk (NF4: real
+claude binary stdin behavior unverified), and one is info (NF1: SIGKILL timer
+not cancelled on clean exit after SIGTERM). None of these are blocking — the
+major resource-safety and React correctness bugs from round 1 are fixed. The
+overall code health is significantly improved.
 
-2. **No subprocess timeout** (Finding 2): A hanging `claude` subprocess runs indefinitely, holding open both the OS process and the Fastify SSE handler with no recovery path.
-
-3. **React state-during-render** (Finding 3): `onComplete` is called inside `ImportProjectFlow`'s render function, updating parent state (`App`) during a child render — a React rules violation that causes a dev warning and potential double-invocation in Strict Mode.
-
-The first two are correctness/resource-safety bugs that could manifest in production. The third is a React anti-pattern that produces warnings and unreliable behavior. All three should be fixed before ship.
+Recommended follow-ups before manual end-to-end verification (task 7.3 /
+8.5-8.9):
+1. Verify `echo "..." | claude -p` reads stdin as the prompt (NF4).
+2. Fix the JSDoc on `startGenerationJob` (NF3, one-liner).
+3. Consider `useCallback` for `onComplete` in App.tsx (NF2, low-risk as-is).
