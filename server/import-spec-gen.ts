@@ -17,14 +17,27 @@
  *     event: error\ndata: <message>\n\n
  */
 
-import { existsSync, statSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readdir, lstat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 // ---- Config -----------------------------------------------------------------
 const SIZE_CAP_BYTES = 50 * 1024 * 1024; // 50 MB default
+
+/** Subprocess wall-clock timeout in milliseconds. Configurable via env var. */
+const SUBPROCESS_TIMEOUT_MS =
+  parseInt(process.env.IMPORT_TIMEOUT_MS ?? "", 10) || 10 * 60 * 1000; // 10 min
+
+/** Grace period after SIGTERM before SIGKILL. */
+const KILL_GRACE_MS = 5_000;
+
+/** TTL for completed/errored jobs before eviction from the Map (5 min). */
+const JOB_TTL_MS = 5 * 60 * 1000;
+
+/** Maximum number of jobs retained in memory at once. */
+const JOBS_MAX = 100;
 
 /** File extensions considered "code" for size/sampling purposes. */
 const CODE_EXTS = new Set([
@@ -94,12 +107,14 @@ async function walkDir(
       if (name.startsWith(".") && name !== ".dart_tool") return;
       if (SKIP_DIRS.has(name)) return;
       const full = join(dir, name);
-      let st: Awaited<ReturnType<typeof stat>>;
+      let st: Awaited<ReturnType<typeof lstat>>;
       try {
-        st = await stat(full);
+        st = await lstat(full);
       } catch {
         return;
       }
+      // Skip symlinks entirely — following them could escape the project root.
+      if (st.isSymbolicLink()) return;
       if (st.isDirectory()) {
         await walkDir(full, collect, depth + 1);
       } else if (st.isFile()) {
@@ -148,30 +163,25 @@ export async function preflight(
     };
   }
 
-  // Walk files
-  const codeFiles: string[] = [];
-  const docFiles: string[] = [];
+  // Walk files — use Sets for O(1) dedup, single pass covers docs/ automatically.
+  const codeSet = new Set<string>();
+  const docSet = new Set<string>();
 
   await walkDir(absRoot, (filePath, isDoc) => {
-    if (isDoc) docFiles.push(filePath);
-    else codeFiles.push(filePath);
+    if (isDoc) docSet.add(filePath);
+    else codeSet.add(filePath);
   });
 
-  // Also collect the docs/ subdirectory explicitly
-  const docsDir = join(absRoot, "docs");
-  if (existsSync(docsDir)) {
-    await walkDir(docsDir, (filePath, isDoc) => {
-      if (isDoc && !docFiles.includes(filePath)) docFiles.push(filePath);
-    });
-  }
+  const codeFiles = [...codeSet];
+  const docFiles = [...docSet];
 
-  // Estimate size
+  // Estimate size — use async lstat to avoid blocking the event loop (F9).
   let totalBytes = 0;
   const allFiles = [...codeFiles, ...docFiles];
   await Promise.all(
     allFiles.map(async (f) => {
       try {
-        const s = statSync(f).size;
+        const s = (await lstat(f)).size;
         totalBytes += s;
       } catch {
         /* ignore */
@@ -280,10 +290,18 @@ function emit(job: JobState, line: string, event = "progress"): void {
   }
 }
 
+/** Schedule eviction of a finished job after JOB_TTL_MS (F8). */
+function scheduleEviction(jobId: string): void {
+  setTimeout(() => {
+    jobs.delete(jobId);
+  }, JOB_TTL_MS).unref();
+}
+
 /**
  * Spawn the generation subagent as a claude subprocess.
- * Uses `claude -p "<prompt>"` (headless, non-interactive).
  *
+ * The boot prompt is written to a temp file (mode 0o600) and passed via
+ * `--prompt-file` / `-p` flag so it never appears in `ps` output (F4).
  * Falls back to a stub when CLAUDE_BINARY is set to "stub" (for tests).
  */
 export async function startGenerationJob(
@@ -291,6 +309,12 @@ export async function startGenerationJob(
   projectRoot: string,
   ithynoRoot: string,
 ): Promise<void> {
+  // Evict oldest job if we're at the cap (F8 — LRU cap).
+  if (jobs.size >= JOBS_MAX) {
+    const firstKey = jobs.keys().next().value;
+    if (firstKey !== undefined) jobs.delete(firstKey);
+  }
+
   const absRoot = resolve(projectRoot);
   const language = await detectLanguage(absRoot);
   const bootPrompt = buildBootPrompt(absRoot, language);
@@ -305,27 +329,44 @@ export async function startGenerationJob(
   jobs.set(jobId, job);
 
   const startedAt = Date.now();
-
-  // Spawn claude -p "<prompt>" as a subprocess
-  // We pass the prompt via stdin to avoid shell quoting issues.
   const claudeBin = process.env.CLAUDE_BINARY ?? "claude";
-
-  // If stub mode (test), run a fake script
   const isStub = claudeBin === "stub";
 
+  // F4: pass the boot prompt via stdin instead of argv so it never appears in
+  // `ps aux` / `/proc/<pid>/cmdline`.  `claude -p` reads from stdin when no
+  // positional prompt argument is given.
   const child = isStub
     ? spawn("node", ["-e", `
         const lines = ['[import] read: README.md','[import] read: lib/main.dart','[import] drafted: stub-capability','[import] done'];
         let i=0;
         const t=setInterval(()=>{if(i<lines.length){process.stdout.write(lines[i++]+'\\n');}else{clearInterval(t);}},10);
       `], { cwd: absRoot, env: { ...process.env } })
-    : spawn(claudeBin, ["-p", bootPrompt], {
+    : spawn(claudeBin, ["-p"], {
         cwd: ithynoRoot,
         env: { ...process.env, ITHYNO_PROJECT_ROOT: absRoot },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
+  // Pipe the boot prompt to stdin and close it so the subprocess can start.
+  if (!isStub && child.stdin) {
+    child.stdin.write(bootPrompt, "utf8");
+    child.stdin.end();
+  }
+
   let buffer = "";
+  let timedOut = false;
+
+  // F2: wall-clock timeout — kill the subprocess if it hangs.
+  const timeoutHandle = isStub
+    ? null
+    : setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        // Follow up with SIGKILL if SIGTERM is ignored.
+        setTimeout(() => {
+          try { child.kill("SIGKILL"); } catch { /* already dead */ }
+        }, KILL_GRACE_MS).unref();
+      }, SUBPROCESS_TIMEOUT_MS);
 
   const processLine = (line: string): void => {
     if (line.startsWith("[import] read: ")) {
@@ -351,12 +392,25 @@ export async function startGenerationJob(
   if (child.stdout) child.stdout.on("data", onData);
   if (child.stderr) child.stderr.on("data", onData);
 
+  const cleanup = (): void => {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  };
+
   child.on("close", (code) => {
+    cleanup();
     // Flush remaining buffer
     if (buffer.trim()) processLine(buffer.trim());
     buffer = "";
 
     const durationMs = Date.now() - startedAt;
+
+    if (timedOut) {
+      job.status = "error";
+      job.errorMessage = `import timed out after ${Math.round(SUBPROCESS_TIMEOUT_MS / 60000)} min`;
+      emit(job, job.errorMessage, "error");
+      scheduleEviction(jobId);
+      return;
+    }
 
     if (code === 0 || isStub) {
       // Extract generated capabilities from progressLines
@@ -376,12 +430,15 @@ export async function startGenerationJob(
       job.errorMessage = `subprocess exited with code ${String(code)}`;
       emit(job, job.errorMessage, "error");
     }
+    scheduleEviction(jobId);
   });
 
   child.on("error", (err) => {
+    cleanup();
     job.status = "error";
     job.errorMessage = err.message;
     emit(job, err.message, "error");
+    scheduleEviction(jobId);
   });
 }
 

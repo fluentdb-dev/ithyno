@@ -12,7 +12,7 @@
  * menu items (which open an OS folder picker then render this component).
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ImportConfirmModal } from "./ImportConfirmModal";
 import { ImportProgress } from "./ImportProgress";
 
@@ -38,6 +38,15 @@ export function ImportProjectFlow({ projectRoot: initialRoot, onComplete, onCanc
       : { name: "idle" },
   );
   const [manualRoot, setManualRoot] = useState("");
+
+  // F3: call onComplete in an effect so it never fires during render.
+  // This avoids the React "cannot update a component while rendering a
+  // different component" warning and double-invocation in Strict Mode.
+  useEffect(() => {
+    if (phase.name === "done") {
+      onComplete(phase.projectRoot);
+    }
+  }, [phase, onComplete]);
 
   if (phase.name === "idle") {
     return (
@@ -109,9 +118,8 @@ export function ImportProjectFlow({ projectRoot: initialRoot, onComplete, onCanc
     );
   }
 
-  // done — trigger completion in parent
+  // done — onComplete is called via useEffect above (F3).
   if (phase.name === "done") {
-    onComplete(phase.projectRoot);
     return null;
   }
 

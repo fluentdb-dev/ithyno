@@ -1017,8 +1017,20 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
    */
   function isAuthorizedImportPath(absPath: string): boolean {
     // Must be an absolute path that doesn't escape into system dirs.
+    // Note: the primary security gate is localhost-only network access;
+    // this blocklist provides defense-in-depth for system paths (F5).
     if (!absPath || !absPath.startsWith("/")) return false;
-    const forbidden = ["/etc", "/sys", "/proc", "/dev", "/bin", "/sbin", "/usr/bin", "/usr/sbin"];
+    const forbidden = [
+      // Linux system dirs
+      "/etc", "/sys", "/proc", "/dev", "/bin", "/sbin",
+      "/usr/bin", "/usr/sbin", "/usr/local",
+      // macOS system dirs
+      "/Library", "/private", "/var", "/opt",
+      // Root's home
+      "/root",
+      // System frameworks (macOS)
+      "/System",
+    ];
     for (const f of forbidden) {
       if (absPath === f || absPath.startsWith(f + "/")) return false;
     }
@@ -1065,44 +1077,48 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
         Connection: "keep-alive",
       });
 
-      let alive = true;
-      reply.raw.on("close", () => {
-        alive = false;
-      });
-
-      const writeSse = (event: string, data: string): void => {
-        if (!alive) return;
-        try {
-          reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
-        } catch {
-          alive = false;
-        }
-      };
-
-      const unsub = subscribeToJob(req.params.jobId, (line, event = "progress") => {
-        writeSse(event, line);
-        if (event === "done" || event === "error") {
-          try {
-            reply.raw.end();
-          } catch {
-            /* ignore */
-          }
-          alive = false;
-        }
-      });
-
-      if (!unsub) {
-        writeSse("error", "job not found");
-        try { reply.raw.end(); } catch { /* ignore */ }
-      }
-
-      // Keep connection open until job finishes or client disconnects
+      // F10: resolve the awaited Promise via events rather than a polling loop.
+      // F1: unsub() is called from both the done/error listener and the close
+      //     handler so dead listener closures are always removed promptly.
       await new Promise<void>((resolve) => {
-        const checkDone = (): void => {
-          if (!alive) resolve();
-          else setTimeout(checkDone, 500);
+        let alive = true;
+
+        const finish = (): void => {
+          if (!alive) return;
+          alive = false;
+          resolve();
         };
-        checkDone();
+
+        const writeSse = (event: string, data: string): void => {
+          if (!alive) return;
+          try {
+            reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
+          } catch {
+            finish();
+          }
+        };
+
+        // Subscribe first so unsub is available to the close handler.
+        const unsub = subscribeToJob(req.params.jobId, (line, event = "progress") => {
+          writeSse(event, line);
+          if (event === "done" || event === "error") {
+            try { reply.raw.end(); } catch { /* ignore */ }
+            finish();
+          }
+        });
+
+        if (!unsub) {
+          writeSse("error", "job not found");
+          try { reply.raw.end(); } catch { /* ignore */ }
+          finish();
+          return;
+        }
+
+        // F1: on client disconnect, drain the listener and resolve the promise.
+        reply.raw.on("close", () => {
+          unsub();
+          finish();
+        });
       });
 
       return reply;

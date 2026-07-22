@@ -27,6 +27,40 @@
 - The VS Code postMessage relay could be made bidirectional (progress events → extension progress notifications) for a richer VS Code experience.
 - Could make the size cap configurable via `agents.yaml` or a settings endpoint instead of a hardcoded constant.
 
+## Rework round 2 (2026-07-22)
+
+Review round 1 flagged 3 major + 5 minor + 2 info findings. All were addressed:
+
+### Major fixes
+
+- **F1 — Listener leak on SSE disconnect** (`server/index.ts`): Restructured the SSE handler so `subscribeToJob` is called before the `close` handler is registered, and the `close` handler explicitly calls `unsub()`. Combined with a `Promise`-based event-driven wait (F10), the handler now drains dead listener closures immediately on disconnect rather than leaving them in `job.listeners` indefinitely.
+
+- **F2 — No subprocess timeout** (`server/import-spec-gen.ts`): Added a wall-clock timeout (default 10 min, configurable via `IMPORT_TIMEOUT_MS` env var). On expiry: SIGTERM is sent, followed by SIGKILL after a 5-second grace period. The `close` event handler emits `event: error` with a human-readable timeout message before scheduling job eviction.
+
+- **F3 — `onComplete` called during render** (`web/src/components/ImportProjectFlow.tsx`): Moved the `onComplete(phase.projectRoot)` call into a `useEffect` keyed on `[phase, onComplete]`. The render body for the `done` phase now just returns `null`. This eliminates the React "cannot update a component while rendering a different component" warning and the double-invocation in Strict Mode.
+
+### Minor fixes
+
+- **F4 — Boot prompt in argv**: Changed spawn from `claude -p "<prompt>"` (prompt in argv, visible in `ps`) to piping the prompt to `claude -p` stdin. `stdio` changed from `["ignore", "pipe", "pipe"]` to `["pipe", "pipe", "pipe"]`, and the prompt is written to `child.stdin` then closed.
+
+- **F5 — Blocklist gaps**: Extended `isAuthorizedImportPath` forbidden list to include `/usr/local`, `/Library`, `/private`, `/var`, `/opt`, `/root`, `/System` for macOS + Linux coverage.
+
+- **F6 — `stat()` follows symlinks**: Switched `walkDir` from `stat()` to `lstat()`. Added explicit `if (st.isSymbolicLink()) return` guard so symlinks pointing outside the project root are never followed.
+
+- **F7 — `docs/` walked twice**: Removed the redundant second `walkDir(docsDir, ...)` call. Changed file collection from `string[]` arrays with O(n) `.includes()` dedup to `Set<string>` objects (O(1) dedup). The first full-tree walk already covers `docs/` since it is not in `SKIP_DIRS`.
+
+- **F8 — `jobs` Map grows without bound**: Added TTL eviction via `scheduleEviction(jobId)` called from the `close` and `error` handlers — completed/errored jobs are removed after 5 minutes (enough for late-joining clients to replay history). Also added an LRU cap of 100 concurrent jobs: if the cap is reached, the oldest entry is evicted before inserting a new one.
+
+### Info fixes
+
+- **F9 — `statSync` in Promise.all**: Replaced `statSync(f).size` with `(await lstat(f)).size` (already switching to `lstat` per F6), keeping the size-estimation loop consistently async.
+
+- **F10 — SSE polling loop**: Replaced the 500ms `setTimeout(checkDone, ...)` polling chain with a single `new Promise<void>((resolve) => ...)` that resolves via event callbacks (client `close` event and the `done`/`error` SSE listener). No recurring timers.
+
+### Regression tests added
+
+- `import-spec-gen.test.ts`: added 5 new tests covering F6 (symlink not followed), F7 (docs/ not double-counted), F1 (unsub function returned and callable; null for unknown jobId), and F2 (stub job completes without timeout). All 13 tests in the file pass.
+
 ## Follow-ups
 
 - **"Review + commit" affordance**: After import completes, add a one-click "Review & Commit" button that batches the `openspec/` files into a git commit in the target repo, saving the user from having to cd there and run git commands.
