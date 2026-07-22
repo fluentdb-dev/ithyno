@@ -17,6 +17,8 @@ import { Terminal } from "./components/Terminal";
 import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
+import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
+import { ReadOnlyBrowse } from "./components/ReadOnlyBrowse";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
@@ -42,6 +44,7 @@ export function App() {
   const terminalSize = useStore((s) => s.terminalSize);
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const restartTerminal = useStore((s) => s.restartTerminal);
+  const browseMode = useStore((s) => s.browseMode);
   // In VS Code the extension host owns a real terminal, so we skip the
   // embedded xterm pane entirely. Command injection still works — see
   // `isVsCodeShell()` branch in `api.ts#injectPty`.
@@ -127,7 +130,9 @@ export function App() {
 
   // terminalSize "hidden" replaces the old terminalVisible=false path;
   // terminalVisible is kept for backward compat (ChangeDetail still reads it).
-  const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden";
+  // In browse mode the terminal is always suppressed (defensive guard for
+  // unify-open-project-3-branch, also covered by guard-terminal-autolaunch).
+  const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden" && !browseMode;
 
   // Derive the layout class for the app root. "default" = no extra class.
   // "hidden" doesn't reach this ternary — showTerminal is false when hidden
@@ -142,6 +147,15 @@ export function App() {
         : terminalSize === "half"
           ? " terminal-half"
           : "";
+
+  // Browse mode: render ONLY the ReadOnlyBrowse UI, no chrome.
+  if (browseMode && !authExpired) {
+    return (
+      <div className="app">
+        <ReadOnlyBrowse />
+      </div>
+    );
+  }
 
   if (authExpired) {
     return (
@@ -191,13 +205,10 @@ export function App() {
         {loading && <p className="empty">Loading…</p>}
         {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
         {!loading && state && !state.exists && (
-          <div className="empty-state">
-            <h2>No OpenSpec project found</h2>
-            <p>
-              Start the dashboard from a directory containing an <code>openspec/</code> folder, or pass{" "}
-              <code>--dir &lt;path&gt;</code>.
-            </p>
-          </div>
+          <NoProjectDecisionPanel
+            projectRoot={state.root || ""}
+            hasClaudeMd={state.hasClaudeMd ?? false}
+          />
         )}
         {!loading && state?.exists && (
           <Routes>

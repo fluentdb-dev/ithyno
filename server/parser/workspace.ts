@@ -134,8 +134,10 @@ export async function scanWorkspace(
 ): Promise<WorkspaceState> {
   const gitStatus = await getGitStatus(projectRoot);
   const lock = await readLock(projectRoot);
+  const hasClaudeMd = existsSync(join(projectRoot, "CLAUDE.md"));
   if (!openspecDir) {
-    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus, lock };
+    // Return the project root so the decision panel can display the folder path.
+    return { root: projectRoot, exists: false, specs: [], changes: [], archive: [], gitStatus, lock, hasClaudeMd };
   }
 
   const specs = await parseSpecsDir(join(openspecDir, "specs"));
@@ -151,7 +153,7 @@ export async function scanWorkspace(
   changes.sort((a, b) => a.id.localeCompare(b.id));
   archive.sort((a, b) => b.id.localeCompare(a.id));
 
-  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock };
+  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock, hasClaudeMd };
 }
 
 /**

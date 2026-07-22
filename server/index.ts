@@ -320,6 +320,47 @@ fastify.get("/api/auth/check", async (req, reply) => {
 
 fastify.get("/api/state", async () => scanWorkspace(openspecDir, PROJECT_ROOT));
 
+// ---- Browse endpoints (unify-open-project-3-branch) -----------------------
+// Both endpoints are read-only and require the session token (via the
+// existing onRequest auth hook). They work regardless of whether openspec/
+// exists — that is precisely what enables the Browse read-only mode.
+
+fastify.get("/api/browse/markdown-tree", async () => {
+  const { buildMarkdownTree } = await import("./browse.js");
+  return buildMarkdownTree(PROJECT_ROOT);
+});
+
+fastify.get<{ Querystring: { path?: string } }>(
+  "/api/browse/markdown",
+  async (req, reply) => {
+    const relPath = req.query.path ?? "";
+    const { resolveSafePath } = await import("./browse.js");
+    const resolved = await resolveSafePath(PROJECT_ROOT, relPath);
+    if (!resolved.ok) {
+      return reply.code(400).send({ error: resolved.reason });
+    }
+    if (!resolved.abs.endsWith(".md") && !resolved.abs.endsWith(".markdown")) {
+      return reply.code(400).send({ error: "only markdown files may be read" });
+    }
+    let content: string;
+    try {
+      const { readFile: rf } = await import("node:fs/promises");
+      const { stat: st } = await import("node:fs/promises");
+      const stats = await st(resolved.abs);
+      if (stats.size > 5 * 1024 * 1024) {
+        return reply.code(413).send({ error: "file exceeds 5 MB limit" });
+      }
+      content = await rf(resolved.abs, "utf8");
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return reply.code(404).send({ error: "file not found" });
+      }
+      throw err;
+    }
+    return { path: relPath, content };
+  },
+);
+
 // ---- git identity ----------------------------------------------------------
 fastify.get("/api/git/status", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });

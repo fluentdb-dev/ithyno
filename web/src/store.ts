@@ -103,6 +103,10 @@ type Store = {
    *  by ChangeDetail's worktree view to keep tick state fresh across clients. */
   worktreeChangeById: Record<string, Change>;
   gitConfig: GitConfig | null;
+  /** True when the user clicked "Browse read-only" on the decision panel.
+   *  Causes App.tsx to render <ReadOnlyBrowse /> instead of the normal
+   *  chrome. Landed by unify-open-project-3-branch. */
+  browseMode: boolean;
 
   load: () => Promise<void>;
   connectWs: () => void;
@@ -129,6 +133,7 @@ type Store = {
   setGitStatus: (gitStatus: WorkspaceState["gitStatus"]) => void;
   refreshGitStatus: () => Promise<void>;
   clearWorktreeProgress: (changeId: string) => void;
+  setBrowseMode: (v: boolean) => void;
 };
 
 let toastSeq = 1;
@@ -224,6 +229,7 @@ export const useStore = create<Store>((set, get) => ({
   worktreeProgress: {},
   worktreeChangeById: {},
   gitConfig: null,
+  browseMode: false,
 
   loadAgents: async () => {
     try {
@@ -311,6 +317,7 @@ export const useStore = create<Store>((set, get) => ({
       return { worktreeProgress: rest };
     });
   },
+  setBrowseMode: (v) => set({ browseMode: v }),
 
   loadTagIndex: async () => {
     try {
@@ -476,7 +483,12 @@ export const useStore = create<Store>((set, get) => ({
         if (!cur) return;
         set({ state: replaceSpec(cur, msg.domain, msg.spec) });
       } else if (msg.type === "state-replaced") {
-        void get().load();
+        void get().load().then(() => {
+          // If openspec/ was created out-of-band (e.g. `openspec init` in a
+          // terminal), the workspace now exists — clear browse mode so the
+          // user lands on the real dashboard instead of the stuck browse UI.
+          if (get().state?.exists) get().setBrowseMode(false);
+        });
       } else if (msg.type === "doc-updated") {
         // Refresh tree always; refresh open file only if it's the one that changed.
         if (msg.tree) set({ docs: msg.tree });
