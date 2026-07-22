@@ -17,36 +17,37 @@ We already have `add-init-http-endpoint` (POST /api/init) + the
 against a chosen folder. Users would be better served if Open
 Project reused that plumbing instead of dead-ending.
 
-Three-branch decision is the intent: when the user picks a folder
+Two-branch decision is the intent: when the user picks a folder
 that isn't openspec-initialized yet, the dashboard offers:
 
 1. **Initialize openspec here** — runs `openspec init` in place,
    then loads the newly-created project.
-2. **Cancel** — dismisses and returns to the previous project (or
-   the picker).
-3. **Browse read-only** — opens the folder in a read-only view: the
+2. **Browse read-only** — opens the folder in a read-only view: the
    dashboard scans `docs/`, `README.md`, `CLAUDE.md`, and any other
    root-level markdown, and renders them under a lightweight
    navigation. No editing, no agent dispatch, no Kanban — just
    markdown. Useful for previewing a repo before committing to
    initialize openspec there.
 
+Note: the change slug remains `unify-open-project-3-branch` for
+historical continuity. An earlier draft included a **Cancel** button
+as a third branch, but user feedback narrowed the design to 2 —
+users pick a different folder from the shell's normal Open Project
+entry point rather than an in-panel Cancel affordance.
+
 Import + spec-generation is a **separate change**
 (`import-project-spec-generation`, coming next) — this change only
-adds the 3-branch decision UI + the read-only browse mode; the
+adds the decision panel UI + the read-only browse mode; the
 spec-generation path is a future button inside the browse view.
 
 ## What Changes
 
 - **`web/src/App.tsx`** — when the store's `state` reports
   `exists === false` for the current project, replace the current
-  static "No OpenSpec project found" copy with a 3-button decision
+  static "No OpenSpec project found" copy with a 2-button decision
   panel:
   - `Initialize openspec here` → POST /api/init (existing endpoint
     from `add-init-http-endpoint`) + optimistic reload
-  - `Cancel` → set state to `null`, prompt user to pick another
-    folder (Electron: re-open File dialog; browser: instruct user
-    to relaunch with `--dir`)
   - `Browse read-only` → set a new store field `browseMode = true`
     and render `<ReadOnlyBrowse />`
 - **New `web/src/components/ReadOnlyBrowse.tsx`** — enumerate
@@ -70,12 +71,10 @@ spec-generation path is a future button inside the browse view.
 ## Success
 
 - Open Project on a folder that lacks `openspec/`:
-  - The dashboard renders the 3-branch decision panel with three
+  - The dashboard renders the 2-branch decision panel with two
     clear actions.
   - Clicking `Initialize openspec here` runs `openspec init` on the
     folder, reloads state, and shows the fresh Kanban.
-  - Clicking `Cancel` returns the user to the previous project (if
-    any) or the picker.
   - Clicking `Browse read-only` mounts `<ReadOnlyBrowse />` with a
     sidebar listing every markdown file under the root (docs/,
     README, CLAUDE.md, CONTRIBUTING, etc.) and a right-pane viewer.

@@ -10,7 +10,7 @@
 - [ ] 2.1 In `web/src/App.tsx`, replace the current `state?.exists === false` empty-state block with a new `<NoProjectDecisionPanel />` component (extracted into `web/src/components/NoProjectDecisionPanel.tsx`).
 - [ ] 2.2 The panel shows: heading "No OpenSpec project found in `<path>`", three primary buttons in a row (Initialize / Cancel / Browse), and — when the server reports `CLAUDE.md` exists at root — a small info line beneath the buttons.
 - [ ] 2.3 Wire `Initialize openspec here` to `POST /api/init` with the current dir. On 2xx, refetch `/api/state`; on error, show a toast with the error message.
-- [ ] 2.4 Wire `Cancel` — on Electron, invoke `Open Project…` again via the existing IPC bridge; on browser, show an empty helper telling the user to relaunch with `--dir <path>`.
+- [ ] 2.4 ~~Wire `Cancel` — on Electron, invoke `Open Project…` again via the existing IPC bridge; on browser, show an empty helper telling the user to relaunch with `--dir <path>`.~~ **Dropped in round 3 tighten (2026-07-22)** — Cancel button removed; users pick a different folder from the shell's normal Open Project entry point.
 - [ ] 2.5 Wire `Browse read-only` — calls `setBrowseMode(true)`, causing App.tsx to render `<ReadOnlyBrowse />` instead of the decision panel.
 
 ## 3. ReadOnlyBrowse component
@@ -61,6 +61,18 @@
   - Cancel button returns to Open Project dialog
   - Browse button loads ReadOnlyBrowse with the folder's markdown files (docs/, README.md, CLAUDE.md, CONTRIBUTING.md as applicable)
 - [ ] 8.6 Manual (Electron): Open Project → pick a folder that HAS `openspec/`. Behavior unchanged — dashboard loads Kanban as today.
-- [ ] 8.7 Manual (browser): `ithyno --dir <non-openspec-path>` — same 3-branch panel appears (Cancel button shows the browser-appropriate helper message instead of re-invoking dialog).
+- [ ] 8.7 Manual (browser): `ithyno --dir <non-openspec-path>` — same 2-button panel appears.
 - [ ] 8.8 Manual security: with Browse mode active, try requesting `/api/browse/markdown?path=../../etc/passwd` via devtools — expect 400 with a clear denial message; no file returned.
 - [ ] 8.9 Write `openspec/changes/unify-open-project-3-branch/outcome.md` (✅ Worked / ⚠️ Surprises / 🔁 Differently / 🌱 Follow-ups). Follow-ups: consider extending Browse mode to non-markdown files (source-code view); consider a "generate spec from this" button in Browse mode that hands off to the future `import-project-spec-generation`.
+
+## 8A. Narrow to 2 branches (round 3, 2026-07-22)
+
+User feedback: only `Initialize` and `Browse read-only` are needed.
+Cancel is redundant — users pick a different folder from the shell's
+normal Open Project entry point.
+
+- [x] 8A.1 Remove the Cancel button + `handleCancel` + `cancelClicked` state from `web/src/components/NoProjectDecisionPanel.tsx`.
+- [x] 8A.2 Remove the `ithyno.openProject` IPC bridge from `electron/src/preload.ts` (no longer used).
+- [x] 8A.3 Remove the `ithyno:open-project` handler from `electron/src/main.ts` (no longer wired).
+- [x] 8A.4 Update spec: rename requirement to "2-branch decision", remove the Cancel scenario, keep Initialize + Browse.
+- [x] 8A.5 Update proposal.md to say 2-branch, keep the slug (historical), note the pivot in the Why section.

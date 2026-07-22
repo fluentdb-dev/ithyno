@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * Three-branch decision panel shown when the user opens a folder that has no
- * openspec/ directory. Landed by unify-open-project-3-branch.
+ * Two-branch decision panel shown when the user opens a folder that has no
+ * openspec/ directory. Landed by unify-open-project-3-branch;
+ * narrowed to 2 branches (Cancel removed) per user feedback 2026-07-22.
  *
  * Actions:
  *   • Initialize openspec here → POST /api/init + refetch state
- *   • Cancel → Electron: re-open Open Project dialog; browser: show helper
  *   • Browse read-only → setBrowseMode(true) → renders <ReadOnlyBrowse />
  */
 import { useState } from "react";
 import { useStore } from "../store";
 import { getSessionToken } from "../runtime";
-import { isElectronShell } from "../runtime/electron";
 
 type Props = {
   projectRoot: string;
@@ -24,7 +23,6 @@ export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
   const pushToast = useStore((s) => s.pushToast);
 
   const [initializing, setInitializing] = useState(false);
-  const [cancelClicked, setCancelClicked] = useState(false);
 
   async function handleInitialize() {
     setInitializing(true);
@@ -51,19 +49,6 @@ export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
     }
   }
 
-  function handleCancel() {
-    if (isElectronShell()) {
-      // Trigger the Electron File → Open Project dialog via IPC.
-      const w = window as unknown as { ithyno?: { openProject?: () => void } };
-      if (w.ithyno?.openProject) {
-        w.ithyno.openProject();
-      }
-    } else {
-      // Browser mode: no re-open dialog. Show the helper.
-      setCancelClicked(true);
-    }
-  }
-
   function handleBrowse() {
     setBrowseMode(true);
   }
@@ -84,9 +69,6 @@ export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
         >
           {initializing ? "Initializing…" : "Initialize openspec here"}
         </button>
-        <button className="btn-secondary" onClick={handleCancel} disabled={initializing}>
-          Cancel
-        </button>
         <button className="btn-secondary" onClick={handleBrowse} disabled={initializing}>
           Browse read-only
         </button>
@@ -97,15 +79,6 @@ export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
           This project has <code>CLAUDE.md</code> — ithyno will pick it up as
           agent-facing context once openspec is initialized.
         </p>
-      )}
-
-      {cancelClicked && !isElectronShell() && (
-        <div className="no-project-cancel-hint">
-          <p>
-            To open a different project, restart the server with{" "}
-            <code>ithyno --dir &lt;path&gt;</code>.
-          </p>
-        </div>
       )}
     </div>
   );

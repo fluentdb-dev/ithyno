@@ -136,3 +136,28 @@ the read-only browse UI.
 - `npm run typecheck` → clean (also removed now-unused `stat` import from
   `browse.ts` that was left from the original symlink guard)
 - `npm run build` → clean Vite production build, 830 kB bundle
+
+## Round 3 tighten (2026-07-22)
+
+User feedback: `initializeとBrowse readonlyのみでOK` — Cancel is
+redundant. The dashboard already loads with a specific `--dir`; users
+pick a different folder from the shell's normal Open Project entry
+point rather than a Cancel button inside the panel.
+
+Changes:
+
+- `web/src/components/NoProjectDecisionPanel.tsx` — removed the Cancel
+  button, `handleCancel`, and `cancelClicked` state; deleted the
+  browser-mode helper block that only rendered after Cancel.
+- `electron/src/preload.ts` — removed the `openProject` IPC bridge
+  and `IPC_OPEN_PROJECT` constant (no callers remain).
+- `electron/src/main.ts` — removed the `ithyno:open-project` IPC
+  handler and its 5-line surrounding block.
+- Spec — Requirement renamed "3-branch decision" → "2-branch
+  decision"; Cancel scenario dropped.
+- proposal.md — narrative updated to 2-branch; historical note on
+  Cancel added under Why.
+
+The change slug stays `unify-open-project-3-branch` — renaming would
+churn the merged commit history + branch on `feature/import-project-flow`
+without benefit.

@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
-### Requirement: 3-branch decision on Open Project of a non-openspec folder
+### Requirement: 2-branch decision on Open Project of a non-openspec folder
 
-When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing three clear next actions: Initialize openspec here, Cancel, Browse read-only.
+When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing two clear next actions: Initialize openspec here, Browse read-only. A separate Cancel action is intentionally NOT present — the user can pick a different folder from the shell's normal Open Project entry point.
 
 #### Scenario: Decision panel renders for non-openspec folder
 
 - **GIVEN** the user opens a folder that has no `openspec/` subdirectory
 - **WHEN** the dashboard loads
 - **THEN** a decision panel is shown, headed with the folder path
-- **AND** it presents three buttons: `Initialize openspec here`, `Cancel`, `Browse read-only`
+- **AND** it presents two buttons: `Initialize openspec here`, `Browse read-only`
 
 #### Scenario: Initialize action creates openspec and reloads
 
@@ -17,12 +17,6 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **THEN** the dashboard invokes `POST /api/init` for the current folder
 - **AND** on success it refetches `/api/state`
 - **AND** the dashboard transitions to the standard Kanban view for the newly-initialized project
-
-#### Scenario: Cancel returns to the picker
-
-- **WHEN** the user clicks `Cancel` in the decision panel
-- **THEN** on the Electron shell the File → Open Project dialog is re-opened
-- **AND** on the browser shell a helper message instructs the user to relaunch with `--dir <path>`
 
 #### Scenario: Browse read-only mode
 
