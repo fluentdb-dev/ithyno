@@ -2863,6 +2863,18 @@ a.modal-btn:hover {
 .settings-page h2 {
   margin: 0 0 20px;
 }
+
+/* Info banner — unobtrusive informational notice (guard-terminal-autolaunch-on-agents-yaml) */
+.info-banner {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+}
 .settings-section {
   border: 1px solid var(--border);
   border-radius: 8px;

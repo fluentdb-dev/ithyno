@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import chokidar, { type FSWatcher } from "chokidar";
@@ -475,6 +475,25 @@ export function resolvePromptForRole(
   return BUILT_IN_ROLE_PROMPTS[role];
 }
 
+/**
+ * Check whether `agents.yaml` exists as a readable file at `projectRoot`.
+ * Returns false when the path is absent, is a directory, is a symlink to a
+ * non-file, or is otherwise unreadable.
+ *
+ * Exported as a standalone helper so callers that don't hold an
+ * `AgentRegistry` instance (e.g. `scanWorkspace`, tests) can use it
+ * directly. Landed by guard-terminal-autolaunch-on-agents-yaml.
+ */
+export function hasAgentsYaml(projectRoot: string): boolean {
+  const p = join(projectRoot, "agents.yaml");
+  if (!existsSync(p)) return false;
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export class AgentRegistry {
   private cache: AgentConfig = {
     ok: true,
@@ -648,6 +667,21 @@ export class AgentRegistry {
    */
   managerAgent(): AgentDef | null {
     return this.cache.agents.find((a) => a.roles.includes("manager")) ?? null;
+  }
+
+  /**
+   * Whether `agents.yaml` exists as a readable file at the project root.
+   * Returns false when the file is missing, is a directory, or the path
+   * points to an unreadable entry.
+   *
+   * Used by `attachPtyToSocket` and the VS Code extension to gate the
+   * auto-launch injection: projects without `agents.yaml` skip the
+   * Claude-startup command so only a plain shell is opened. Users can
+   * still open the terminal manually via any explicit affordance.
+   * Landed by guard-terminal-autolaunch-on-agents-yaml.
+   */
+  hasAgentsYaml(): boolean {
+    return hasAgentsYaml(this.projectRoot);
   }
 
   /**

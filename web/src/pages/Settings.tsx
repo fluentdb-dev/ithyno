@@ -19,6 +19,7 @@ export function Settings() {
   const parallelExecution = useStore((s) => s.parallelExecution);
   const agmsg = useStore((s) => s.agmsg);
   const pushToast = useStore((s) => s.pushToast);
+  const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
   const [busy, setBusy] = useState(false);
 
   const onToggleParallel = async (next: boolean) => {
@@ -39,6 +40,15 @@ export function Settings() {
   return (
     <div className="settings-page">
       <h2>Settings</h2>
+
+      {!hasAgentsYaml && (
+        <div className="info-banner">
+          <strong>Terminal auto-launch is off</strong> — this project has no{" "}
+          <code>agents.yaml</code>. Add one to enable agent dispatch and
+          automatic terminal startup, or open the terminal manually via the
+          size toggle.
+        </div>
+      )}
 
       <section className="settings-section">
         <h3>Appearance</h3>

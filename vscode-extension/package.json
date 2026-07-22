@@ -45,7 +45,7 @@
         "ithyno.autoLaunchTerminal": {
           "type": "boolean",
           "default": true,
-          "description": "When true (the default), opening the ithyno dashboard immediately creates the `ithyno` VS Code Terminal and runs the startup command (see `ithyno.terminalStartup`). When false, the terminal is created lazily on the first button press (Apply / Archive / Merge / Run). Set to false if you dislike the Terminal panel opening alongside the dashboard."
+          "description": "When true (the default), opening the ithyno dashboard immediately creates the `ithyno` VS Code Terminal and runs the startup command (see `ithyno.terminalStartup`) — but only when `agents.yaml` is present at the project root. Projects without `agents.yaml` never auto-launch (a plain shell is still available via explicit terminal commands). When false, the terminal is created lazily on the first button press (Apply / Archive / Merge / Run)."
         }
       }
     }

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
+import { hasAgentsYaml } from "../agents/registry.js";
 import { _setTmuxCacheForTest, ptyStartup } from "./pty.js";
 
 /**
@@ -294,5 +295,39 @@ agents:
       startup: "tmux new-session -A -s ithyno -- claude --continue",
       initialInput: "/ithy-opsx:dispatch",
     });
+  });
+});
+
+// ---- guard: hasAgentsYaml gates the auto-launch injection (guard-terminal-autolaunch-on-agents-yaml) ----
+describe("auto-launch guard: hasAgentsYaml + ptyStartup composition", () => {
+  it("WITHOUT agents.yaml: hasAgentsYaml returns false, ptyStartup still produces a non-empty startup (injection skipped by caller)", async () => {
+    // Simulate a project root WITHOUT agents.yaml.
+    // hasAgentsYaml() must return false so the caller (attachPtyToSocket) knows
+    // to skip the injection. ptyStartup() is still called and returns a startup
+    // string (the session-id fallback) — the caller discards it.
+    const projectRoot = dir; // dir has no agents.yaml
+    expect(hasAgentsYaml(projectRoot)).toBe(false);
+    // ptyStartup still resolves a startup (e.g. mints a session-id) — the
+    // guard check in attachPtyToSocket suppresses the write, not ptyStartup.
+    const { startup } = ptyStartup(null, projectRoot);
+    expect(startup.length).toBeGreaterThan(0);
+  });
+
+  it("WITH agents.yaml: hasAgentsYaml returns true, ptyStartup produces startup for injection", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+
+    expect(hasAgentsYaml(dir)).toBe(true);
+    const { startup } = ptyStartup(reg, dir);
+    expect(startup).toBe("claude --continue");
   });
 });

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,6 +56,23 @@ function resolveInjectedStartup(
     return "claude";
   }
   return `claude --session-id ${fresh}`;
+}
+
+/**
+ * Returns true when `agents.yaml` exists as a readable file at the given
+ * workspace root. Returns false when absent, is a directory, or is a symlink
+ * to a non-file. Mirrors the server-side `hasAgentsYaml()` helper.
+ *
+ * Landed by guard-terminal-autolaunch-on-agents-yaml.
+ */
+function workspaceHasAgentsYaml(workspaceRoot: string): boolean {
+  const p = join(workspaceRoot, "agents.yaml");
+  if (!existsSync(p)) return false;
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 type PanelSession = {
@@ -137,10 +155,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // where opening the dashboard immediately connects to a live PTY.
     // Skipped when `ithyno.autoLaunchTerminal` is false, in which case
     // the terminal is created lazily on the first pty.inject message.
+    //
+    // Guard (guard-terminal-autolaunch-on-agents-yaml): also skip when
+    // the workspace has no agents.yaml — auto-launch is only useful when
+    // agents are configured. Users can still open the terminal manually.
     const autoLaunch = vscode.workspace
       .getConfiguration("ithyno")
       .get<boolean>("autoLaunchTerminal", true);
-    if (autoLaunch) {
+    if (autoLaunch && workspaceHasAgentsYaml(workspaceRoot)) {
       const t = ensureTerminal(s);
       t.show(true); // preserveFocus so the dashboard keeps keyboard focus
     }

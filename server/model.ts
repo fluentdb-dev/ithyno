@@ -15,6 +15,11 @@ export type WorkspaceState = {
    *  `parallelExecution: false` and the lock is held by another
    *  change. Landed by collapse-jobregistry-and-add-semaphore. */
   lock: WorktreeLock | null;
+  /** Whether `agents.yaml` exists as a readable file at the project root.
+   *  False when absent, a directory, or unreadable. The dashboard uses
+   *  this to render a hint when auto-launch is suppressed.
+   *  Landed by guard-terminal-autolaunch-on-agents-yaml. */
+  hasAgentsYaml: boolean;
 };
 
 export type WorktreeLock = {

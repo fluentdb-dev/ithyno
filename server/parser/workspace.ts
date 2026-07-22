@@ -10,6 +10,7 @@ import { readSidecar, extractSidecarFields } from "../sidecar.js";
 import { parseNeedsHuman } from "../needs-human.js";
 import { getGitStatus } from "../git/status.js";
 import { readLock } from "../agents/worktree-lock.js";
+import { hasAgentsYaml } from "../agents/registry.js";
 
 /** Locate the openspec/ directory under a project root. */
 export function resolveOpenspecDir(projectRoot: string): string | null {
@@ -134,8 +135,9 @@ export async function scanWorkspace(
 ): Promise<WorkspaceState> {
   const gitStatus = await getGitStatus(projectRoot);
   const lock = await readLock(projectRoot);
+  const agentsYaml = hasAgentsYaml(projectRoot);
   if (!openspecDir) {
-    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus, lock };
+    return { root: "", exists: false, specs: [], changes: [], archive: [], gitStatus, lock, hasAgentsYaml: agentsYaml };
   }
 
   const specs = await parseSpecsDir(join(openspecDir, "specs"));
@@ -151,7 +153,7 @@ export async function scanWorkspace(
   changes.sort((a, b) => a.id.localeCompare(b.id));
   archive.sort((a, b) => b.id.localeCompare(a.id));
 
-  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock };
+  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock, hasAgentsYaml: agentsYaml };
 }
 
 /**
