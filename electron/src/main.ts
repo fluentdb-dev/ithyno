@@ -392,6 +392,25 @@ function refreshMenu(aboutConfig?: AboutConfig): void {
     onNewProject: () => {
       void onNewProject();
     },
+    onImportProject: () => {
+      // import-project-spec-generation: open OS folder picker, then send the
+      // picked path to the renderer via IPC so ImportProjectFlow can start.
+      const parent = mainWindow ?? undefined;
+      const opts: Electron.OpenDialogSyncOptions = {
+        title: 'Select project to import into ithyno',
+        properties: ['openDirectory'],
+        buttonLabel: 'Import this project',
+      };
+      const result = parent
+        ? dialog.showOpenDialogSync(parent, opts)
+        : dialog.showOpenDialogSync(opts);
+      const picked = result?.[0];
+      if (!picked) return;
+      const win = mainWindow;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('ithyno:import-project', picked);
+      }
+    },
     onOpenRecent: (path) => {
       if (!isDirectory(path)) {
         store.removeFromRecent(path);

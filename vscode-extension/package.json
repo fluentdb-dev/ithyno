@@ -14,6 +14,7 @@
   "activationEvents": [
     "onCommand:ithyno.show",
     "onCommand:ithyno.newProject",
+    "onCommand:ithyno.importProject",
     "onCommand:ithyno.about"
   ],
   "contributes": {
@@ -26,6 +27,11 @@
       {
         "command": "ithyno.newProject",
         "title": "ithyno: New Project",
+        "category": "ithyno"
+      },
+      {
+        "command": "ithyno.importProject",
+        "title": "ithyno: Import Existing Project",
         "category": "ithyno"
       },
       {

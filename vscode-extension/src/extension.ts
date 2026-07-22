@@ -169,11 +169,18 @@ export function activate(context: vscode.ExtensionContext): void {
     () => runNewProjectFlow(context),
   );
 
+  // import-project-spec-generation: open a folder picker then navigate
+  // the existing ithyno dashboard to the import flow for that folder.
+  const importProjectCmd = vscode.commands.registerCommand(
+    "ithyno.importProject",
+    () => runImportProjectFlow(),
+  );
+
   const aboutCmd = vscode.commands.registerCommand("ithyno.about", () =>
     openAboutPanel(context),
   );
 
-  context.subscriptions.push(cmd, newProjectCmd, aboutCmd);
+  context.subscriptions.push(cmd, newProjectCmd, importProjectCmd, aboutCmd);
 }
 
 /**
@@ -353,6 +360,45 @@ ${sponsorLinks}
   </div>
 </body>
 </html>`;
+}
+
+/**
+ * import-project-spec-generation: ithyno.importProject command handler.
+ *
+ * Opens an OS folder picker and — if an ithyno dashboard is open — sends
+ * a postMessage to the webview so the ImportProjectFlow component can take
+ * over. If no dashboard is open, the user is prompted to open one first
+ * (the empty-state Import button provides the same flow once loaded).
+ *
+ * The webview receives `{ type: "ithyno:import-project", projectRoot }`.
+ * The webview's bootstrapped script relays this to window.ithyno.importProject
+ * listeners registered by App.tsx.
+ */
+async function runImportProjectFlow(): Promise<void> {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: "Import this project",
+    title: "Select project to import into ithyno",
+  });
+  if (!picked || picked.length === 0) return;
+  const projectRoot = picked[0].fsPath;
+
+  if (!session) {
+    vscode.window.showInformationMessage(
+      `ithyno: Open the ithyno dashboard (ithyno: Show Dashboard) first, ` +
+      `then use the "Import" button in the dashboard for ${projectRoot}.`,
+    );
+    return;
+  }
+
+  // Post message to the webview — handled by the web app's IPC relay
+  session.panel.reveal(vscode.ViewColumn.Beside);
+  await session.panel.webview.postMessage({
+    type: "ithyno:import-project",
+    projectRoot,
+  });
 }
 
 export function deactivate(): void {

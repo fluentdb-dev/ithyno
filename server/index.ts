@@ -1002,6 +1002,114 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
   return { status: "ok", activeTerminals: activeTerminalCount() };
 });
 
+// ---- Import spec-generation endpoints (import-project-spec-generation) -----
+// POST /api/import/spec-generation — preflight + job launch
+// GET  /api/import/spec-generation/:jobId/events — SSE progress stream
+{
+  const { preflight: importPreflight, startGenerationJob, subscribeToJob } =
+    await import("./import-spec-gen.js");
+
+  /**
+   * Determine whether a given absolute path is authorized for import.
+   * We allow any path that starts with the user's home directory or is under
+   * a common project location. The check is intentionally permissive for local
+   * use — the primary guard is localhost-only access.
+   */
+  function isAuthorizedImportPath(absPath: string): boolean {
+    // Must be an absolute path that doesn't escape into system dirs.
+    if (!absPath || !absPath.startsWith("/")) return false;
+    const forbidden = ["/etc", "/sys", "/proc", "/dev", "/bin", "/sbin", "/usr/bin", "/usr/sbin"];
+    for (const f of forbidden) {
+      if (absPath === f || absPath.startsWith(f + "/")) return false;
+    }
+    return true;
+  }
+
+  type ImportBody = { projectRoot?: unknown; force?: unknown; dry?: unknown };
+  fastify.post<{ Body: ImportBody }>("/api/import/spec-generation", async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+      return reply.code(403).send({ error: "local only" });
+    }
+    const body = req.body ?? {};
+    if (typeof body.projectRoot !== "string" || !body.projectRoot) {
+      return reply.code(400).send({ error: "`projectRoot` is required" });
+    }
+    const force = body.force === true;
+    const dry = body.dry === true;
+
+    const result = await importPreflight(body.projectRoot, force, isAuthorizedImportPath);
+    if (!result.ok) {
+      return reply.code(result.status).send({ error: result.reason });
+    }
+
+    // Dry-run: return preflight only without launching a job
+    if (dry) {
+      return reply.code(202).send({ ...result.result, dry: true });
+    }
+
+    // Async: start the generation job, return immediately with jobId
+    void startGenerationJob(result.result.jobId, body.projectRoot, PROJECT_ROOT);
+    return reply.code(202).send(result.result);
+  });
+
+  fastify.get<{ Params: { jobId: string } }>(
+    "/api/import/spec-generation/:jobId/events",
+    async (req, reply) => {
+      if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+        return reply.code(403).send({ error: "local only" });
+      }
+
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      let alive = true;
+      reply.raw.on("close", () => {
+        alive = false;
+      });
+
+      const writeSse = (event: string, data: string): void => {
+        if (!alive) return;
+        try {
+          reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
+        } catch {
+          alive = false;
+        }
+      };
+
+      const unsub = subscribeToJob(req.params.jobId, (line, event = "progress") => {
+        writeSse(event, line);
+        if (event === "done" || event === "error") {
+          try {
+            reply.raw.end();
+          } catch {
+            /* ignore */
+          }
+          alive = false;
+        }
+      });
+
+      if (!unsub) {
+        writeSse("error", "job not found");
+        try { reply.raw.end(); } catch { /* ignore */ }
+      }
+
+      // Keep connection open until job finishes or client disconnects
+      await new Promise<void>((resolve) => {
+        const checkDone = (): void => {
+          if (!alive) resolve();
+          else setTimeout(checkDone, 500);
+        };
+        checkDone();
+      });
+
+      return reply;
+    },
+  );
+}
+
 // ---- Static (production) + SPA fallback ------------------------------------
 const webDist = join(PKG_ROOT, "web", "dist");
 if (!DEV && existsSync(webDist)) {

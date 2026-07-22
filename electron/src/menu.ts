@@ -21,6 +21,8 @@ export interface MenuHandlers {
   about: AboutConfig;
   onOpenProject(): void;
   onNewProject(): void;
+  /** import-project-spec-generation: open OS folder picker then trigger import flow */
+  onImportProject(): void;
   onOpenRecent(path: string): void;
   onQuit(): void;
   onOpenDocumentation(): void;
@@ -56,6 +58,11 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
         label: 'New Project…',
         accelerator: 'CmdOrCtrl+Shift+N',
         click: () => handlers.onNewProject(),
+      },
+      {
+        label: 'Import Existing Project…',
+        accelerator: 'CmdOrCtrl+Shift+I',
+        click: () => handlers.onImportProject(),
       },
       recentSubmenu,
       { type: 'separator' },
