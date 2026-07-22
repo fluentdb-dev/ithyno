@@ -19,6 +19,7 @@ import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
 import { ReadOnlyBrowse } from "./components/ReadOnlyBrowse";
+import { ImportProjectFlow } from "./components/ImportProjectFlow";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
@@ -39,6 +40,11 @@ export function App() {
   const state = useStore((s) => s.state);
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
+
+  // import-project-spec-generation: import flow state
+  const [importFlowActive, setImportFlowActive] = useState(false);
+  const [importFlowRoot, setImportFlowRoot] = useState<string | undefined>();
+  const [importBannerVisible, setImportBannerVisible] = useState(false);
   const storeTerminalAvailable = useStore((s) => s.terminalAvailable);
   const terminalVisible = useStore((s) => s.terminalVisible);
   const terminalSize = useStore((s) => s.terminalSize);
@@ -128,6 +134,33 @@ export function App() {
     return () => { if (typeof unsub === "function") unsub(); };
   }, [restartTerminal]);
 
+  // import-project-spec-generation: listen for Electron IPC "import project"
+  // messages sent by the File → Import Existing Project… menu item.
+  useEffect(() => {
+    const w = window as any;
+    if (!w.ithyno?.onImportProject) return;
+    const unsub = w.ithyno.onImportProject((projectRoot: string) => {
+      setImportFlowRoot(projectRoot || undefined);
+      setImportFlowActive(true);
+    });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, []);
+
+  // import-project-spec-generation: listen for VS Code postMessage
+  // `{ type: "ithyno:import-project", projectRoot }` relayed from
+  // the extension's `ithyno.importProject` command.
+  useEffect(() => {
+    const handler = (ev: MessageEvent) => {
+      if (!ev.data || typeof ev.data !== "object") return;
+      if (ev.data.type !== "ithyno:import-project") return;
+      const root = typeof ev.data.projectRoot === "string" ? ev.data.projectRoot : undefined;
+      setImportFlowRoot(root);
+      setImportFlowActive(true);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   // terminalSize "hidden" replaces the old terminalVisible=false path;
   // terminalVisible is kept for backward compat (ChangeDetail still reads it).
   // In browse mode the terminal is always suppressed (defensive guard for
@@ -202,12 +235,42 @@ export function App() {
       </header>
 
       <main className="content">
+        {/* import-project-spec-generation: LLM-generated draft banner */}
+        {importBannerVisible && (
+          <div className="import-generated-banner">
+            <span>
+              Specs are LLM-generated drafts — review before relying on them.
+            </span>
+            <button
+              className="import-banner-dismiss"
+              aria-label="Dismiss"
+              onClick={() => setImportBannerVisible(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {loading && <p className="empty">Loading…</p>}
         {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
-        {!loading && state && !state.exists && (
+        {!loading && state && !state.exists && !importFlowActive && (
           <NoProjectDecisionPanel
             projectRoot={state.root || ""}
             hasClaudeMd={state.hasClaudeMd ?? false}
+          />
+        )}
+        {!loading && state && !state.exists && importFlowActive && (
+          <ImportProjectFlow
+            projectRoot={importFlowRoot}
+            onComplete={() => {
+              setImportFlowActive(false);
+              setImportBannerVisible(true);
+              void load();
+            }}
+            onCancel={() => {
+              setImportFlowActive(false);
+              setImportFlowRoot(undefined);
+            }}
           />
         )}
         {!loading && state?.exists && (
