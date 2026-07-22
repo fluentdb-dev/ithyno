@@ -13,8 +13,6 @@ import { join, resolve } from 'node:path';
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 const DEFAULT_CHROME_COLOR = '#0f1115';
-const DEFAULT_CHROME_SYMBOL = '#e6e9ef';
-const OVERLAY_HEIGHT = 32;
 
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
@@ -242,16 +240,7 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     title: 'ithyno',
     show: false,
     backgroundColor: DEFAULT_CHROME_COLOR,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
-    ...(process.platform === 'darwin'
-      ? {}
-      : {
-          titleBarOverlay: {
-            color: DEFAULT_CHROME_COLOR,
-            symbolColor: DEFAULT_CHROME_SYMBOL,
-            height: OVERLAY_HEIGHT,
-          },
-        }),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -460,23 +449,12 @@ if (!gotLock) {
 
   ipcMain.on(
     IPC_SET_TITLE_BAR_COLOR,
-    (event, color: unknown, symbolColor: unknown) => {
+    (event, color: unknown) => {
       if (typeof color !== 'string') return;
+      if (process.platform !== 'darwin') return;
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win || win.isDestroyed()) return;
-      if (process.platform === 'darwin') {
-        win.setBackgroundColor(color);
-      } else if (typeof symbolColor === 'string') {
-        try {
-          win.setTitleBarOverlay({
-            color,
-            symbolColor,
-            height: OVERLAY_HEIGHT,
-          });
-        } catch {
-          // setTitleBarOverlay is unavailable on some Linux setups; swallow.
-        }
-      }
+      win.setBackgroundColor(color);
     },
   );
 
