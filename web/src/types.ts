@@ -17,6 +17,11 @@ export type WorkspaceState = {
    *  lock is held by a different change. Landed by
    *  collapse-jobregistry-and-add-semaphore. */
   lock: WorktreeLock | null;
+  /** Whether `agents.yaml` exists as a readable file at the project root.
+   *  False when absent, a directory, or unreadable. The dashboard uses
+   *  this to render a hint when auto-launch is suppressed.
+   *  Landed by guard-terminal-autolaunch-on-agents-yaml. */
+  hasAgentsYaml: boolean;
 };
 
 export type WorktreeLock = {

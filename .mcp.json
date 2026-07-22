@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "puppeteer": {
+      "command": "node",
+      "args": [
+        "/Users/cishihara/Development/mcp-browser/node_modules/@modelcontextprotocol/server-puppeteer/dist/index.js"
+      ]
+    }
+  }
+}

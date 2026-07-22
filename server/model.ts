@@ -19,6 +19,11 @@ export type WorkspaceState = {
    *  on the decision panel when `exists === false`. Non-breaking
    *  additive field. Landed by unify-open-project-3-branch. */
   hasClaudeMd: boolean;
+  /** Whether `agents.yaml` exists as a readable file at the project root.
+   *  False when absent, a directory, or unreadable. The dashboard uses
+   *  this to render a hint when auto-launch is suppressed.
+   *  Landed by guard-terminal-autolaunch-on-agents-yaml. */
+  hasAgentsYaml: boolean;
 };
 
 export type WorktreeLock = {

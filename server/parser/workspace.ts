@@ -10,6 +10,7 @@ import { readSidecar, extractSidecarFields } from "../sidecar.js";
 import { parseNeedsHuman } from "../needs-human.js";
 import { getGitStatus } from "../git/status.js";
 import { readLock } from "../agents/worktree-lock.js";
+import { hasAgentsYaml } from "../agents/registry.js";
 
 /** Locate the openspec/ directory under a project root. */
 export function resolveOpenspecDir(projectRoot: string): string | null {
@@ -135,9 +136,20 @@ export async function scanWorkspace(
   const gitStatus = await getGitStatus(projectRoot);
   const lock = await readLock(projectRoot);
   const hasClaudeMd = existsSync(join(projectRoot, "CLAUDE.md"));
+  const agentsYaml = hasAgentsYaml(projectRoot);
   if (!openspecDir) {
     // Return the project root so the decision panel can display the folder path.
-    return { root: projectRoot, exists: false, specs: [], changes: [], archive: [], gitStatus, lock, hasClaudeMd };
+    return {
+      root: projectRoot,
+      exists: false,
+      specs: [],
+      changes: [],
+      archive: [],
+      gitStatus,
+      lock,
+      hasClaudeMd,
+      hasAgentsYaml: agentsYaml,
+    };
   }
 
   const specs = await parseSpecsDir(join(openspecDir, "specs"));
@@ -153,7 +165,17 @@ export async function scanWorkspace(
   changes.sort((a, b) => a.id.localeCompare(b.id));
   archive.sort((a, b) => b.id.localeCompare(a.id));
 
-  return { root: openspecDir, exists: true, specs, changes, archive, gitStatus, lock, hasClaudeMd };
+  return {
+    root: openspecDir,
+    exists: true,
+    specs,
+    changes,
+    archive,
+    gitStatus,
+    lock,
+    hasClaudeMd,
+    hasAgentsYaml: agentsYaml,
+  };
 }
 
 /**

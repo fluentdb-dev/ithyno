@@ -16,6 +16,7 @@ import {
 import { dirname, join } from "node:path";
 import type { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
+import { hasAgentsYaml } from "../agents/registry.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -305,26 +306,36 @@ export async function attachPtyToSocket(
   // not before it. If the manager entry declared an `initialInput`,
   // inject it 300 ms after the startup command so the Manager has time
   // to boot and render its own prompt.
+  //
+  // Guard (guard-terminal-autolaunch-on-agents-yaml): skip the Claude
+  // injection when the project has no agents.yaml. The PTY still spawns
+  // a plain shell — manual use is never blocked.
   const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
   if (startup) {
-    setTimeout(() => {
-      try {
-        console.log(`[pty] auto-launching: ${startup}`);
-        term.write(`${startup}\r`);
-      } catch {
-        /* term already dead */
-      }
-      if (initialInput) {
-        setTimeout(() => {
-          try {
-            console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
-            term.write(`${initialInput}\r`);
-          } catch {
-            /* term already dead */
-          }
-        }, 300);
-      }
-    }, 300);
+    if (!hasAgentsYaml(opts.cwd)) {
+      console.log(
+        `[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`,
+      );
+    } else {
+      setTimeout(() => {
+        try {
+          console.log(`[pty] auto-launching: ${startup}`);
+          term.write(`${startup}\r`);
+        } catch {
+          /* term already dead */
+        }
+        if (initialInput) {
+          setTimeout(() => {
+            try {
+              console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
+              term.write(`${initialInput}\r`);
+            } catch {
+              /* term already dead */
+            }
+          }, 300);
+        }
+      }, 300);
+    }
   }
 
   term.onData((data: string) => {
