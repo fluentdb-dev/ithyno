@@ -458,6 +458,16 @@ if (!gotLock) {
     },
   );
 
+  // Renderer → "re-open Open Project dialog" (unify-open-project-3-branch:
+  // Cancel button in the NoProjectDecisionPanel). Reuses pickProjectDialog so
+  // the exact same dialog the menu triggers is shown.
+  const IPC_OPEN_PROJECT = 'ithyno:open-project';
+  ipcMain.on(IPC_OPEN_PROJECT, () => {
+    const parent = mainWindow ?? undefined;
+    const picked = pickProjectDialog(parent);
+    if (picked) void switchProject(picked);
+  });
+
   void app.whenReady().then(async () => {
     const aboutConfig = readAboutConfig();
     app.setAboutPanelOptions({

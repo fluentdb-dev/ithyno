@@ -15,6 +15,10 @@ export type WorkspaceState = {
    *  `parallelExecution: false` and the lock is held by another
    *  change. Landed by collapse-jobregistry-and-add-semaphore. */
   lock: WorktreeLock | null;
+  /** True when CLAUDE.md exists at the project root. Surfaces a hint
+   *  on the decision panel when `exists === false`. Non-breaking
+   *  additive field. Landed by unify-open-project-3-branch. */
+  hasClaudeMd: boolean;
 };
 
 export type WorktreeLock = {

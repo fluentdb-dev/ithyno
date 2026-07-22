@@ -8,6 +8,10 @@ export type WorkspaceState = {
   changes: Change[];
   archive: ChangeSummary[];
   gitStatus: GitStatus;
+  /** True when CLAUDE.md exists at the project root. Landed by
+   *  unify-open-project-3-branch — surfaces the hint in
+   *  <NoProjectDecisionPanel />. Non-breaking additive field. */
+  hasClaudeMd: boolean;
   /** `.worktrees/.lock` state — null when no lock is held. Consumed by
    *  the Start button to gate when `parallelExecution: false` and the
    *  lock is held by a different change. Landed by
@@ -331,4 +335,20 @@ export type ToggleResponse = {
   editedLine?: number;
   newLineText?: string;
   change: Change | null;
+};
+
+// ---- browse mode (unify-open-project-3-branch) -----------------------------
+
+/** A node in the markdown-tree response from GET /api/browse/markdown-tree. */
+export type MarkdownTreeNode = {
+  path: string;
+  name: string;
+  kind: "file" | "dir";
+  children?: MarkdownTreeNode[];
+};
+
+/** Response from GET /api/browse/markdown?path=<rel>. */
+export type MarkdownContent = {
+  path: string;
+  content: string;
 };
