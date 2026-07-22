@@ -165,7 +165,15 @@ export function App() {
   // terminalVisible is kept for backward compat (ChangeDetail still reads it).
   // In browse mode the terminal is always suppressed (defensive guard for
   // unify-open-project-3-branch, also covered by guard-terminal-autolaunch).
-  const showTerminal = embeddedTerminalAvailable && terminalVisible && terminalSize !== "hidden" && !browseMode;
+  // hasAgentsYaml gate (guard-terminal-autolaunch-on-agents-yaml round 2):
+  // when agents.yaml is absent, .with-terminal must NOT apply — otherwise
+  // .content still reserves padding-right for a nonexistent aside.
+  const showTerminal =
+    Boolean(state?.hasAgentsYaml) &&
+    embeddedTerminalAvailable &&
+    terminalVisible &&
+    terminalSize !== "hidden" &&
+    !browseMode;
 
   // Derive the layout class for the app root. "default" = no extra class.
   // "hidden" doesn't reach this ternary — showTerminal is false when hidden
