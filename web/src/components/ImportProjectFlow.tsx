@@ -15,12 +15,13 @@
 import { useState, useEffect } from "react";
 import { ImportConfirmModal } from "./ImportConfirmModal";
 import { ImportProgress } from "./ImportProgress";
+import type { WorkspaceState } from "../types";
 
 type Phase =
   | { name: "idle" }
   | { name: "confirm"; projectRoot: string }
-  | { name: "progress"; projectRoot: string; jobId: string }
-  | { name: "done"; projectRoot: string; capabilities: string[] };
+  | { name: "progress"; projectRoot: string }
+  | { name: "done"; projectRoot: string };
 
 type Props = {
   /** The target project root to import. If not provided, user enters it. */
@@ -39,7 +40,7 @@ export function ImportProjectFlow({ projectRoot: initialRoot, onComplete, onCanc
   );
   const [manualRoot, setManualRoot] = useState("");
 
-  // F3: call onComplete in an effect so it never fires during render.
+  // Call onComplete in an effect so it never fires during render.
   // This avoids the React "cannot update a component while rendering a
   // different component" warning and double-invocation in Strict Mode.
   useEffect(() => {
@@ -91,8 +92,8 @@ export function ImportProjectFlow({ projectRoot: initialRoot, onComplete, onCanc
     return (
       <ImportConfirmModal
         projectRoot={phase.projectRoot}
-        onConfirm={(jobId) =>
-          setPhase({ name: "progress", projectRoot: phase.projectRoot, jobId })
+        onConfirm={() =>
+          setPhase({ name: "progress", projectRoot: phase.projectRoot })
         }
         onCancel={onCancel}
       />
@@ -100,25 +101,18 @@ export function ImportProjectFlow({ projectRoot: initialRoot, onComplete, onCanc
   }
 
   if (phase.name === "progress") {
+    const handleComplete = (_state: WorkspaceState) => {
+      setPhase({ name: "done", projectRoot: phase.projectRoot });
+    };
     return (
       <ImportProgress
-        jobId={phase.jobId}
-        onDone={(capabilities) =>
-          setPhase({ name: "done", projectRoot: phase.projectRoot, capabilities })
-        }
-        onError={() => {
-          // Stay in error state (handled inside ImportProgress)
-        }}
-        onRetry={() => {
-          // Go back to confirm to restart
-          setPhase({ name: "confirm", projectRoot: phase.projectRoot });
-        }}
+        onComplete={handleComplete}
         onCancel={onCancel}
       />
     );
   }
 
-  // done — onComplete is called via useEffect above (F3).
+  // done — onComplete is called via useEffect above.
   if (phase.name === "done") {
     return null;
   }

@@ -21,7 +21,9 @@ type PreflightData = {
 
 type Props = {
   projectRoot: string;
-  onConfirm: (jobId: string) => void;
+  /** Called when the server accepted the import dispatch. No jobId is
+   *  passed — progress is tracked via the WS state-replaced broadcast. */
+  onConfirm: () => void;
   onCancel: () => void;
 };
 
@@ -90,7 +92,7 @@ export function ImportConfirmModal({ projectRoot, onConfirm, onCancel }: Props) 
         setConfirming(false);
         return;
       }
-      onConfirm(data.jobId);
+      onConfirm();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Network error");
       setConfirming(false);

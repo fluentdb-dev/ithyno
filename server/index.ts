@@ -1043,23 +1043,22 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
   return { status: "ok", activeTerminals: activeTerminalCount() };
 });
 
-// ---- Import spec-generation endpoints (import-project-spec-generation) -----
-// POST /api/import/spec-generation — preflight + job launch
-// GET  /api/import/spec-generation/:jobId/events — SSE progress stream
+// ---- Import spec-generation endpoint (refactor-import-to-task-tool-subagent) -
+// POST /api/import/spec-generation — preflight + inject to Manager PTY
+// The SSE endpoint (GET /api/import/spec-generation/:jobId/events) has been
+// removed. Progress is observed via the workspace file-watch WS broadcast:
+// the dashboard watches for `generatedMarkerPresent` on state-replaced.
 {
-  const { preflight: importPreflight, startGenerationJob, subscribeToJob } =
+  const { preflight: importPreflight, injectImportCommand } =
     await import("./import-spec-gen.js");
 
   /**
    * Determine whether a given absolute path is authorized for import.
-   * We allow any path that starts with the user's home directory or is under
-   * a common project location. The check is intentionally permissive for local
-   * use — the primary guard is localhost-only access.
+   * We allow any path that doesn't start with a system directory.
+   * The primary security gate is localhost-only network access; this
+   * blocklist provides defense-in-depth for system paths.
    */
   function isAuthorizedImportPath(absPath: string): boolean {
-    // Must be an absolute path that doesn't escape into system dirs.
-    // Note: the primary security gate is localhost-only network access;
-    // this blocklist provides defense-in-depth for system paths (F5).
     if (!absPath || !absPath.startsWith("/")) return false;
     const forbidden = [
       // Linux system dirs
@@ -1095,76 +1094,22 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       return reply.code(result.status).send({ error: result.reason });
     }
 
-    // Dry-run: return preflight only without launching a job
+    // Dry-run: return preflight info without dispatching
     if (dry) {
       return reply.code(202).send({ ...result.result, dry: true });
     }
 
-    // Async: start the generation job, return immediately with jobId
-    void startGenerationJob(result.result.jobId, body.projectRoot, PROJECT_ROOT);
+    // Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
+    // 503 when the Manager PTY is not running.
+    const injectResult = injectImportCommand(result.result.targetPath, injectIntoActive);
+    if (!injectResult.ok) {
+      return reply.code(503).send({
+        error: `Manager PTY not running; add agents.yaml to the ithyno project root and restart ithyno. (${injectResult.reason})`,
+      });
+    }
+
     return reply.code(202).send(result.result);
   });
-
-  fastify.get<{ Params: { jobId: string } }>(
-    "/api/import/spec-generation/:jobId/events",
-    async (req, reply) => {
-      if (!isLocal(req.socket.remoteAddress ?? undefined)) {
-        return reply.code(403).send({ error: "local only" });
-      }
-
-      reply.raw.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      });
-
-      // F10: resolve the awaited Promise via events rather than a polling loop.
-      // F1: unsub() is called from both the done/error listener and the close
-      //     handler so dead listener closures are always removed promptly.
-      await new Promise<void>((resolve) => {
-        let alive = true;
-
-        const finish = (): void => {
-          if (!alive) return;
-          alive = false;
-          resolve();
-        };
-
-        const writeSse = (event: string, data: string): void => {
-          if (!alive) return;
-          try {
-            reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
-          } catch {
-            finish();
-          }
-        };
-
-        // Subscribe first so unsub is available to the close handler.
-        const unsub = subscribeToJob(req.params.jobId, (line, event = "progress") => {
-          writeSse(event, line);
-          if (event === "done" || event === "error") {
-            try { reply.raw.end(); } catch { /* ignore */ }
-            finish();
-          }
-        });
-
-        if (!unsub) {
-          writeSse("error", "job not found");
-          try { reply.raw.end(); } catch { /* ignore */ }
-          finish();
-          return;
-        }
-
-        // F1: on client disconnect, drain the listener and resolve the promise.
-        reply.raw.on("close", () => {
-          unsub();
-          finish();
-        });
-      });
-
-      return reply;
-    },
-  );
 }
 
 // ---- Static (production) + SPA fallback ------------------------------------

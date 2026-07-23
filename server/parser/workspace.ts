@@ -137,6 +137,7 @@ export async function scanWorkspace(
   const lock = await readLock(projectRoot);
   const hasClaudeMd = existsSync(join(projectRoot, "CLAUDE.md"));
   const agentsYaml = hasAgentsYaml(projectRoot);
+  const generatedMarkerPresent = existsSync(join(projectRoot, "openspec", "GENERATED.md"));
   if (!openspecDir) {
     // Return the project root so the decision panel can display the folder path.
     return {
@@ -149,6 +150,7 @@ export async function scanWorkspace(
       lock,
       hasClaudeMd,
       hasAgentsYaml: agentsYaml,
+      generatedMarkerPresent,
     };
   }
 
@@ -175,6 +177,7 @@ export async function scanWorkspace(
     lock,
     hasClaudeMd,
     hasAgentsYaml: agentsYaml,
+    generatedMarkerPresent,
   };
 }
 

@@ -1,87 +1,117 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * Unit tests for ImportProgress parsing logic.
+ * Unit tests for ImportProgress completion-detection logic.
  *
- * The SSE stream consumer itself requires a DOM EventSource and is tested
- * manually (task 8.5). This file tests the line-parsing logic.
+ * The component itself subscribes to the Zustand store and fires
+ * onComplete when `state.exists === true && state.generatedMarkerPresent === true`.
+ * These tests exercise that detection logic in isolation without a DOM
+ * (the store subscription is a plain selector — easy to unit-test).
+ *
+ * Full DOM rendering is deferred to manual task 8.5.
  */
 import { describe, expect, it } from "vitest";
+import type { WorkspaceState } from "../types";
 
-type ProgressLine = {
-  kind: "read" | "drafted" | "other";
-  text: string;
-};
-
-function parseLine(raw: string): ProgressLine {
-  if (raw.startsWith("[import] read: ")) {
-    return { kind: "read", text: raw.slice("[import] read: ".length) };
-  }
-  if (raw.startsWith("[import] drafted: ")) {
-    return { kind: "drafted", text: raw.slice("[import] drafted: ".length) };
-  }
-  return { kind: "other", text: raw };
+// Minimal factory for WorkspaceState so tests stay concise.
+function makeState(overrides: Partial<WorkspaceState>): WorkspaceState {
+  return {
+    root: "/tmp/test-project",
+    exists: false,
+    specs: [],
+    changes: [],
+    archive: [],
+    gitStatus: { isRepo: false },
+    lock: null,
+    hasClaudeMd: false,
+    hasAgentsYaml: false,
+    generatedMarkerPresent: false,
+    ...overrides,
+  };
 }
 
-describe("parseLine", () => {
-  it("parses read lines", () => {
-    const line = parseLine("[import] read: lib/main.dart");
-    expect(line.kind).toBe("read");
-    expect(line.text).toBe("lib/main.dart");
+/**
+ * Mirror of the completion predicate used in ImportProgress.tsx's useEffect:
+ *   state && state.exists && state.generatedMarkerPresent
+ */
+function isImportComplete(state: WorkspaceState | null): boolean {
+  return state !== null && state.exists && state.generatedMarkerPresent;
+}
+
+describe("ImportProgress completion detection", () => {
+  it("does NOT complete when state is null", () => {
+    expect(isImportComplete(null)).toBe(false);
   });
 
-  it("parses drafted lines", () => {
-    const line = parseLine("[import] drafted: sql-editor");
-    expect(line.kind).toBe("drafted");
-    expect(line.text).toBe("sql-editor");
+  it("does NOT complete when exists is false", () => {
+    const state = makeState({ exists: false, generatedMarkerPresent: true });
+    expect(isImportComplete(state)).toBe(false);
   });
 
-  it("marks other lines as other", () => {
-    const line = parseLine("some random output");
-    expect(line.kind).toBe("other");
-    expect(line.text).toBe("some random output");
+  it("does NOT complete when generatedMarkerPresent is false", () => {
+    const state = makeState({ exists: true, generatedMarkerPresent: false });
+    expect(isImportComplete(state)).toBe(false);
   });
 
-  it("handles done lines as other", () => {
-    const line = parseLine("[import] done");
-    expect(line.kind).toBe("other");
-    expect(line.text).toBe("[import] done");
+  it("does NOT complete when both exists and generatedMarkerPresent are false", () => {
+    const state = makeState({ exists: false, generatedMarkerPresent: false });
+    expect(isImportComplete(state)).toBe(false);
   });
 
-  it("handles empty string", () => {
-    const line = parseLine("");
-    expect(line.kind).toBe("other");
-    expect(line.text).toBe("");
+  it("completes when exists === true AND generatedMarkerPresent === true", () => {
+    const state = makeState({ exists: true, generatedMarkerPresent: true });
+    expect(isImportComplete(state)).toBe(true);
+  });
+
+  it("passes the full state to onComplete (simulated)", () => {
+    const state = makeState({
+      exists: true,
+      generatedMarkerPresent: true,
+      root: "/Users/cishihara/projects/my-app/openspec",
+    });
+    const received: WorkspaceState[] = [];
+    const onComplete = (s: WorkspaceState) => received.push(s);
+
+    if (isImportComplete(state)) {
+      onComplete(state);
+    }
+
+    expect(received).toHaveLength(1);
+    expect(received[0].root).toBe("/Users/cishihara/projects/my-app/openspec");
+    expect(received[0].generatedMarkerPresent).toBe(true);
   });
 });
 
-describe("import progress line filtering", () => {
-  it("counts read lines correctly", () => {
-    const lines: ProgressLine[] = [
-      parseLine("[import] read: README.md"),
-      parseLine("[import] read: lib/main.dart"),
-      parseLine("[import] drafted: navigation"),
-      parseLine("[import] drafted: sql-editor"),
-      parseLine("some other output"),
-    ];
-    const reads = lines.filter((l) => l.kind === "read");
-    const drafts = lines.filter((l) => l.kind === "drafted");
-    expect(reads.length).toBe(2);
-    expect(drafts.length).toBe(2);
+describe("generatedMarkerPresent state transitions", () => {
+  it("initial state (before import dispatch) does not trigger completion", () => {
+    // The workspace doesn't exist yet — no openspec/ present.
+    const initial = makeState({ exists: false, generatedMarkerPresent: false });
+    expect(isImportComplete(initial)).toBe(false);
   });
 
-  it("extracts capability names from drafted lines", () => {
-    const capabilities = [
-      "[import] drafted: sql-editor",
-      "[import] drafted: database-connections",
-      "[import] drafted: query-results",
-    ]
-      .map(parseLine)
-      .filter((l) => l.kind === "drafted")
-      .map((l) => l.text);
-    expect(capabilities).toEqual([
-      "sql-editor",
-      "database-connections",
-      "query-results",
-    ]);
+  it("state after dispatch (job enqueued, GENERATED.md not yet written) does not complete", () => {
+    // openspec/ might appear from openspec-init but GENERATED.md not yet there
+    const midImport = makeState({ exists: true, generatedMarkerPresent: false });
+    expect(isImportComplete(midImport)).toBe(false);
+  });
+
+  it("state after sub-agent writes GENERATED.md triggers completion", () => {
+    // Final state-replaced fires; GENERATED.md now present
+    const complete = makeState({ exists: true, generatedMarkerPresent: true });
+    expect(isImportComplete(complete)).toBe(true);
+  });
+
+  it("handles rapid state updates — only the final complete state fires onComplete", () => {
+    const states: Array<WorkspaceState | null> = [
+      null,
+      makeState({ exists: false }),
+      makeState({ exists: true, generatedMarkerPresent: false }),
+      makeState({ exists: true, generatedMarkerPresent: true }),
+    ];
+    const completions: WorkspaceState[] = [];
+    for (const s of states) {
+      if (isImportComplete(s)) completions.push(s!);
+    }
+    expect(completions).toHaveLength(1);
+    expect(completions[0].generatedMarkerPresent).toBe(true);
   });
 });
