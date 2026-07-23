@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { resolveOpenspecDir, scanWorkspace, parseChange, changeIdForPath } from "./parser/workspace.js";
@@ -52,7 +52,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
 
 const PORT = Number(process.env.PORT ?? 4321);
-const PROJECT_ROOT = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
+// Normalize via realpath so a symlinked launch path still matches equally-
+// resolved targetPaths in Pattern classification (A/B). Fall back to the
+// non-real path if realpath fails (e.g., the dir was just created and the
+// filesystem hasn't finalized).
+const PROJECT_ROOT = (() => {
+  const resolved = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
+  try { return realpathSync(resolved, { encoding: "utf8" }); } catch { return resolved; }
+})();
 const DEV = process.env.ITHYNO_DEV === "1";
 const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
@@ -1120,7 +1127,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
 {
   const { preflight: importPreflight, injectImportCommand } =
     await import("./import-spec-gen.js");
-  const { registerImportJob, deleteImportJob } =
+  const { registerImportJob, deleteImportJob, setOnExpire } =
     await import("./import-jobs.js");
   const { ImportTargetWatcher } =
     await import("./sync/watcher.js");
@@ -1132,6 +1139,17 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
    * on TTL sweep or job cancellation (future extension point).
    */
   const importWatchers = new Map<string, InstanceType<typeof ImportTargetWatcher>>();
+
+  // A2 (enable-import-both-patterns review round 1): TTL sweep in
+  // import-jobs.ts calls this back for each expired jobId so we can stop
+  // the orphaned ImportTargetWatcher and free the chokidar handle.
+  setOnExpire((jobId: string) => {
+    const w = importWatchers.get(jobId);
+    if (w) {
+      void w.stop();
+      importWatchers.delete(jobId);
+    }
+  });
 
   /**
    * Determine whether a given absolute path is authorized for import.
@@ -1190,7 +1208,10 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
 
     // ---- Pattern classification (enable-import-both-patterns task 2.3) ---
     const { targetPath, jobId } = result.result;
-    const pattern: "A" | "B" = targetPath === PROJECT_ROOT ? "B" : "A";
+    // Resolve symlinks so a symlinked project root still classifies as Pattern B.
+    let realTarget = targetPath;
+    try { realTarget = realpathSync(targetPath, { encoding: "utf8" }); } catch { /* keep targetPath */ }
+    const pattern: "A" | "B" = realTarget === PROJECT_ROOT ? "B" : "A";
 
     // Dry-run: return preflight info + pattern without dispatching
     if (dry) {

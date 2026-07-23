@@ -27,3 +27,16 @@
 - **VS Code `switchWorkspace` command**: Noted as a follow-up in the proposal. Not yet implemented in the VS Code extension; the notification shows the browser fallback (copy-path) when the command is absent.
 - **CSS for `.import-notifications-region` and `.imported-project-notification`**: Skeleton classes referenced in the component and App shell. Styling pass needed before the feature is fully visually polished.
 - **Grace period deregistration test**: The 30 s grace timer test is omitted from the unit suite (would require `vitest.useFakeTimers`) — a follow-up test or manual observation is recommended.
+
+## Rework round 2 (2026-07-23)
+
+Round 1 review flagged 2 blocking (B1, B2) + 4 advisory (A1–A4). All addressed:
+
+- **B1 (blocking)** — `window.ithyno.openProject` bridge re-added in `electron/src/preload.ts` + `IPC_OPEN_PROJECT` handler in `electron/src/main.ts`. `ImportedProjectNotification` no longer falls through to browser fallback in Electron.
+- **B2 (blocking)** — Added `.import-notifications-region` + `.imported-project-notification*` classes to `web/src/styles.css` (74 lines of styling: fixed top-right position, card border/shadow, flex column, dismiss button).
+- **A1 (advisory)** — Path normalization: `PROJECT_ROOT` and `targetPath` are now both `realpathSync`-normalized before Pattern A/B comparison. Symlinked project roots no longer misclassify.
+- **A2 (advisory)** — TTL sweep no longer leaves orphaned watchers. `import-jobs.ts` exports `setOnExpire(cb)`. `server/index.ts` registers a callback that calls `importWatchers.get(id)?.stop()` and removes the entry — so an expired job's chokidar handle is freed.
+- **A4 (advisory)** — `pushImportNotification` now guards against duplicate `id`s in the array (returns unchanged state when a matching id already exists). Defends against future WS-replay-on-reconnect or double-connect scenarios.
+- **A3 (advisory)** — Skipped. The doctor-gate ordering (before path auth) does mean an unauthorized path with no doctor-ready state gets a 409 instead of 403. The reviewer noted this as advisory; not worth the churn given the ordering isn't security-relevant.
+
+Gates after round 2: `openspec validate --strict` VALID, `npm test` 450 pass (1 pre-existing sharp failure), `typecheck` clean, `build` success.

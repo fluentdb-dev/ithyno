@@ -334,7 +334,11 @@ export const useStore = create<Store>((set, get) => ({
   },
   setBrowseMode: (v) => set({ browseMode: v }),
   pushImportNotification: (n) =>
-    set((s) => ({ importedProjectNotifications: [...s.importedProjectNotifications, n] })),
+    set((s) =>
+      s.importedProjectNotifications.some((x) => x.id === n.id)
+        ? s
+        : { importedProjectNotifications: [...s.importedProjectNotifications, n] },
+    ),
   dismissImportNotification: (id) =>
     set((s) => ({
       importedProjectNotifications: s.importedProjectNotifications.filter((n) => n.id !== id),

@@ -25,12 +25,23 @@ const JOB_TTL_MS = 60 * 60 * 1000;
 
 const registry = new Map<string, ImportJob>();
 
+/** Callback invoked on each expired job during sweep. Used by the caller
+ *  (server/index.ts) to also stop the associated ImportTargetWatcher, so an
+ *  orphaned watcher isn't left holding a chokidar handle after TTL expiry
+ *  (enable-import-both-patterns review round 1 A2). */
+let onExpire: ((jobId: string) => void) | null = null;
+
+export function setOnExpire(cb: ((jobId: string) => void) | null): void {
+  onExpire = cb;
+}
+
 /** Remove all jobs whose startedAt is older than JOB_TTL_MS. */
 function sweepExpired(): void {
   const cutoff = Date.now() - JOB_TTL_MS;
   for (const [id, job] of registry) {
     if (job.startedAt < cutoff) {
       registry.delete(id);
+      try { onExpire?.(id); } catch { /* callback must not block sweep */ }
     }
   }
 }

@@ -477,6 +477,13 @@ if (!gotLock) {
     },
   );
 
+  // enable-import-both-patterns: open an imported Pattern-A project as the
+  // active project when the renderer calls window.ithyno.openProject(path).
+  ipcMain.on('ithyno:open-project', (_event, path: unknown) => {
+    if (typeof path !== 'string' || !path) return;
+    void switchProject(path);
+  });
+
   void app.whenReady().then(async () => {
     const aboutConfig = readAboutConfig();
     app.setAboutPanelOptions({
