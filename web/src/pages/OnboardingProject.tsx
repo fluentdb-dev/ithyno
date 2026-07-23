@@ -127,6 +127,13 @@ export function OnboardingProject() {
     };
 
     const run = async () => {
+      // Local flag: set by the SSE error handler so agents-yaml write is
+      // skipped when the chain errored. Using a closure-local boolean
+      // rather than reading errorMessage state avoids adding errorMessage
+      // to the dependency array (which would re-run the effect on every
+      // error and restart the SSE chain). (F1 fix — expand-init-to-scaffold-agents rework r2)
+      let sseErrored = false;
+
       // Mark prereq step done (already checked in InitDialog).
       setStatus((s) => ({ ...s, prereq: "done" }));
 
@@ -152,6 +159,7 @@ export function OnboardingProject() {
             `Server returned ${res.status} — could not start onboarding.`,
           );
           setStatus((s) => ({ ...s, scaffold: "failed" }));
+          sseErrored = true;
           return;
         }
         const reader = res.body.getReader();
@@ -170,6 +178,9 @@ export function OnboardingProject() {
             if (!payload) continue;
             try {
               const evt = JSON.parse(payload) as ChainEvent;
+              // Track SSE error before delegating to appendEvent so
+              // the agents-yaml guard below sees the flag synchronously.
+              if (evt.type === "error") sseErrored = true;
               appendEvent(evt);
             } catch {
               /* skip malformed frame */
@@ -178,6 +189,7 @@ export function OnboardingProject() {
         }
       } catch (err) {
         if (cancelled) return;
+        sseErrored = true;
         setConnectionLost(true);
         setStatus((s) => {
           const next = { ...s };
@@ -195,15 +207,16 @@ export function OnboardingProject() {
       if (cancelled) return;
 
       // SSE chain complete — write agents.yaml via POST /api/init with
-      // manager.command. This is a follow-up POST after the stream because
-      // /api/init/stream doesn't yet support manager selection.
-      if (!errorMessage) {
+      // agentsYamlOnly: true. This skips runInit so openspec/ is not
+      // re-initialized; only the doctor gate + writeAgentsYaml run.
+      // (F2 fix — expand-init-to-scaffold-agents rework r2)
+      if (!sseErrored) {
         setStatus((s) => ({ ...s, "agents-yaml": "in-progress" }));
         try {
           const result = await initProject({
             dir: target,
             manager: { command: chosenCli! },
-            force: true, // openspec/ already exists; only write agents.yaml
+            agentsYamlOnly: true,
           });
           if (!result.ok) {
             setStatus((s) => ({ ...s, "agents-yaml": "failed" }));
@@ -225,7 +238,7 @@ export function OnboardingProject() {
     return () => {
       cancelled = true;
     };
-  }, [dialogPhase, target, targetValid, chosenCli, errorMessage]);
+  }, [dialogPhase, target, targetValid, chosenCli]);
 
   useEffect(() => {
     const el = logPaneRef.current;

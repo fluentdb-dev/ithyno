@@ -71,3 +71,27 @@
   share the cached report from the last fetch.
 - CSS for `.init-dialog-*` classes needs to be added to `web/src/styles.css` before the dialog
   renders correctly in production. (The classes exist; the rules need authoring.)
+
+## Rework round 2
+
+Addressed 3 findings from review round 1:
+
+- **F1 (medium — BUG fixed)**: Removed `errorMessage` from the `useEffect` dependency array in
+  `OnboardingProject.tsx`. Introduced a closure-local `sseErrored` boolean flag that is set by
+  the SSE error handler and used to gate the agents-yaml write. This eliminates the re-fire loop
+  where React re-ran the effect on every `setErrorMessage(...)` call, potentially launching a
+  second SSE chain with `errorMessage === null` in the new snapshot.
+
+- **F2 (low — BUG fixed)**: Added `agentsYamlOnly: true` support to `POST /api/init`. When the
+  flag is set, the handler skips `runInit` entirely and only runs the doctor gate +
+  `writeAgentsYaml`. `OnboardingProject`'s follow-up POST now sends `agentsYamlOnly: true`
+  instead of `force: true`, so the openspec/ scaffold written by the SSE chain is never
+  overwritten. `InitProjectPayload` in `web/src/api.ts` and `InitBody` in `server/index.ts`
+  were extended accordingly.
+
+- **F3 (info — TODO documented)**: Added a `TODO(F3)` comment in `web/src/types.ts` above the
+  `Cli` union explaining the intentional duplication with `server/doctor.ts`, the plan to add a
+  compile-time guard when `add-doctor-and-installer` is archived, and the risk of silent drift.
+
+All checks pass post-rework: `openspec validate --strict` VALID, `npm test` 446 pass (1
+pre-existing `sharp` failure unrelated), `npm run typecheck` clean, `npm run build` clean.

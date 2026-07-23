@@ -497,6 +497,14 @@ type InitBody = {
   autoGitInit?: unknown;
   manager?: unknown;
   defaultManager?: unknown;
+  /**
+   * When true, skip runInit entirely and only run the doctor gate +
+   * writeAgentsYaml. Consumed by OnboardingProject's follow-up POST
+   * after the SSE chain has already written openspec/ — avoids
+   * re-running openspec init --force and overwriting the scaffold.
+   * (expand-init-to-scaffold-agents rework r2, F2 fix)
+   */
+  agentsYamlOnly?: unknown;
 };
 // Shared body validator for both /api/init and /api/init/stream so
 // behavior stays identical (add-new-project-onboarding-window).
@@ -551,18 +559,27 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
 
   const { chosenCli } = gateResult;
 
-  // ---- Run openspec init ---------------------------------------------------
-  const { runInit } = await import("../bin/init.js");
-  const result = await runInit({
-    targetDir: v.dir,
-    force: body.force === true,
-    skipGitignore: body.skipGitignore === true,
-    autoCreateDir: body.autoCreateDir === true,
-    autoGitInit: body.autoGitInit === true,
-    quiet: true,
-  });
-  if (!result.ok) {
-    return reply.code(500).send(result);
+  // ---- Run openspec init (skipped when agentsYamlOnly is true) -------------
+  // agentsYamlOnly: true — caller (OnboardingProject follow-up POST) has
+  // already scaffolded openspec/ via the SSE chain; only write agents.yaml.
+  // Running runInit again with force:true would overwrite the scaffold.
+  // (expand-init-to-scaffold-agents rework r2, F2 fix)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let initResult: Record<string, unknown> = { ok: true };
+  if (body.agentsYamlOnly !== true) {
+    const { runInit } = await import("../bin/init.js");
+    const runInitResult = await runInit({
+      targetDir: v.dir,
+      force: body.force === true,
+      skipGitignore: body.skipGitignore === true,
+      autoCreateDir: body.autoCreateDir === true,
+      autoGitInit: body.autoGitInit === true,
+      quiet: true,
+    });
+    if (!runInitResult.ok) {
+      return reply.code(500).send(runInitResult);
+    }
+    initResult = runInitResult as unknown as Record<string, unknown>;
   }
 
   // ---- Write agents.yaml from template (with rollback on failure) ----------
@@ -574,7 +591,7 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
     });
   }
 
-  return { ...result, managerCommand: chosenCli };
+  return { ...initResult, managerCommand: chosenCli };
 });
 
 // POST /api/init/stream — SSE sibling that runs runNewProjectChain

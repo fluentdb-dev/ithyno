@@ -308,6 +308,13 @@ export interface InitProjectPayload {
   autoGitInit?: boolean;
   manager?: { command: Cli };
   defaultManager?: Cli;
+  /**
+   * When true, skip runInit and only run the doctor gate + writeAgentsYaml.
+   * Used by OnboardingProject's follow-up POST after the SSE chain has
+   * already scaffolded openspec/ — avoids re-running openspec init --force.
+   * (expand-init-to-scaffold-agents rework r2, F2 fix)
+   */
+  agentsYamlOnly?: boolean;
 }
 export interface InitProjectResult {
   ok: boolean;

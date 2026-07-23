@@ -349,6 +349,12 @@ export type ToggleResponse = {
 };
 
 // ---- agent CLI identifiers (expand-init-to-scaffold-agents) ----------------
+// TODO(F3): This Cli union and CLI_PRIORITY array duplicate the definitions in
+// server/doctor.ts. The duplication is intentional while server/doctor.ts is a
+// stub (it will be replaced when `add-doctor-and-installer` lands). When that
+// change is merged, add a compile-time guard to ensure the two sources stay in
+// sync — e.g. a `satisfies` check or a shared package / auto-generated type
+// bridge — before archiving add-doctor-and-installer.
 /** Union of known agent CLI identifiers. Mirrors server/doctor.ts Cli type. */
 export type Cli =
   | "claude"
