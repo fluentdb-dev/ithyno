@@ -3,6 +3,7 @@
 // CLI entry. Two modes:
 //   - default (no subcommand): start the dashboard server via tsx
 //   - `init [dir]`           : scaffold a target project (pure JS handler)
+//   - `doctor`               : check prerequisites (add-doctor-and-installer)
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -37,6 +38,23 @@ program
       process.exit(res.exitCode);
     }
     process.exit(0);
+  });
+
+// `doctor` subcommand: check prerequisites (add-doctor-and-installer).
+// Runs runDoctor() via tsx (so the TS module is available without a build step)
+// and prints a human-readable table. Exit 0 when readyForManager, 1 otherwise.
+program
+  .command("doctor")
+  .description("Check prerequisite CLIs and tools (agent CLIs, tmux, agmsg)")
+  .option("--json", "emit raw DoctorReport JSON instead of a human-readable table")
+  .action((opts) => {
+    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+    // _doctor-runner.ts lives next to ithyno.js in bin/
+    const doctorRunner = resolve(pkgRoot, "bin", "_doctor-runner.ts");
+    const args = [tsxCli, doctorRunner];
+    if (opts.json) args.push("--json");
+    const child = spawn(process.execPath, args, { stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code ?? 1));
   });
 
 // Default action: start the dashboard.

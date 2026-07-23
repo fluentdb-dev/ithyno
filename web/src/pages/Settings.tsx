@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { setAgmsgConfig, setParallelExecution } from "../api";
+import { setAgmsgConfig, setParallelExecution, installPrereq } from "../api";
+import type { DoctorReport, CliStatus, Cli } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 /**
@@ -20,7 +21,14 @@ export function Settings() {
   const agmsg = useStore((s) => s.agmsg);
   const pushToast = useStore((s) => s.pushToast);
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
+  const doctorReport = useStore((s) => s.doctorReport);
+  const loadDoctorReport = useStore((s) => s.loadDoctorReport);
   const [busy, setBusy] = useState(false);
+
+  // Fetch the doctor report on mount
+  useEffect(() => {
+    void loadDoctorReport();
+  }, [loadDoctorReport]);
 
   const onToggleParallel = async (next: boolean) => {
     setBusy(true);
@@ -48,6 +56,8 @@ export function Settings() {
           agent dispatch and the ithyno terminal panel.
         </div>
       )}
+
+      <PrerequisitesSection report={doctorReport} onRefresh={loadDoctorReport} />
 
       <section className="settings-section">
         <h3>Appearance</h3>
@@ -299,5 +309,231 @@ function AgmsgSection(props: {
         </button>
       </div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prerequisites section (add-doctor-and-installer)
+// ---------------------------------------------------------------------------
+
+const AGENT_CLI_KEYS: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+  "antigravity",
+];
+
+function PrerequisitesSection(props: {
+  report: DoctorReport | null;
+  onRefresh: () => Promise<void>;
+}) {
+  const { report, onRefresh } = props;
+  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+
+  const renderRow = (
+    name: string,
+    status: CliStatus | undefined,
+    installable: "tmux" | "agmsg" | null,
+  ) => {
+    if (!status) {
+      return (
+        <tr key={name} className="prereq-row">
+          <td className="prereq-name">{name}</td>
+          <td className="prereq-status prereq-missing">—</td>
+          <td className="prereq-version"></td>
+          <td className="prereq-path"></td>
+          <td className="prereq-action"></td>
+        </tr>
+      );
+    }
+    return (
+      <tr key={name} className="prereq-row">
+        <td className="prereq-name">{name}</td>
+        <td className={`prereq-status ${status.installed ? "prereq-ok" : "prereq-missing"}`}>
+          {status.installed ? "✓" : "✗"}
+        </td>
+        <td className="prereq-version">{status.version ?? ""}</td>
+        <td className="prereq-path">{status.path ?? ""}</td>
+        <td className="prereq-action">
+          {installable && !status.installed && (
+            <button
+              type="button"
+              className="prereq-install-btn"
+              onClick={() => setInstallTool(installable)}
+            >
+              Install
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <>
+      <section className="settings-section prereq-section">
+        <h3>Prerequisites</h3>
+        <p className="muted">
+          Required CLIs and tools. Agent CLIs must be installed manually (auth is
+          vendor-specific). tmux and agmsg can be installed from this panel.
+        </p>
+        {!report ? (
+          <p className="muted">Checking prerequisites…</p>
+        ) : (
+          <>
+            <table className="prereq-table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Status</th>
+                  <th>Version</th>
+                  <th>Path</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {AGENT_CLI_KEYS.map((key) =>
+                  renderRow(key, report.agents[key], null),
+                )}
+                {renderRow("tmux", report.tmux, "tmux")}
+                {renderRow("agmsg", report.agmsg, "agmsg")}
+              </tbody>
+            </table>
+            <p className="muted prereq-ready">
+              <strong>Ready for Manager:</strong>{" "}
+              <span className={report.readyForManager ? "prereq-ok" : "prereq-missing"}>
+                {report.readyForManager ? "yes" : "no"}
+              </span>
+            </p>
+            <div className="settings-actions">
+              <button type="button" onClick={() => void onRefresh()}>
+                Refresh
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      {installTool && (
+        <PrereqInstallModal
+          tool={installTool}
+          onClose={(didInstall) => {
+            setInstallTool(null);
+            if (didInstall) void onRefresh();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function PrereqInstallModal(props: {
+  tool: "tmux" | "agmsg";
+  onClose: (didInstall: boolean) => void;
+}) {
+  const { tool, onClose } = props;
+  const [lines, setLines] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const [ok, setOk] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const didInstallRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        const res = await installPrereq(tool);
+        if (!res.ok && res.status !== 200) {
+          const body = await res.json().catch(() => ({})) as { error?: string };
+          setLines([`Error ${res.status}: ${body.error ?? "install failed"}`]);
+          setDone(true);
+          return;
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) {
+          setLines(["No response body — cannot stream progress."]);
+          setDone(true);
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done: rdDone, value } = await reader.read();
+          if (cancelled) break;
+          if (value) buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE chunks
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const eventLine = part.split("\n").find((l) => l.startsWith("event: "));
+            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!dataLine) continue;
+            const eventName = eventLine?.slice(7) ?? "progress";
+            const data = JSON.parse(dataLine.slice(6)) as Record<string, unknown>;
+            if (eventName === "progress") {
+              setLines((prev) => [...prev, String(data.line ?? "")]);
+            } else if (eventName === "done") {
+              const isOk = data.ok === true;
+              setOk(isOk);
+              if (isOk) didInstallRef.current = true;
+              setDone(true);
+            }
+          }
+          if (rdDone) break;
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLines((prev) => [...prev, `Error: ${err instanceof Error ? err.message : String(err)}`]);
+          setDone(true);
+        }
+      }
+    };
+
+    void run();
+    return () => { cancelled = true; };
+  }, [tool]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [lines]);
+
+  return (
+    <div className="prereq-modal-backdrop">
+      <div className="prereq-modal">
+        <h3>Installing {tool}…</h3>
+        <div className="prereq-modal-output" ref={scrollRef}>
+          {lines.map((l, i) => (
+            <div key={i} className="prereq-output-line">{l}</div>
+          ))}
+          {!done && <div className="prereq-output-line prereq-spinner">…</div>}
+        </div>
+        {done && (
+          <p className={ok ? "prereq-ok" : "prereq-missing"}>
+            {ok ? `${tool} installed successfully.` : `Install failed.`}
+          </p>
+        )}
+        <div className="prereq-modal-actions">
+          <button
+            type="button"
+            disabled={!done}
+            onClick={() => onClose(didInstallRef.current)}
+          >
+            {done ? "Close" : "Installing…"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
