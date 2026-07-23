@@ -24,6 +24,12 @@ export type WorkspaceState = {
    *  this to render a hint when auto-launch is suppressed.
    *  Landed by guard-terminal-autolaunch-on-agents-yaml. */
   hasAgentsYaml: boolean;
+  /** True when `openspec/GENERATED.md` exists at the project root. The
+   *  dashboard uses this to render the LLM-generated banner after import.
+   *  Also used by ImportProgress to detect import completion via the
+   *  workspace file-watch WS broadcast. Non-breaking additive field.
+   *  Landed by refactor-import-to-task-tool-subagent. */
+  generatedMarkerPresent: boolean;
 };
 
 export type WorktreeLock = {

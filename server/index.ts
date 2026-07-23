@@ -11,8 +11,8 @@ import { parseSpec } from "./parser/spec.js";
 import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
-import { Watcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
+import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
@@ -56,7 +56,12 @@ const PROJECT_ROOT = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
 const DEV = process.env.ITHYNO_DEV === "1";
 const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
-const openspecDir = resolveOpenspecDir(PROJECT_ROOT);
+// Mutable — updated at runtime when the ProjectRootWatcher detects that
+// openspec/ has been created by an import sub-agent or `openspec init`.
+// All handlers that read this variable call resolveOpenspecDir(PROJECT_ROOT)
+// live (see /api/state) or read this variable after it has been updated.
+// Never cache this in a local const inside a long-lived closure.
+let openspecDir = resolveOpenspecDir(PROJECT_ROOT);
 
 const fastify = Fastify({ logger: false });
 
@@ -129,12 +134,24 @@ function broadcast(event: ServerEvent): void {
 
 // ---- Echo-suppressing file watcher ----------------------------------------
 let watcher: Watcher | null = null;
-if (openspecDir) {
-  watcher = new Watcher(openspecDir, async (filePath, event) => {
+
+/**
+ * Start the openspec/ Watcher for the resolved openspecDir. Extracted as a
+ * function so it can be called both at boot (when openspec/ already exists) and
+ * from the ProjectRootWatcher callback (when openspec/ is created at runtime
+ * by an import or `openspec init`).
+ *
+ * The `resolvedDir` argument must be the absolute path of the openspec/
+ * directory that was just detected. In the boot case this equals the module-
+ * level `openspecDir`; in the runtime case we re-resolve it here so the
+ * closure captures the right value.
+ */
+function startOpenspecWatcher(resolvedDir: string): void {
+  watcher = new Watcher(resolvedDir, async (filePath, event) => {
     try {
       // Any markdown change under openspec/ may have updated frontmatter tags.
       if (filePath.endsWith(".md")) broadcast({ type: "tags-updated" });
-      const changeId = changeIdForPath(openspecDir, filePath);
+      const changeId = changeIdForPath(resolvedDir, filePath);
       if (changeId) {
         // add-needs-human-phase editor fallback: if the changed file is
         // `needs-human.md`, guard on the current phase BEFORE parsing so a
@@ -149,7 +166,7 @@ if (openspecDir) {
         // a coincidentally-named template file).
         const isDirectNeedsHuman =
           basename(filePath) === "needs-human.md" &&
-          dirname(filePath) === join(openspecDir, "changes", changeId);
+          dirname(filePath) === join(resolvedDir, "changes", changeId);
         if (event !== "unlink" && isDirectNeedsHuman) {
           const raw = await readSidecar(PROJECT_ROOT, changeId);
           const cur = extractSidecarFields(raw, changeId);
@@ -165,12 +182,12 @@ if (openspecDir) {
             }
           }
         }
-        const change = await parseChange(openspecDir, changeId);
+        const change = await parseChange(resolvedDir, changeId);
         broadcast({ type: "change-updated", changeId, change });
         return;
       }
       // specs/<domain>/spec.md or anything else: re-broadcast a top-level spec.
-      const specsPrefix = join(openspecDir, "specs") + sep;
+      const specsPrefix = join(resolvedDir, "specs") + sep;
       if (filePath.startsWith(specsPrefix) && filePath.endsWith("spec.md") && event !== "unlink") {
         const domain = filePath.slice(specsPrefix.length).split(sep)[0];
         const content = await readFile(filePath, "utf8");
@@ -183,6 +200,42 @@ if (openspecDir) {
     }
   });
   watcher.start();
+}
+
+if (openspecDir) {
+  startOpenspecWatcher(openspecDir);
+} else {
+  // Fallback: watch the project root for the creation of an `openspec/`
+  // directory. This is the import scenario — ithyno started before
+  // `openspec/` existed. Without this watcher, no `state-replaced` WS
+  // broadcast would ever fire after the import sub-agent writes
+  // `openspec/GENERATED.md`, leaving the ImportProgress dashboard stuck.
+  // Also handles `openspec init` from a shell while ithyno is running.
+  // Idempotency guard: prevents double-start if the callback somehow fires
+  // more than once (e.g. a future refactor adds a second call path). The
+  // ProjectRootWatcher's own `stopped` flag makes this practically impossible
+  // today, but a module-level boolean is cheap insurance. (NF1)
+  let openspecWatcherStarted = false;
+  const projectRootWatcher = new ProjectRootWatcher(PROJECT_ROOT, () => {
+    if (openspecWatcherStarted) {
+      console.log(`[watcher] openspec/ detected again — idempotency guard: ignoring duplicate call`);
+      return;
+    }
+    openspecWatcherStarted = true;
+
+    const newOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
+    console.log(`[watcher] openspec/ detected at ${PROJECT_ROOT} — starting Watcher`);
+    if (newOpenspecDir) {
+      // Update the module-level variable so all subsequent requests
+      // (withinOpenspec, change endpoints, /api/state) see the real path.
+      openspecDir = newOpenspecDir;
+      startOpenspecWatcher(newOpenspecDir);
+    }
+    // Broadcast state-replaced regardless — the dashboard needs to re-fetch
+    // even if resolveOpenspecDir somehow returns null in an edge case.
+    broadcast({ type: "state-replaced" });
+  });
+  projectRootWatcher.start();
 }
 
 // Second watcher for the design-docs space (`docs/`). Reuses the same Watcher
@@ -318,7 +371,20 @@ fastify.get("/api/auth/check", async (req, reply) => {
   return { ok: true };
 });
 
-fastify.get("/api/state", async () => scanWorkspace(openspecDir, PROJECT_ROOT));
+fastify.get("/api/state", async () => {
+  // Re-resolve every call so that a runtime openspec/ creation (import
+  // sub-agent, `openspec init`) is reflected immediately without a server
+  // restart. The module-level `openspecDir` is updated by the ProjectRootWatcher
+  // callback, but calling resolveOpenspecDir here as well ensures correctness
+  // even if there is a narrow race between the watcher fire and this handler.
+  const liveOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
+  if (liveOpenspecDir && !openspecDir) {
+    // Watcher callback hasn't fired yet — update the module-level var so
+    // other handlers (withinOpenspec, change endpoints) also see it.
+    openspecDir = liveOpenspecDir;
+  }
+  return scanWorkspace(liveOpenspecDir, PROJECT_ROOT);
+});
 
 // ---- Browse endpoints (unify-open-project-3-branch) -----------------------
 // Both endpoints are read-only and require the session token (via the
@@ -1043,23 +1109,22 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
   return { status: "ok", activeTerminals: activeTerminalCount() };
 });
 
-// ---- Import spec-generation endpoints (import-project-spec-generation) -----
-// POST /api/import/spec-generation — preflight + job launch
-// GET  /api/import/spec-generation/:jobId/events — SSE progress stream
+// ---- Import spec-generation endpoint (refactor-import-to-task-tool-subagent) -
+// POST /api/import/spec-generation — preflight + inject to Manager PTY
+// The SSE endpoint (GET /api/import/spec-generation/:jobId/events) has been
+// removed. Progress is observed via the workspace file-watch WS broadcast:
+// the dashboard watches for `generatedMarkerPresent` on state-replaced.
 {
-  const { preflight: importPreflight, startGenerationJob, subscribeToJob } =
+  const { preflight: importPreflight, injectImportCommand } =
     await import("./import-spec-gen.js");
 
   /**
    * Determine whether a given absolute path is authorized for import.
-   * We allow any path that starts with the user's home directory or is under
-   * a common project location. The check is intentionally permissive for local
-   * use — the primary guard is localhost-only access.
+   * We allow any path that doesn't start with a system directory.
+   * The primary security gate is localhost-only network access; this
+   * blocklist provides defense-in-depth for system paths.
    */
   function isAuthorizedImportPath(absPath: string): boolean {
-    // Must be an absolute path that doesn't escape into system dirs.
-    // Note: the primary security gate is localhost-only network access;
-    // this blocklist provides defense-in-depth for system paths (F5).
     if (!absPath || !absPath.startsWith("/")) return false;
     const forbidden = [
       // Linux system dirs
@@ -1095,76 +1160,30 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       return reply.code(result.status).send({ error: result.reason });
     }
 
-    // Dry-run: return preflight only without launching a job
+    // Dry-run: return preflight info without dispatching
     if (dry) {
       return reply.code(202).send({ ...result.result, dry: true });
     }
 
-    // Async: start the generation job, return immediately with jobId
-    void startGenerationJob(result.result.jobId, body.projectRoot, PROJECT_ROOT);
+    // Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
+    // injectImportCommand validates the path for control characters (→ 400)
+    // and then routes to the Manager PTY by cwd (→ 503 when not running).
+    const managerCwd = PROJECT_ROOT;
+    const injectResult = injectImportCommand(
+      result.result.targetPath,
+      (data, terminate) => injectIntoManager(managerCwd, data, terminate),
+    );
+    if (!injectResult.ok) {
+      const statusCode = (injectResult as { status?: number }).status === 400 ? 400 : 503;
+      const msg =
+        statusCode === 400
+          ? injectResult.reason
+          : `Manager PTY not running; add agents.yaml to the ithyno project root and restart ithyno. (${injectResult.reason})`;
+      return reply.code(statusCode).send({ error: msg });
+    }
+
     return reply.code(202).send(result.result);
   });
-
-  fastify.get<{ Params: { jobId: string } }>(
-    "/api/import/spec-generation/:jobId/events",
-    async (req, reply) => {
-      if (!isLocal(req.socket.remoteAddress ?? undefined)) {
-        return reply.code(403).send({ error: "local only" });
-      }
-
-      reply.raw.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      });
-
-      // F10: resolve the awaited Promise via events rather than a polling loop.
-      // F1: unsub() is called from both the done/error listener and the close
-      //     handler so dead listener closures are always removed promptly.
-      await new Promise<void>((resolve) => {
-        let alive = true;
-
-        const finish = (): void => {
-          if (!alive) return;
-          alive = false;
-          resolve();
-        };
-
-        const writeSse = (event: string, data: string): void => {
-          if (!alive) return;
-          try {
-            reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
-          } catch {
-            finish();
-          }
-        };
-
-        // Subscribe first so unsub is available to the close handler.
-        const unsub = subscribeToJob(req.params.jobId, (line, event = "progress") => {
-          writeSse(event, line);
-          if (event === "done" || event === "error") {
-            try { reply.raw.end(); } catch { /* ignore */ }
-            finish();
-          }
-        });
-
-        if (!unsub) {
-          writeSse("error", "job not found");
-          try { reply.raw.end(); } catch { /* ignore */ }
-          finish();
-          return;
-        }
-
-        // F1: on client disconnect, drain the listener and resolve the promise.
-        reply.raw.on("close", () => {
-          unsub();
-          finish();
-        });
-      });
-
-      return reply;
-    },
-  );
 }
 
 // ---- Static (production) + SPA fallback ------------------------------------

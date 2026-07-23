@@ -240,7 +240,7 @@ type ClientMessage =
 
 // Registry of live PTY sessions. The last entry is the most recently active
 // terminal — that's what /api/pty/inject writes to.
-type LiveTerminal = { term: any; ws: WebSocket };
+type LiveTerminal = { term: any; ws: WebSocket; cwd: string };
 const live: LiveTerminal[] = [];
 
 function bump(entry: LiveTerminal): void {
@@ -262,6 +262,49 @@ export function injectIntoActive(data: string, terminate: boolean):
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Inject `data` into the Manager PTY — the PTY whose `cwd` matches the given
+ * `managerCwd` (typically the ithyno project root). Unlike `injectIntoActive`,
+ * this does not depend on which terminal the user last interacted with, so it
+ * is safe to call from server-side logic (e.g. the Import endpoint) where the
+ * user may have opened a second terminal (a worktree terminal) since the
+ * Manager was last active.
+ *
+ * Returns 503 when no PTY with a matching cwd exists — the Manager is not
+ * running or has not been opened in the Terminal panel yet.
+ */
+export function injectIntoManager(
+  managerCwd: string,
+  data: string,
+  terminate: boolean,
+): { ok: true } | { ok: false; reason: string } {
+  // Walk from most-recently-active backwards so we pick the most recently
+  // used Manager terminal when (hypothetically) multiple are open.
+  for (let i = live.length - 1; i >= 0; i--) {
+    const entry = live[i];
+    if (entry.cwd === managerCwd) {
+      try {
+        entry.term.write(terminate ? data + "\r" : data);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  }
+  // Diagnostic: log the cwds that were actually present so operators can
+  // diagnose mismatches (e.g. the PTY was spawned with a different cwd than
+  // PROJECT_ROOT, or the terminal was never opened). (NF2)
+  const liveCwds = live.map((e) => e.cwd);
+  console.warn(
+    `[pty] injectIntoManager: no terminal found for cwd "${managerCwd}". ` +
+    `Live terminal cwds: ${liveCwds.length > 0 ? liveCwds.map((c) => `"${c}"`).join(", ") : "(none)"}`,
+  );
+  return {
+    ok: false,
+    reason: `No Manager terminal is open (expected cwd: ${managerCwd}). Open the Terminal panel and ensure the Manager is running.`,
+  };
 }
 
 export function activeTerminalCount(): number {
@@ -307,7 +350,7 @@ export async function attachPtyToSocket(
     env: { ...process.env, TERM: "xterm-256color" },
   });
 
-  const entry: LiveTerminal = { term, ws };
+  const entry: LiveTerminal = { term, ws, cwd: opts.cwd };
   live.push(entry);
 
   // Auto-launch the resolved startup command so the Terminal panel has

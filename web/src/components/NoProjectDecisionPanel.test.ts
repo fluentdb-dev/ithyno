@@ -70,6 +70,7 @@ describe("NoProjectDecisionPanel hint logic (unify-open-project-3-branch)", () =
         hasAgentsYaml: false,
         gitStatus: { isRepo: false },
         lock: null,
+        generatedMarkerPresent: false,
       },
     });
     expect(useStore.getState().state?.hasClaudeMd).toBe(true);
@@ -87,6 +88,7 @@ describe("NoProjectDecisionPanel hint logic (unify-open-project-3-branch)", () =
         hasAgentsYaml: false,
         gitStatus: { isRepo: false },
         lock: null,
+        generatedMarkerPresent: false,
       },
     });
     expect(useStore.getState().state?.hasClaudeMd).toBe(false);
