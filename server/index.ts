@@ -11,8 +11,8 @@ import { parseSpec } from "./parser/spec.js";
 import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
-import { Watcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, activeTerminalCount, ptyStartup } from "./sync/pty.js";
+import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup } from "./sync/pty.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
@@ -129,12 +129,24 @@ function broadcast(event: ServerEvent): void {
 
 // ---- Echo-suppressing file watcher ----------------------------------------
 let watcher: Watcher | null = null;
-if (openspecDir) {
-  watcher = new Watcher(openspecDir, async (filePath, event) => {
+
+/**
+ * Start the openspec/ Watcher for the resolved openspecDir. Extracted as a
+ * function so it can be called both at boot (when openspec/ already exists) and
+ * from the ProjectRootWatcher callback (when openspec/ is created at runtime
+ * by an import or `openspec init`).
+ *
+ * The `resolvedDir` argument must be the absolute path of the openspec/
+ * directory that was just detected. In the boot case this equals the module-
+ * level `openspecDir`; in the runtime case we re-resolve it here so the
+ * closure captures the right value.
+ */
+function startOpenspecWatcher(resolvedDir: string): void {
+  watcher = new Watcher(resolvedDir, async (filePath, event) => {
     try {
       // Any markdown change under openspec/ may have updated frontmatter tags.
       if (filePath.endsWith(".md")) broadcast({ type: "tags-updated" });
-      const changeId = changeIdForPath(openspecDir, filePath);
+      const changeId = changeIdForPath(resolvedDir, filePath);
       if (changeId) {
         // add-needs-human-phase editor fallback: if the changed file is
         // `needs-human.md`, guard on the current phase BEFORE parsing so a
@@ -149,7 +161,7 @@ if (openspecDir) {
         // a coincidentally-named template file).
         const isDirectNeedsHuman =
           basename(filePath) === "needs-human.md" &&
-          dirname(filePath) === join(openspecDir, "changes", changeId);
+          dirname(filePath) === join(resolvedDir, "changes", changeId);
         if (event !== "unlink" && isDirectNeedsHuman) {
           const raw = await readSidecar(PROJECT_ROOT, changeId);
           const cur = extractSidecarFields(raw, changeId);
@@ -165,12 +177,12 @@ if (openspecDir) {
             }
           }
         }
-        const change = await parseChange(openspecDir, changeId);
+        const change = await parseChange(resolvedDir, changeId);
         broadcast({ type: "change-updated", changeId, change });
         return;
       }
       // specs/<domain>/spec.md or anything else: re-broadcast a top-level spec.
-      const specsPrefix = join(openspecDir, "specs") + sep;
+      const specsPrefix = join(resolvedDir, "specs") + sep;
       if (filePath.startsWith(specsPrefix) && filePath.endsWith("spec.md") && event !== "unlink") {
         const domain = filePath.slice(specsPrefix.length).split(sep)[0];
         const content = await readFile(filePath, "utf8");
@@ -183,6 +195,28 @@ if (openspecDir) {
     }
   });
   watcher.start();
+}
+
+if (openspecDir) {
+  startOpenspecWatcher(openspecDir);
+} else {
+  // Fallback: watch the project root for the creation of an `openspec/`
+  // directory. This is the import scenario — ithyno started before
+  // `openspec/` existed. Without this watcher, no `state-replaced` WS
+  // broadcast would ever fire after the import sub-agent writes
+  // `openspec/GENERATED.md`, leaving the ImportProgress dashboard stuck.
+  // Also handles `openspec init` from a shell while ithyno is running.
+  const projectRootWatcher = new ProjectRootWatcher(PROJECT_ROOT, () => {
+    const newOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
+    console.log(`[watcher] openspec/ detected at ${PROJECT_ROOT} — starting Watcher`);
+    if (newOpenspecDir) {
+      startOpenspecWatcher(newOpenspecDir);
+    }
+    // Broadcast state-replaced regardless — the dashboard needs to re-fetch
+    // even if resolveOpenspecDir somehow returns null in an edge case.
+    broadcast({ type: "state-replaced" });
+  });
+  projectRootWatcher.start();
 }
 
 // Second watcher for the design-docs space (`docs/`). Reuses the same Watcher
@@ -1100,12 +1134,20 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     }
 
     // Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
-    // 503 when the Manager PTY is not running.
-    const injectResult = injectImportCommand(result.result.targetPath, injectIntoActive);
+    // injectImportCommand validates the path for control characters (→ 400)
+    // and then routes to the Manager PTY by cwd (→ 503 when not running).
+    const managerCwd = PROJECT_ROOT;
+    const injectResult = injectImportCommand(
+      result.result.targetPath,
+      (data, terminate) => injectIntoManager(managerCwd, data, terminate),
+    );
     if (!injectResult.ok) {
-      return reply.code(503).send({
-        error: `Manager PTY not running; add agents.yaml to the ithyno project root and restart ithyno. (${injectResult.reason})`,
-      });
+      const statusCode = (injectResult as { status?: number }).status === 400 ? 400 : 503;
+      const msg =
+        statusCode === 400
+          ? injectResult.reason
+          : `Manager PTY not running; add agents.yaml to the ithyno project root and restart ithyno. (${injectResult.reason})`;
+      return reply.code(statusCode).send({ error: msg });
     }
 
     return reply.code(202).send(result.result);

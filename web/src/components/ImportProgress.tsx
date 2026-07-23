@@ -33,12 +33,20 @@ export function ImportProgress({ onComplete, onCancel }: Props) {
     onCompleteRef.current = onComplete;
   });
 
+  // Once-guard: prevents double-invocation of onComplete in React Strict Mode
+  // (where effects run twice per mount) or when two rapid `state-replaced`
+  // WS events both carry generatedMarkerPresent === true before the parent
+  // has had time to unmount this component.
+  const firedRef = useRef(false);
+
   // When the workspace state refreshes (driven by state-replaced WS event →
   // store.load() → fetchState()) and the generated marker is present, fire
   // onComplete. We only need to fire once — the parent (ImportProjectFlow)
   // will unmount this component immediately after.
   useEffect(() => {
     if (state && state.exists && state.generatedMarkerPresent) {
+      if (firedRef.current) return;
+      firedRef.current = true;
       onCompleteRef.current(state);
     }
   }, [state]);

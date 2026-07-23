@@ -31,3 +31,71 @@
 - **`estimatedContextBytes` / `scanCounts` / `filesToScan` in the confirm modal**: These fields still show the "how many files will the sub-agent read" stats from the preflight scan. That's useful to keep — it gives the user a sense of project size before confirming. No change needed; just noting that these fields are retained intentionally.
 - **Watcher scope for imported projects**: The current `state-replaced` mechanism works because ithyno watches its own `openspec/` dir. If the target project's `openspec/GENERATED.md` lands in a DIFFERENT directory (not the ithyno project), the watcher won't see it. This is by design — ithyno is pointed at one project at a time. If multi-project support becomes a goal, the watcher would need to track the import target.
 - **Task 8.5–8.9 (manual verification)** deferred to the operator.
+
+---
+
+## Rework round 2
+
+Fixed all 7 findings from the round-1 review (5 named fixes + 2 info items).
+
+### F1 (critical) — completion-signal loop broken when openspec/ absent
+
+Added `ProjectRootWatcher` class in `server/sync/watcher.ts`. It watches the
+project root at depth 0 for an `addDir` event whose path matches
+`<projectRoot>/openspec`. On first detection it stops itself and calls
+`onOpenspecCreated()`. In `server/index.ts`, the watcher startup was extracted
+into a `startOpenspecWatcher(resolvedDir)` helper so the same logic is reused
+at boot (when openspec/ already exists) and at runtime (when the import sub-
+agent creates it). When `openspecDir === null` at boot, `ProjectRootWatcher` is
+started on `PROJECT_ROOT`; its callback re-resolves `openspecDir`, calls
+`startOpenspecWatcher`, and broadcasts `state-replaced`. This fixes the hang
+where `ImportProgress.tsx` would never receive the completion signal.
+
+### F2 (major) — missing 400 size cap test
+
+Added `"rejects 400 when total file size exceeds 50 MB cap"` test in
+`server/import-spec-gen.test.ts`. Uses `fs.truncate` to create a sparse `.ts`
+file whose apparent size is 51 MB without writing 51 MB of data to disk. The
+test confirms `result.ok === false`, `result.status === 400`, and the reason
+message contains "exceeds" and "50 MB".
+
+### F3 (minor) — `onComplete` no once-guard
+
+Added `const firedRef = useRef(false)` guard in `ImportProgress.tsx`. The
+`useEffect` now checks and sets `firedRef.current` before calling
+`onCompleteRef.current(state)`, preventing double-invocation in React Strict
+Mode or from rapid duplicate `state-replaced` events.
+
+### F4 (minor) — `targetPath` shell/prompt injection
+
+`injectImportCommand` in `server/import-spec-gen.ts` now validates `targetPath`
+against `/[\x00-\x1f\x7f-\x9f]/` before building the PTY command. Control
+characters (CR, LF, NUL, all C0/C1 range) are rejected with
+`{ ok: false, reason: "...", status: 400 }`. The `server/index.ts` handler maps
+`status === 400` to a 400 HTTP response. Four new unit tests cover `\n`, `\r`,
+`\x00`, and the guard that blocks the injector from being called at all.
+
+### F5 (minor) — `injectIntoActive` targets wrong PTY
+
+Added `injectIntoManager(managerCwd, data, terminate)` in `server/sync/pty.ts`.
+The `LiveTerminal` type now includes `cwd: string` (set from `opts.cwd` in
+`attachPtyToSocket`). `injectIntoManager` walks `live[]` from tail to head and
+returns the first entry whose `cwd` matches `managerCwd` (the ithyno project
+root). Returns 503-mapped `{ ok: false }` when no matching PTY exists. The
+Import endpoint in `server/index.ts` now calls `injectIntoManager(PROJECT_ROOT,
+...)` instead of `injectIntoActive`, ensuring the command always lands in the
+Manager terminal regardless of which terminal was last active.
+
+### F6 / F7 (info)
+
+F6 (backtick in TARGET_PATH in skill template) — noted as hypothetical; no
+change made. F7 (task 7.1 references wrong test filename) — cosmetic artifact
+mismatch; no change made since the actual file name `import-spec-gen.test.ts`
+is correct and the task is complete.
+
+### Sanity check
+
+- `npm run openspec -- validate refactor-import-to-task-tool-subagent --strict` → valid
+- `npm test` → 414 passed, 1 skipped, 1 pre-existing failure (build-icons/sharp not installed)
+- `npm run typecheck` → clean
+- `npm run build` → clean

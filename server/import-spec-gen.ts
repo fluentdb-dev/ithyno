@@ -169,13 +169,28 @@ export async function preflight(
  * Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
  *
  * Returns ok: true on success, ok: false with a reason when the PTY is not
- * running or the inject fails. The caller (server/index.ts) maps
- * ok: false → 503.
+ * running, the inject fails, or targetPath contains characters that would
+ * break or hijack the PTY command line (CR, LF, NUL, or other C0 controls).
+ *
+ * The caller (server/index.ts) maps ok: false → 503 (PTY not running) or
+ * 400 (bad targetPath).
  */
 export function injectImportCommand(
   targetPath: string,
   inject: (data: string, terminate: boolean) => { ok: true } | { ok: false; reason: string },
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; reason: string; status?: 400 } {
+  // Guard against shell / PTY injection via embedded control characters.
+  // A path containing \n or \r would cause two separate lines to be written
+  // to the PTY — the second line would be an arbitrary command injection.
+  // NUL (\0) is also invalid in POSIX path names and must be rejected.
+  // We also exclude the DEL character (0x7f) and all other C0/C1 controls.
+  if (/[\x00-\x1f\x7f-\x9f]/.test(targetPath)) {
+    return {
+      ok: false,
+      reason: "targetPath contains control characters that are not allowed in a PTY command",
+      status: 400,
+    };
+  }
   const cmd = `/ithy-opsx:import ${targetPath}`;
   return inject(cmd, true);
 }

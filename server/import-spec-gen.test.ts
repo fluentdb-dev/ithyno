@@ -129,6 +129,26 @@ describe("import-spec-gen preflight", () => {
     }
   });
 
+  // F2: preflight must reject projects whose total code+docs size exceeds the
+  // 50 MB cap with HTTP 400. We use a sparse file (truncate to 51 MB) so
+  // lstat reports a large apparent size without writing 51 MB to disk.
+  it("rejects 400 when total file size exceeds 50 MB cap", async () => {
+    const { truncate } = await import("node:fs/promises");
+    const FIFTY_ONE_MB = 51 * 1024 * 1024;
+
+    // A sparse .ts file: lstat reports its apparent size as 51 MB.
+    const sparsePath = join(tmpDir, "sparse.ts");
+    await writeFile(sparsePath, "");
+    await truncate(sparsePath, FIFTY_ONE_MB);
+
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(400);
+    expect(result.reason).toMatch(/exceeds/);
+    expect(result.reason).toMatch(/50 MB/);
+  });
+
   // F7 regression: docs/ must not be counted twice.
   it("does not double-count files in docs/ subdirectory (F7)", async () => {
     await mkdir(join(tmpDir, "docs"), { recursive: true });
@@ -180,6 +200,43 @@ describe("injectImportCommand", () => {
 
     injectImportCommand("/Users/foo/my-project", mockInject);
     expect(injected[0]).toBe("/ithy-opsx:import /Users/foo/my-project");
+  });
+
+  // F4: targetPath containing control characters must be rejected before
+  // reaching the PTY, preventing shell injection.
+  it("rejects 400 when targetPath contains a newline (\\n)", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\ncommand", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+    expect(result.reason).toMatch(/control characters/);
+  });
+
+  it("rejects 400 when targetPath contains a carriage return (\\r)", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\rcommand", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+  });
+
+  it("rejects 400 when targetPath contains a NUL byte", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\x00command", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+  });
+
+  it("does not call inject when control chars are present", () => {
+    let called = false;
+    const mockInject = (_data: string, _terminate: boolean) => {
+      called = true;
+      return { ok: true as const };
+    };
+    injectImportCommand("/path/\nevil", mockInject);
+    expect(called).toBe(false);
   });
 });
 
