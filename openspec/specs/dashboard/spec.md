@@ -3839,6 +3839,8 @@ The server SHALL expose two read-only endpoints — `GET /api/browse/markdown-tr
 
 ### Requirement: Import endpoint generates openspec specs from code and docs
 
+> ⚠️ **PENDING MODIFIED** by [enable-import-both-patterns](../../changes/enable-import-both-patterns/): Adds doctor preflight (409 when no agent CLI installed) + pattern classification (A/B) in the response + Pattern-A external-target watcher.
+
 The system SHALL expose `POST /api/import/spec-generation` that, given a project root, dispatches a Claude Code sub-agent (via the Task tool inside the ithyno-side Manager session) to read the project's code and docs and produce a first-draft `openspec/specs/` set. The endpoint SHALL run preflight checks and hand the job off to Manager for execution. Completion is signaled via the existing workspace file-watch WS broadcast (not a subprocess SSE stream).
 
 #### Scenario: Preflight blocks existing openspec/
