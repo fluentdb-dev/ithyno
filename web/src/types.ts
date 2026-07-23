@@ -338,6 +338,16 @@ export type DiffPayload = {
   files: DiffFile[];
 };
 
+// ---- import-completed WS event (enable-import-both-patterns) ---------------
+
+/** Payload for the `import-completed` server WS event. */
+export type ImportCompletedEvent = {
+  type: "import-completed";
+  jobId: string;
+  targetPath: string;
+  pattern: "A" | "B";
+};
+
 // Toggle endpoint response.
 export type ToggleResponse = {
   status: "ok" | "conflict" | "invalid";

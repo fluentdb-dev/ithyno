@@ -115,6 +115,7 @@ type ServerEvent =
   | { type: "agent-job-removed"; jobId: string; changeId: string }
   | { type: "worktree-progress-updated"; jobId: string; changeId: string; progress: { done: number; total: number } }
   | { type: "git-status-updated"; gitStatus: GitStatus }
+  | { type: "import-completed"; jobId: string; targetPath: string; pattern: "A" | "B" }
   | {
       type: "agents-updated";
       ok: boolean;
@@ -1111,12 +1112,26 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
 
 // ---- Import spec-generation endpoint (refactor-import-to-task-tool-subagent) -
 // POST /api/import/spec-generation — preflight + inject to Manager PTY
-// The SSE endpoint (GET /api/import/spec-generation/:jobId/events) has been
-// removed. Progress is observed via the workspace file-watch WS broadcast:
-// the dashboard watches for `generatedMarkerPresent` on state-replaced.
+// Enhanced by enable-import-both-patterns:
+//   - Doctor gate (409 when readyForManager false)
+//   - Import job registry (TTL 1h, max 20, 429 on cap)
+//   - Pattern A/B classification; response includes `pattern`
+//   - Pattern A: registers ImportTargetWatcher; broadcasts `import-completed`
 {
   const { preflight: importPreflight, injectImportCommand } =
     await import("./import-spec-gen.js");
+  const { registerImportJob, deleteImportJob } =
+    await import("./import-jobs.js");
+  const { ImportTargetWatcher } =
+    await import("./sync/watcher.js");
+  const { runDoctor } =
+    await import("./doctor.js");
+
+  /**
+   * Active Pattern A watchers keyed by jobId. Stored so stop() can be called
+   * on TTL sweep or job cancellation (future extension point).
+   */
+  const importWatchers = new Map<string, InstanceType<typeof ImportTargetWatcher>>();
 
   /**
    * Determine whether a given absolute path is authorized for import.
@@ -1155,25 +1170,55 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     const force = body.force === true;
     const dry = body.dry === true;
 
+    // ---- Doctor gate (enable-import-both-patterns task 3.1) ---------------
+    // Reject with 409 when no agent CLI is installed — clearer than 503 and
+    // fires before any Manager check so the user knows the prerequisite gap.
+    const doctor = await runDoctor();
+    if (!doctor.readyForManager) {
+      return reply.code(409).send({
+        error:
+          "No agent CLI (claude, codex, agy, …) found on PATH. " +
+          "Install one and verify it is available, then retry. " +
+          "See Settings > Prerequisites (doctor) for details.",
+      });
+    }
+
     const result = await importPreflight(body.projectRoot, force, isAuthorizedImportPath);
     if (!result.ok) {
       return reply.code(result.status).send({ error: result.reason });
     }
 
-    // Dry-run: return preflight info without dispatching
+    // ---- Pattern classification (enable-import-both-patterns task 2.3) ---
+    const { targetPath, jobId } = result.result;
+    const pattern: "A" | "B" = targetPath === PROJECT_ROOT ? "B" : "A";
+
+    // Dry-run: return preflight info + pattern without dispatching
     if (dry) {
-      return reply.code(202).send({ ...result.result, dry: true });
+      return reply.code(202).send({ ...result.result, pattern, dry: true });
     }
 
-    // Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
+    // ---- Register import job (task 3.3) ------------------------------------
+    const regResult = registerImportJob({
+      jobId,
+      targetPath,
+      startedAt: Date.now(),
+      pattern,
+    });
+    if (!regResult.ok) {
+      return reply.code(regResult.status).send({ error: regResult.reason });
+    }
+
+    // ---- Inject `/ithy-opsx:import <targetPath>` into the Manager PTY -----
     // injectImportCommand validates the path for control characters (→ 400)
     // and then routes to the Manager PTY by cwd (→ 503 when not running).
     const managerCwd = PROJECT_ROOT;
     const injectResult = injectImportCommand(
-      result.result.targetPath,
+      targetPath,
       (data, terminate) => injectIntoManager(managerCwd, data, terminate),
     );
     if (!injectResult.ok) {
+      // Roll back the registered job — inject failed before dispatch.
+      deleteImportJob(jobId);
       const statusCode = (injectResult as { status?: number }).status === 400 ? 400 : 503;
       const msg =
         statusCode === 400
@@ -1182,7 +1227,20 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       return reply.code(statusCode).send({ error: msg });
     }
 
-    return reply.code(202).send(result.result);
+    // ---- Pattern A: register ImportTargetWatcher (task 3.4 / task 1.2) ---
+    if (pattern === "A" && !importWatchers.has(jobId)) {
+      const tw = new ImportTargetWatcher(targetPath, jobId, ({ targetPath: tp, jobId: jid }) => {
+        // Broadcast import-completed WS event (task 4.2).
+        broadcast({ type: "import-completed", jobId: jid, targetPath: tp, pattern: "A" });
+        // Clean up job registry and watcher map.
+        deleteImportJob(jid);
+        importWatchers.delete(jid);
+      });
+      importWatchers.set(jobId, tw);
+      tw.start();
+    }
+
+    return reply.code(202).send({ ...result.result, pattern });
   });
 }
 

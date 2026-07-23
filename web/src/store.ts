@@ -21,6 +21,7 @@ import type {
   DocsFile,
   DocsTree,
   GitConfig,
+  ImportCompletedEvent,
   JobStatus,
   JobSummary,
   ManagerStatus,
@@ -37,6 +38,13 @@ export function taskKey(t: Pick<Task, "filePath" | "id" | "text">): string {
 }
 
 type Toast = { id: number; kind: "info" | "error"; message: string };
+
+/** A Pattern-A import completion notification (enable-import-both-patterns). */
+export type ImportedProjectNotification = {
+  id: string; // jobId
+  targetPath: string;
+  completedAt: number; // epoch ms
+};
 
 type Conflict = { newText: string; message: string };
 
@@ -107,6 +115,10 @@ type Store = {
    *  Causes App.tsx to render <ReadOnlyBrowse /> instead of the normal
    *  chrome. Landed by unify-open-project-3-branch. */
   browseMode: boolean;
+  /** Active Pattern-A import completion notifications (enable-import-both-patterns).
+   *  Each entry is pushed by the `import-completed` WS event when `pattern === "A"`.
+   *  Dismissed independently by the user. */
+  importedProjectNotifications: ImportedProjectNotification[];
 
   load: () => Promise<void>;
   connectWs: () => void;
@@ -134,6 +146,8 @@ type Store = {
   refreshGitStatus: () => Promise<void>;
   clearWorktreeProgress: (changeId: string) => void;
   setBrowseMode: (v: boolean) => void;
+  pushImportNotification: (n: ImportedProjectNotification) => void;
+  dismissImportNotification: (id: string) => void;
 };
 
 let toastSeq = 1;
@@ -230,6 +244,7 @@ export const useStore = create<Store>((set, get) => ({
   worktreeChangeById: {},
   gitConfig: null,
   browseMode: false,
+  importedProjectNotifications: [],
 
   loadAgents: async () => {
     try {
@@ -318,6 +333,12 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
   setBrowseMode: (v) => set({ browseMode: v }),
+  pushImportNotification: (n) =>
+    set((s) => ({ importedProjectNotifications: [...s.importedProjectNotifications, n] })),
+  dismissImportNotification: (id) =>
+    set((s) => ({
+      importedProjectNotifications: s.importedProjectNotifications.filter((n) => n.id !== id),
+    })),
 
   loadTagIndex: async () => {
     try {
@@ -556,6 +577,25 @@ export const useStore = create<Store>((set, get) => ({
         // entry is declared and its command/args — the Manager section
         // must reflect that too. Fire-and-forget refetch.
         void get().loadManagerStatus();
+      } else if (msg.type === "import-completed") {
+        // enable-import-both-patterns: route by pattern.
+        const ev = msg as ImportCompletedEvent;
+        if (ev.pattern === "B") {
+          // Pattern B (in-place): same folder as the running project.
+          // Existing ImportProgress detects generatedMarkerPresent via
+          // state-replaced; trigger the usual load() so state reflects
+          // the new openspec/.
+          void get().load().then(() => {
+            if (get().state?.exists) get().setBrowseMode(false);
+          });
+        } else {
+          // Pattern A (external target): push a persistent notification card.
+          get().pushImportNotification({
+            id: ev.jobId,
+            targetPath: ev.targetPath,
+            completedAt: Date.now(),
+          });
+        }
       }
     };
   },
