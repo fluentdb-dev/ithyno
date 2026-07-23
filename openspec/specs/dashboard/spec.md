@@ -3839,6 +3839,8 @@ The server SHALL expose two read-only endpoints — `GET /api/browse/markdown-tr
 
 ### Requirement: Import endpoint generates openspec specs from code and docs
 
+> ⚠️ **PENDING MODIFIED** by [refactor-import-to-task-tool-subagent](../../changes/refactor-import-to-task-tool-subagent/): Transport shifts from `claude -p` subprocess + SSE stdout stream → Task-tool sub-agent inside Manager PTY, completion signaled via workspace file-watch WS broadcast.
+
 The system SHALL expose `POST /api/import/spec-generation` that, given a project root, dispatches an LLM-driven subagent to read the project's code and docs and produce a first-draft `openspec/specs/` set. The endpoint SHALL run preflight checks and stream progress via SSE.
 
 #### Scenario: Preflight blocks existing openspec/
@@ -3901,6 +3903,8 @@ The import subagent SHALL leave the project's git working tree with the openspec
 - **THEN** the `openspec/` tree and `openspec/GENERATED.md` appear as untracked files (or as `A`-marked staged files if the user pre-staged), and no new commit exists on the current branch attributable to the import
 
 ### Requirement: Import uses the ithyno tool's own agents.yaml
+
+> ⚠️ **PENDING MODIFIED** by [refactor-import-to-task-tool-subagent](../../changes/refactor-import-to-task-tool-subagent/): Dispatch mechanism becomes Task-tool spawn inside the ithyno-side Manager PTY (not a subprocess). Adds a "Manager session is required" scenario (503 if Manager PTY isn't running).
 
 The import subagent SHALL be dispatched using the ithyno tool's own `agents.yaml` — NOT the target project's (which by definition doesn't have one). The generation runs on the ithyno-side Claude Code session, not on the target project's session.
 
