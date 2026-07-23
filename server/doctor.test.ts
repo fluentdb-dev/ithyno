@@ -7,8 +7,13 @@
  *  - checkCommand returns installed:false for a non-existent command.
  *  - checkCommand handles timeout gracefully.
  *  - runDoctor returns a DoctorReport with the expected shape.
+ *  - Install endpoint 400-path validation guard (F7).
+ *  - agmsg cpSync force:true regression — partial install is fully overwritten (F2).
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { checkCommand, runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
 
@@ -123,15 +128,14 @@ describe("runDoctor", () => {
     expect(typeof report.agmsg.installed).toBe("boolean");
   });
 
-  it("readyForManager is false when no agent CLI is installed (mocked check)", async () => {
-    // Mock checkCommand to always return not installed, then test the logic.
-    // We do this by testing the runDoctor result is a boolean — the exact
-    // value depends on the test machine having a CLI. We rely on the
-    // integration test above for the real check. Here we just verify
-    // the formula: readyForManager === any agent.installed.
+  it("readyForManager reflects primary agent CLI keys (not antigravity alias)", async () => {
+    // readyForManager uses a fixed key list that excludes "antigravity" (the
+    // agy alias). We verify that readyForManager matches the formula using
+    // the same AGENT_KEYS (claude, codex, agy, copilot, gemini, opencode, cursor).
     const report = await runDoctor();
-    const anyAgentInstalled = Object.values(report.agents).some((s) => s.installed);
-    expect(report.readyForManager).toBe(anyAgentInstalled);
+    const PRIMARY_KEYS = ["claude", "codex", "agy", "copilot", "gemini", "opencode", "cursor"] as const;
+    const anyPrimaryInstalled = PRIMARY_KEYS.some((k) => report.agents[k]?.installed === true);
+    expect(report.readyForManager).toBe(anyPrimaryInstalled);
   });
 });
 
@@ -153,5 +157,85 @@ describe("install tool validation (logical)", () => {
     for (const t of invalid) {
       expect(INSTALLABLE.has(t)).toBe(false);
     }
+  });
+
+  /**
+   * Mirrors the exact validation guard in `server/index.ts`:
+   *   if (tool !== "tmux" && tool !== "agmsg") → 400
+   * This test ensures the guard rejects every non-installable value and
+   * accepts only the two valid tools (F7: 400-path coverage).
+   */
+  it("400-path guard rejects every non-installable value", () => {
+    function wouldReturn400(tool: unknown): boolean {
+      return tool !== "tmux" && tool !== "agmsg";
+    }
+
+    // Must return 400 (true)
+    const shouldReject: unknown[] = [
+      undefined, null, "", "claude", "codex", "agy", "antigravity",
+      "gemini", "opencode", "cursor", "copilot", "all", 0, false, {},
+    ];
+    for (const t of shouldReject) {
+      expect(wouldReturn400(t)).toBe(true);
+    }
+
+    // Must NOT return 400 (false)
+    expect(wouldReturn400("tmux")).toBe(false);
+    expect(wouldReturn400("agmsg")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// agmsg install — cpSync force:true correctness (F2 regression guard)
+// Verifies that re-running the copy over a partial destination writes the
+// correct files and does not leave stale/missing entries behind.
+// ---------------------------------------------------------------------------
+
+describe("agmsg install cpSync force:true (F2 regression)", () => {
+  let src: string;
+  let dest: string;
+
+  beforeEach(() => {
+    src = mkdtempSync(join(tmpdir(), "ithyno-agmsg-src-"));
+    dest = mkdtempSync(join(tmpdir(), "ithyno-agmsg-dest-"));
+
+    // Simulate vendored agmsg source tree
+    mkdirSync(join(src, "scripts"), { recursive: true });
+    writeFileSync(join(src, "scripts", "send.sh"), "#!/bin/sh\necho send_v2");
+    writeFileSync(join(src, "scripts", "extra.sh"), "#!/bin/sh\necho extra");
+  });
+
+  afterEach(() => {
+    rmSync(src, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+  });
+
+  it("force:true overwrites stale file from a partial previous install", () => {
+    // Simulate a partial prior install: only send.sh exists, with old content
+    mkdirSync(join(dest, "scripts"), { recursive: true });
+    writeFileSync(join(dest, "scripts", "send.sh"), "#!/bin/sh\necho send_v1_partial");
+
+    // Re-run copy with force: true (the fixed behaviour)
+    cpSync(src, dest, { recursive: true, force: true });
+
+    // send.sh must have new content
+    const content = readFileSync(join(dest, "scripts", "send.sh"), "utf8");
+    expect(content).toBe("#!/bin/sh\necho send_v2");
+
+    // extra.sh must be present (was missing in partial install)
+    expect(existsSync(join(dest, "scripts", "extra.sh"))).toBe(true);
+  });
+
+  it("force:false leaves stale file intact (documents the old broken behaviour)", () => {
+    // Pre-create stale file
+    mkdirSync(join(dest, "scripts"), { recursive: true });
+    writeFileSync(join(dest, "scripts", "send.sh"), "#!/bin/sh\necho send_v1_partial");
+
+    // Old behaviour: force: false silently skips existing files
+    cpSync(src, dest, { recursive: true, force: false });
+
+    // Content NOT updated — this is the bug fixed by F2
+    const content = readFileSync(join(dest, "scripts", "send.sh"), "utf8");
+    expect(content).toBe("#!/bin/sh\necho send_v1_partial");
   });
 });

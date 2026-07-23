@@ -83,22 +83,31 @@ export async function checkCommand(
     // Resolve the path first (via `which`), then run the version command.
     // Both operations share the same 2 s budget.
     let settled = false;
+    // whichProc is assigned just below; settle() references it via closure.
+    // Calling kill() after the process has already exited is a safe no-op.
+    let whichProc: ReturnType<typeof spawn> | undefined;
     const settle = (result: CliStatus) => {
       if (settled) return;
       settled = true;
+      // Kill the still-running `which` subprocess so it does not write to
+      // resolvedPath after this Promise has resolved (F1 fix).
+      try { whichProc?.kill(); } catch { /* ignore */ }
       resolve(result);
     };
 
     // Spawn `which <cmd>` to get the path
     let resolvedPath: string | undefined;
 
-    const whichProc = spawn("which", [cmd], { stdio: ["ignore", "pipe", "ignore"] });
+    // Note: `which` is not available on Windows (the equivalent is `where`).
+    // The error handler below silently ignores ENOENT, so resolvedPath remains
+    // undefined on Windows — only the path field in the report is affected (F4).
+    whichProc = spawn("which", [cmd], { stdio: ["ignore", "pipe", "ignore"] });
     let whichOut = "";
     whichProc.stdout?.on("data", (d: Buffer) => {
       whichOut += d.toString();
     });
     whichProc.on("error", () => {
-      // `which` not available — skip path resolution
+      // `which` not available (e.g., Windows) — skip path resolution
     });
     whichProc.on("close", (code) => {
       if (code === 0 && whichOut.trim()) {
@@ -202,9 +211,10 @@ export async function runDoctor(): Promise<DoctorReport> {
 
   const agmsgResult = checkAgmsg();
 
-  // readyForManager: at least one NAMED agent CLI (not antigravity alias) is installed.
-  // The "antigravity" key is agy's alias — agy itself is the primary check.
-  const AGENT_KEYS: Cli[] = ["claude", "codex", "agy", "copilot", "gemini", "opencode", "cursor", "antigravity"];
+  // readyForManager: at least one NAMED agent CLI is installed.
+  // "antigravity" is excluded because it is an alias for "agy" (same binary);
+  // including it would double-count the same installation (F3 fix).
+  const AGENT_KEYS: Cli[] = ["claude", "codex", "agy", "copilot", "gemini", "opencode", "cursor"];
   const readyForManager = AGENT_KEYS.some((k) => agents[k]?.installed === true);
 
   return {

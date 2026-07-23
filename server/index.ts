@@ -446,7 +446,9 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
     try {
       sendSse("progress", { line: `Installing agmsg from ${vendorRoot} …` });
       mkdirSync(joinPath(homedirFn(), ".agents", "skills"), { recursive: true });
-      cpSync(vendorRoot, TARGET_ROOT, { recursive: true, force: false });
+      // force: true — always overwrite existing files so a partial/interrupted
+      // install does not silently leave the tree incomplete (F2 fix).
+      cpSync(vendorRoot, TARGET_ROOT, { recursive: true, force: true });
       // chmod .sh files
       function chmodShells(dir: string): void {
         if (!existsSyncFn(dir)) return;

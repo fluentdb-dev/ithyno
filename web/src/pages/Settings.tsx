@@ -444,6 +444,8 @@ function PrereqInstallModal(props: {
 
   useEffect(() => {
     let cancelled = false;
+    // Hoist reader so the cleanup closure can cancel it on unmount (F5 fix).
+    let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     const run = async () => {
       try {
@@ -461,6 +463,7 @@ function PrereqInstallModal(props: {
           setDone(true);
           return;
         }
+        activeReader = reader;
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -499,7 +502,12 @@ function PrereqInstallModal(props: {
     };
 
     void run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // Cancel the stream reader so the server-side SSE connection is closed
+      // immediately on unmount, rather than waiting for browser GC (F5 fix).
+      activeReader?.cancel().catch(() => {});
+    };
   }, [tool]);
 
   // Auto-scroll to bottom

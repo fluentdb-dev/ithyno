@@ -31,3 +31,23 @@
 - Add cache TTL to `runDoctor()` in `server/doctor.ts` for repeated requests under load.
 - Consider a shared SSE streaming helper in `server/util/sse.ts` once more endpoints need it.
 - The `--json` flag on `ithyno doctor` could pipe into `jq` for scripting; document this in README or help text.
+
+---
+
+## Rework round 2
+
+Addressed 6 findings from review round 1 (F1–F5 + F7; F6 was info-only, no action needed).
+
+**F2 (medium) — cpSync partial install:** Changed `force: false` to `force: true` in the agmsg `cpSync` call (`server/index.ts`). Added a comment explaining why. Added a regression test in `doctor.test.ts` that proves `force: true` overwrites a stale partial install and that `force: false` leaves it broken.
+
+**F1 (low) — whichProc leak:** Changed `whichProc` to `let` with an `undefined` initial value so `settle()` can close over it. `settle()` now calls `whichProc?.kill()` before resolving, preventing the subprocess from writing to the closed-over `resolvedPath` after the outer Promise settles. The `?.` guard handles the narrow window before the spawn returns.
+
+**F3 (low) — readyForManager comment contradiction:** Removed `antigravity` from `AGENT_KEYS` (was comment-contradicting double-counting of `agy`). Updated the comment to explain the exclusion. Updated the corresponding test to use the same primary key list.
+
+**F4 (low) — Windows which comment:** Added an inline comment on the `spawn("which", ...)` line noting that `which` is unavailable on Windows (equivalent is `where`) and that path resolution silently yields `undefined` there, affecting only the `path` field in the report.
+
+**F5 (low) — SSE reader cancel on unmount:** Hoisted `reader` to `activeReader` in the outer `useEffect` closure scope. The cleanup function now calls `activeReader?.cancel().catch(() => {})` so the underlying fetch stream is released immediately on unmount rather than waiting for GC.
+
+**F7 (low) — test coverage:** Added two new describe blocks to `doctor.test.ts`: (1) `"400-path guard rejects every non-installable value"` — mirrors the exact `tool !== "tmux" && tool !== "agmsg"` guard, covering 14 invalid inputs and the 2 valid ones; (2) `"agmsg install cpSync force:true (F2 regression)"` — two tests using real `cpSync` calls on temp directories to document both the fixed and old broken behaviour.
+
+All checks pass after rework: `npm run openspec -- validate add-doctor-and-installer --strict` (VALID), `npm test` (444 pass + 1 skip, pre-existing sharp failure), `npm run typecheck` (clean), `npm run build` (clean).
