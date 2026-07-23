@@ -1,121 +1,104 @@
 ---
 date: 2026-07-23
-verdict: needs-rework
-findings: 3
-commit: 64fbe72
+verdict: pass
+findings: 2
+round: 2
+commit: 9a5755c
 ---
 
-# Review: expand-init-to-scaffold-agents
+# Review: expand-init-to-scaffold-agents (round 2)
 
-Overall the change is structurally sound. Server logic is well-extracted,
-test coverage is solid, typecheck passes, and the 4 required paths are all
-exercised. Three findings require rework before merge.
+Round 1 returned 3 findings (1 medium, 1 low, 1 info). This round verifies
+all three are resolved and does a fresh pass for regressions. Verdict: **PASS**.
 
 ---
 
-## F1 — BUG (Medium): `errorMessage` in `useEffect` deps causes re-run loop
+## Round-1 finding verification
 
-**File:** `web/src/pages/OnboardingProject.tsx`, line 228
+### F1 (medium — BUG): `errorMessage` in `useEffect` deps — RESOLVED
 
-```ts
-}, [dialogPhase, target, targetValid, chosenCli, errorMessage]);
-```
-
-`errorMessage` must not be a dependency of the effect that launches the SSE
-chain. The problem:
-
-1. SSE chain runs, an error fires `setErrorMessage(...)`.
-2. React re-runs the effect (deps changed). Cleanup cancels the previous run
-   (setting `cancelled = true`), then a NEW invocation starts.
-3. The new invocation checks `if (dialogPhase !== "running" || ...)` — all
-   still true — so it fires another `/api/init/stream` request. The
-   `if (!errorMessage)` guard at line 200 is evaluated in the new closure
-   where `errorMessage` is still `null` (state snapshot at effect entry), so
-   agents-yaml write will proceed even if the SSE phase errored.
-
-**Fix:** Remove `errorMessage` from the dependency array. Track whether an
-error already occurred inside a ref (`hasErrorRef`) or use a committed-flag
-ref instead of reading the state variable inside the closure.
+`errorMessage` is absent from the dependency array, which now reads:
 
 ```ts
-// replace the deps line with:
 }, [dialogPhase, target, targetValid, chosenCli]);
-// and guard agents-yaml write with a local flag set by the SSE error handler:
-let sseErrored = false;
-// ...in appendEvent for "error" type:
-sseErrored = true;
-setErrorMessage(e.message);
-// ...then:
-if (!sseErrored) { /* agents-yaml write */ }
 ```
+
+`sseErrored` is declared as a closure-local `boolean` inside `run()` and set
+in all three error paths:
+
+- HTTP error on `fetch` response (line 162)
+- SSE `"error"` event parsed from the stream (line 183)
+- `catch` block for network/reader failure (line 192)
+
+The agents-yaml write block at line 213 guards on `!sseErrored`, not on
+`!errorMessage`. The re-fire loop is eliminated. No regression detected.
+
+### F2 (low — BUG): follow-up POST re-ran `openspec init --force` — RESOLVED
+
+`agentsYamlOnly?: unknown` added to `InitBody` (server) and
+`agentsYamlOnly?: boolean` added to `InitProjectPayload` (client). Server
+handler at line 569 skips `runInit` when `body.agentsYamlOnly !== true` is
+false — only the doctor gate + `writeAgentsYaml` run. OnboardingProject now
+sends `agentsYamlOnly: true` in the follow-up POST instead of `force: true`.
+The openspec/ scaffold written by the SSE chain is never overwritten.
+
+The doctor gate and `resolveManagerFromDoctor` still execute unconditionally
+(before the `agentsYamlOnly` branch). This is correct: we want the 409 guard
+even when only writing agents.yaml, and the client always passes
+`manager: { command: chosenCli! }` (CLI chosen in the dialog).
+
+### F3 (info): TODO comment on `Cli`/`CLI_PRIORITY` duplication — RESOLVED
+
+`TODO(F3)` comment added in `web/src/types.ts` above the `Cli` type,
+explaining the intentional duplication with `server/doctor.ts`, the plan to
+add a compile-time guard when `add-doctor-and-installer` lands, and the drift
+risk. Comment is accurate and actionable.
 
 ---
 
-## F2 — BUG (Low): follow-up POST `force: true` re-runs `openspec init`, not just agents.yaml write
+## Fresh-pass findings (round 2)
 
-**File:** `web/src/pages/OnboardingProject.tsx`, lines 203-207
+### NF1 — INFO: orphaned `eslint-disable` comment in `server/index.ts`
 
-The comment says:
+**File:** `server/index.ts`, line 567
+
 ```ts
-force: true, // openspec/ already exists; only write agents.yaml
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let initResult: Record<string, unknown> = { ok: true };
 ```
 
-But `POST /api/init` with `force: true` does NOT only write agents.yaml. The
-handler sequence is:
+The suppression comment targets `no-explicit-any`, but the next line uses
+`Record<string, unknown>`, not `any`. The comment was left from a draft and
+suppresses nothing. It is harmless but creates false impressions about the
+type annotation. Remove the comment or move it to the correct line (line 582:
+`initResult = runInitResult as unknown as Record<string, unknown>`).
 
-1. Doctor gate
-2. `runInit({ force: true })` — this re-runs `openspec init --force`, which
-   **overwrites** the already-written openspec/ scaffolding.
-3. `writeAgentsYaml()`
+**Not a merge blocker.**
 
-So after the SSE chain scaffolds and inits openspec/ successfully, the
-follow-up POST reinitializes the whole project with force. This is a
-semantics bug: any customization the user or the SSE chain produced in
-openspec/ between those two calls would be overwritten.
+### NF2 — INFO: `agentsYamlOnly` HTTP path has no unit test
 
-**Fix (short term):** Add a dedicated server endpoint or param
-(e.g. `agentsYamlOnly: true`) that skips `runInit` and only executes the
-doctor gate + `writeAgentsYaml`. Alternatively extend `/api/init/stream` to
-accept `manager.command` in the body and write agents.yaml as a third step
-inside the SSE chain — which the outcome.md already flags as the preferred
-long-term fix.
+**File:** `server/init.test.ts`
 
-Until then, the safest minimal fix is to pass `force: false` and handle the
-"already initialized" error gracefully, or expose a separate
-`POST /api/init/agents-yaml` endpoint.
+The `agentsYamlOnly: true` short-circuit in `POST /api/init` (skip `runInit`,
+call `writeAgentsYaml`, return `{ ok: true, managerCommand }`) is not covered
+by any test. The component tests for `writeAgentsYaml` and `runInit` exist in
+isolation and integration, but none exercise the HTTP handler with
+`agentsYamlOnly: true` to confirm:
 
----
+- `runInit` is not called (no `openspec/` mutation)
+- `writeAgentsYaml` is still called
+- Response includes `{ ok: true, managerCommand: "..." }`
+- 409 still fires if no CLI is installed (doctor gate still active)
 
-## F3 — INFO (Low): `Cli` type defined in two places with no shared source of truth
-
-**Files:** `server/doctor.ts` (stub, to be replaced) and `web/src/types.ts`
-
-Both define the same `Cli` union literal (`"claude" | "codex" | ...`) and
-`CLI_PRIORITY` array independently. The outcome.md acknowledges this, and the
-stub will be replaced when `add-doctor-and-installer` lands. The risk is drift
-after merge: if `add-doctor-and-installer` adds or renames a CLI value in
-`server/doctor.ts`, `web/src/types.ts` will not be automatically updated.
-
-**Recommendation:** When `add-doctor-and-installer` lands, add a compile-time
-guard: a `satisfies` check or a type-import bridge (e.g. expose the server
-type via a shared package or auto-generate `web/src/types.generated.ts` from
-the server). This is not a merge blocker for this change, but log it as a
-follow-up task before `add-doctor-and-installer` archives.
+Not a merge blocker given the sub-unit coverage is solid, but a follow-up
+test would close the gap before `add-doctor-and-installer` lands and the
+path becomes load-bearing.
 
 ---
 
-## Findings not flagged (per brief)
+## Test coverage (round 2 check)
 
-- **`server/doctor.ts` stub** — expected, documented, not a finding.
-- **CSS classes unstyled** — known incomplete, acknowledged in outcome.md.
-- **Double doctor call in SSE path** — minor inefficiency, no correctness
-  impact while the stub is in place.
-
----
-
-## Test coverage check
-
-Required 4 paths per brief:
+All 4 required paths from the brief still covered:
 
 | Path | Test | Status |
 |------|------|--------|
@@ -124,17 +107,15 @@ Required 4 paths per brief:
 | 200 priority default | `resolveManagerFromDoctor` — priority tests | PASS |
 | agents.yaml written | `writeAgentsYaml` + integration test | PASS |
 
-All 4 required paths covered. 446 tests pass (1 pre-existing failure
-in `build-icons` due to missing `sharp` package — unrelated).
+Outcome.md reports `npm test` 446 pass (1 pre-existing `sharp` failure,
+unrelated), `npm run typecheck` clean, `npm run build` clean.
 
 ---
 
 ## Summary
 
-- F1 is a correctness bug that causes the SSE chain to re-fire on error,
-  potentially skipping the error state. **Must fix.**
-- F2 is a semantics bug: the follow-up POST re-runs `openspec init --force`
-  instead of just writing agents.yaml. This can destroy openspec/
-  scaffolding that the SSE chain already wrote. **Must fix (or document
-  the accepted behavior and add a guard).**
-- F3 is a future-maintenance risk to track. **No immediate action needed.**
+All three round-1 findings are resolved without regressions. Two new
+info-level observations (orphaned eslint comment, missing HTTP-layer test for
+`agentsYamlOnly` path) are noted but are not merge blockers.
+
+**Verdict: PASS** — ready to merge.
