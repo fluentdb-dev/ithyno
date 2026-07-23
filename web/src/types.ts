@@ -348,6 +348,40 @@ export type ToggleResponse = {
   change: Change | null;
 };
 
+// ---- agent CLI identifiers (expand-init-to-scaffold-agents) ----------------
+/** Union of known agent CLI identifiers. Mirrors server/doctor.ts Cli type. */
+export type Cli =
+  | "claude"
+  | "codex"
+  | "agy"
+  | "copilot"
+  | "gemini"
+  | "opencode"
+  | "cursor";
+
+/** Priority order for default Manager selection (highest priority first). */
+export const CLI_PRIORITY: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+];
+
+/** Status of a single CLI as reported by /api/doctor. */
+export type CliStatus = {
+  installed: boolean;
+  version?: string;
+};
+
+/** Response from GET /api/doctor (add-doctor-and-installer). */
+export type DoctorReport = {
+  agents: Record<Cli, CliStatus>;
+  readyForManager: boolean;
+};
+
 // ---- browse mode (unify-open-project-3-branch) -----------------------------
 
 /** A node in the markdown-tree response from GET /api/browse/markdown-tree. */

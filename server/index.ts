@@ -482,12 +482,21 @@ fastify.post("/api/git/init", async (req, reply) => {
 // Backbone for UI-driven "New Project" flows. Electron / VS Code may import
 // runInit directly instead (agmsg-installer pattern); this endpoint remains
 // for browser mode and as a fallback.
+//
+// Extended by expand-init-to-scaffold-agents:
+//   - Calls runDoctor() before scaffolding; 409 if readyForManager is false.
+//   - Accepts optional manager.command (Cli); validates against installed list.
+//   - After openspec init, writes agents.yaml from templates/agents.yaml.tmpl.
+//   - Rolls back openspec/ on agents.yaml write failure; returns 500.
+//   - Response includes managerCommand.
 type InitBody = {
   dir?: unknown;
   force?: unknown;
   skipGitignore?: unknown;
   autoCreateDir?: unknown;
   autoGitInit?: unknown;
+  manager?: unknown;
+  defaultManager?: unknown;
 };
 // Shared body validator for both /api/init and /api/init/stream so
 // behavior stays identical (add-new-project-onboarding-window).
@@ -512,6 +521,37 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
   const body = req.body ?? {};
   const v = await validateInitBody(body);
   if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
+
+  // ---- Doctor gate + Manager resolution (expand-init-to-scaffold-agents) --
+  const { runDoctor } = await import("./doctor.js");
+  const { resolveManagerFromDoctor, writeAgentsYaml } = await import("./init-handler.js");
+  const report = await runDoctor();
+
+  const requestedCommand =
+    body.manager !== undefined &&
+    body.manager !== null &&
+    typeof body.manager === "object" &&
+    "command" in (body.manager as object) &&
+    typeof (body.manager as { command: unknown }).command === "string"
+      ? (body.manager as { command: string }).command
+      : undefined;
+
+  const gateResult = resolveManagerFromDoctor(report, {
+    managerCommand: requestedCommand,
+    defaultManager: typeof body.defaultManager === "string" ? body.defaultManager : undefined,
+  });
+
+  if (!gateResult.ok) {
+    return reply.code(gateResult.status).send(
+      gateResult.status === 409
+        ? { error: gateResult.error, hint: gateResult.hint }
+        : { error: gateResult.error, installed: gateResult.installed },
+    );
+  }
+
+  const { chosenCli } = gateResult;
+
+  // ---- Run openspec init ---------------------------------------------------
   const { runInit } = await import("../bin/init.js");
   const result = await runInit({
     targetDir: v.dir,
@@ -524,7 +564,17 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
   if (!result.ok) {
     return reply.code(500).send(result);
   }
-  return result;
+
+  // ---- Write agents.yaml from template (with rollback on failure) ----------
+  try {
+    await writeAgentsYaml(v.dir, chosenCli, PKG_ROOT);
+  } catch (err) {
+    return reply.code(500).send({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return { ...result, managerCommand: chosenCli };
 });
 
 // POST /api/init/stream — SSE sibling that runs runNewProjectChain

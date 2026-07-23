@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setAgmsgConfig, setParallelExecution } from "../api";
+import { setAgmsgConfig, setParallelExecution, fetchDoctor } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
+import type { Cli, DoctorReport } from "../types";
+import { CLI_PRIORITY } from "../types";
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -20,6 +22,8 @@ export function Settings() {
   const agmsg = useStore((s) => s.agmsg);
   const pushToast = useStore((s) => s.pushToast);
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
+  const defaultManager = useStore((s) => s.defaultManager);
+  const setDefaultManager = useStore((s) => s.setDefaultManager);
   const [busy, setBusy] = useState(false);
 
   const onToggleParallel = async (next: boolean) => {
@@ -91,6 +95,12 @@ export function Settings() {
       </section>
 
       <AgmsgSection storeAgmsg={agmsg} disabled={busy} pushToast={pushToast} />
+
+      <DefaultManagerSection
+        defaultManager={defaultManager}
+        onSet={setDefaultManager}
+        disabled={busy}
+      />
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
@@ -298,6 +308,105 @@ function AgmsgSection(props: {
           {busy ? "Saving…" : "Save agmsg config"}
         </button>
       </div>
+    </section>
+  );
+}
+
+/** Human-readable labels for each CLI. Mirrors InitDialog's CLI_LABELS. */
+const CLI_LABELS_SETTINGS: Record<Cli, string> = {
+  claude: "Claude (claude)",
+  codex: "Codex (codex)",
+  agy: "Agy (agy)",
+  copilot: "GitHub Copilot (copilot)",
+  gemini: "Gemini (gemini)",
+  opencode: "OpenCode (opencode)",
+  cursor: "Cursor (cursor)",
+};
+
+/**
+ * Default Manager preference section (expand-init-to-scaffold-agents).
+ * Fetches /api/doctor to know which CLIs are installed, then renders a radio
+ * group limited to those. The chosen value is persisted via the store.
+ */
+function DefaultManagerSection(props: {
+  defaultManager: Cli | null;
+  onSet: (cli: Cli) => void;
+  disabled: boolean;
+}) {
+  const { defaultManager, onSet, disabled } = props;
+
+  const [report, setReport] = useState<DoctorReport | null>(null);
+  const [doctorError, setDoctorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDoctor()
+      .then((r) => {
+        if (!cancelled) setReport(r);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setDoctorError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const installed = report
+    ? CLI_PRIORITY.filter((cli) => report.agents[cli].installed)
+    : [];
+
+  // Resolve effective default: stored pref if installed, else first by priority.
+  const effective: Cli | null =
+    defaultManager && installed.includes(defaultManager)
+      ? defaultManager
+      : installed[0] ?? null;
+
+  return (
+    <section className="settings-section">
+      <h3>Default Manager</h3>
+      <p className="muted">
+        The agent CLI used as Manager when you initialize a new project. Only
+        installed CLIs are shown. Persisted to{" "}
+        <code>localStorage["ithyno.defaultManager"]</code>.
+      </p>
+
+      {doctorError && (
+        <p className="settings-error muted">
+          Could not load CLI list: {doctorError}
+        </p>
+      )}
+
+      {!report && !doctorError && <p className="muted">Checking installed CLIs…</p>}
+
+      {report && installed.length === 0 && (
+        <p className="muted">
+          No agent CLI detected. Install one (e.g.{" "}
+          <code>npm i -g @anthropic-ai/claude-code</code>) and reload.
+        </p>
+      )}
+
+      {installed.length > 0 && (
+        <div className="settings-radio-group">
+          {installed.map((cli) => (
+            <label key={cli} className="settings-radio">
+              <input
+                type="radio"
+                name="default-manager"
+                value={cli}
+                checked={effective === cli}
+                disabled={disabled}
+                onChange={() => onSet(cli)}
+              />
+              <span>{CLI_LABELS_SETTINGS[cli]}</span>
+              {effective === cli && !defaultManager && (
+                <span className="muted"> (auto)</span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
