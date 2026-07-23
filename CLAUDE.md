@@ -70,6 +70,23 @@ before ending the turn. Use the frontmatter format defined in
 deleted — when they graduate to a doc or change, update the frontmatter to
 `status: promoted` and link to the destination via `promoted_to`.
 
+## Branches
+
+- `main` — **release branch**. Only release-ready code lands here. Do NOT
+  commit day-to-day work directly to `main`.
+- `develop` — **integration branch**. All propose / apply / archive work
+  targets `develop`. Feature and `agent/<change-id>` worktree branches
+  are cut from `develop` and merged back into `develop`.
+- Releases are cut from `develop` → `main` at release time (details TBD;
+  either a fast-forward when green, or `merge --no-ff` for a release
+  boundary commit).
+
+Skill implications:
+- `/ithy-opsx:merge` / `/ithy-opsx:archive` default target is `develop`
+  (not `main`). When invoking these, verify the checkout is `develop`.
+- `git worktree add -b agent/<id> .worktrees/<id> HEAD` cuts from the
+  current branch's HEAD — make sure `develop` is checked out first.
+
 ## What lives where
 
 - `docs/ideas/` — stage ① idea-stage captures (never deleted; promoted via frontmatter).
