@@ -56,7 +56,12 @@ const PROJECT_ROOT = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
 const DEV = process.env.ITHYNO_DEV === "1";
 const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
-const openspecDir = resolveOpenspecDir(PROJECT_ROOT);
+// Mutable — updated at runtime when the ProjectRootWatcher detects that
+// openspec/ has been created by an import sub-agent or `openspec init`.
+// All handlers that read this variable call resolveOpenspecDir(PROJECT_ROOT)
+// live (see /api/state) or read this variable after it has been updated.
+// Never cache this in a local const inside a long-lived closure.
+let openspecDir = resolveOpenspecDir(PROJECT_ROOT);
 
 const fastify = Fastify({ logger: false });
 
@@ -206,10 +211,24 @@ if (openspecDir) {
   // broadcast would ever fire after the import sub-agent writes
   // `openspec/GENERATED.md`, leaving the ImportProgress dashboard stuck.
   // Also handles `openspec init` from a shell while ithyno is running.
+  // Idempotency guard: prevents double-start if the callback somehow fires
+  // more than once (e.g. a future refactor adds a second call path). The
+  // ProjectRootWatcher's own `stopped` flag makes this practically impossible
+  // today, but a module-level boolean is cheap insurance. (NF1)
+  let openspecWatcherStarted = false;
   const projectRootWatcher = new ProjectRootWatcher(PROJECT_ROOT, () => {
+    if (openspecWatcherStarted) {
+      console.log(`[watcher] openspec/ detected again — idempotency guard: ignoring duplicate call`);
+      return;
+    }
+    openspecWatcherStarted = true;
+
     const newOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
     console.log(`[watcher] openspec/ detected at ${PROJECT_ROOT} — starting Watcher`);
     if (newOpenspecDir) {
+      // Update the module-level variable so all subsequent requests
+      // (withinOpenspec, change endpoints, /api/state) see the real path.
+      openspecDir = newOpenspecDir;
       startOpenspecWatcher(newOpenspecDir);
     }
     // Broadcast state-replaced regardless — the dashboard needs to re-fetch
@@ -352,7 +371,20 @@ fastify.get("/api/auth/check", async (req, reply) => {
   return { ok: true };
 });
 
-fastify.get("/api/state", async () => scanWorkspace(openspecDir, PROJECT_ROOT));
+fastify.get("/api/state", async () => {
+  // Re-resolve every call so that a runtime openspec/ creation (import
+  // sub-agent, `openspec init`) is reflected immediately without a server
+  // restart. The module-level `openspecDir` is updated by the ProjectRootWatcher
+  // callback, but calling resolveOpenspecDir here as well ensures correctness
+  // even if there is a narrow race between the watcher fire and this handler.
+  const liveOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
+  if (liveOpenspecDir && !openspecDir) {
+    // Watcher callback hasn't fired yet — update the module-level var so
+    // other handlers (withinOpenspec, change endpoints) also see it.
+    openspecDir = liveOpenspecDir;
+  }
+  return scanWorkspace(liveOpenspecDir, PROJECT_ROOT);
+});
 
 // ---- Browse endpoints (unify-open-project-3-branch) -----------------------
 // Both endpoints are read-only and require the session token (via the

@@ -8,6 +8,14 @@
  * `generatedMarkerPresent === true`, the import is complete and
  * `onComplete(state)` is called.
  *
+ * Both predicates are required:
+ *   - `exists === true` is satisfied because /api/state re-calls
+ *     resolveOpenspecDir(PROJECT_ROOT) on every request (server-side F1 fix).
+ *     A boot-time null openspecDir no longer prevents the state from reflecting
+ *     a runtime openspec/ creation.
+ *   - `generatedMarkerPresent === true` is satisfied when the import sub-agent
+ *     writes openspec/GENERATED.md (the last step of the import flow).
+ *
  * See refactor-import-to-task-tool-subagent for the design rationale.
  *
  * Props:

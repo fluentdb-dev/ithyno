@@ -293,6 +293,14 @@ export function injectIntoManager(
       }
     }
   }
+  // Diagnostic: log the cwds that were actually present so operators can
+  // diagnose mismatches (e.g. the PTY was spawned with a different cwd than
+  // PROJECT_ROOT, or the terminal was never opened). (NF2)
+  const liveCwds = live.map((e) => e.cwd);
+  console.warn(
+    `[pty] injectIntoManager: no terminal found for cwd "${managerCwd}". ` +
+    `Live terminal cwds: ${liveCwds.length > 0 ? liveCwds.map((c) => `"${c}"`).join(", ") : "(none)"}`,
+  );
   return {
     ok: false,
     reason: `No Manager terminal is open (expected cwd: ${managerCwd}). Open the Terminal panel and ensure the Manager is running.`,

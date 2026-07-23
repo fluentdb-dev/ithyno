@@ -7,6 +7,14 @@
  * These tests exercise that detection logic in isolation without a DOM
  * (the store subscription is a plain selector — easy to unit-test).
  *
+ * Both predicates are required and correct:
+ *   - `state.exists` is true when /api/state resolves openspecDir dynamically
+ *     (the server-side F1 fix in server/index.ts). The server re-calls
+ *     resolveOpenspecDir(PROJECT_ROOT) on every /api/state request so that
+ *     a runtime openspec/ creation (import sub-agent) is reflected immediately.
+ *   - `state.generatedMarkerPresent` is true when openspec/GENERATED.md exists,
+ *     which the import sub-agent writes last.
+ *
  * Full DOM rendering is deferred to manual task 8.5.
  */
 import { describe, expect, it } from "vitest";

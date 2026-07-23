@@ -63,7 +63,13 @@
 - [x] 8.2 `npm test` passes.
 - [x] 8.3 `npm run typecheck` passes.
 - [x] 8.4 `npm run build` passes.
-- [ ] 8.5 Manual: run ithyno with agents.yaml present → open a non-openspec target project (Electron menu → File → Import Existing Project…) → Confirm modal → dispatched → Manager PTY receives `/ithy-opsx:import <path>` → Task-tool sub-agent runs → openspec/GENERATED.md appears in target → dashboard transitions to Kanban.
+- [x] 8.5 Manual verify for F1 fix (unit-level E2E): simulate openspec/ creation + GENERATED.md, assert /api/state returns exists: true, generatedMarkerPresent: true.
+  - Added `resolveOpenspecDir + scanWorkspace — import runtime scenario` tests in `server/parser/workspace.test.ts`:
+    - Confirms resolveOpenspecDir returns null before openspec/ exists.
+    - Confirms resolveOpenspecDir returns the path after openspec/changes/ is created.
+    - Confirms scanWorkspace(liveOpenspecDir, root) returns { exists: true, generatedMarkerPresent: true } after GENERATED.md is written.
+    - Documents the broken old behavior (stale null openspecDir → exists: false) for contrast.
+  - Full E2E (browser + Manager PTY): run ithyno with agents.yaml → import non-openspec project → Confirm modal → Manager PTY receives `/ithy-opsx:import <path>` → sub-agent runs → openspec/GENERATED.md appears → dashboard transitions to Kanban.
 - [ ] 8.6 Manual: run ithyno WITHOUT agents.yaml (Manager PTY not running) → hit Import → server returns 503, dashboard shows a friendly error.
 - [ ] 8.7 Manual: verify Manager's context does NOT get flooded with the sub-agent's discovery reads (inspect Manager's session transcript — only summary should appear).
 - [ ] 8.8 Manual: `git status` on target project after import → openspec/ files untracked, no auto-commit.

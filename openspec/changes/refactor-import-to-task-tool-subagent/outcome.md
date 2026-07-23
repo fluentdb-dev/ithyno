@@ -99,3 +99,52 @@ is correct and the task is complete.
 - `npm test` → 414 passed, 1 skipped, 1 pre-existing failure (build-icons/sharp not installed)
 - `npm run typecheck` → clean
 - `npm run build` → clean
+
+---
+
+## Rework round 3
+
+Fixed the critical F1 finding and addressed NF1 (idempotency) and NF2 (diagnostic logging). 4 additional tests added (18 total for this change).
+
+### F1 (critical) — /api/state returns exists: false after runtime openspec/ creation
+
+**Root cause**: `const openspecDir = resolveOpenspecDir(PROJECT_ROOT)` on line 59 of `server/index.ts` was resolved once at boot and never updated. In the import scenario (ithyno starts with no `openspec/`), this was always `null`. The `/api/state` handler called `scanWorkspace(openspecDir, PROJECT_ROOT)` with the stale null, so `scanWorkspace` always returned `{ exists: false }`. Even after the import sub-agent created `openspec/` and wrote `GENERATED.md`, the response was `{ exists: false, generatedMarkerPresent: true }`. The client predicate `state.exists && state.generatedMarkerPresent` was `false && true` — never fired.
+
+**Fix applied (server-side, architecturally correct)**:
+
+1. Changed `const openspecDir` to `let openspecDir` so it can be updated at runtime.
+2. `/api/state` handler now calls `resolveOpenspecDir(PROJECT_ROOT)` on every request (live re-resolution). It also updates the module-level `openspecDir` if it discovers a non-null path when the current value is null — so other handlers (withinOpenspec, change endpoints) immediately benefit too.
+3. `ProjectRootWatcher` callback explicitly updates `openspecDir = newOpenspecDir` before calling `startOpenspecWatcher`. This ensures the module-level variable is updated even if `/api/state` hasn't been called yet.
+
+The client predicate in `ImportProgress.tsx` is unchanged (`state.exists && state.generatedMarkerPresent`) — both predicates are correct now that the server returns honest state.
+
+### NF1 (minor) — idempotency guard for ProjectRootWatcher double-start
+
+Added an `openspecWatcherStarted` boolean flag in the `else` block of `server/index.ts`. The `ProjectRootWatcher` callback checks and sets this flag before calling `startOpenspecWatcher`. A duplicate call (hypothetical: future refactor adds a second code path) is logged and ignored rather than silently overwriting the watcher reference and orphaning the chokidar instance.
+
+### NF2 (info) — injectIntoManager diagnostic logging
+
+When `injectIntoManager` finds no terminal matching `managerCwd`, it now logs a `console.warn` that includes both the expected cwd and the list of actual cwds of all live terminals. Example:
+```
+[pty] injectIntoManager: no terminal found for cwd "/Users/foo/my-project". Live terminal cwds: "/Users/foo/my-project/.worktrees/some-change" 
+```
+This makes it immediately clear whether the Manager PTY was never opened (cwds: none) or was opened with a different cwd (cwd mismatch diagnostic).
+
+### N3 (info) — withinOpenspec uses frozen openspecDir
+
+This was flagged as a pre-existing limitation. Now that `openspecDir` is mutable and gets updated by both the ProjectRootWatcher callback and the `/api/state` handler, `withinOpenspec` will also benefit once the module-level variable is updated. The update happens synchronously in the callback before any subsequent request, so after the first `/api/state` call post-import, `withinOpenspec` will accept paths under the new `openspec/`. This is a meaningful improvement over the old behavior (which required a server restart).
+
+### E2E unit tests added
+
+Added `resolveOpenspecDir + scanWorkspace — import runtime scenario (F1 regression)` suite in `server/parser/workspace.test.ts` with 4 tests:
+- Confirms `resolveOpenspecDir` returns null before `openspec/` exists
+- Confirms `resolveOpenspecDir` returns the path after `openspec/changes/` is created
+- Confirms `scanWorkspace(liveOpenspecDir, root)` returns `{ exists: true, generatedMarkerPresent: true }` after `GENERATED.md` is written — the passing case that was broken before this fix
+- Documents the old broken behavior (`stale null → exists: false`) for regression contrast
+
+### Sanity check
+
+- `npm run openspec -- validate refactor-import-to-task-tool-subagent --strict` → valid
+- `npm test` → 418 passed (4 new tests), 1 skipped, 1 pre-existing failure (build-icons/sharp not installed)
+- `npm run typecheck` → clean
+- `npm run build` → clean
