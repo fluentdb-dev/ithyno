@@ -62,14 +62,6 @@ The import sub-agent SHALL leave the project's git working tree with the openspe
 - **THEN** the `openspec/` tree and `openspec/GENERATED.md` appear as untracked files (or as `A`-marked staged files if the user pre-staged), and no new commit exists on the current branch attributable to the import
 - **AND** the Task-tool sub-agent's boot prompt includes an explicit "DO NOT commit" instruction
 
-## REMOVED Requirements
-
-### Requirement: SSE stream of subprocess progress
-
-**Reason**: The `POST /api/import/spec-generation` no longer spawns a `claude -p` subprocess whose stdout would be streamed. Progress is now observed via the workspace file-watch WS broadcast (see the new "Completion is observed via workspace file watch" scenario). The dedicated `GET /api/import/spec-generation/:jobId/events` SSE endpoint is removed.
-
-**Migration**: dashboard `ImportProgress.tsx` replaces its EventSource consumer with a subscription to the existing WS `state-replaced` broadcast. No client-visible SSE endpoint remains.
-
 ## ADDED Requirements
 
 ### Requirement: `/ithy-opsx:import <target-path>` skill
