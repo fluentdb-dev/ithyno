@@ -2,47 +2,201 @@
 verdict: needs-rework
 reviewer: manager-fallback
 model: sonnet
+round: 2
 change_id: refactor-import-to-task-tool-subagent
 ---
 
-# Review
+# Review — Round 2
 
-## Findings
+Round-1 had 1 critical + 1 major + 3 minor + 2 info findings. The rework
+commit `6f50129` addressed the major and minor findings cleanly. However,
+the critical finding (F1) is only partially fixed: the watch mechanism now
+fires correctly, but the client-side completion predicate prevents
+`onComplete` from ever firing in the canonical import scenario.
 
-### Finding 1 (severity: critical)
-**File**: `server/index.ts:132` / `server/sync/watcher.ts:27`
-**Issue**: The completion-signal path is broken for the exact use-case this change targets. The server computes `openspecDir = resolveOpenspecDir(PROJECT_ROOT)` once at boot. When ithyno starts with no existing `openspec/` directory (the import scenario — `state.exists === false`), `openspecDir` is `null` and the `if (openspecDir) { watcher = new Watcher(...) }` guard means no file watcher is ever started. Consequently, no `state-replaced` WS broadcast fires when the sub-agent later creates `openspec/` and `openspec/GENERATED.md`. `ImportProgress.tsx`'s `useEffect` subscribes to store state that never updates, so `onComplete` never fires and the dashboard is stuck in the progress phase indefinitely.
+## Round-1 findings: status
 
-The fix must emit a `state-replaced` broadcast when `openspec/GENERATED.md` is created even when no prior watcher exists. Options include: (a) start a fallback `fs.watch`/chokidar watcher on `PROJECT_ROOT` itself (not `openspecDir`) whenever `openspecDir === null`, broadcasting `state-replaced` on any `openspec/` appearance; (b) have the server poll lightly after a POST to `/api/import/spec-generation` until the marker appears; or (c) require that ithyno's project root already has `openspec/` before the import command is accepted (changes the UX contract).
+### F1 (critical) — `state-replaced` fires but completion predicate is still broken
 
-### Finding 2 (severity: major)
-**File**: `server/import-spec-gen.test.ts` (missing test case)
-**Issue**: Task 7.1 explicitly requires "400 on oversized" test coverage. The existing test suite does not include any test for the size-cap rejection path (50 MB). While the preflight logic itself is carried over intact from the archived predecessor, the test coverage claim in `tasks.md` is not met. A reviewer cannot confirm the 400 path is exercised.
-**Fix**: Add a test that creates a temp file large enough to exceed `SIZE_CAP_BYTES` (or mock `lstat` to return a large size), calls `preflight`, and asserts `result.ok === false && result.status === 400`.
+**Status: NOT RESOLVED — re-classified as critical**
 
-### Finding 3 (severity: minor)
-**File**: `web/src/components/ImportProgress.tsx:39-44`
-**Issue**: `onComplete` is not guarded against duplicate firings. The `useEffect` runs every time `state` changes. If the WS delivers two consecutive `state-replaced` events both arriving with `generatedMarkerPresent === true` before React unmounts `ImportProgress`, `onComplete` fires twice. The parent sets `phase` to `"done"` which enqueues an unmount, but in the same React flush the second state update may trigger the effect again before the unmount lands. In React Strict Mode (dev) effects intentionally run twice per mount, which would fire `onComplete` twice unconditionally.
-**Fix**: Add a `firedRef = useRef(false)` guard: `if (firedRef.current) return; firedRef.current = true; onCompleteRef.current(state);`
+The rework added `ProjectRootWatcher` which correctly fires `state-replaced`
+when `openspec/` is created at runtime. It also starts the real `Watcher` on
+the new `openspec/` directory, which fires a second `state-replaced` when
+`openspec/GENERATED.md` is written. Both broadcasts are sound.
 
-### Finding 4 (severity: minor)
-**File**: `server/import-spec-gen.ts:179`
-**Issue**: `targetPath` is injected verbatim into the PTY slash-command string — `"/ithy-opsx:import " + targetPath` — with no check for embedded control characters (principally `\r`, `\n`, `\x03`). On Linux/macOS, file paths technically may contain newline characters (unusual but valid). A path containing `\n` would cause two separate lines to be written to the PTY, the second of which would be an arbitrary command injection into the Manager's session. `resolve()` normalizes separators but does not strip embedded newlines.
-**Fix**: Before injecting, validate that `targetPath` contains no characters outside the printable ASCII/Unicode range expected for file paths, or at minimum reject paths containing CR/LF/NUL (`/[\r\n\0]/`). The `isAuthorizedImportPath` blocklist does not cover this.
+However, the completion check in `ImportProgress.tsx` (line 47) is:
 
-### Finding 5 (severity: minor)
-**File**: `server/sync/pty.ts:257-258`
-**Issue**: `injectIntoActive` targets `live[live.length - 1]` — the most recently bumped PTY entry — not specifically the Manager PTY. If the user activates a second PTY (e.g. a worktree terminal) between opening the Manager and clicking Import, `bump()` moves that second entry to the tail and the `/ithy-opsx:import` command lands in the wrong terminal. This is pre-existing behavior shared with `/api/pty/inject`, not introduced by this change, but the change now relies on it for a non-interactive server-triggered dispatch where the user cannot see which terminal received the command.
-**Fix**: Either document this as a known limitation (manager-must-be-last-active) or add a Manager-specific selector (e.g. tag terminals with their role at spawn time and resolve by role here).
+```ts
+if (state && state.exists && state.generatedMarkerPresent) {
+```
 
-### Finding 6 (severity: info)
-**File**: `.claude/skills/ithy-opsx-import/SKILL.md:151` (boot prompt `<TARGET_PATH>` substitution)
-**Issue**: The boot prompt template embeds `<TARGET_PATH>` as plain text in a Markdown fenced block. If the target path contains backtick sequences (e.g., `` `/some/path` ``), the Markdown rendering could break the code block structure. In practice, OS paths don't contain backticks, so this is hypothetical. No change required unless hardening is desired.
+The `state.exists` field comes from `/api/state` →
+`scanWorkspace(openspecDir, PROJECT_ROOT)` where `openspecDir` is the
+module-level constant resolved once at boot. In the import scenario, ithyno
+starts with no `openspec/` → `openspecDir === null` at boot and never
+changes. Every call to `/api/state` returns `{ exists: false, ... }`
+regardless of whether `openspec/` has since been created on disk.
 
-### Finding 7 (severity: info)
-**File**: `openspec/changes/refactor-import-to-task-tool-subagent/tasks.md` task 7.1
-**Issue**: Task 7.1 references `server/import.test.ts` (a rename that was never performed) but the actual file is `server/import-spec-gen.test.ts`. This is a cosmetic mismatch in the task artifact and does not affect runtime behavior.
+`scanWorkspace` does compute `generatedMarkerPresent` independently:
+
+```ts
+const generatedMarkerPresent = existsSync(join(projectRoot, "openspec", "GENERATED.md"));
+if (!openspecDir) {
+  return { root: projectRoot, exists: false, ..., generatedMarkerPresent };
+}
+```
+
+So after GENERATED.md is written the response is
+`{ exists: false, generatedMarkerPresent: true }`, but `ImportProgress`
+requires `state.exists === true` to fire. That condition is impossible to
+satisfy without a server restart.
+
+End-to-end trace confirming the hang:
+
+1. ithyno starts, `openspecDir = null`
+2. Import dispatched → PTY gets the command → sub-agent starts
+3. Sub-agent runs `openspec init` → `openspec/` directory created
+4. `ProjectRootWatcher` fires → `startOpenspecWatcher(newDir)` + `broadcast({ type: "state-replaced" })`
+5. Client receives `state-replaced` → `fetchState()` → `/api/state` → `{ exists: false, generatedMarkerPresent: false }` (GENERATED.md not yet written)
+6. Sub-agent writes specs, then writes `openspec/GENERATED.md`
+7. Watcher on `openspec/` detects GENERATED.md (is `.md`) → broadcasts `state-replaced`
+8. Client receives `state-replaced` → `fetchState()` → `/api/state` → `{ exists: false, generatedMarkerPresent: true }` (openspecDir still null)
+9. `ImportProgress` checks `state.exists && state.generatedMarkerPresent` → `false && true` → **never fires `onComplete`**
+
+The dashboard hangs indefinitely — same symptom as before the rework, just at step 9 instead of step 4.
+
+**Fix**: Remove the `state.exists` guard from the completion predicate.
+`generatedMarkerPresent` is independently computed by `scanWorkspace` and
+is the correct sentinel. Change line 47 of `ImportProgress.tsx` from:
+
+```ts
+if (state && state.exists && state.generatedMarkerPresent) {
+```
+
+to:
+
+```ts
+if (state && state.generatedMarkerPresent) {
+```
+
+Also update the `isImportComplete` mirror function in
+`ImportProgress.test.ts` line 37, and the test comment on line 7, and any
+test cases that assume `exists: true` is required (the test at line 93 of
+`ImportProgress.test.ts` uses `exists: true` in the `midImport` state but
+that test is fine as written — that case asserts non-completion when
+`generatedMarkerPresent` is false, which is still correct).
+
+Note: `state.exists` is not needed because `generatedMarkerPresent` can only
+become `true` after `openspec/GENERATED.md` is written, which happens in
+Step 6 of the sub-agent flow after `openspec init` has already run. The
+extra `exists` check adds no safety — it only blocks completion.
+
+---
+
+### F2 (major) — 400 size cap test
+
+**Status: RESOLVED**
+
+Test added at `server/import-spec-gen.test.ts:135–150`. Creates a sparse
+51 MB `.ts` file via `truncate`, calls `preflight`, asserts
+`ok === false`, `status === 400`, reason matches `/exceeds/` and `/50 MB/`.
+The `lstat.size` approach correctly uses the logical file size so the test
+does not write 51 MB to disk. The test file for the size-exceeding case is
+a `.ts` file which is included in the `walkDir` scan. Coverage confirmed.
+
+### F3 (minor) — `onComplete` once-guard
+
+**Status: RESOLVED**
+
+`const firedRef = useRef(false)` is declared at component scope (line 40 of
+`ImportProgress.tsx`), outside the `useEffect`. The guard check and set
+(`if (firedRef.current) return; firedRef.current = true;`) are inside the
+effect. Placement and logic are correct.
+
+### F4 (minor) — control-character rejection
+
+**Status: RESOLVED**
+
+Regex `/[\x00-\x1f\x7f-\x9f]/` in `injectImportCommand` covers:
+- `\x00`–`\x1f`: all C0 controls including `\n` (0x0a), `\r` (0x0d), NUL (0x00)
+- `\x7f`: DEL
+- `\x80`–`\x9f`: C1 controls
+
+Four unit tests cover `\n`, `\r`, `\x00`, and the guard that blocks the
+injector from being called at all. The regex is correct and comprehensive
+for the stated threat (PTY line injection via control chars).
+
+Backticks (0x60) are printable and not blocked — this was already noted as
+info-only in round 1 (F6) and no change is required.
+
+### F5 (minor) — PTY routing
+
+**Status: RESOLVED**
+
+`injectIntoManager(managerCwd, data, terminate)` added to `server/sync/pty.ts`.
+`LiveTerminal` now carries `cwd: string` set from `opts.cwd` at spawn time.
+The function walks `live[]` from tail (most recently active) to head and
+returns the first matching cwd. Returns `{ ok: false, reason: "..." }`
+when no match found; the caller maps that to 503.
+
+`managerCwd` is `PROJECT_ROOT`; the PTY spawned in `ptyWss.on("connection")`
+uses `cwd = openspecDir ? resolve(openspecDir, "..") : PROJECT_ROOT`. In
+the import scenario `openspecDir` is null at boot so the PTY cwd is
+`PROJECT_ROOT`. The cwd comparison is exact string match, which works
+correctly in both the boot-with-openspec and boot-without-openspec cases.
+
+Multiple PTYs with the same cwd: the tail-to-head walk picks the most
+recently used one. Acceptable defensive behavior; comment documents it.
+
+---
+
+## New findings from multi-angle pass
+
+### Finding N1 (minor) — `startOpenspecWatcher` called while `watcher !== null` is impossible but fragile
+
+If `startOpenspecWatcher` were ever called twice (e.g. through a future
+refactor calling it from a second code path), it would silently overwrite
+the module-level `watcher` reference, orphaning the first `Watcher`
+(leaving its chokidar instance running without a reference to stop it).
+There is no guard. The current call graph makes this impossible (one of two
+mutually exclusive paths: `if (openspecDir) ... else ...`), but a defensive
+`if (watcher) { watcher.stop(); watcher = null; }` before the assignment
+would be safer for long-term maintainability.
+
+**Severity: minor** — not a bug in the current code; pre-existing pattern
+(the old code also had no such guard). No ship-block.
+
+### Finding N2 (info) — `projectRootWatcher` not accessible for explicit shutdown
+
+`projectRootWatcher` is declared in the `else` block and not reachable from
+the SIGINT/SIGTERM handlers. This matches the pre-existing behavior for the
+main `Watcher` (also not closed on SIGINT — the handlers call
+`agentRunner.shutdown(); process.exit(0)` and rely on OS cleanup). No
+change needed; consistent with existing shutdown strategy.
+
+### Finding N3 (info) — `withinOpenspec` uses frozen `openspecDir`
+
+`withinOpenspec(filePath)` uses the boot-time `openspecDir` constant for its
+main guard (line 303 of `server/index.ts`). After import creates `openspec/`
+at runtime, the main `withinOpenspec` guard (`openspecDir && abs.startsWith(...)`)
+returns `false` for paths under the new `openspec/`. Write endpoints that
+call `withinOpenspec` would reject writes to the imported `openspec/` until
+a server restart. This is a pre-existing architectural limitation
+(module-level singleton) that pre-dates this change and is not introduced
+by the rework. Not a ship-block for this change's scope (import flow only),
+but a server restart is required to use the edit API after import.
+
+---
 
 ## Verdict
 
-needs-rework — Finding 1 is a critical functional bug: the completion signal (`state-replaced` → `generatedMarkerPresent` → `onComplete`) will never fire for the canonical use-case (ithyno started against a project with no existing `openspec/` directory), leaving the dashboard stuck in the progress phase indefinitely. Finding 2 is a major gap in test coverage explicitly promised by `tasks.md`. Findings 3–5 are minor correctness issues that should be fixed before ship.
+**needs-rework** — F1 is still critical. The `ProjectRootWatcher` correctly
+triggers `state-replaced` broadcasts when `openspec/` appears and when
+`GENERATED.md` is written, but the completion predicate
+`state.exists && state.generatedMarkerPresent` in `ImportProgress.tsx` can
+never be satisfied because the server's `/api/state` returns
+`{ exists: false }` whenever `openspecDir` was null at boot. The fix is
+a one-line change: remove `state.exists &&` from the predicate (and update
+the matching test mirror function). All other round-1 findings are resolved.
+No new blocking issues are introduced by the rework.
