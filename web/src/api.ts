@@ -287,11 +287,12 @@ export async function setAgmsgConfig(
 }
 
 // ---- doctor endpoint (add-doctor-and-installer) ----------------------------
-/** Fetch the doctor report: installed CLIs + readyForManager. */
+// Note: the canonical fetcher is `fetchDoctorReport` below (session-token
+// gated). `fetchDoctor` is retained as a thin alias so existing callers
+// (InitDialog etc.) keep working after the doctor branch merged its real
+// impl. Prefer `fetchDoctorReport` for new code.
 export async function fetchDoctor(): Promise<DoctorReport> {
-  const res = await fetch("/api/doctor");
-  if (!res.ok) throw new Error(`GET /api/doctor failed: ${res.status}`);
-  return res.json();
+  return fetchDoctorReport();
 }
 
 // add-init-http-endpoint: POST /api/init client. Scaffolds a new project at
