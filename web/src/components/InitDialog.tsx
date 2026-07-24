@@ -125,97 +125,97 @@ export function InitDialog({
   }
 
   return (
-    <div className="init-dialog-overlay">
-      <div className="init-dialog">
-        <h3>Initialize Project</h3>
-        <p className="muted">
-          <code>{dir}</code>
-        </p>
+    <div className="onboarding-card">
+      <h2>Initialize Project</h2>
+      <p className="onboarding-target">
+        <code>{dir}</code>
+      </p>
 
-        {/* Prerequisites summary */}
-        <section className="init-dialog-section">
-          <h4>Prerequisites</h4>
-          {loading && <p className="muted">Checking…</p>}
-          {doctorError && (
-            <p className="init-dialog-error">
-              Could not check prerequisites: {doctorError}
-            </p>
-          )}
-          {report && (
-            <ul className="init-dialog-prereqs">
-              {CLI_PRIORITY.map((cli) => {
-                const status = report.agents[cli];
-                return (
-                  <li key={cli} className={status.installed ? "prereq-ok" : "prereq-missing"}>
-                    <span className="prereq-icon">{status.installed ? "✓" : "✗"}</span>
-                    <span className="prereq-label">{CLI_LABELS[cli]}</span>
-                    {status.version && (
-                      <span className="prereq-version muted"> ({status.version})</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {report && !readyForManager && (
-            <div className="init-dialog-blocked">
-              No agent CLI is installed. Install at least one CLI, then try
-              again.{" "}
-              <a href="/settings" className="init-dialog-link">
-                Settings &gt; Prerequisites
-              </a>
-            </div>
-          )}
-        </section>
-
-        {/* Manager picker (shown only when ready) */}
-        {report && readyForManager && (
-          <section className="init-dialog-section">
-            <h4>Manager CLI</h4>
-            <p className="muted">
-              Choose which agent CLI will run as the Manager in this project.
-            </p>
-            <div className="init-dialog-picker">
-              {installedClis.map((cli) => (
-                <label key={cli} className="init-dialog-radio">
-                  <input
-                    type="radio"
-                    name="manager-cli"
-                    value={cli}
-                    checked={selectedCli === cli}
-                    disabled={initializing}
-                    onChange={() => setSelectedCli(cli)}
-                  />
-                  <span>{CLI_LABELS[cli]}</span>
-                </label>
-              ))}
-            </div>
-          </section>
+      {/* Prerequisites */}
+      <section className="onboarding-section">
+        <h3 className="onboarding-section-title">Prerequisites</h3>
+        {loading && <p className="muted">Checking installed CLIs…</p>}
+        {doctorError && (
+          <div className="onboarding-error">
+            <strong>Error:</strong> Could not check prerequisites: {doctorError}
+          </div>
         )}
+        {report && (
+          <ul className="onboarding-prereqs">
+            {CLI_PRIORITY.map((cli) => {
+              const status = report.agents[cli];
+              return (
+                <li
+                  key={cli}
+                  className={`onboarding-prereq ${status.installed ? "prereq-ok" : "prereq-missing"}`}
+                >
+                  <span className="onboarding-icon">{status.installed ? "✓" : "○"}</span>
+                  <span className="onboarding-label">{CLI_LABELS[cli]}</span>
+                  {status.version && (
+                    <span className="muted"> ({status.version})</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {report && !readyForManager && (
+          <div className="onboarding-error">
+            <strong>No agent CLI installed.</strong> Install at least one CLI,
+            then reload.{" "}
+            <a href="/settings" className="onboarding-link">Settings › Prerequisites</a>
+          </div>
+        )}
+      </section>
 
-        <div className="init-dialog-actions">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onCancel}
-            disabled={initializing}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => void handleInit()}
-            disabled={
-              loading ||
-              initializing ||
-              !readyForManager ||
-              selectedCli === null
-            }
-          >
-            {initializing ? "Initializing…" : "Initialize"}
-          </button>
-        </div>
+      {/* Manager picker */}
+      {report && readyForManager && (
+        <section className="onboarding-section">
+          <h3 className="onboarding-section-title">Manager CLI</h3>
+          <p className="muted onboarding-section-sub">
+            Which agent CLI runs as the Manager in this project.
+          </p>
+          <div className="onboarding-picker">
+            {installedClis.map((cli) => (
+              <label
+                key={cli}
+                className={`onboarding-picker-item ${selectedCli === cli ? "is-selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="manager-cli"
+                  value={cli}
+                  checked={selectedCli === cli}
+                  disabled={initializing}
+                  onChange={() => setSelectedCli(cli)}
+                />
+                <span>{CLI_LABELS[cli]}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="onboarding-actions">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={initializing}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleInit()}
+          disabled={
+            loading ||
+            initializing ||
+            !readyForManager ||
+            selectedCli === null
+          }
+        >
+          {initializing ? "Initializing…" : "Continue"}
+        </button>
       </div>
     </div>
   );

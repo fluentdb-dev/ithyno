@@ -339,6 +339,27 @@ export function OnboardingProject() {
         </div>
 
         <div className="onboarding-actions">
+          <button
+            type="button"
+            onClick={() => {
+              // Reset state and go back to the Prerequisites / Manager picker
+              setStatus({
+                prereq: "pending",
+                scaffold: "pending",
+                "openspec-init": "pending",
+                "agents-yaml": "pending",
+              });
+              setLogs([]);
+              setIsComplete(false);
+              setErrorMessage(null);
+              setConnectionLost(false);
+              setChosenCli(null);
+              setDialogPhase("dialog");
+            }}
+            disabled={dialogPhase === "running" && !errorMessage && !connectionLost && !isComplete}
+          >
+            ← Back
+          </button>
           <button type="button" onClick={() => closeOnboarding(channel)}>
             Close
           </button>
