@@ -559,27 +559,36 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
 
   const { chosenCli } = gateResult;
 
-  // ---- Run openspec init (skipped when agentsYamlOnly is true) -------------
+  // ---- Run scaffold + openspec init (skipped when agentsYamlOnly is true) --
   // agentsYamlOnly: true — caller (OnboardingProject follow-up POST) has
   // already scaffolded openspec/ via the SSE chain; only write agents.yaml.
   // Running runInit again with force:true would overwrite the scaffold.
   // (expand-init-to-scaffold-agents rework r2, F2 fix)
+  //
+  // Use runNewProjectChain (not raw runInit): it runs the ithyno template
+  // copy AND `npx openspec init` so `openspec/config.yaml` actually gets
+  // created. runInit alone only prints a "next steps" hint and returns —
+  // that leaves state.exists === false and the NoProjectDecisionPanel
+  // never transitions to Kanban (bug fix, 2026-07-24).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let initResult: Record<string, unknown> = { ok: true };
   if (body.agentsYamlOnly !== true) {
-    const { runInit } = await import("../bin/init.js");
-    const runInitResult = await runInit({
-      targetDir: v.dir,
-      force: body.force === true,
-      skipGitignore: body.skipGitignore === true,
-      autoCreateDir: body.autoCreateDir === true,
-      autoGitInit: body.autoGitInit === true,
-      quiet: true,
+    const { runNewProjectChain } = await import("../bin/new-project-chain.js");
+    const events: Array<{ step: string; line?: string; message?: string; type: string }> = [];
+    const chainResult = await runNewProjectChain(v.dir, (ev) => {
+      // Non-streaming caller — capture events for the JSON response instead
+      // of an SSE stream. Errors are surfaced via chainResult.ok = false.
+      events.push(ev as { step: string; line?: string; message?: string; type: string });
     });
-    if (!runInitResult.ok) {
-      return reply.code(500).send(runInitResult);
+    if (!chainResult.ok) {
+      const errorEvent = events.find((e) => e.type === "error");
+      return reply.code(500).send({
+        ok: false,
+        reason: errorEvent?.message ?? "runNewProjectChain failed",
+        events,
+      });
     }
-    initResult = runInitResult as unknown as Record<string, unknown>;
+    initResult = { ok: true, target: chainResult.target, events } as unknown as Record<string, unknown>;
   }
 
   // ---- Write agents.yaml from template (with rollback on failure) ----------

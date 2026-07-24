@@ -95,3 +95,28 @@ Addressed 3 findings from review round 1:
 
 All checks pass post-rework: `openspec validate --strict` VALID, `npm test` 446 pass (1
 pre-existing `sharp` failure unrelated), `npm run typecheck` clean, `npm run build` clean.
+
+## Bugfix (2026-07-24): Init actually runs openspec init
+
+**Observed**: user clicked `Initialize openspec here` on
+NoProjectDecisionPanel — no visible change. Root cause: `POST /api/init`
+called raw `runInit` (from `bin/init.js`) which only copies ithyno's
+templates (`CLAUDE.md`, `agents.yaml.example`, `docs/`, `LICENSE`) but
+PRINTS "run `npx openspec init` yourself" — it never actually invokes
+the openspec init CLI. Result: `openspec/config.yaml` never gets
+created, `/api/state` still returns `exists: false`, the panel stays
+put.
+
+**Fix**: switched to `runNewProjectChain` (from
+`bin/new-project-chain.js`) which the `/api/init/stream` SSE endpoint
+already uses. Runs `runInit` + `npx -y -p @fission-ai/openspec@latest
+openspec init <dir> --tools claude`. Since our POST /api/init isn't
+SSE, we pass a callback that captures events into an array; on failure
+we return 500 with the `events` list for client-side diagnostics.
+
+Files touched:
+- `server/index.ts` — `POST /api/init` swap from `runInit` to
+  `runNewProjectChain`; response includes `events` array.
+
+Tests: init.test.ts 27/27 pass, full suite 446 pass (1 pre-existing
+sharp failure). Manual re-verify (8.5) still recommended.
