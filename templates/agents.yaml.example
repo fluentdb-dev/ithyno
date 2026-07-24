@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MIT
-# OpenSpec UI agent registry.
+# OpenSpec UI agent registry — human-readable reference copy.
+#
+# NOTE: When `ithyno init` creates `agents.yaml` for a new project, it uses
+# `templates/agents.yaml.tmpl` as the Init-time source (with {{MANAGER_COMMAND}}
+# substitution). Edit that file to change the Init-generated scaffold.
+# This file (agents.yaml.example) is the annotated reference for humans.
 #
 # Copy this file to `agents.yaml` at the project root and edit. The dashboard
 # loads it on startup and again whenever the file changes. With no agents

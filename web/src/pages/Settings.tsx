@@ -2,8 +2,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { setAgmsgConfig, setParallelExecution, installPrereq } from "../api";
-import type { DoctorReport, CliStatus, Cli } from "../api";
+import type { CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
+import type { Cli, DoctorReport } from "../types";
+import { CLI_PRIORITY } from "../types";
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -23,6 +25,8 @@ export function Settings() {
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
   const doctorReport = useStore((s) => s.doctorReport);
   const loadDoctorReport = useStore((s) => s.loadDoctorReport);
+  const defaultManager = useStore((s) => s.defaultManager);
+  const setDefaultManager = useStore((s) => s.setDefaultManager);
   const [busy, setBusy] = useState(false);
 
   // Fetch the doctor report on mount
@@ -101,6 +105,13 @@ export function Settings() {
       </section>
 
       <AgmsgSection storeAgmsg={agmsg} disabled={busy} pushToast={pushToast} />
+
+      <DefaultManagerSection
+        defaultManager={defaultManager}
+        onSet={setDefaultManager}
+        disabled={busy}
+        report={doctorReport}
+      />
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
@@ -324,7 +335,6 @@ const AGENT_CLI_KEYS: Cli[] = [
   "gemini",
   "opencode",
   "cursor",
-  "antigravity",
 ];
 
 function PrerequisitesSection(props: {
@@ -543,5 +553,81 @@ function PrereqInstallModal(props: {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Human-readable labels for each CLI. Mirrors InitDialog's CLI_LABELS. */
+const CLI_LABELS_SETTINGS: Record<Cli, string> = {
+  claude: "Claude (claude)",
+  codex: "Codex (codex)",
+  agy: "Agy (agy)",
+  copilot: "GitHub Copilot (copilot)",
+  gemini: "Gemini (gemini)",
+  opencode: "OpenCode (opencode)",
+  cursor: "Cursor (cursor)",
+  antigravity: "Antigravity (antigravity)",
+};
+
+/**
+ * Default Manager preference section (expand-init-to-scaffold-agents).
+ * Reads the doctor report from the store (already fetched by the parent
+ * Settings page via loadDoctorReport). Radio group limited to installed CLIs.
+ */
+function DefaultManagerSection(props: {
+  defaultManager: Cli | null;
+  onSet: (cli: Cli) => void;
+  disabled: boolean;
+  report: DoctorReport | null;
+}) {
+  const { defaultManager, onSet, disabled, report } = props;
+
+  const installed = report
+    ? CLI_PRIORITY.filter((cli) => report.agents[cli]?.installed)
+    : [];
+
+  const effective: Cli | null =
+    defaultManager && installed.includes(defaultManager)
+      ? defaultManager
+      : installed[0] ?? null;
+
+  return (
+    <section className="settings-section">
+      <h3>Default Manager</h3>
+      <p className="muted">
+        The agent CLI used as Manager when you initialize a new project. Only
+        installed CLIs are shown. Persisted to{" "}
+        <code>localStorage["ithyno.defaultManager"]</code>.
+      </p>
+
+      {!report && <p className="muted">Checking installed CLIs…</p>}
+
+      {report && installed.length === 0 && (
+        <p className="muted">
+          No agent CLI detected. Install one (e.g.{" "}
+          <code>npm i -g @anthropic-ai/claude-code</code>) and reload.
+        </p>
+      )}
+
+      {installed.length > 0 && (
+        <div className="settings-radio-group">
+          {installed.map((cli) => (
+            <label key={cli} className="settings-radio">
+              <input
+                type="radio"
+                name="default-manager"
+                value={cli}
+                checked={effective === cli}
+                disabled={disabled}
+                onChange={() => onSet(cli)}
+              />
+              <span>{CLI_LABELS_SETTINGS[cli]}</span>
+              {effective === cli && !defaultManager && (
+                <span className="muted"> (auto)</span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

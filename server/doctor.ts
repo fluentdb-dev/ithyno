@@ -25,6 +25,20 @@ export type Cli =
   | "cursor"
   | "antigravity";
 
+/** Priority order for default-Manager selection (highest priority first).
+ *  Mirrors web/src/types.ts. Excludes antigravity — same policy as the
+ *  server's readyForManager gate. Consumed by init-handler.ts's
+ *  resolveManagerFromDoctor(). */
+export const CLI_PRIORITY: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+];
+
 export type CliStatus = {
   installed: boolean;
   version?: string;

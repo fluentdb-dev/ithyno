@@ -7,6 +7,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { copyFile, updateGitignore, runInit } from "../bin/init.js";
+import { resolveManagerFromDoctor, writeAgentsYaml } from "./init-handler.js";
+import type { DoctorReport } from "./doctor.js";
 
 const execFile = promisify(execFileCb);
 
@@ -202,5 +204,158 @@ describe("template drift guard", () => {
     const strip = (s: string) =>
       s.split(/\r?\n/).filter((l) => !l.startsWith("description:")).join("\n");
     expect(strip(templated)).toBe(strip(inRepo));
+  });
+});
+
+// ---- expand-init-to-scaffold-agents: doctor gate + agents.yaml write -------
+
+/** Minimal DoctorReport fixture with only claude installed. */
+function makeReport(overrides: Partial<Record<string, boolean>> = {}): DoctorReport {
+  const defaultInstalled: Record<string, boolean> = {
+    claude: true,
+    codex: false,
+    agy: false,
+    copilot: false,
+    gemini: false,
+    opencode: false,
+    cursor: false,
+    ...overrides,
+  };
+  return {
+    readyForManager: Object.values(defaultInstalled).some(Boolean),
+    agents: Object.fromEntries(
+      Object.entries(defaultInstalled).map(([k, v]) => [k, { installed: v }]),
+    ) as DoctorReport["agents"],
+    tmux: { installed: false },
+    agmsg: { installed: false },
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+describe("resolveManagerFromDoctor (expand-init-to-scaffold-agents)", () => {
+  it("409 when readyForManager is false (no CLI installed)", () => {
+    const report = makeReport({ claude: false });
+    const result = resolveManagerFromDoctor(report, {});
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.status === 409) {
+      expect(result.hint).toContain("Settings > Prerequisites");
+    }
+  });
+
+  it("400 when requested manager.command is not installed", () => {
+    const report = makeReport({ claude: true, codex: false });
+    const result = resolveManagerFromDoctor(report, { managerCommand: "codex" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(400);
+      if ("installed" in result) {
+        expect(result.installed).toContain("claude");
+        expect(result.installed).not.toContain("codex");
+      }
+    }
+  });
+
+  it("200: picks priority default when manager omitted (claude before codex)", () => {
+    const report = makeReport({ claude: true, codex: true });
+    const result = resolveManagerFromDoctor(report, {});
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.chosenCli).toBe("claude");
+    }
+  });
+
+  it("200: picks codex when claude is not installed and codex is", () => {
+    const report = makeReport({ claude: false, codex: true });
+    const result = resolveManagerFromDoctor(report, {});
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.chosenCli).toBe("codex");
+    }
+  });
+
+  it("200: respects explicit manager.command when installed", () => {
+    const report = makeReport({ claude: true, codex: true });
+    const result = resolveManagerFromDoctor(report, { managerCommand: "codex" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.chosenCli).toBe("codex");
+    }
+  });
+
+  it("200: respects defaultManager when installed and no explicit command", () => {
+    const report = makeReport({ claude: true, codex: true });
+    const result = resolveManagerFromDoctor(report, { defaultManager: "codex" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.chosenCli).toBe("codex");
+    }
+  });
+
+  it("200: ignores defaultManager when it is not installed; falls back to priority order", () => {
+    const report = makeReport({ claude: true, codex: false });
+    const result = resolveManagerFromDoctor(report, { defaultManager: "codex" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.chosenCli).toBe("claude");
+    }
+  });
+});
+
+describe("writeAgentsYaml (expand-init-to-scaffold-agents)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ithyno-agents-yaml-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("writes agents.yaml with {{MANAGER_COMMAND}} substituted", async () => {
+    const pkgRoot = process.cwd();
+    await writeAgentsYaml(dir, "claude", pkgRoot);
+    const content = await readFile(join(dir, "agents.yaml"), "utf8");
+    expect(content).toContain("command: claude");
+    expect(content).not.toContain("{{MANAGER_COMMAND}}");
+  });
+
+  it("rolls back openspec/ when write fails due to bad path", async () => {
+    // Create a fake openspec/ directory to simulate the post-runInit state.
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(dir, "openspec"), { recursive: true });
+
+    // Use a pkgRoot that has no templates/ to trigger a read failure.
+    const badPkgRoot = join(dir, "nonexistent-pkg");
+    await expect(writeAgentsYaml(dir, "claude", badPkgRoot)).rejects.toThrow();
+
+    // openspec/ should have been removed (rollback).
+    expect(existsSync(join(dir, "openspec"))).toBe(false);
+  });
+});
+
+describe("runInit + writeAgentsYaml integration (expand-init-to-scaffold-agents)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ithyno-init-agents-"));
+    await execFile("git", ["init"], { cwd: dir });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("agents.yaml is written at <projectRoot>/agents.yaml with the correct command", async () => {
+    const initResult = await runInit({ targetDir: dir, quiet: true });
+    expect(initResult.ok).toBe(true);
+
+    const pkgRoot = process.cwd();
+    await writeAgentsYaml(dir, "claude", pkgRoot);
+
+    const agentsYaml = await readFile(join(dir, "agents.yaml"), "utf8");
+    expect(agentsYaml).toContain("command: claude");
+    expect(agentsYaml).toContain("roles: [manager]");
+    expect(agentsYaml).toContain("mode: live-shell");
   });
 });

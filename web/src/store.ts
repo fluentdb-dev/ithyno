@@ -20,6 +20,7 @@ import { getSessionToken } from "./runtime";
 import type {
   AgentPublic,
   Change,
+  Cli,
   DocsFile,
   DocsTree,
   GitConfig,
@@ -33,6 +34,7 @@ import type {
   Task,
   WorkspaceState,
 } from "./types";
+import { CLI_PRIORITY } from "./types";
 
 export function taskKey(t: Pick<Task, "filePath" | "id" | "text">): string {
   return `${t.filePath}::${t.id || t.text}`;
@@ -113,6 +115,12 @@ type Store = {
    *  Landed by add-doctor-and-installer. */
   doctorReport: DoctorReport | null;
 
+  /** User's preferred default Manager CLI. Persisted to
+   *  `localStorage["ithyno.defaultManager"]`. Null means unset; resolved
+   *  from priority order (claude > codex > …) on first use.
+   *  Landed by expand-init-to-scaffold-agents. */
+  defaultManager: Cli | null;
+
   load: () => Promise<void>;
   connectWs: () => void;
   toggle: (task: Task) => Promise<void>;
@@ -140,6 +148,7 @@ type Store = {
   clearWorktreeProgress: (changeId: string) => void;
   setBrowseMode: (v: boolean) => void;
   loadDoctorReport: () => Promise<void>;
+  setDefaultManager: (cli: Cli) => void;
 };
 
 let toastSeq = 1;
@@ -198,6 +207,18 @@ function readTheme(): ThemePreference {
   }
 }
 
+/** Persisted default Manager CLI preference (expand-init-to-scaffold-agents). */
+const DEFAULT_MANAGER_KEY = "ithyno.defaultManager";
+function readDefaultManager(): Cli | null {
+  try {
+    const v = localStorage.getItem(DEFAULT_MANAGER_KEY);
+    if (v && (CLI_PRIORITY as string[]).includes(v)) return v as Cli;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function replaceChange(state: WorkspaceState, change: Change): WorkspaceState {
   return { ...state, changes: state.changes.map((c) => (c.id === change.id ? change : c)) };
 }
@@ -237,6 +258,7 @@ export const useStore = create<Store>((set, get) => ({
   gitConfig: null,
   browseMode: false,
   doctorReport: null,
+  defaultManager: readDefaultManager(),
 
   loadAgents: async () => {
     try {
@@ -325,6 +347,14 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
   setBrowseMode: (v) => set({ browseMode: v }),
+  setDefaultManager: (cli) => {
+    try {
+      localStorage.setItem(DEFAULT_MANAGER_KEY, cli);
+    } catch {
+      /* ignore quota / private-mode errors */
+    }
+    set({ defaultManager: cli });
+  },
 
   loadDoctorReport: async () => {
     try {

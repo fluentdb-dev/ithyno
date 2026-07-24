@@ -681,12 +681,29 @@ fastify.post("/api/git/init", async (req, reply) => {
 // Backbone for UI-driven "New Project" flows. Electron / VS Code may import
 // runInit directly instead (agmsg-installer pattern); this endpoint remains
 // for browser mode and as a fallback.
+//
+// Extended by expand-init-to-scaffold-agents:
+//   - Calls runDoctor() before scaffolding; 409 if readyForManager is false.
+//   - Accepts optional manager.command (Cli); validates against installed list.
+//   - After openspec init, writes agents.yaml from templates/agents.yaml.tmpl.
+//   - Rolls back openspec/ on agents.yaml write failure; returns 500.
+//   - Response includes managerCommand.
 type InitBody = {
   dir?: unknown;
   force?: unknown;
   skipGitignore?: unknown;
   autoCreateDir?: unknown;
   autoGitInit?: unknown;
+  manager?: unknown;
+  defaultManager?: unknown;
+  /**
+   * When true, skip runInit entirely and only run the doctor gate +
+   * writeAgentsYaml. Consumed by OnboardingProject's follow-up POST
+   * after the SSE chain has already written openspec/ — avoids
+   * re-running openspec init --force and overwriting the scaffold.
+   * (expand-init-to-scaffold-agents rework r2, F2 fix)
+   */
+  agentsYamlOnly?: unknown;
 };
 // Shared body validator for both /api/init and /api/init/stream so
 // behavior stays identical (add-new-project-onboarding-window).
@@ -711,19 +728,78 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
   const body = req.body ?? {};
   const v = await validateInitBody(body);
   if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
-  const { runInit } = await import("../bin/init.js");
-  const result = await runInit({
-    targetDir: v.dir,
-    force: body.force === true,
-    skipGitignore: body.skipGitignore === true,
-    autoCreateDir: body.autoCreateDir === true,
-    autoGitInit: body.autoGitInit === true,
-    quiet: true,
+
+  // ---- Doctor gate + Manager resolution (expand-init-to-scaffold-agents) --
+  const { runDoctor } = await import("./doctor.js");
+  const { resolveManagerFromDoctor, writeAgentsYaml } = await import("./init-handler.js");
+  const report = await runDoctor();
+
+  const requestedCommand =
+    body.manager !== undefined &&
+    body.manager !== null &&
+    typeof body.manager === "object" &&
+    "command" in (body.manager as object) &&
+    typeof (body.manager as { command: unknown }).command === "string"
+      ? (body.manager as { command: string }).command
+      : undefined;
+
+  const gateResult = resolveManagerFromDoctor(report, {
+    managerCommand: requestedCommand,
+    defaultManager: typeof body.defaultManager === "string" ? body.defaultManager : undefined,
   });
-  if (!result.ok) {
-    return reply.code(500).send(result);
+
+  if (!gateResult.ok) {
+    return reply.code(gateResult.status).send(
+      gateResult.status === 409
+        ? { error: gateResult.error, hint: gateResult.hint }
+        : { error: gateResult.error, installed: gateResult.installed },
+    );
   }
-  return result;
+
+  const { chosenCli } = gateResult;
+
+  // ---- Run scaffold + openspec init (skipped when agentsYamlOnly is true) --
+  // agentsYamlOnly: true — caller (OnboardingProject follow-up POST) has
+  // already scaffolded openspec/ via the SSE chain; only write agents.yaml.
+  // Running runInit again with force:true would overwrite the scaffold.
+  // (expand-init-to-scaffold-agents rework r2, F2 fix)
+  //
+  // Use runNewProjectChain (not raw runInit): it runs the ithyno template
+  // copy AND `npx openspec init` so `openspec/config.yaml` actually gets
+  // created. runInit alone only prints a "next steps" hint and returns —
+  // that leaves state.exists === false and the NoProjectDecisionPanel
+  // never transitions to Kanban (bug fix, 2026-07-24).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let initResult: Record<string, unknown> = { ok: true };
+  if (body.agentsYamlOnly !== true) {
+    const { runNewProjectChain } = await import("../bin/new-project-chain.js");
+    const events: Array<{ step: string; line?: string; message?: string; type: string }> = [];
+    const chainResult = await runNewProjectChain(v.dir, (ev) => {
+      // Non-streaming caller — capture events for the JSON response instead
+      // of an SSE stream. Errors are surfaced via chainResult.ok = false.
+      events.push(ev as { step: string; line?: string; message?: string; type: string });
+    });
+    if (!chainResult.ok) {
+      const errorEvent = events.find((e) => e.type === "error");
+      return reply.code(500).send({
+        ok: false,
+        reason: errorEvent?.message ?? "runNewProjectChain failed",
+        events,
+      });
+    }
+    initResult = { ok: true, target: chainResult.target, events } as unknown as Record<string, unknown>;
+  }
+
+  // ---- Write agents.yaml from template (with rollback on failure) ----------
+  try {
+    await writeAgentsYaml(v.dir, chosenCli, PKG_ROOT);
+  } catch (err) {
+    return reply.code(500).send({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return { ...initResult, managerCommand: chosenCli };
 });
 
 // POST /api/init/stream — SSE sibling that runs runNewProjectChain

@@ -348,6 +348,50 @@ export type ToggleResponse = {
   change: Change | null;
 };
 
+// ---- agent CLI identifiers (expand-init-to-scaffold-agents) ----------------
+/** Union of known agent CLI identifiers. Mirrors server/doctor.ts Cli type
+ *  and web/src/api.ts (kept in sync manually — small union, low churn). */
+export type Cli =
+  | "claude"
+  | "codex"
+  | "agy"
+  | "copilot"
+  | "gemini"
+  | "opencode"
+  | "cursor"
+  | "antigravity";
+
+/** Priority order for default Manager selection (highest priority first).
+ *  `antigravity` is excluded from the priority list — the server's
+ *  readyForManager gating also treats it as an "extra" not required for
+ *  base ithyno operation. */
+export const CLI_PRIORITY: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+];
+
+/** Status of a single CLI as reported by /api/doctor. */
+export type CliStatus = {
+  installed: boolean;
+  version?: string;
+  path?: string;
+  error?: string;
+};
+
+/** Response from GET /api/doctor (add-doctor-and-installer). */
+export type DoctorReport = {
+  agents: Record<Cli, CliStatus>;
+  tmux: CliStatus;
+  agmsg: CliStatus;
+  readyForManager: boolean;
+  checkedAt: string;
+};
+
 // ---- browse mode (unify-open-project-3-branch) -----------------------------
 
 /** A node in the markdown-tree response from GET /api/browse/markdown-tree. */

@@ -3,7 +3,9 @@ import type {
   AgentConfigPayload,
   AgentConfigResponse,
   Change,
+  Cli,
   DiffPayload,
+  DoctorReport,
   DocsFile,
   DocsTree,
   GitConfig,
@@ -284,15 +286,35 @@ export async function setAgmsgConfig(
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+// ---- doctor endpoint (add-doctor-and-installer) ----------------------------
+/** Fetch the doctor report: installed CLIs + readyForManager. */
+export async function fetchDoctor(): Promise<DoctorReport> {
+  const res = await fetch("/api/doctor");
+  if (!res.ok) throw new Error(`GET /api/doctor failed: ${res.status}`);
+  return res.json();
+}
+
 // add-init-http-endpoint: POST /api/init client. Scaffolds a new project at
 // an absolute path. autoCreateDir + autoGitInit default to true here because
 // the UI's "New Project" flow expects one-shot creation.
+//
+// Extended by expand-init-to-scaffold-agents: accepts optional manager field
+// (chosen CLI) and returns managerCommand in the result.
 export interface InitProjectPayload {
   dir: string;
   force?: boolean;
   skipGitignore?: boolean;
   autoCreateDir?: boolean;
   autoGitInit?: boolean;
+  manager?: { command: Cli };
+  defaultManager?: Cli;
+  /**
+   * When true, skip runInit and only run the doctor gate + writeAgentsYaml.
+   * Used by OnboardingProject's follow-up POST after the SSE chain has
+   * already scaffolded openspec/ — avoids re-running openspec init --force.
+   * (expand-init-to-scaffold-agents rework r2, F2 fix)
+   */
+  agentsYamlOnly?: boolean;
 }
 export interface InitProjectResult {
   ok: boolean;
@@ -304,6 +326,8 @@ export interface InitProjectResult {
   summary?: { created: number; overwritten: number; skipped: number };
   openspecMissing?: boolean;
   gitInitPerformed?: boolean;
+  /** Chosen Manager CLI (expand-init-to-scaffold-agents). */
+  managerCommand?: Cli;
 }
 export async function initProject(
   payload: InitProjectPayload,
@@ -381,30 +405,9 @@ export async function postGitInit(): Promise<GitStatus> {
 
 // ---- Doctor API (add-doctor-and-installer) ---------------------------------
 
-export type CliStatus = {
-  installed: boolean;
-  version?: string;
-  path?: string;
-  error?: string;
-};
-
-export type Cli =
-  | "claude"
-  | "codex"
-  | "agy"
-  | "copilot"
-  | "gemini"
-  | "opencode"
-  | "cursor"
-  | "antigravity";
-
-export type DoctorReport = {
-  agents: Record<Cli, CliStatus>;
-  tmux: CliStatus;
-  agmsg: CliStatus;
-  readyForManager: boolean;
-  checkedAt: string;
-};
+// Cli / CliStatus / DoctorReport live in ./types (single source of truth).
+// Re-export here for callers that import from ./api.
+export type { Cli, CliStatus, DoctorReport } from "./types";
 
 /** Fetch the current prerequisite report (session-token gated). */
 export async function fetchDoctorReport(): Promise<DoctorReport> {

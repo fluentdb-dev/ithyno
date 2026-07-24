@@ -4,6 +4,13 @@
 // `target` + optional `channel` from query, opens POST /api/init/stream
 // via `fetch`, parses SSE frames, and drives step + log UI.
 // Landed by add-new-project-onboarding-window.
+//
+// Extended by expand-init-to-scaffold-agents: before starting the onboarding
+// chain, renders <InitDialog /> so the user can review Prerequisites and pick
+// a Manager CLI. The chosen CLI is forwarded to POST /api/init/stream via
+// X-Manager-Command header (or embedded in body once the SSE endpoint grows
+// manager support). For now, after the SSE chain completes, we POST /api/init
+// with the chosen manager to write agents.yaml.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken } from "../runtime";
 import {
@@ -12,30 +19,35 @@ import {
   openProject,
   type OnboardingChannel,
 } from "../lib/onboardingChannel";
+import { InitDialog } from "../components/InitDialog";
+import { initProject } from "../api";
+import type { Cli } from "../types";
 
-type Step = "scaffold" | "openspec-init";
+type Step = "prereq" | "scaffold" | "openspec-init" | "agents-yaml";
 type StepStatus = "pending" | "in-progress" | "done" | "failed";
 type ChainEvent =
-  | { type: "step-start"; step: Step }
+  | { type: "step-start"; step: "scaffold" | "openspec-init" }
   | {
       type: "log";
-      step: Step;
+      step: "scaffold" | "openspec-init";
       line: string;
       stream: "stdout" | "stderr";
     }
-  | { type: "step-done"; step: Step }
+  | { type: "step-done"; step: "scaffold" | "openspec-init" }
   | { type: "complete"; target: string }
-  | { type: "error"; step: Step; message: string };
+  | { type: "error"; step: "scaffold" | "openspec-init"; message: string };
 
 const STEP_LABELS: Record<Step, string> = {
+  prereq: "Check prerequisites",
   scaffold: "Scaffold ithyno files",
   "openspec-init": "Install OpenSpec",
+  "agents-yaml": "Write agents.yaml",
 };
 
 const MAX_LOG_LINES = 500;
 
 interface LogLine {
-  step: Step;
+  step: "scaffold" | "openspec-init";
   line: string;
   stream: "stdout" | "stderr";
   id: number;
@@ -61,9 +73,15 @@ export function OnboardingProject() {
   }, []);
   const channel: OnboardingChannel = useMemo(() => detectChannel(), []);
 
+  // Dialog phase: show InitDialog first, then run the chain.
+  const [dialogPhase, setDialogPhase] = useState<"dialog" | "running" | "done">("dialog");
+  const [chosenCli, setChosenCli] = useState<Cli | null>(null);
+
   const [status, setStatus] = useState<Record<Step, StepStatus>>({
+    prereq: "pending",
     scaffold: "pending",
     "openspec-init": "pending",
+    "agents-yaml": "pending",
   });
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [isComplete, setIsComplete] = useState(false);
@@ -74,8 +92,9 @@ export function OnboardingProject() {
 
   const targetValid = target.length > 0 && target.startsWith("/");
 
+  // Run the onboarding chain after the dialog is dismissed with a chosen CLI.
   useEffect(() => {
-    if (!targetValid) return;
+    if (dialogPhase !== "running" || !targetValid || chosenCli === null) return;
     let cancelled = false;
 
     const appendEvent = (e: ChainEvent) => {
@@ -108,6 +127,16 @@ export function OnboardingProject() {
     };
 
     const run = async () => {
+      // Local flag: set by the SSE error handler so agents-yaml write is
+      // skipped when the chain errored. Using a closure-local boolean
+      // rather than reading errorMessage state avoids adding errorMessage
+      // to the dependency array (which would re-run the effect on every
+      // error and restart the SSE chain). (F1 fix — expand-init-to-scaffold-agents rework r2)
+      let sseErrored = false;
+
+      // Mark prereq step done (already checked in InitDialog).
+      setStatus((s) => ({ ...s, prereq: "done" }));
+
       const token = getSessionToken();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -130,6 +159,7 @@ export function OnboardingProject() {
             `Server returned ${res.status} — could not start onboarding.`,
           );
           setStatus((s) => ({ ...s, scaffold: "failed" }));
+          sseErrored = true;
           return;
         }
         const reader = res.body.getReader();
@@ -148,6 +178,9 @@ export function OnboardingProject() {
             if (!payload) continue;
             try {
               const evt = JSON.parse(payload) as ChainEvent;
+              // Track SSE error before delegating to appendEvent so
+              // the agents-yaml guard below sees the flag synchronously.
+              if (evt.type === "error") sseErrored = true;
               appendEvent(evt);
             } catch {
               /* skip malformed frame */
@@ -156,10 +189,11 @@ export function OnboardingProject() {
         }
       } catch (err) {
         if (cancelled) return;
+        sseErrored = true;
         setConnectionLost(true);
         setStatus((s) => {
           const next = { ...s };
-          for (const step of ["scaffold", "openspec-init"] as Step[]) {
+          for (const step of ["scaffold", "openspec-init"] as const) {
             if (next[step] === "in-progress") next[step] = "failed";
           }
           return next;
@@ -167,6 +201,36 @@ export function OnboardingProject() {
         setErrorMessage(
           err instanceof Error ? err.message : "Connection lost",
         );
+        return;
+      }
+
+      if (cancelled) return;
+
+      // SSE chain complete — write agents.yaml via POST /api/init with
+      // agentsYamlOnly: true. This skips runInit so openspec/ is not
+      // re-initialized; only the doctor gate + writeAgentsYaml run.
+      // (F2 fix — expand-init-to-scaffold-agents rework r2)
+      if (!sseErrored) {
+        setStatus((s) => ({ ...s, "agents-yaml": "in-progress" }));
+        try {
+          const result = await initProject({
+            dir: target,
+            manager: { command: chosenCli! },
+            agentsYamlOnly: true,
+          });
+          if (!result.ok) {
+            setStatus((s) => ({ ...s, "agents-yaml": "failed" }));
+            setErrorMessage(result.reason ?? "Failed to write agents.yaml");
+            return;
+          }
+          setStatus((s) => ({ ...s, "agents-yaml": "done" }));
+        } catch (err) {
+          if (cancelled) return;
+          setStatus((s) => ({ ...s, "agents-yaml": "failed" }));
+          setErrorMessage(
+            err instanceof Error ? err.message : "Failed to write agents.yaml",
+          );
+        }
       }
     };
 
@@ -174,7 +238,7 @@ export function OnboardingProject() {
     return () => {
       cancelled = true;
     };
-  }, [target, targetValid]);
+  }, [dialogPhase, target, targetValid, chosenCli]);
 
   useEffect(() => {
     const el = logPaneRef.current;
@@ -200,6 +264,23 @@ export function OnboardingProject() {
     );
   }
 
+  // Show InitDialog first (prereq check + Manager picker).
+  if (dialogPhase === "dialog") {
+    return (
+      <div className="onboarding-page">
+        <InitDialog
+          dir={target}
+          initOptions={{ autoCreateDir: true, autoGitInit: true }}
+          onSuccess={(cli) => {
+            setChosenCli(cli);
+            setDialogPhase("running");
+          }}
+          onCancel={() => closeOnboarding(channel)}
+        />
+      </div>
+    );
+  }
+
   const canOpen = isComplete && !errorMessage && !connectionLost;
 
   return (
@@ -216,7 +297,7 @@ export function OnboardingProject() {
         )}
 
         <ul className="onboarding-steps">
-          {(["scaffold", "openspec-init"] as Step[]).map((step) => (
+          {(["prereq", "scaffold", "openspec-init", "agents-yaml"] as Step[]).map((step) => (
             <li key={step} className={`onboarding-step ${status[step]}`}>
               <span className="onboarding-icon">{icon(status[step])}</span>
               <span className="onboarding-label">{STEP_LABELS[step]}</span>
