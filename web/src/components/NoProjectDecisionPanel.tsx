@@ -7,19 +7,17 @@
  * "Browse read-only" (which mounted a markdown-tree viewer) is now
  * "Open dashboard anyway" (renders the empty Kanban directly).
  *
- * Extended by expand-init-to-scaffold-agents: the Initialize button now
- * opens <InitDialog /> for prerequisite check + Manager CLI selection before
- * POSTing /api/init.
+ * Initialize button navigates to `/onboarding?target=<projectRoot>`,
+ * matching the same transition Settings > New Project uses. The Onboarding
+ * page drives the SSE-streamed runInit + `openspec init` chain and switches
+ * to the initialized project on completion.
  *
  * Actions:
- *   • Initialize openspec here → open InitDialog → POST /api/init + refetch state
+ *   • Initialize openspec here → navigate to /onboarding?target=<projectRoot>
  *   • Open dashboard anyway → setBrowseMode(true) → App.tsx renders the
  *     normal chrome (topbar + Routes) with an empty Overview / Kanban
  */
-import { useState } from "react";
 import { useStore } from "../store";
-import { InitDialog } from "./InitDialog";
-import type { Cli } from "../types";
 
 type Props = {
   projectRoot: string;
@@ -28,57 +26,39 @@ type Props = {
 
 export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
   const setBrowseMode = useStore((s) => s.setBrowseMode);
-  const load = useStore((s) => s.load);
-
-  const [showDialog, setShowDialog] = useState(false);
 
   function handleBrowse() {
     setBrowseMode(true);
   }
 
-  async function handleInitSuccess(_managerCommand: Cli) {
-    setShowDialog(false);
-    // Refetch state — the new openspec/ + agents.yaml should now exist.
-    await load();
+  function handleInitialize() {
+    const q = new URLSearchParams({ target: projectRoot, channel: "browser" });
+    window.location.href = `/onboarding?${q.toString()}`;
   }
 
   return (
-    <>
-      <div className="no-project-panel">
-        <h2>No OpenSpec project found</h2>
-        <p className="no-project-path muted">
-          <code>{projectRoot}</code>
-        </p>
-        <p>Choose how you want to continue:</p>
+    <div className="no-project-panel">
+      <h2>No OpenSpec project found</h2>
+      <p className="no-project-path muted">
+        <code>{projectRoot}</code>
+      </p>
+      <p>Choose how you want to continue:</p>
 
-        <div className="no-project-actions">
-          <button
-            className="btn-primary"
-            onClick={() => setShowDialog(true)}
-            disabled={showDialog}
-          >
-            Initialize openspec here
-          </button>
-          <button className="btn-secondary" onClick={handleBrowse} disabled={showDialog}>
-            Open dashboard anyway
-          </button>
-        </div>
-
-        {hasClaudeMd && (
-          <p className="no-project-claude-hint">
-            This project has <code>CLAUDE.md</code> — ithyno will pick it up as
-            agent-facing context once openspec is initialized.
-          </p>
-        )}
+      <div className="no-project-actions">
+        <button className="btn-primary" onClick={handleInitialize}>
+          Initialize openspec here
+        </button>
+        <button className="btn-secondary" onClick={handleBrowse}>
+          Open dashboard anyway
+        </button>
       </div>
 
-      {showDialog && (
-        <InitDialog
-          dir={projectRoot}
-          onSuccess={(cli) => void handleInitSuccess(cli)}
-          onCancel={() => setShowDialog(false)}
-        />
+      {hasClaudeMd && (
+        <p className="no-project-claude-hint">
+          This project has <code>CLAUDE.md</code> — ithyno will pick it up as
+          agent-facing context once openspec is initialized.
+        </p>
       )}
-    </>
+    </div>
   );
 }
