@@ -40,18 +40,19 @@ describe("bucketizeByPhase (add-phase-lane-view-toggle)", () => {
     expect(b.coded.map((c) => c.id)).toEqual(["b"]);
     expect(b.reviewed.map((c) => c.id)).toEqual(["c"]);
     expect(b.done.map((c) => c.id)).toEqual(["d"]);
-    expect(b.unphased).toEqual([]);
   });
 
-  it("undefined phase → unphased", () => {
+  it("undefined phase folds into propose (starting-stage default)", () => {
     const b = bucketizeByPhase([mkChange("x", { phase: undefined })]);
-    expect(b.unphased.map((c) => c.id)).toEqual(["x"]);
-    expect(b.proposed).toEqual([]);
+    expect(b.proposed.map((c) => c.id)).toEqual(["x"]);
+    expect(b.coded).toEqual([]);
+    expect(b.reviewed).toEqual([]);
+    expect(b.done).toEqual([]);
   });
 
-  it("unknown phase string → unphased (defensive narrowing)", () => {
+  it("unknown phase string folds into propose", () => {
     const b = bucketizeByPhase([mkChange("x", { phase: "not-a-real-phase" })]);
-    expect(b.unphased.map((c) => c.id)).toEqual(["x"]);
+    expect(b.proposed.map((c) => c.id)).toEqual(["x"]);
   });
 
   it("needs-human with a resolvable priorPhase → priorPhase lane", () => {
@@ -59,22 +60,22 @@ describe("bucketizeByPhase (add-phase-lane-view-toggle)", () => {
       mkChange("nh", { phase: "needs-human", priorPhase: "coded" }),
     ]);
     expect(b.coded.map((c) => c.id)).toEqual(["nh"]);
-    expect(b.unphased).toEqual([]);
+    expect(b.proposed).toEqual([]);
   });
 
-  it("needs-human with undefined priorPhase → unphased", () => {
+  it("needs-human with undefined priorPhase folds into propose", () => {
     const b = bucketizeByPhase([
       mkChange("nh", { phase: "needs-human", priorPhase: undefined }),
     ]);
-    expect(b.unphased.map((c) => c.id)).toEqual(["nh"]);
+    expect(b.proposed.map((c) => c.id)).toEqual(["nh"]);
     expect(b.coded).toEqual([]);
   });
 
-  it("needs-human with unknown priorPhase → unphased", () => {
+  it("needs-human with unknown priorPhase folds into propose", () => {
     const b = bucketizeByPhase([
       mkChange("nh", { phase: "needs-human", priorPhase: "garbage" }),
     ]);
-    expect(b.unphased.map((c) => c.id)).toEqual(["nh"]);
+    expect(b.proposed.map((c) => c.id)).toEqual(["nh"]);
   });
 
   it("mixed input preserves order within each lane", () => {
@@ -87,11 +88,10 @@ describe("bucketizeByPhase (add-phase-lane-view-toggle)", () => {
       mkChange("d1", { phase: "done" }),
       mkChange("u2", { phase: undefined }),
     ]);
-    expect(b.proposed.map((c) => c.id)).toEqual(["a1", "a2"]);
+    expect(b.proposed.map((c) => c.id)).toEqual(["a1", "a2", "u1", "u2"]);
     expect(b.coded.map((c) => c.id)).toEqual(["b1"]);
     expect(b.reviewed.map((c) => c.id)).toEqual(["nh1"]);
     expect(b.done.map((c) => c.id)).toEqual(["d1"]);
-    expect(b.unphased.map((c) => c.id)).toEqual(["u1", "u2"]);
   });
 
   it("empty input yields all-empty buckets", () => {
@@ -100,6 +100,5 @@ describe("bucketizeByPhase (add-phase-lane-view-toggle)", () => {
     expect(b.coded).toEqual([]);
     expect(b.reviewed).toEqual([]);
     expect(b.done).toEqual([]);
-    expect(b.unphased).toEqual([]);
   });
 });
