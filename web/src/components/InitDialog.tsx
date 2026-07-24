@@ -20,7 +20,6 @@ import { useStore } from "../store";
 import { fetchDoctor, initProject } from "../api";
 import type { Cli, DoctorReport } from "../types";
 import { CLI_PRIORITY } from "../types";
-import { PrereqInstallModal } from "./PrereqInstallModal";
 
 export type InitDialogProps = {
   /** Absolute path of the directory to initialize. */
@@ -64,10 +63,7 @@ export function InitDialog({
   const [loading, setLoading] = useState(true);
   const [selectedCli, setSelectedCli] = useState<Cli | null>(null);
   const [initializing, setInitializing] = useState(false);
-  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
-
-  // Fetch doctor report on mount + after each install
+  // Fetch doctor report on mount
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -95,7 +91,7 @@ export function InitDialog({
     return () => {
       cancelled = true;
     };
-  }, [defaultManager, refreshCounter]);
+  }, [defaultManager]);
 
   const installedClis = report
     ? CLI_PRIORITY.filter((cli) => report.agents[cli].installed)
@@ -128,7 +124,6 @@ export function InitDialog({
   }
 
   return (
-    <>
     <div className="onboarding-card">
       <h2>Initialize Project</h2>
       <p className="onboarding-target">
@@ -161,7 +156,10 @@ export function InitDialog({
                 </li>
               );
             })}
-            {/* Optional tooling: tmux + agmsg. Installable inline. */}
+            {/* Optional tooling: tmux + agmsg. Status only — install happens
+                inside the chosen Manager agent after Init completes, not from
+                here (the server-side installer would side-step the agent's
+                own tooling context). */}
             {(["tmux", "agmsg"] as const).map((tool) => {
               const status = report[tool];
               return (
@@ -171,19 +169,10 @@ export function InitDialog({
                 >
                   <span className="onboarding-icon">{status.installed ? "✓" : "○"}</span>
                   <span className="onboarding-label">
-                    {tool} <span className="muted">(optional)</span>
+                    {tool} <span className="muted">(optional — installed by Manager after Init)</span>
                   </span>
                   {status.version && (
                     <span className="muted"> ({status.version})</span>
-                  )}
-                  {!status.installed && (
-                    <button
-                      type="button"
-                      className="onboarding-inline-install"
-                      onClick={() => setInstallTool(tool)}
-                    >
-                      Install
-                    </button>
                   )}
                 </li>
               );
@@ -249,15 +238,5 @@ export function InitDialog({
         </button>
       </div>
     </div>
-    {installTool && (
-      <PrereqInstallModal
-        tool={installTool}
-        onClose={(didInstall) => {
-          setInstallTool(null);
-          if (didInstall) setRefreshCounter((n) => n + 1);
-        }}
-      />
-    )}
-    </>
   );
 }
