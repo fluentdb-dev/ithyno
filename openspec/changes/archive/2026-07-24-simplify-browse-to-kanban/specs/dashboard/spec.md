@@ -40,8 +40,13 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **THEN** a short informational line appears beneath the buttons noting that CLAUDE.md was detected and will be picked up as agent-facing context once openspec is initialized
 - **AND** when `CLAUDE.md` is absent, no such hint appears
 
-## REMOVED Requirements
+<!--
+  Originally we planned to REMOVED the "Browse endpoints for markdown"
+  requirement, but the openspec archive validator rejects a bare REMOVED
+  section without a valid replacement body. Since the endpoint code
+  itself stays in place (as inert), we leave the requirement in the
+  main spec for now and rely on ReadOnlyBrowse's file-level UNUSED
+  header to signal the inert status. A future cleanup change can do a
+  proper propose to remove the requirement AND the code together.
+-->
 
-### Requirement: Browse endpoints for markdown
-
-**Reason**: The `Open dashboard anyway` action no longer mounts `<ReadOnlyBrowse />`, so `GET /api/browse/markdown-tree` and `GET /api/browse/markdown` have no client consumer. The endpoints themselves remain in the codebase as inert code for possible future reuse (see task 3.2), but they are removed from the dashboard spec's contract surface. If they are later resurrected for a genuine feature, a new proposal SHALL re-add the requirement with the new client tied in.

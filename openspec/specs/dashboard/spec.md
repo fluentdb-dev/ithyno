@@ -3770,16 +3770,14 @@ The Kanban `Start ▼ (N)` column-header bulk selector SHALL render only in the 
 
 ### Requirement: 2-branch decision on Open Project of a non-openspec folder
 
-> ⚠️ **PENDING MODIFIED** by [simplify-browse-to-kanban](../../changes/simplify-browse-to-kanban/): The second branch "Browse read-only" becomes "Open dashboard anyway" — it renders the empty Kanban directly instead of mounting the markdown-tree viewer.
-
-When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing two clear next actions: Initialize openspec here, Browse read-only. A separate Cancel action is intentionally NOT present — the user can pick a different folder from the shell's normal Open Project entry point.
+When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing two clear next actions: **Initialize openspec here** and **Open dashboard anyway** (the second action was previously "Browse read-only" and mounted a markdown-tree viewer; it now opens the empty dashboard directly).
 
 #### Scenario: Decision panel renders for non-openspec folder
 
 - **GIVEN** the user opens a folder that has no `openspec/` subdirectory
 - **WHEN** the dashboard loads
 - **THEN** a decision panel is shown, headed with the folder path
-- **AND** it presents two buttons: `Initialize openspec here`, `Browse read-only`
+- **AND** it presents two buttons: `Initialize openspec here`, `Open dashboard anyway`
 
 #### Scenario: Initialize action creates openspec and reloads
 
@@ -3788,14 +3786,14 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **AND** on success it refetches `/api/state`
 - **AND** the dashboard transitions to the standard Kanban view for the newly-initialized project
 
-#### Scenario: Browse read-only mode
+#### Scenario: Open dashboard anyway renders empty Kanban
 
-- **WHEN** the user clicks `Browse read-only`
-- **THEN** the dashboard mounts a read-only browse view
-- **AND** the browse view enumerates markdown files under the project root (`README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/**/*.md`)
-- **AND** the browse view does NOT show the Kanban, Specs, Archive, Agents, Docs, or Settings tabs
-- **AND** the browse view does NOT auto-launch the embedded terminal
-- **AND** no mutating request (init, change, dispatch, task-toggle, etc.) can be triggered from any control within the browse view
+- **WHEN** the user clicks `Open dashboard anyway`
+- **THEN** the dashboard sets a client-side `browseMode = true` flag
+- **AND** the app renders its normal chrome (topbar + Routes) as if `state.exists === true`
+- **AND** the Overview page (Kanban) renders with zero changes; the standard "no changes" empty-state copy is shown
+- **AND** the dedicated `<ReadOnlyBrowse />` markdown-tree component is NOT mounted
+- **AND** the dashboard does NOT auto-launch the embedded terminal unless `agents.yaml` is present (guard from `guard-terminal-autolaunch-on-agents-yaml` still applies)
 
 #### Scenario: Openspec-present folder is unaffected
 
@@ -3810,9 +3808,17 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **THEN** a short informational line appears beneath the buttons noting that CLAUDE.md was detected and will be picked up as agent-facing context once openspec is initialized
 - **AND** when `CLAUDE.md` is absent, no such hint appears
 
-### Requirement: Browse endpoints for markdown
+<!--
+  Originally we planned to REMOVED the "Browse endpoints for markdown"
+  requirement, but the openspec archive validator rejects a bare REMOVED
+  section without a valid replacement body. Since the endpoint code
+  itself stays in place (as inert), we leave the requirement in the
+  main spec for now and rely on ReadOnlyBrowse's file-level UNUSED
+  header to signal the inert status. A future cleanup change can do a
+  proper propose to remove the requirement AND the code together.
+-->
 
-> ⚠️ **PENDING REMOVED** by [simplify-browse-to-kanban](../../changes/simplify-browse-to-kanban/): No client consumes these endpoints after the Browse button becomes "Open dashboard anyway". Endpoints remain in code as inert (see change task 3.2) but the requirement is dropped from the spec.
+### Requirement: Browse endpoints for markdown
 
 The server SHALL expose two read-only endpoints — `GET /api/browse/markdown-tree` and `GET /api/browse/markdown?path=<rel>` — that let the Browse view enumerate and read markdown files under the current project root without requiring `openspec/` to exist.
 
