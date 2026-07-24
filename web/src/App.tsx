@@ -18,7 +18,6 @@ import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalS
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
-import { ReadOnlyBrowse } from "./components/ReadOnlyBrowse";
 import { ImportProjectFlow } from "./components/ImportProjectFlow";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
@@ -189,15 +188,6 @@ export function App() {
           ? " terminal-half"
           : "";
 
-  // Browse mode: render ONLY the ReadOnlyBrowse UI, no chrome.
-  if (browseMode && !authExpired) {
-    return (
-      <div className="app">
-        <ReadOnlyBrowse />
-      </div>
-    );
-  }
-
   if (authExpired) {
     return (
       <div className="app">
@@ -261,7 +251,7 @@ export function App() {
 
         {loading && <p className="empty">Loading…</p>}
         {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
-        {!loading && state && !state.exists && !importFlowActive && (
+        {!loading && state && !state.exists && !importFlowActive && !browseMode && (
           <NoProjectDecisionPanel
             projectRoot={state.root || ""}
             hasClaudeMd={state.hasClaudeMd ?? false}
@@ -281,7 +271,7 @@ export function App() {
             }}
           />
         )}
-        {!loading && state?.exists && (
+        {!loading && (state?.exists || browseMode) && (
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/change/:id" element={<ChangeDetail />} />

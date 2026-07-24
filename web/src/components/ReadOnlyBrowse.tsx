@@ -1,5 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
+ * UNUSED as of simplify-browse-to-kanban (2026-07-24).
+ *
+ * The dashboard's "Browse" button now sets `browseMode = true` and
+ * App.tsx renders the normal chrome (topbar + empty Kanban) directly,
+ * bypassing this component. The `/api/browse/markdown-tree` and
+ * `/api/browse/markdown` server endpoints are also inert.
+ *
+ * Preserved on disk in case a future "docs preview" feature reuses
+ * the two-pane markdown tree pattern. If it stays inert past the
+ * next spec-tightening review, delete this file and the associated
+ * server/browse.ts endpoints.
+ *
+ * Original description ↓
  * Read-only markdown browser. Shown when browseMode === true in the store.
  *
  * - Fetches /api/browse/markdown-tree on mount and renders a left sidebar.

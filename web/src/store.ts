@@ -103,7 +103,7 @@ type Store = {
    *  by ChangeDetail's worktree view to keep tick state fresh across clients. */
   worktreeChangeById: Record<string, Change>;
   gitConfig: GitConfig | null;
-  /** True when the user clicked "Browse read-only" on the decision panel.
+  /** True when the user clicked "Open dashboard anyway" (formerly "Browse read-only") on the decision panel.
    *  Causes App.tsx to render <ReadOnlyBrowse /> instead of the normal
    *  chrome. Landed by unify-open-project-3-branch. */
   browseMode: boolean;
