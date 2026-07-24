@@ -3316,6 +3316,8 @@ validate → write path.
 
 ### Requirement: Revert Slash Command
 
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:revert` → `/ithy-opsx:revert` and the skill id `opsx-revert` → `ithy-opsx-revert` as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
+
 The project SHALL provide a `/opsx:revert <scope>` slash command that a
 worker or user runs inside Claude Code to open a Case α or Case β
 revert change under the naming convention `revert-<scope>`. The
