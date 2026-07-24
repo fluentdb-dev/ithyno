@@ -53,7 +53,18 @@ export type ImportedProjectNotification = {
 type Conflict = { newText: string; message: string };
 
 export type CommandStyle = "claude" | "cli";
-export type OverviewLayout = "board" | "cards";
+/**
+ * Overview layout toggle values (add-phase-lane-view-toggle):
+ *   - `"board"` — 3-column TODO / IN-PROGRESS / DONE (default).
+ *   - `"phase"` — 4 swim lanes proposed / coded / reviewed / done + Unphased fallback.
+ *   - `"cards"` — plain card grid (no columns).
+ *
+ * Persisted to `localStorage["ithyno.overviewLayout"]`. Legacy `"board"`
+ * and `"cards"` values continue to round-trip; unknown persisted strings
+ * fall back to `"board"` (see `readOverviewLayout`). The union is
+ * ADDITIVE — no persist-schema-version bump is needed.
+ */
+export type OverviewLayout = "board" | "phase" | "cards";
 /** Four exclusive terminal size options. Not persisted — resets to
  *  `"default"` on every page reload. Landed by add-terminal-size-toggle. */
 export type TerminalSize = "fullscreen" | "half" | "default" | "hidden";
@@ -199,10 +210,20 @@ function readCommandStyle(): CommandStyle {
 }
 
 const OVERVIEW_LAYOUT_KEY = "ithyno.overviewLayout";
+/**
+ * Defensive narrower: any value outside the 3-arm union falls back to
+ * `"board"`. Guards against future removals of a state (e.g. if we ever
+ * retire `"phase"` again, older users with `"phase"` persisted won't
+ * crash — they just see the default board). Exported for unit tests.
+ * Landed by add-phase-lane-view-toggle.
+ */
+export function narrowOverviewLayout(v: unknown): OverviewLayout {
+  if (v === "phase" || v === "cards" || v === "board") return v;
+  return "board";
+}
 function readOverviewLayout(): OverviewLayout {
   try {
-    const v = localStorage.getItem(OVERVIEW_LAYOUT_KEY);
-    return v === "cards" ? "cards" : "board";
+    return narrowOverviewLayout(localStorage.getItem(OVERVIEW_LAYOUT_KEY));
   } catch {
     return "board";
   }

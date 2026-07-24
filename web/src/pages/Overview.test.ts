@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { filterChanges } from "./Overview";
+import { narrowOverviewLayout } from "../store";
 import type { Change, ProposalDoc } from "../types";
 
 function mkChange(id: string, opts: { intent?: string; tags?: string[] } = {}): Change {
@@ -80,5 +81,43 @@ describe("filterChanges (add-kanban-search-filter)", () => {
       "revert",
     );
     expect(out.map((c) => c.id).sort()).toEqual(["b", "c", "revert-a"]);
+  });
+});
+
+/**
+ * Overview layout toggle round-trip (add-phase-lane-view-toggle).
+ *
+ * The store persists `overviewLayout` to localStorage and narrows the
+ * value back to the 3-arm union on read. These tests exercise the pure
+ * narrower — the actual localStorage round-trip is handled by
+ * `readOverviewLayout` in store.ts which calls into the same narrower.
+ */
+describe("narrowOverviewLayout (add-phase-lane-view-toggle)", () => {
+  it("board round-trips as board", () => {
+    expect(narrowOverviewLayout("board")).toBe("board");
+  });
+
+  it("phase round-trips as phase", () => {
+    expect(narrowOverviewLayout("phase")).toBe("phase");
+  });
+
+  it("cards round-trips as cards", () => {
+    expect(narrowOverviewLayout("cards")).toBe("cards");
+  });
+
+  it("unknown persisted value falls back to board", () => {
+    expect(narrowOverviewLayout("something-else")).toBe("board");
+  });
+
+  it("null (no persisted value) falls back to board (default for fresh install)", () => {
+    expect(narrowOverviewLayout(null)).toBe("board");
+  });
+
+  it("undefined falls back to board", () => {
+    expect(narrowOverviewLayout(undefined)).toBe("board");
+  });
+
+  it("empty string falls back to board", () => {
+    expect(narrowOverviewLayout("")).toBe("board");
   });
 });
