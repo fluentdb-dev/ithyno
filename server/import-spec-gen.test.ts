@@ -37,17 +37,15 @@ describe("import-spec-gen preflight", () => {
     expect(result.result.scanCounts.docs).toBeGreaterThanOrEqual(1);
   });
 
-  it("rejects 409 when openspec/ exists and force is false", async () => {
+  it("allows import when openspec/ exists (Pattern B / re-import)", async () => {
     await mkdir(join(tmpDir, "openspec"), { recursive: true });
+    await writeFile(join(tmpDir, "README.md"), "# Test\n");
 
     const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.status).toBe(409);
-    expect(result.reason).toMatch(/openspec\//);
+    expect(result.ok).toBe(true);
   });
 
-  it("allows when openspec/ exists but force is true", async () => {
+  it("still allows when openspec/ exists and force is true", async () => {
     await mkdir(join(tmpDir, "openspec"), { recursive: true });
     await writeFile(join(tmpDir, "README.md"), "# Test\n");
 
@@ -273,12 +271,11 @@ describe("preflight — doctor independence", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("preflight 409 when openspec/ exists (independent of doctor)", async () => {
+  it("preflight ok even when openspec/ exists (409 gate removed)", async () => {
     await mkdir(join(tmpDir, "openspec"), { recursive: true });
+    await writeFile(join(tmpDir, "main.ts"), "export {};\n");
     const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.status).toBe(409);
+    expect(result.ok).toBe(true);
   });
 });
 

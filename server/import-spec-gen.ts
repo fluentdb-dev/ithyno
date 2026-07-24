@@ -18,7 +18,6 @@
  * WorkspaceState. See refactor-import-to-task-tool-subagent.
  */
 
-import { existsSync } from "node:fs";
 import { readdir, lstat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -108,14 +107,11 @@ export async function preflight(
     return { ok: false, status: 403, reason: "projectRoot is not under an authorized directory" };
   }
 
-  // 409: openspec/ already exists + no force
-  if (!force && existsSync(join(absRoot, "openspec"))) {
-    return {
-      ok: false,
-      status: 409,
-      reason: `openspec/ already exists at ${join(absRoot, "openspec")}; pass force: true to overwrite`,
-    };
-  }
+  // Existing openspec/ is intentionally allowed — Pattern B (in-place init
+  // → import) always has openspec/ present after Init, and Pattern A users
+  // may re-import over a previous run. The `force` parameter is kept in the
+  // signature for API compatibility but no longer gates preflight.
+  void force;
 
   // Walk files — use Sets for O(1) dedup, single pass covers docs/ automatically.
   const codeSet = new Set<string>();

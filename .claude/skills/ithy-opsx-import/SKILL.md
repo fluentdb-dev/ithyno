@@ -33,15 +33,13 @@ not an absolute path, report the error and stop.
    ```
    If missing, report: `Error: target path does not exist: $ARGUMENTS` and stop.
 
-3. Defensive guard — check `openspec/` does not already exist:
-   ```bash
-   test -d "$ARGUMENTS/openspec" && echo exists || echo clear
-   ```
-   If it already exists, report:
-   `openspec/ already exists at $ARGUMENTS/openspec — skipping import (server should have blocked this).`
-   and stop.
+3. Announce: `[import] Starting sub-agent for $ARGUMENTS`
 
-4. Announce: `[import] Starting sub-agent for $ARGUMENTS`
+   An existing `openspec/` directory at `$ARGUMENTS/openspec` is
+   intentionally allowed. Pattern B (in-place import after Init)
+   always sees `openspec/` present, and the sub-agent's `openspec
+   init` step is idempotent — existing scaffold is preserved and
+   only per-capability spec files are (over)written in Step 5.
 
 ### 2. Spawn Task-tool sub-agent
 
