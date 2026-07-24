@@ -2,6 +2,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
 const IPC_IMPORT_PROJECT = 'ithyno:import-project';
+const IPC_OPEN_PROJECT = 'ithyno:open-project';
 
 export const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 
@@ -27,5 +28,11 @@ contextBridge.exposeInMainWorld('ithyno', {
     const listener = (_e: Electron.IpcRendererEvent, projectRoot: string) => cb(projectRoot);
     ipcRenderer.on(IPC_IMPORT_PROJECT, listener);
     return () => ipcRenderer.off(IPC_IMPORT_PROJECT, listener);
+  },
+  /** enable-import-both-patterns: open an imported project as the active
+   *  project. Sends IPC_OPEN_PROJECT to the main process which calls
+   *  switchProject(path). */
+  openProject: (path: string): void => {
+    ipcRenderer.send(IPC_OPEN_PROJECT, path);
   },
 });

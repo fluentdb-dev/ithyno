@@ -2,6 +2,7 @@
 import chokidar, { type FSWatcher } from "chokidar";
 import { readFile } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { existsSync } from "node:fs";
 import { sha1 } from "../util/hash.js";
 
 /**
@@ -134,5 +135,86 @@ export class ProjectRootWatcher {
   async stop(): Promise<void> {
     this.stopped = true;
     await this.watcher?.close();
+  }
+}
+
+/**
+ * ImportTargetWatcher — watches an external project root (Pattern A import)
+ * for the creation of `openspec/GENERATED.md`.
+ *
+ * When the marker is detected, `onComplete({ targetPath, jobId })` is called
+ * exactly once. The watcher automatically deregisters itself 30 seconds after
+ * completion (or immediately on `stop()`).
+ *
+ * Idempotency: registering the same (targetPath, jobId) pair twice is a no-op
+ * (caller should deduplicate before calling `start()`). Duplicate marker-file
+ * events fire the callback only once per jobId (guarded by `fired`).
+ *
+ * Landed by enable-import-both-patterns.
+ */
+export class ImportTargetWatcher {
+  private watcher: FSWatcher | null = null;
+  private fired = false;
+  private stopped = false;
+  private gracePeriodTimer: NodeJS.Timeout | null = null;
+
+  /** Grace period after completion before the watcher fully stops (ms). */
+  static readonly GRACE_MS = 30_000;
+
+  constructor(
+    readonly targetPath: string,
+    readonly jobId: string,
+    private readonly onComplete: (ev: { targetPath: string; jobId: string }) => void,
+  ) {}
+
+  start(): void {
+    const markerPath = join(this.targetPath, "openspec", "GENERATED.md");
+
+    // If the marker already exists at start time, fire immediately.
+    if (!this.fired && existsSync(markerPath)) {
+      this._complete();
+      return;
+    }
+
+    // Watch the target root for file additions.
+    this.watcher = chokidar.watch(this.targetPath, {
+      ignoreInitial: true,
+      // Watch up to depth 2: targetRoot/openspec/GENERATED.md
+      depth: 2,
+      awaitWriteFinish: false,
+    });
+
+    const handleAdd = (filePath: string) => {
+      if (this.stopped || this.fired) return;
+      if (filePath === markerPath) {
+        this._complete();
+      }
+    };
+
+    this.watcher.on("add", handleAdd);
+  }
+
+  private _complete(): void {
+    this.fired = true;
+    this.onComplete({ targetPath: this.targetPath, jobId: this.jobId });
+
+    // Schedule self-deregistration after grace period.
+    this.gracePeriodTimer = setTimeout(() => {
+      void this._shutdown();
+    }, ImportTargetWatcher.GRACE_MS);
+  }
+
+  private async _shutdown(): Promise<void> {
+    this.stopped = true;
+    if (this.gracePeriodTimer) {
+      clearTimeout(this.gracePeriodTimer);
+      this.gracePeriodTimer = null;
+    }
+    await this.watcher?.close();
+    this.watcher = null;
+  }
+
+  async stop(): Promise<void> {
+    await this._shutdown();
   }
 }

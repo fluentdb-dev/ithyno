@@ -244,3 +244,64 @@ describe("injectImportCommand", () => {
 // The HTTP 503 path is exercised in server/index.ts when injectImportCommand
 // returns ok: false. The unit test above covers that return shape. Full
 // integration (HTTP 503 response) is verified manually in task 8.6.
+
+// ---- Doctor gate (enable-import-both-patterns task 9.3) --------------------
+// The 409 doctor gate lives in server/index.ts, NOT in preflight() itself.
+// Preflight has no knowledge of doctor. These tests document the HTTP-layer
+// behavior via the contract: when doctor returns readyForManager: false, the
+// endpoint should 409 before running preflight. We test the preflight function
+// directly here — endpoint-level behavior is manual (task 10.7).
+
+describe("preflight — doctor independence", () => {
+  // Preflight itself does not call runDoctor(). The gate in server/index.ts
+  // runs the doctor check first. These tests simply confirm that preflight
+  // still returns ok: true for a valid root, independent of whether a doctor
+  // check would pass or fail — the two concerns are separated.
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "preflight-doctor-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("preflight ok: true for a project root (doctor check is orthogonal)", async () => {
+    await writeFile(join(tmpDir, "main.ts"), "export {};\n");
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(true);
+  });
+
+  it("preflight 409 when openspec/ exists (independent of doctor)", async () => {
+    await mkdir(join(tmpDir, "openspec"), { recursive: true });
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(409);
+  });
+});
+
+// ---- Pattern hint (enable-import-both-patterns task 3.2) -------------------
+// The pattern: "A" | "B" derivation (`targetPath === PROJECT_ROOT`) lives in
+// server/index.ts around the preflight result. The computation is simple and
+// tied to a runtime-constant (PROJECT_ROOT). We test the discrimination logic
+// in isolation below.
+
+describe("pattern classification logic", () => {
+  function classifyPattern(targetPath: string, projectRoot: string): "A" | "B" {
+    return targetPath === projectRoot ? "B" : "A";
+  }
+
+  it("Pattern B when targetPath equals PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/project", "/home/user/project")).toBe("B");
+  });
+
+  it("Pattern A when targetPath differs from PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/other", "/home/user/project")).toBe("A");
+  });
+
+  it("Pattern A when targetPath is a subdirectory of PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/project/subdir", "/home/user/project")).toBe("A");
+  });
+});

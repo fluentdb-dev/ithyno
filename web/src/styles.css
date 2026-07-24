@@ -3476,3 +3476,77 @@ a.modal-btn:hover {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ---- Import-completion notifications (enable-import-both-patterns) ---- */
+/* Stacked top-right region, below topbar (z-index 10), above main content. */
+.import-notifications-region {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  pointer-events: none;
+}
+.imported-project-notification {
+  background: var(--panel);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card, 0 2px 8px rgba(0, 0, 0, 0.18));
+  padding: 12px 14px;
+  pointer-events: auto;
+}
+.imported-project-notification-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.imported-project-notification-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary, var(--text));
+}
+.imported-project-notification-path {
+  font-size: 12px;
+  color: var(--fg-muted, var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.imported-project-notification-time {
+  font-size: 11px;
+  color: var(--fg-muted, var(--muted));
+}
+.imported-project-notification-actions {
+  display: flex;
+  gap: 8px;
+}
+.imported-project-notification-actions .btn-primary,
+.imported-project-notification-actions .btn-secondary {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.imported-project-notification-actions .btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg-on-solid, #fff);
+  border-color: var(--accent);
+}
+.imported-project-notification-actions .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.imported-project-notification-actions .btn-secondary {
+  background: var(--bg-panel-2);
+  color: var(--fg-primary, var(--text));
+  border-color: var(--border);
+}
+.imported-project-notification-actions .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+}

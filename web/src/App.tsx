@@ -19,6 +19,7 @@ import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
 import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
 import { ImportProjectFlow } from "./components/ImportProjectFlow";
+import { ImportedProjectNotification } from "./components/ImportedProjectNotification";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
@@ -39,6 +40,8 @@ export function App() {
   const state = useStore((s) => s.state);
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
+  const importedProjectNotifications = useStore((s) => s.importedProjectNotifications);
+  const dismissImportNotification = useStore((s) => s.dismissImportNotification);
 
   // import-project-spec-generation: import flow state
   const [importFlowActive, setImportFlowActive] = useState(false);
@@ -317,6 +320,20 @@ export function App() {
           </div>
           <Terminal key={terminalRestartCounter} />
         </aside>
+      )}
+
+      {/* Pattern-A import completion notifications (enable-import-both-patterns).
+          Stacked top-right; each card dismisses independently. */}
+      {importedProjectNotifications.length > 0 && (
+        <div className="import-notifications-region">
+          {importedProjectNotifications.map((n) => (
+            <ImportedProjectNotification
+              key={n.id}
+              notification={n}
+              onDismiss={dismissImportNotification}
+            />
+          ))}
+        </div>
       )}
 
       <div className="toasts">
