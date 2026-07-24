@@ -3307,6 +3307,21 @@ a.modal-btn:hover {
 }
 .onboarding-link:hover { text-decoration: underline; }
 
+.onboarding-inline-install {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.onboarding-inline-install:hover {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+
 /* ---- No Project Decision Panel (unify-open-project-3-branch) ------------- */
 .no-project-panel {
   max-width: 560px;
