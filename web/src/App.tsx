@@ -260,7 +260,7 @@ export function App() {
             hasClaudeMd={state.hasClaudeMd ?? false}
           />
         )}
-        {!loading && state && !state.exists && importFlowActive && (
+        {importFlowActive && (
           <ImportProjectFlow
             projectRoot={importFlowRoot}
             onComplete={() => {
