@@ -379,6 +379,58 @@ export async function postGitInit(): Promise<GitStatus> {
   return data.gitStatus;
 }
 
+// ---- Doctor API (add-doctor-and-installer) ---------------------------------
+
+export type CliStatus = {
+  installed: boolean;
+  version?: string;
+  path?: string;
+  error?: string;
+};
+
+export type Cli =
+  | "claude"
+  | "codex"
+  | "agy"
+  | "copilot"
+  | "gemini"
+  | "opencode"
+  | "cursor"
+  | "antigravity";
+
+export type DoctorReport = {
+  agents: Record<Cli, CliStatus>;
+  tmux: CliStatus;
+  agmsg: CliStatus;
+  readyForManager: boolean;
+  checkedAt: string;
+};
+
+/** Fetch the current prerequisite report (session-token gated). */
+export async function fetchDoctorReport(): Promise<DoctorReport> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Session-Token"] = token;
+  const res = await fetch("/api/doctor", { headers });
+  if (!res.ok) throw new Error(`GET /api/doctor failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * POST /api/doctor/install to install tmux or agmsg.
+ * Returns a ReadableStream of SSE text, or throws on 400.
+ */
+export async function installPrereq(
+  tool: "tmux" | "agmsg",
+): Promise<Response> {
+  const res = await fetch("/api/doctor/install", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ tool }),
+  });
+  return res;
+}
+
 export async function cancelAgentJob(id: string): Promise<void> {
   // No body, but still uses the auth header. `postJson` adds Content-Type
   // application/json which a body-less POST tolerates fine.

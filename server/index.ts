@@ -37,6 +37,8 @@ import { PHASES, isPhase, isReservedPhase, NEEDS_HUMAN, type Phase } from "./pha
 import { readSidecar, writeSidecar, extractSidecarFields } from "./sidecar.js";
 import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js";
 import { getAboutInfo } from "./about.js";
+import { runDoctor } from "./doctor.js";
+import type { DoctorReport } from "./doctor.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -123,7 +125,8 @@ type ServerEvent =
       parallelExecution: boolean;
       agmsg: import("./agents/registry.js").AgmsgConfig | null;
       warnings: string[];
-    };
+    }
+  | { type: "doctor-updated"; report: DoctorReport };
 
 function broadcast(event: ServerEvent): void {
   const payload = JSON.stringify(event);
@@ -356,6 +359,202 @@ fastify.get("/api/health", async () => {
 });
 
 fastify.get("/api/about", async () => getAboutInfo());
+
+// ---- Doctor endpoints (add-doctor-and-installer) ---------------------------
+// GET /api/doctor — returns DoctorReport. Session-token authed via the global
+// onRequest hook (mutating methods) but also gated on explicit token check
+// here since GET reads are not caught by the CSRF hook.
+fastify.get("/api/doctor", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  const report = await runDoctor();
+  return report;
+});
+
+// POST /api/doctor/install — streams installer progress via SSE.
+// Accepts { tool: "tmux" | "agmsg" }. Rejects anything else with 400.
+// tmux: detects brew / apt-get / dnf / pacman.
+// agmsg: copies the vendored tree from electron/vendor or guide the user.
+fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, reply) => {
+  const tool = req.body?.tool;
+  if (tool !== "tmux" && tool !== "agmsg") {
+    return reply
+      .code(400)
+      .send({ error: `only "tmux" and "agmsg" are installable via this endpoint` });
+  }
+
+  // Set up SSE stream
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  let clientAlive = true;
+  reply.raw.on("close", () => {
+    clientAlive = false;
+  });
+
+  const sendSse = (event: string, data: unknown) => {
+    if (!clientAlive) return;
+    try {
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      clientAlive = false;
+    }
+  };
+
+  const INSTALL_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
+  if (tool === "agmsg") {
+    // agmsg install: copy the vendored tree from electron/vendor/agmsg
+    const { homedir: homedirFn } = await import("node:os");
+    const { join: joinPath } = await import("node:path");
+    const { existsSync: existsSyncFn, mkdirSync, cpSync, chmodSync, readdirSync, statSync } = await import("node:fs");
+
+    const TARGET_ROOT = joinPath(homedirFn(), ".agents", "skills", "agmsg");
+    const TARGET_MARKER = joinPath(TARGET_ROOT, "scripts", "send.sh");
+
+    if (existsSyncFn(TARGET_MARKER)) {
+      sendSse("progress", { line: "agmsg is already installed." });
+      sendSse("done", { ok: true, exitCode: 0 });
+      if (clientAlive) reply.raw.end();
+      // Broadcast doctor-updated
+      void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
+      return;
+    }
+
+    // Try to find the vendored tree
+    const vendorCandidates = [
+      joinPath(PKG_ROOT, "vendor", "agmsg"),
+      joinPath(PKG_ROOT, "electron", "vendor", "agmsg"),
+    ];
+    const vendorRoot = vendorCandidates.find((p) => existsSyncFn(joinPath(p, "scripts", "send.sh")));
+
+    if (!vendorRoot) {
+      sendSse("progress", { line: "Vendored agmsg not found. Install via: /plugin marketplace add fujibee/agmsg" });
+      sendSse("done", { ok: false, exitCode: 1 });
+      if (clientAlive) reply.raw.end();
+      return;
+    }
+
+    try {
+      sendSse("progress", { line: `Installing agmsg from ${vendorRoot} …` });
+      mkdirSync(joinPath(homedirFn(), ".agents", "skills"), { recursive: true });
+      // force: true — always overwrite existing files so a partial/interrupted
+      // install does not silently leave the tree incomplete (F2 fix).
+      cpSync(vendorRoot, TARGET_ROOT, { recursive: true, force: true });
+      // chmod .sh files
+      function chmodShells(dir: string): void {
+        if (!existsSyncFn(dir)) return;
+        for (const entry of readdirSync(dir)) {
+          const full = joinPath(dir, entry);
+          const st = statSync(full);
+          if (st.isDirectory()) chmodShells(full);
+          else if (entry.endsWith(".sh")) {
+            try { chmodSync(full, 0o755); } catch { /* ignore */ }
+          }
+        }
+      }
+      chmodShells(joinPath(TARGET_ROOT, "scripts"));
+      sendSse("progress", { line: `agmsg installed to ${TARGET_ROOT}` });
+      sendSse("done", { ok: true, exitCode: 0 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sendSse("progress", { line: `Install failed: ${msg}` });
+      sendSse("done", { ok: false, exitCode: 1 });
+    }
+    if (clientAlive) reply.raw.end();
+    void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
+    return;
+  }
+
+  // tool === "tmux"
+  // Detect package manager
+  const { platform } = await import("node:os");
+  const os = platform();
+
+  let installCmd: string[];
+
+  if (os === "darwin") {
+    installCmd = ["brew", "install", "tmux"];
+  } else if (os === "linux") {
+    // Try to detect apt-get, dnf, pacman in order
+    const { execFileSync } = await import("node:child_process");
+    function hasCmd(c: string): boolean {
+      try { execFileSync("which", [c], { stdio: "ignore", timeout: 1000 }); return true; } catch { return false; }
+    }
+    if (hasCmd("apt-get")) {
+      installCmd = ["apt-get", "install", "-y", "tmux"];
+    } else if (hasCmd("dnf")) {
+      installCmd = ["dnf", "install", "-y", "tmux"];
+    } else if (hasCmd("pacman")) {
+      installCmd = ["pacman", "-S", "--noconfirm", "tmux"];
+    } else {
+      sendSse("progress", { line: "No known package manager found (tried apt-get, dnf, pacman). See https://github.com/tmux/tmux/wiki/Installing" });
+      sendSse("done", { ok: false, exitCode: 1 });
+      if (clientAlive) reply.raw.end();
+      return;
+    }
+  } else {
+    // Windows or other
+    sendSse("progress", { line: `Unsupported platform "${os}". See https://github.com/tmux/tmux/wiki/Installing` });
+    sendSse("done", { ok: false, exitCode: 1 });
+    if (clientAlive) reply.raw.end();
+    return;
+  }
+
+  // Spawn the install command and stream output
+  const { spawn: spawnChild } = await import("node:child_process");
+  sendSse("progress", { line: `Running: ${installCmd.join(" ")}` });
+
+  await new Promise<void>((resolveProm) => {
+    const child = spawnChild(installCmd[0], installCmd.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }, INSTALL_TIMEOUT);
+
+    child.stdout?.on("data", (d: Buffer) => {
+      sendSse("progress", { line: d.toString().replace(/\n$/, "") });
+    });
+    child.stderr?.on("data", (d: Buffer) => {
+      sendSse("progress", { line: d.toString().replace(/\n$/, "") });
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      sendSse("progress", { line: `Error: ${err.message}` });
+      sendSse("done", { ok: false, exitCode: null });
+      if (clientAlive) reply.raw.end();
+      void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
+      resolveProm();
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const ok = !timedOut && code === 0;
+      if (timedOut) {
+        sendSse("progress", { line: "Install timed out (5 min limit)." });
+      }
+      sendSse("done", { ok, exitCode: code });
+      if (clientAlive) reply.raw.end();
+      if (ok) {
+        void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
+      }
+      resolveProm();
+    });
+  });
+});
 
 // Dedicated lightweight token-validity check so the UI can detect a stale
 // token at first load (typically after a server restart) without waiting for

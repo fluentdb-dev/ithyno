@@ -10,10 +10,12 @@ import {
   fetchManagerStatus,
   fetchGitConfig,
   fetchGitStatus,
+  fetchDoctorReport,
   checkAuth,
   triggerAuthExpired,
   toggleTask as apiToggle,
 } from "./api";
+import type { DoctorReport } from "./api";
 import { getSessionToken } from "./runtime";
 import type {
   AgentPublic,
@@ -107,6 +109,9 @@ type Store = {
    *  Causes App.tsx to render <ReadOnlyBrowse /> instead of the normal
    *  chrome. Landed by unify-open-project-3-branch. */
   browseMode: boolean;
+  /** Latest DoctorReport from /api/doctor. Null before first fetch.
+   *  Landed by add-doctor-and-installer. */
+  doctorReport: DoctorReport | null;
 
   load: () => Promise<void>;
   connectWs: () => void;
@@ -134,6 +139,7 @@ type Store = {
   refreshGitStatus: () => Promise<void>;
   clearWorktreeProgress: (changeId: string) => void;
   setBrowseMode: (v: boolean) => void;
+  loadDoctorReport: () => Promise<void>;
 };
 
 let toastSeq = 1;
@@ -230,6 +236,7 @@ export const useStore = create<Store>((set, get) => ({
   worktreeChangeById: {},
   gitConfig: null,
   browseMode: false,
+  doctorReport: null,
 
   loadAgents: async () => {
     try {
@@ -318,6 +325,15 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
   setBrowseMode: (v) => set({ browseMode: v }),
+
+  loadDoctorReport: async () => {
+    try {
+      const report = await fetchDoctorReport();
+      set({ doctorReport: report });
+    } catch {
+      // Non-fatal — keep whatever we had before
+    }
+  },
 
   loadTagIndex: async () => {
     try {
@@ -556,6 +572,10 @@ export const useStore = create<Store>((set, get) => ({
         // entry is declared and its command/args — the Manager section
         // must reflect that too. Fire-and-forget refetch.
         void get().loadManagerStatus();
+      } else if (msg.type === "doctor-updated") {
+        // add-doctor-and-installer: server broadcasts this after an install
+        // completes. Update the cached report so Settings refreshes.
+        set({ doctorReport: msg.report });
       }
     };
   },
