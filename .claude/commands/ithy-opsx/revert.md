@@ -1,5 +1,5 @@
 ---
-name: "OPSX: Revert"
+name: "ITHY-OPSX: Revert"
 description: Open a Case α or Case β revert change with PENDING / REVERTED annotations enforced by tooling
 category: Workflow
 tags: [workflow, revert, artifacts, experimental]
@@ -21,13 +21,13 @@ When ready to implement the revert, run `/opsx:apply revert-<scope>`.
 
 ---
 
-**Input**: The argument after `/opsx:revert` is the revert scope in
+**Input**: The argument after `/ithy-opsx:revert` is the revert scope in
 kebab-case (e.g., `kanban-ui-lanes` → change id `revert-kanban-ui-lanes`),
 OR a description that I'll convert to kebab-case.
 
 **How to run this**
 
-Follow the **`opsx-revert`** skill (see `.claude/skills/opsx-revert/SKILL.md`) with
+Follow the **`ithy-opsx-revert`** skill (see `.claude/skills/ithy-opsx-revert/SKILL.md`) with
 scope: **$ARGUMENTS**.
 
 The skill covers:

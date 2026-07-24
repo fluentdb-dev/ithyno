@@ -970,6 +970,8 @@ The `/opsx:verify <change-id>` slash command SHALL exist as a prompt template th
 
 ### Requirement: Escalate Command Wrapper
 
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:escalate` → `/ithy-opsx:escalate` (file moves from `.claude/commands/opsx/escalate.md` → `.claude/commands/ithy-opsx/escalate.md`) as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
+
 The `/opsx:escalate <change-id> "<question>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to construct a JSON body containing the question and a context string assembled from the change's current state (phase, recent diff summary, prior review verdict) and to invoke `POST /api/changes/<change-id>/needs-human` via a Bash + curl call to `http://localhost:4321`. On HTTP 2xx the template SHALL report success to the caller; on non-2xx it SHALL surface the error body for further handling.
 
 #### Scenario: template exists in commands directory
@@ -988,6 +990,8 @@ The `/opsx:escalate <change-id> "<question>"` slash command SHALL exist as a pro
 - **THEN** the caller receives the endpoint's error message verbatim so it can decide next action
 
 ### Requirement: Answer Command Wrapper
+
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:answer` → `/ithy-opsx:answer` (file moves from `.claude/commands/opsx/answer.md` → `.claude/commands/ithy-opsx/answer.md`) as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
 
 The `/opsx:answer <change-id> "<answer>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to invoke `POST /api/changes/<change-id>/needs-human/answer` via Bash + curl to `http://localhost:4321` with the answer text as the JSON body, and to report the endpoint's response back to the caller. The template SHALL be safe to invoke only when the change is currently in `needs-human` state; the endpoint's 409 return is the safety net.
 

@@ -1,5 +1,5 @@
 ---
-name: "OPSX: Escalate"
+name: "ITHY-OPSX: Escalate"
 description: Post an escalation to needs-human for the given change
 category: Workflow
 tags: [workflow, escalate, needs-human, worker, phase-4]
@@ -23,7 +23,7 @@ in the needs-human state and hand off to the user.
 
    Extract `changeId` and `question` from `$ARGUMENTS`. If either is
    missing or empty, STOP and report:
-   `Usage: /opsx:escalate <change-id> "<question>"`
+   `Usage: /ithy-opsx:escalate <change-id> "<question>"`
 
 2. **Assemble context**
 
@@ -79,4 +79,4 @@ in the needs-human state and hand off to the user.
   intent of asking the user directly**. This command records an
   escalation to the state machine; the actual user Q&A happens when
   the Manager (or a future gate agent) picks up the answer via
-  `/opsx:answer` or the editor fallback.
+  `/ithy-opsx:answer` or the editor fallback.

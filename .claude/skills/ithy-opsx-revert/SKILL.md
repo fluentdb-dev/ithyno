@@ -1,21 +1,23 @@
 ---
-name: opsx-revert
-description: The Claude-driven "open a revert change" flow for OpenSpec UI. Runs when the user invokes `/opsx:revert <scope>`. Handles preflight → target picking → Case α/β classification → openspec new + skeleton generation → PENDING annotation injection into current specs → REVERTED annotation injection into Case α archives → validate. Never commits, never archives, never touches git.
+name: ithy-opsx-revert
+description: The Claude-driven "open a revert change" flow for OpenSpec UI. Runs when the user invokes `/ithy-opsx:revert <scope>`. Handles preflight → target picking → Case α/β classification → openspec new + skeleton generation → PENDING annotation injection into current specs → REVERTED annotation injection into Case α archives → validate. Never commits, never archives, never touches git.
 ---
 
-# `/opsx:revert <scope>` — open a revert change with annotations enforced
+# `/ithy-opsx:revert <scope>` — open a revert change with annotations enforced
 
 This skill is the recipe Claude runs when the user asks to open a
 revert. It bakes the Revert workflow's `PENDING` and `REVERTED`
 annotation conventions into a scripted checklist so no annotation
 can be forgotten.
 
-Landed by `add-opsx-revert-command`.
+Landed by `add-opsx-revert-command` (originally shipped as `/opsx:revert`);
+renamed to `/ithy-opsx:revert` by `unify-ithyno-slash-command-surface`
+so that ithyno owns exactly one slash-command namespace end-to-end.
 
 ## When Claude runs this
 
-- User types `/opsx:revert <scope>` (the slash command entry lives at
-  `.claude/commands/opsx/revert.md`).
+- User types `/ithy-opsx:revert <scope>` (the slash command entry lives at
+  `.claude/commands/ithy-opsx/revert.md`).
 - User asks in natural language to open a revert change (e.g., "let's
   revert the escalation UX").
 
@@ -53,7 +55,7 @@ Landed by `add-opsx-revert-command`.
 3. **OpenSpec CLI**. Run `npm run openspec -- list` to confirm the
    CLI works.
 4. **Scope argument**. If the invoker passed `<scope>` after
-   `/opsx:revert`, use it. Otherwise, use the **AskUserQuestion tool**
+   `/ithy-opsx:revert`, use it. Otherwise, use the **AskUserQuestion tool**
    (open-ended) to ask:
    > "What behavior are you reverting? A short kebab-case scope
    > (e.g., `kanban-ui-lanes`), or a description I'll convert."
@@ -243,7 +245,7 @@ Write a standard revert checklist. Include:
 ## 5. In-flight spec 注記
 
 - [ ] 5.1 PENDING <REMOVAL|MODIFICATION> annotation on <N> target requirements in openspec/specs/<capability>/spec.md
-- [ ] 5.2 (auto-inserted by /opsx:revert; verify by inspection)
+- [ ] 5.2 (auto-inserted by /ithy-opsx:revert; verify by inspection)
 
 ## 6. Case β target archive procedure (if applicable)
 

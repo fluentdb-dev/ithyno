@@ -1,5 +1,43 @@
 ## MODIFIED Requirements
 
+### Requirement: Escalate Command Wrapper
+
+The `/ithy-opsx:escalate <change-id> "<question>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to construct a JSON body containing the question and a context string assembled from the change's current state (phase, recent diff summary, prior review verdict) and to invoke `POST /api/changes/<change-id>/needs-human` via a Bash + curl call to `http://localhost:4321`. On HTTP 2xx the template SHALL report success to the caller; on non-2xx it SHALL surface the error body for further handling.
+
+#### Scenario: template exists in commands directory
+- **GIVEN** the repository at `.claude/commands/ithy-opsx/escalate.md`
+- **WHEN** a Claude Code session evaluates the slash command
+- **THEN** the template loads and follows the curl-based escalation flow
+
+#### Scenario: successful escalation
+- **GIVEN** the endpoint returns HTTP 200
+- **WHEN** the template's post-flow reporting runs
+- **THEN** the caller receives an "escalated" confirmation with the API's returned status snippet
+
+#### Scenario: error surfaced
+- **GIVEN** the endpoint returns HTTP 400 (empty question) or 409 (already escalated)
+- **WHEN** the template's error-handling runs
+- **THEN** the caller receives the endpoint's error message verbatim so it can decide next action
+
+### Requirement: Answer Command Wrapper
+
+The `/ithy-opsx:answer <change-id> "<answer>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to invoke `POST /api/changes/<change-id>/needs-human/answer` via Bash + curl to `http://localhost:4321` with the answer text as the JSON body, and to report the endpoint's response back to the caller. The template SHALL be safe to invoke only when the change is currently in `needs-human` state; the endpoint's 409 return is the safety net.
+
+#### Scenario: template exists in commands directory
+- **GIVEN** the repository at `.claude/commands/ithy-opsx/answer.md`
+- **WHEN** a Claude Code session evaluates the slash command
+- **THEN** the template loads and follows the curl-based answer flow
+
+#### Scenario: successful answer
+- **GIVEN** the endpoint returns HTTP 200 (change was in needs-human)
+- **WHEN** the template's reporting runs
+- **THEN** the caller receives an "answer submitted" confirmation
+
+#### Scenario: 409 when not escalated
+- **GIVEN** the endpoint returns HTTP 409 (change is not in needs-human)
+- **WHEN** the template's error-handling runs
+- **THEN** the caller receives the "change is not in needs-human" error verbatim
+
 ### Requirement: Revert Slash Command
 
 The project SHALL provide a `/ithy-opsx:revert <scope>` slash command that a worker or user runs inside Claude Code to open a Case α or Case β revert change under the naming convention `revert-<scope>`. The command SHALL enforce the PENDING annotation and (Case α only) REVERTED annotation conventions documented in `CLAUDE.md` and `.claude/skills/openspec-flow/SKILL.md`.

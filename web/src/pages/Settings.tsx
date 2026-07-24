@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setAgmsgConfig, setParallelExecution } from "../api";
+import { installIthyOpsx, setAgmsgConfig, setParallelExecution, uninstallIthyOpsx } from "../api";
 import type { CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
@@ -420,6 +420,7 @@ function PrerequisitesSection(props: {
                 {report.readyForManager ? "yes" : "no"}
               </span>
             </p>
+            <IthyOpsxRow report={report} onRefresh={onRefresh} />
             <div className="settings-actions">
               <button type="button" onClick={() => void onRefresh()}>
                 Refresh
@@ -439,6 +440,135 @@ function PrerequisitesSection(props: {
         />
       )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ithy-opsx skills install row (unify-ithyno-slash-command-surface)
+// ---------------------------------------------------------------------------
+
+function IthyOpsxRow(props: {
+  report: DoctorReport;
+  onRefresh: () => Promise<void>;
+}) {
+  const { report, onRefresh } = props;
+  const pushToast = useStore((s) => s.pushToast);
+  const [busy, setBusy] = useState<"install" | "uninstall" | null>(null);
+  const [confirmingUninstall, setConfirmingUninstall] = useState(false);
+
+  const io = report.ithyOpsx;
+  const installed = io.installed;
+  const modified = io.userModifiedFiles.length;
+
+  async function handleInstall(force: boolean) {
+    setBusy("install");
+    try {
+      const rep = await installIthyOpsx(force);
+      const total = rep.installed + rep.updated;
+      pushToast(
+        "info",
+        total > 0
+          ? `Installed ${rep.installed} new + updated ${rep.updated} ithy-opsx file(s)`
+          : `ithy-opsx up to date${rep.userModified > 0 ? ` (${rep.userModified} user-modified preserved)` : ""}`,
+      );
+      await onRefresh();
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUninstall() {
+    setBusy("uninstall");
+    setConfirmingUninstall(false);
+    try {
+      const rep = await uninstallIthyOpsx();
+      pushToast("info", `Removed ${rep.removed} ithy-opsx file(s) from ~/.claude`);
+      await onRefresh();
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="ithy-opsx-row">
+      <div className="ithy-opsx-status">
+        <span className={`prereq-status ${installed ? "prereq-ok" : "prereq-missing"}`}>
+          {installed ? "✓" : "○"}
+        </span>
+        <strong>ithy-opsx skills</strong>
+        <span className="muted">
+          {installed
+            ? ` — installed v${io.installedVersion} (${io.commandCount} commands, ${io.skillCount} skills)`
+            : ` — not installed (bundle v${io.bundledVersion}, ${io.commandCount} commands, ${io.skillCount} skills)`}
+        </span>
+        {modified > 0 && (
+          <span className="ithy-opsx-modified" title={io.userModifiedFiles.join("\n")}>
+            {" ⚠ "}
+            {modified} user-modified
+          </span>
+        )}
+        {io.installError && (
+          <span className="prereq-missing"> — error: {io.installError}</span>
+        )}
+      </div>
+      <div className="ithy-opsx-actions">
+        {!installed && (
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void handleInstall(false)}
+          >
+            {busy === "install" ? "Installing…" : "Install"}
+          </button>
+        )}
+        {installed && (
+          <>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void handleInstall(true)}
+            >
+              {busy === "install" ? "Reinstalling…" : "Reinstall"}
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => setConfirmingUninstall(true)}
+            >
+              Uninstall
+            </button>
+          </>
+        )}
+      </div>
+      {confirmingUninstall && (
+        <div className="modal-backdrop" onClick={() => setConfirmingUninstall(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Uninstall ithy-opsx skills</h3>
+            <p className="modal-subtitle">
+              Removes {io.commandCount + io.skillCount} file(s) recorded in the manifest
+              from <code>~/.claude/</code>. Other files (e.g. agmsg, openspec) are preserved.
+            </p>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setConfirmingUninstall(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={busy !== null}
+                onClick={() => void handleUninstall()}
+              >
+                {busy === "uninstall" ? "Removing…" : "Uninstall"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

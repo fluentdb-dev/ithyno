@@ -435,6 +435,45 @@ export async function installPrereq(
   return res;
 }
 
+/** Install or reinstall the bundled ithy-opsx skills into ~/.claude.
+ *  Landed by unify-ithyno-slash-command-surface. */
+export async function installIthyOpsx(force = false): Promise<{
+  installed: number;
+  updated: number;
+  skipped: number;
+  userModified: number;
+  removed: number;
+  errors: string[];
+}> {
+  const { status, data } = await postJson<{
+    installed: number;
+    updated: number;
+    skipped: number;
+    userModified: number;
+    removed: number;
+    errors: string[];
+    error?: string;
+  }>("/api/doctor/install/ithy-opsx", { force });
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+  return data;
+}
+
+/** Uninstall every file the installer placed. */
+export async function uninstallIthyOpsx(): Promise<{
+  removed: number;
+  alreadyGone: number;
+  errors: string[];
+}> {
+  const { status, data } = await postJson<{
+    removed: number;
+    alreadyGone: number;
+    errors: string[];
+    error?: string;
+  }>("/api/doctor/uninstall/ithy-opsx", {});
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+  return data;
+}
+
 export async function cancelAgentJob(id: string): Promise<void> {
   // No body, but still uses the auth header. `postJson` adds Content-Type
   // application/json which a body-less POST tolerates fine.

@@ -1,5 +1,5 @@
 ---
-name: "OPSX: Answer"
+name: "ITHY-OPSX: Answer"
 description: Submit an answer to close a needs-human escalation for the given change
 category: Workflow
 tags: [workflow, answer, needs-human, worker, phase-4]
@@ -23,7 +23,7 @@ returning the change to the phase it was in before being escalated.
 
    Extract `changeId` and `answer` from `$ARGUMENTS`. If either is
    missing or empty, STOP and report:
-   `Usage: /opsx:answer <change-id> "<answer>"`
+   `Usage: /ithy-opsx:answer <change-id> "<answer>"`
 
 2. **POST the answer**
 

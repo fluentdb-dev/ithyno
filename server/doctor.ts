@@ -11,6 +11,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { checkIthyOpsxInstall, type IthyOpsxDoctor } from "./install-skills.js";
+
 // ---------------------------------------------------------------------------
 // Types (exported — used by server/index.ts and external callers)
 // ---------------------------------------------------------------------------
@@ -52,6 +54,10 @@ export type DoctorReport = {
   agmsg: CliStatus;
   /** true when at least one agent CLI has installed === true */
   readyForManager: boolean;
+  /** Install state of the bundled ithy-opsx slash-commands + skills under
+   *  ~/.claude. Separate from readyForManager — Manager PTY starts
+   *  regardless. See install-skills.ts. */
+  ithyOpsx: IthyOpsxDoctor;
   /** ISO timestamp of when the check was performed */
   checkedAt: string;
 };
@@ -212,10 +218,11 @@ function checkAgmsg(): CliStatus {
 export async function runDoctor(): Promise<DoctorReport> {
   const agentDefs = AGENT_CLIS;
 
-  // Run all agent CLI checks + tmux in parallel
-  const [agentResults, tmuxResult] = await Promise.all([
+  // Run all agent CLI checks + tmux + ithy-opsx install snapshot in parallel
+  const [agentResults, tmuxResult, ithyOpsxResult] = await Promise.all([
     Promise.all(agentDefs.map((def) => checkCommand(def.cmd, def.versionArg))),
     checkCommand("tmux", "-V"),
+    checkIthyOpsxInstall(),
   ]);
 
   const agents: Record<Cli, CliStatus> = {} as Record<Cli, CliStatus>;
@@ -236,6 +243,7 @@ export async function runDoctor(): Promise<DoctorReport> {
     tmux: tmuxResult,
     agmsg: agmsgResult,
     readyForManager,
+    ithyOpsx: ithyOpsxResult,
     checkedAt: new Date().toISOString(),
   };
 }

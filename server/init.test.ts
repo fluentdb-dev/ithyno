@@ -228,6 +228,15 @@ function makeReport(overrides: Partial<Record<string, boolean>> = {}): DoctorRep
     ) as DoctorReport["agents"],
     tmux: { installed: false },
     agmsg: { installed: false },
+    ithyOpsx: {
+      installed: false,
+      installedVersion: null,
+      bundledVersion: "0.0.0-test",
+      commandCount: 0,
+      skillCount: 0,
+      userModifiedFiles: [],
+      installError: null,
+    },
     checkedAt: new Date().toISOString(),
   };
 }

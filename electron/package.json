@@ -64,6 +64,15 @@
         "to": "app/vendor/agmsg"
       },
       {
+        "from": "../.claude/commands/ithy-opsx",
+        "to": "app/.claude/commands/ithy-opsx"
+      },
+      {
+        "from": "../.claude/skills",
+        "to": "app/.claude/skills",
+        "filter": ["ithy-opsx-*/**"]
+      },
+      {
         "from": "../LICENSE",
         "to": "app/LICENSE"
       }

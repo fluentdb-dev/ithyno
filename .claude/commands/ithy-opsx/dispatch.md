@@ -173,7 +173,7 @@ For each stage `S ∈ {code, review, verify}`:
          *)           AGMSG_TYPE="" ;;
        esac
        if [ -z "$AGMSG_TYPE" ]; then
-         /opsx:escalate <change-id> "agmsg-type unknown for command: $entry_command"
+         /ithy-opsx:escalate <change-id> "agmsg-type unknown for command: $entry_command"
          exit
        fi
        # Extract --model <id> from entry.args and thread it to spawn.
@@ -188,7 +188,7 @@ For each stage `S ∈ {code, review, verify}`:
            j=$((i+1))
            next="${entry_args[$j]:-}"
            if [ $j -ge $n ] || [ -z "$next" ] || [[ "$next" == --* ]]; then
-             /opsx:escalate <change-id> "agents.yaml agent \"$entry_name\" has bare --model without a value in args"
+             /ithy-opsx:escalate <change-id> "agents.yaml agent \"$entry_name\" has bare --model without a value in args"
              exit
            fi
            MODEL_ARG="--model $next"
@@ -395,7 +395,7 @@ while [ $ELAPSED -lt $CEILING ]; do
   fi
 done
 if [ $RECEIVED -eq 0 ]; then
-  /opsx:escalate <change-id> "<stage> agmsg worker did not report within timeout"
+  /ithy-opsx:escalate <change-id> "<stage> agmsg worker did not report within timeout"
   exit
 fi
 ```
@@ -506,7 +506,7 @@ a message naming the leaked resource only after step 3 fails.
    Parse the response's `phase` field:
    - `done` → exit: `Change already at phase: done — nothing to do.`
    - `needs-human` → exit: `Change is in needs-human — user must
-     answer via /opsx:answer <id> "<answer>" before dispatcher can
+     answer via /ithy-opsx:answer <id> "<answer>" before dispatcher can
      proceed.`
    - `proposed` or `null` — enter loop from step 6 (code first)
    - `coded` — enter loop from step 7 (review first)
@@ -548,7 +548,7 @@ a message naming the leaked resource only after step 3 fails.
      if [ -n "$HELD" ] && [ -d ".worktrees/$HELD" ]; then
        # Lock held by another live change → escalate.
        if [ "$HELD" != "<change-id>" ]; then
-         /opsx:escalate <change-id> "Another change ($HELD) is currently running. Merge or discard it before starting another."
+         /ithy-opsx:escalate <change-id> "Another change ($HELD) is currently running. Merge or discard it before starting another."
          exit
        fi
        # Lock held by this same change → we're re-entering (attach path).
@@ -636,7 +636,7 @@ a message naming the leaked resource only after step 3 fails.
    ```
    iteration += 1
    if iteration > MAX_REWORK_ROUNDS:
-     /opsx:escalate <change-id> "Dispatch loop did not converge after MAX_REWORK_ROUNDS iterations. Latest review findings: <priorFindings>"
+     /ithy-opsx:escalate <change-id> "Dispatch loop did not converge after MAX_REWORK_ROUNDS iterations. Latest review findings: <priorFindings>"
      exit
    ```
 
@@ -748,7 +748,7 @@ a message naming the leaked resource only after step 3 fails.
 - **One phase update per stage**: only call `POST /api/changes/:id/phase`
   after the corresponding worker returned success AND the review /
   verify verdict is `pass`. Do NOT set `phase: needs-human` from the
-  dispatcher — that's `/opsx:escalate`'s job.
+  dispatcher — that's `/ithy-opsx:escalate`'s job.
 
 - **Do NOT modify code from the dispatcher session**. All code changes
   happen inside dispatched worker invocations (Task tool subagent OR
@@ -783,7 +783,7 @@ a message naming the leaked resource only after step 3 fails.
   `coded` skips to review; at `reviewed` skips to verify.
 
 - **Semaphore release on every exit path** (`parallelExecution=false`
-  only). Before invoking `/opsx:escalate` from ANY stage — code stage
+  only). Before invoking `/ithy-opsx:escalate` from ANY stage — code stage
   failure, review contract failure, verify failure, MAX_ITERATIONS
   cap — release the lock if this dispatcher holds it:
 
