@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
+import { WorkerStateIndicator, type LaneContext } from "./WorkerStateIndicator";
 import type { Change, JobSummary } from "../types";
 import { hasNonVerifyWork } from "../util/changeState";
 
@@ -40,6 +41,7 @@ export function slotForChange(change: Change): CardSlot {
 export function KanbanCard({
   change,
   job,
+  laneContext = "board",
   onStart,
   onArchive,
   onMerge,
@@ -47,6 +49,9 @@ export function KanbanCard({
 }: {
   change: Change;
   job?: JobSummary;
+  /** Which board placed this card. Only affects the idle (no-job) branch of
+   *  the worker-state indicator — see `WorkerStateIndicator`. */
+  laneContext?: LaneContext;
   onStart: () => void;
   onArchive: () => void;
   onMerge: (job: JobSummary) => void;
@@ -91,7 +96,7 @@ export function KanbanCard({
         <div className="kanban-card-head">
           <h4>{change.id}</h4>
           {showReadyDot && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
-          <AgentBadge job={job} />
+          <WorkerStateIndicator job={job} laneContext={laneContext} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
         </div>
@@ -192,37 +197,12 @@ export function KanbanCard({
   );
 }
 
-function AgentBadge({ job }: { job?: JobSummary }) {
-  if (!job) return null;
-  if (job.status === "running") {
-    return (
-      <span className="agent-badge running" title={`Agent ${job.agentName} running`}>
-        <span className="agent-pulse" /> {job.agentName}
-      </span>
-    );
-  }
-  if (job.status === "completed") {
-    return (
-      <span className="agent-badge ok" title="Ready to merge">
-        ✓ ready
-      </span>
-    );
-  }
-  if (job.status === "cancelled") {
-    return <span className="agent-badge muted">cancelled</span>;
-  }
-  if (job.status === "orphaned") {
-    return (
-      <span
-        className="agent-badge orphaned"
-        title="Worktree adopted from disk (no process in this server lifetime) — Merge or Discard"
-      >
-        orphaned
-      </span>
-    );
-  }
-  return <span className="agent-badge fail" title={`exit ${job.exitCode ?? "?"}`}>✗ failed</span>;
-}
+// `AgentBadge` was superseded by `<WorkerStateIndicator>`
+// (annotate-cards-with-worker-job-state): the badge only named the agent,
+// the indicator reports what the worker is doing (pulse + elapsed / done /
+// crashed / queued). The `.agent-badge` / `.agent-pulse` rules are left in
+// `styles.css` (no other consumer today, but harmless) — only the
+// card-local component was removed.
 
 function isMergeable(job: JobSummary): boolean {
   return (

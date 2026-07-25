@@ -70,6 +70,15 @@ export function useKanbanActions(): KanbanCardHandlers {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const { startImplementation, startFlowModals } = useStartFlow();
 
+  // annotate-cards-with-worker-job-state (task 1.1): finished jobs are NOT
+  // evicted here. `store.setJobFinished` only flips `status` + stamps
+  // `finishedAt`, and the entry survives in `s.jobs` until the server emits
+  // `agent-job-removed` (external worktree discard) or the page reloads. So
+  // the 30 s post-finish retention the spec requires is already satisfied —
+  // no client-side grace timer is needed, and adding an eviction here would
+  // regress the Merge / View diff / Discard affordances, which read the same
+  // map. The transient-ness of the "done" checkmark is instead enforced by
+  // `WorkerStateIndicator`'s DONE_GRACE_MS window at render time.
   const jobByChange = useMemo(() => {
     const m = new Map<string, JobSummary>();
     for (const j of Object.values(jobs)) {

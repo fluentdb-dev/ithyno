@@ -101,6 +101,7 @@ export function PhaseLaneBoard({
       key={c.id}
       change={c}
       job={jobByChange.get(c.id)}
+      laneContext="phase"
       onStart={() => onStart(c)}
       onArchive={() => onArchive(c)}
       onMerge={(j) => onMerge(c, j)}
