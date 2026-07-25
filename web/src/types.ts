@@ -393,27 +393,12 @@ export type CliStatus = {
   error?: string;
 };
 
-/** Bundled ithy-opsx skill install snapshot, part of DoctorReport.
- *  Landed by unify-ithyno-slash-command-surface. */
-export type IthyOpsxDoctor = {
-  installed: boolean;
-  installedVersion: string | null;
-  bundledVersion: string;
-  commandCount: number;
-  skillCount: number;
-  userModifiedFiles: string[];
-  installError: string | null;
-};
-
 /** Response from GET /api/doctor (add-doctor-and-installer). */
 export type DoctorReport = {
   agents: Record<Cli, CliStatus>;
   tmux: CliStatus;
   agmsg: CliStatus;
   readyForManager: boolean;
-  /** Install state of the bundled ithy-opsx skills under ~/.claude.
-   *  Separate from readyForManager. */
-  ithyOpsx: IthyOpsxDoctor;
   checkedAt: string;
 };
 

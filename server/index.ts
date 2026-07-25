@@ -39,7 +39,6 @@ import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js
 import { getAboutInfo } from "./about.js";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
-import { installIthyOpsxSkills, uninstallIthyOpsxSkills } from "./install-skills.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -563,47 +562,6 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       resolveProm();
     });
   });
-});
-
-// POST /api/doctor/install/ithy-opsx — install or reinstall the bundled
-// ithy-opsx slash-commands + skills into ~/.claude. Session-token gated.
-// Landed by unify-ithyno-slash-command-surface.
-type IthyOpsxInstallBody = { force?: unknown };
-fastify.post<{ Body: IthyOpsxInstallBody }>("/api/doctor/install/ithy-opsx", async (req, reply) => {
-  const token = extractToken({
-    headers: req.headers as Record<string, string | string[] | undefined>,
-    url: req.url,
-  });
-  if (!token || !verifyToken(token)) {
-    return reply.code(401).send({ error: "auth required" });
-  }
-  const force = req.body?.force === true;
-  try {
-    const report = await installIthyOpsxSkills({ force });
-    void runDoctor().then((r) => broadcast({ type: "doctor-updated", report: r }));
-    return report;
-  } catch (err) {
-    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-// POST /api/doctor/uninstall/ithy-opsx — remove every file the installer
-// placed, per the manifest. Session-token gated.
-fastify.post("/api/doctor/uninstall/ithy-opsx", async (req, reply) => {
-  const token = extractToken({
-    headers: req.headers as Record<string, string | string[] | undefined>,
-    url: req.url,
-  });
-  if (!token || !verifyToken(token)) {
-    return reply.code(401).send({ error: "auth required" });
-  }
-  try {
-    const report = await uninstallIthyOpsxSkills();
-    void runDoctor().then((r) => broadcast({ type: "doctor-updated", report: r }));
-    return report;
-  } catch (err) {
-    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
-  }
 });
 
 // Dedicated lightweight token-validity check so the UI can detect a stale
@@ -1656,31 +1614,6 @@ try {
     // way, the current state is "no lock held" — nothing to log unless
     // we actually removed something. cleanupStaleLock does not
     // currently report which case; if we care, extend the return type.
-  }
-
-  // Install the bundled ithy-opsx slash-commands + skills into ~/.claude so
-  // any Claude Code session — including the Manager PTY running in the
-  // user's project cwd — resolves /ithy-opsx:*. Non-fatal on failure;
-  // Doctor surfaces the state. See unify-ithyno-slash-command-surface.
-  try {
-    const rep = await installIthyOpsxSkills();
-    const total = rep.installed + rep.updated;
-    if (rep.errors.length > 0) {
-      console.error(`[install-skills] ${rep.errors.length} error(s): ${rep.errors.join("; ")}`);
-    }
-    if (total > 0) {
-      console.log(
-        `[install-skills] copied ${rep.installed} new, updated ${rep.updated}, skipped ${rep.userModified} (user-modified), removed ${rep.removed} → ~/.claude`,
-      );
-    } else if (rep.userModified > 0) {
-      console.log(
-        `[install-skills] up to date (version ${rep.manifest.installedVersion}); ${rep.userModified} user-modified preserved`,
-      );
-    } else {
-      console.log(`[install-skills] up to date (version ${rep.manifest.installedVersion})`);
-    }
-  } catch (err) {
-    console.error(`[install-skills] install failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   await fastify.listen({ port: PORT, host: "127.0.0.1" });

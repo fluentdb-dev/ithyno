@@ -19,9 +19,7 @@
     "server",
     "templates",
     "web/dist",
-    "tsconfig.json",
-    ".claude/commands/ithy-opsx",
-    ".claude/skills/ithy-opsx-*/**"
+    "tsconfig.json"
   ],
   "workspaces": [
     "electron",

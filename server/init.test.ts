@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
@@ -207,6 +207,84 @@ describe("template drift guard", () => {
   });
 });
 
+describe("ithy-opsx template drift guard", () => {
+  // distribute-ithy-opsx-via-init-templates: the ithy-opsx surface
+  // ships via Init (templates/.claude/…), and this repo's own
+  // .claude/ copy IS the dev-copy that the templates mirror.
+  // Byte-identity between the two prevents drift landing in a PR
+  // that only edits one side. On failure, the message names the
+  // specific pair so the fix is one grep away.
+  const repoRoot = process.cwd();
+
+  async function walk(dir: string): Promise<string[]> {
+    const out: string[] = [];
+    async function inner(cur: string) {
+      for (const ent of await readdir(cur, { withFileTypes: true })) {
+        const p = join(cur, ent.name);
+        if (ent.isDirectory()) await inner(p);
+        else if (ent.isFile()) out.push(p);
+      }
+    }
+    await inner(dir);
+    return out.sort();
+  }
+
+  it("every .claude/commands/ithy-opsx/*.md file is byte-identical to templates/.claude/commands/ithy-opsx/*.md", async () => {
+    const devDir = join(repoRoot, ".claude/commands/ithy-opsx");
+    const tmplDir = join(repoRoot, "templates/.claude/commands/ithy-opsx");
+    const files = await walk(devDir);
+    expect(files.length).toBeGreaterThan(0);
+    for (const dev of files) {
+      const rel = dev.slice(devDir.length + 1);
+      const tmpl = join(tmplDir, rel);
+      const [devBuf, tmplBuf] = await Promise.all([
+        readFile(dev),
+        readFile(tmpl).catch((e) => {
+          throw new Error(
+            `template missing for ${rel} (expected at templates/.claude/commands/ithy-opsx/${rel}): ${(e as Error).message}`,
+          );
+        }),
+      ]);
+      if (!devBuf.equals(tmplBuf)) {
+        throw new Error(
+          `drift: .claude/commands/ithy-opsx/${rel} differs from templates/.claude/commands/ithy-opsx/${rel}`,
+        );
+      }
+    }
+  });
+
+  it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {
+    const devSkillsRoot = join(repoRoot, ".claude/skills");
+    const tmplSkillsRoot = join(repoRoot, "templates/.claude/skills");
+    const skills = (
+      await readdir(devSkillsRoot, { withFileTypes: true })
+    ).filter((e) => e.isDirectory() && e.name.startsWith("ithy-opsx-"));
+    expect(skills.length).toBeGreaterThan(0);
+    for (const skill of skills) {
+      const devDir = join(devSkillsRoot, skill.name);
+      const tmplDir = join(tmplSkillsRoot, skill.name);
+      const files = await walk(devDir);
+      for (const dev of files) {
+        const rel = dev.slice(devDir.length + 1);
+        const tmpl = join(tmplDir, rel);
+        const [devBuf, tmplBuf] = await Promise.all([
+          readFile(dev),
+          readFile(tmpl).catch((e) => {
+            throw new Error(
+              `template missing for ${skill.name}/${rel} (expected at templates/.claude/skills/${skill.name}/${rel}): ${(e as Error).message}`,
+            );
+          }),
+        ]);
+        if (!devBuf.equals(tmplBuf)) {
+          throw new Error(
+            `drift: .claude/skills/${skill.name}/${rel} differs from templates/.claude/skills/${skill.name}/${rel}`,
+          );
+        }
+      }
+    }
+  });
+});
+
 // ---- expand-init-to-scaffold-agents: doctor gate + agents.yaml write -------
 
 /** Minimal DoctorReport fixture with only claude installed. */
@@ -228,15 +306,6 @@ function makeReport(overrides: Partial<Record<string, boolean>> = {}): DoctorRep
     ) as DoctorReport["agents"],
     tmux: { installed: false },
     agmsg: { installed: false },
-    ithyOpsx: {
-      installed: false,
-      installedVersion: null,
-      bundledVersion: "0.0.0-test",
-      commandCount: 0,
-      skillCount: 0,
-      userModifiedFiles: [],
-      installError: null,
-    },
     checkedAt: new Date().toISOString(),
   };
 }

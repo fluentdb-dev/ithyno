@@ -57,33 +57,6 @@ program
     child.on("exit", (code) => process.exit(code ?? 1));
   });
 
-// `install-skills` / `uninstall-skills` subcommands
-// (unify-ithyno-slash-command-surface). Manage the bundled `/ithy-opsx:*`
-// commands and skills under `~/.claude/` for headless / scripted setups.
-function runSkillsSubcommand(mode, force) {
-  const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
-  const runner = resolve(pkgRoot, "bin", "_install-skills-runner.ts");
-  const args = [tsxCli, runner, mode];
-  if (force) args.push("--force");
-  const child = spawn(process.execPath, args, { stdio: "inherit" });
-  child.on("exit", (code) => process.exit(code ?? 1));
-}
-
-program
-  .command("install-skills")
-  .description(
-    "Copy the bundled ithy-opsx commands and skills into ~/.claude (idempotent).",
-  )
-  .option("-f, --force", "reinstall even if the manifest is up to date")
-  .action((opts) => runSkillsSubcommand("install", !!opts.force));
-
-program
-  .command("uninstall-skills")
-  .description(
-    "Remove ithy-opsx files previously installed by ithyno (per manifest).",
-  )
-  .action(() => runSkillsSubcommand("uninstall", false));
-
 // Default action: start the dashboard.
 program
   .option("-p, --port <number>", "port to listen on", "4321")

@@ -1,5 +1,28 @@
 # Outcome — unify-ithyno-slash-command-surface
 
+> ⚠️ **Distribution decision superseded (2026-07-25)** by
+> [`distribute-ithy-opsx-via-init-templates`](../distribute-ithy-opsx-via-init-templates/proposal.md).
+> The user-global install path this change added (sha256 manifest under
+> `~/.claude/`, HTTP install/uninstall endpoints, Doctor `ithyOpsx` field,
+> Settings row, `ithyno install-skills`/`uninstall-skills` subcommands,
+> non-template npm `files` + electron `extraResources` entries) is being
+> removed. Distribution now goes via Init scaffolding
+> (`templates/.claude/commands/ithy-opsx/` +
+> `templates/.claude/skills/ithy-opsx-*/`), mirrored to the dev-copy under
+> the same paths and byte-identity-guarded by a Vitest.
+>
+> Reasons: the dev repo is also a consumer; the manifest fast-path never
+> observed local edits so drift was structural; `resolveBundledSkillsRoot()`
+> resolved from module dir meant a server started in a worktree could
+> overwrite user config from an unmerged branch; putting ithyno-tied
+> `/ithy-opsx:*` into a user's global shell contradicted the namespace's
+> project-scoped charter defined in `redesign-skill-namespace-and-dispatch`.
+>
+> The consolidation this change made — one namespace exclusively under
+> `/ithy-opsx:*`, with the three renames + shadow-duplicate deletion — is
+> unaffected and remains load-bearing. The ✅ Worked / ⚠️ Surprises entries
+> tagged "installer" below are historical.
+
 Landed 2026-07-24. Consolidates ithyno's Claude Code slash-command surface exclusively under `/ithy-opsx:*` and makes it a proper distributable/installable skill pack, replacing the earlier split between ithyno's `/opsx:*` additions and its `/ithy-opsx:*` orchestration commands.
 
 ## ✅ Worked
