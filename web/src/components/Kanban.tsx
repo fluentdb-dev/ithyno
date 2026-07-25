@@ -95,6 +95,7 @@ export function KanbanBoard({
       key={c.id}
       change={c}
       job={jobByChange.get(c.id)}
+      laneContext="board"
       onStart={() => onStart(c)}
       onArchive={() => onArchive(c)}
       onMerge={(j) => onMerge(c, j)}

@@ -1361,8 +1361,89 @@ a.modal-btn:hover {
 @keyframes spinner-rot {
   to { transform: rotate(360deg); }
 }
+
+/* Worker-state indicator (kanban card) — annotate-cards-with-worker-job-state.
+   Replaces the card-local AgentBadge; reports what the dispatched worker is
+   doing right now in BOTH the Board and Phase views. */
+.worker-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.worker-state-running {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.worker-state-completed {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+  color: var(--green);
+}
+.worker-state-crashed,
+.worker-state-orphaned {
+  background: color-mix(in oklab, var(--danger) 18%, transparent);
+  color: var(--red);
+}
+.worker-state-queued {
+  background: transparent;
+  opacity: 0.7;
+}
+
+.worker-state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.worker-state-dot.running {
+  background: var(--accent);
+  animation: workerpulse 1.5s ease-in-out infinite;
+}
+.worker-state-dot.completed {
+  background: var(--success);
+}
+.worker-state-dot.cancelled {
+  background: var(--muted);
+}
+.worker-state-dot.crashed,
+.worker-state-dot.orphaned {
+  background: var(--red);
+}
+.worker-state-dot.queued {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.worker-state-glyph {
+  line-height: 1;
+}
+.worker-state-elapsed {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.worker-state-running .worker-state-elapsed {
+  color: inherit;
+  opacity: 0.8;
+}
+@keyframes workerpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mgr-activity-icon.spinner { animation-duration: 3s; }
+  .worker-state-dot.running { animation: none; }
 }
 
 /* Agents page */
