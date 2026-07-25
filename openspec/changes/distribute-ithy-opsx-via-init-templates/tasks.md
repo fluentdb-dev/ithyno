@@ -4,7 +4,7 @@
 
 - [ ] 1.1 Copy every file under `.claude/commands/ithy-opsx/` into `templates/.claude/commands/ithy-opsx/`. 11 files (`answer.md`, `apply.md`, `archive.md`, `dispatch.md`, `dispatch-multi.md`, `escalate.md`, `import.md`, `merge.md`, `review.md`, `revert.md`, `verify.md`).
 - [ ] 1.2 Copy every `.claude/skills/ithy-opsx-*/` directory into `templates/.claude/skills/`. 6 dirs (`ithy-opsx-apply`, `ithy-opsx-archive`, `ithy-opsx-dispatch-multi`, `ithy-opsx-import`, `ithy-opsx-merge`, `ithy-opsx-revert`).
-- [ ] 1.3 Confirm `bin/init.js`'s `walkTemplates` picks the new files up without code changes. The existing walk is generic; no edit expected. Add a comment in `bin/init.js` naming ithy-opsx as one of the scaffold targets so a future reader knows why those templates exist.
+- [x] 1.3 Confirm `bin/init.js`'s `walkTemplates` picks the new files up without code changes. The existing walk is generic; no edit expected. Add a comment in `bin/init.js` naming ithy-opsx as one of the scaffold targets so a future reader knows why those templates exist. (Comment landed in the header block near `PACKAGE_ROOT`; naming both `openspec-flow` and `ithy-opsx-*` for symmetry.)
 
 ## 2. Drift guard
 
