@@ -2,6 +2,7 @@
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
+import { ManagerActivityBadge } from "./ManagerActivityBadge";
 import { TagChipList } from "./TagChip";
 import type { Change, JobSummary } from "../types";
 import { hasNonVerifyWork } from "../util/changeState";
@@ -66,6 +67,11 @@ export function KanbanCard({
     !!worktreeProgress && (!job || job.status !== "cancelled");
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
 
+  // Manager's own orchestration state for this change (in-memory, WS-driven).
+  // Renders as a secondary badge alongside the job's AgentBadge.
+  // Landed by expose-manager-activity-per-change.
+  const managerActivity = useStore((s) => s.managerActivity[change.id]);
+
   const slot = slotForChange(change);
   const showReadyDot = slot === "done";
 
@@ -103,6 +109,7 @@ export function KanbanCard({
           </span>
         )}
       </Link>
+      <ManagerActivityBadge activity={managerActivity} />
       {change.proposal?.tags && change.proposal.tags.length > 0 && (
         <div className="kanban-card-tags">
           <TagChipList tags={change.proposal.tags} small />

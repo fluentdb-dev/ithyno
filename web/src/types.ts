@@ -338,6 +338,43 @@ export type DiffPayload = {
   files: DiffFile[];
 };
 
+// ---- Manager activity (expose-manager-activity-per-change) ----------------
+
+/** The dispatch stage the Manager is orchestrating. Mirrors
+ *  `server/manager-activity.ts`. */
+export type ManagerStage = "code" | "review" | "verify";
+
+/** What the Manager is doing within that stage. `idle` is never stored —
+ *  posting it clears the entry — so a `ManagerActivity` in the store is
+ *  always one of the five renderable values. */
+export type ManagerActivityKind =
+  | "dispatching"
+  | "waiting"
+  | "judging"
+  | "cleanup"
+  | "transitioning"
+  | "idle";
+
+/** Per-change Manager orchestration state. In-memory server-side: a server
+ *  restart clears every entry (there is deliberately no persistence). */
+export type ManagerActivity = {
+  changeId: string;
+  stage: ManagerStage;
+  activity: ManagerActivityKind;
+  /** epoch ms — when this activity became current. Drives the elapsed suffix. */
+  startedAt: number;
+  /** Short hint: worker name for `waiting`, step name for `cleanup`, … */
+  detail?: string;
+};
+
+/** Payload for the `manager-activity-updated` server WS event.
+ *  `activity: null` means the entry was cleared. */
+export type ManagerActivityUpdatedEvent = {
+  type: "manager-activity-updated";
+  changeId: string;
+  activity: ManagerActivity | null;
+};
+
 // ---- import-completed WS event (enable-import-both-patterns) ---------------
 
 /** Payload for the `import-completed` server WS event. */

@@ -13,6 +13,7 @@ import type {
   GitStatus,
   Job,
   JobSummary,
+  ManagerActivity,
   ManagerStatus,
   TagDetail,
   TagIndex,
@@ -246,6 +247,22 @@ export async function fetchAgentConfig(): Promise<AgentConfigResponse> {
 export async function fetchManagerStatus(): Promise<ManagerStatus> {
   const res = await fetch("/api/manager/status");
   if (!res.ok) throw new Error(`GET /api/manager/status failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Bulk snapshot of per-change Manager activity (expose-manager-activity-per-change).
+ *
+ * Session-token gated (the endpoint is written only by the dispatch skill).
+ * The state is in-memory server-side, so this legitimately returns `{}` right
+ * after a server restart — callers must treat "empty" as normal, not an error.
+ */
+export async function fetchManagerActivities(): Promise<Record<string, ManagerActivity>> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Session-Token"] = token;
+  const res = await fetch("/api/manager/activity", { headers });
+  if (!res.ok) throw new Error(`GET /api/manager/activity failed: ${res.status}`);
   return res.json();
 }
 

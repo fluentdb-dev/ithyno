@@ -40,6 +40,12 @@ import { getAboutInfo } from "./about.js";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
 import { installIthyOpsxSkills, uninstallIthyOpsxSkills } from "./install-skills.js";
+import {
+  getAllManagerActivities,
+  parseManagerActivityBody,
+  setManagerActivity,
+  type ManagerActivity,
+} from "./manager-activity.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -135,7 +141,10 @@ type ServerEvent =
       agmsg: import("./agents/registry.js").AgmsgConfig | null;
       warnings: string[];
     }
-  | { type: "doctor-updated"; report: DoctorReport };
+  | { type: "doctor-updated"; report: DoctorReport }
+  // expose-manager-activity-per-change: `activity: null` means the entry was
+  // cleared (the Manager posted `idle` for that change).
+  | { type: "manager-activity-updated"; changeId: string; activity: ManagerActivity | null };
 
 function broadcast(event: ServerEvent): void {
   const payload = JSON.stringify(event);
@@ -618,6 +627,46 @@ fastify.get("/api/auth/check", async (req, reply) => {
     return reply.code(401).send({ error: "auth required" });
   }
   return { ok: true };
+});
+
+// ---- Manager activity (expose-manager-activity-per-change) -----------------
+// In-memory, per-change record of what the Manager (the /ithy-opsx:dispatch
+// orchestrator) is currently doing. Written ONLY by the dispatch skill from
+// the Manager PTY, which is why both endpoints are session-token gated rather
+// than open like /api/state. Nothing here is persisted: a server restart
+// legitimately returns {} and the skill re-posts as it re-enters its loop.
+
+// POST /api/manager/activity — set (or clear, when `activity: "idle"`) the
+// activity for one change, then broadcast the new value to every dashboard.
+fastify.post("/api/manager/activity", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  const parsed = parseManagerActivityBody(req.body);
+  if (!parsed.ok) {
+    return reply.code(400).send({ error: parsed.error });
+  }
+  // setManagerActivity returns the stored record, or null when the write was
+  // an idle-clear — that return value IS the broadcast payload.
+  const activity = setManagerActivity(parsed.value);
+  broadcast({ type: "manager-activity-updated", changeId: parsed.value.changeId, activity });
+  return { ok: true, activity };
+});
+
+// GET /api/manager/activity — bulk snapshot for client bootstrap / reconnect.
+fastify.get("/api/manager/activity", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  return getAllManagerActivities();
 });
 
 fastify.get("/api/state", async () => {

@@ -45,6 +45,15 @@ The skill covers:
    next queued id and spawn its code stage.
 8. **Termination** — end when every id is `done` or `escalated`.
    Report per-id summary.
+9. **Manager activity publication** — post to
+   `POST /api/manager/activity` at every per-change boundary
+   (`dispatching` → `waiting` → `judging` → `cleanup` →
+   `transitioning` → `idle`) so each Kanban card shows what Manager
+   is doing for THAT change. Every post carries its own `changeId`;
+   parallel dispatches never share a badge. Requires
+   `ITHYNO_SESSION_TOKEN` (exported into the Manager PTY by the
+   ithyno server); best-effort — a missing token never blocks
+   dispatch. Landed by expose-manager-activity-per-change.
 
 Do not skip steps. Respect `MAX_ITERATIONS = 5` per change.
 Escalation of one change does NOT stop the others.

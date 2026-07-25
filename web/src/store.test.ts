@@ -8,7 +8,11 @@
  */
 import { describe, it, expect } from "vitest";
 import type { ImportedProjectNotification } from "./store";
-import type { ImportCompletedEvent } from "./types";
+import type {
+  ImportCompletedEvent,
+  ManagerActivity,
+  ManagerActivityUpdatedEvent,
+} from "./types";
 
 // ---- Route logic (extracted from store for unit-testability) ---------------
 
@@ -105,5 +109,135 @@ describe("import-completed WS message routing", () => {
     state = handleImportCompleted(ev, state);
     expect(state.importedProjectNotifications).toHaveLength(1);
     expect(state.stateLoadTriggered).toBe(true);
+  });
+});
+
+// ---- manager-activity-updated routing (expose-manager-activity-per-change) --
+//
+// Mirrors the store's `setManagerActivity` reducer + the WS branch that feeds
+// it. Same shape as the import-completed tests above: the routing logic is
+// exercised in isolation rather than by mounting React (the vitest run is
+// node-environment).
+
+type ManagerActivityState = { managerActivity: Record<string, ManagerActivity> };
+
+function setManagerActivity(
+  state: ManagerActivityState,
+  changeId: string,
+  activity: ManagerActivity | null,
+): ManagerActivityState {
+  if (activity === null) {
+    if (!(changeId in state.managerActivity)) return state;
+    const { [changeId]: _drop, ...rest } = state.managerActivity;
+    return { managerActivity: rest };
+  }
+  return { managerActivity: { ...state.managerActivity, [changeId]: activity } };
+}
+
+function handleManagerActivityUpdated(
+  ev: ManagerActivityUpdatedEvent,
+  state: ManagerActivityState,
+): ManagerActivityState {
+  return setManagerActivity(state, ev.changeId, ev.activity ?? null);
+}
+
+function mkActivity(partial: Partial<ManagerActivity> = {}): ManagerActivity {
+  return {
+    changeId: "x",
+    stage: "code",
+    activity: "waiting",
+    startedAt: 1_000,
+    ...partial,
+  };
+}
+
+describe("manager-activity-updated WS message routing", () => {
+  const empty: ManagerActivityState = { managerActivity: {} };
+
+  it("stores the activity under its changeId", () => {
+    const activity = mkActivity({ detail: "claude" });
+    const next = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "x", activity },
+      { ...empty },
+    );
+    expect(next.managerActivity.x).toEqual(activity);
+  });
+
+  it("a later event for the same change replaces the entry", () => {
+    let state: ManagerActivityState = { ...empty };
+    state = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "x", activity: mkActivity() },
+      state,
+    );
+    state = handleManagerActivityUpdated(
+      {
+        type: "manager-activity-updated",
+        changeId: "x",
+        activity: mkActivity({ activity: "judging", startedAt: 2_000 }),
+      },
+      state,
+    );
+    expect(Object.keys(state.managerActivity)).toEqual(["x"]);
+    expect(state.managerActivity.x.activity).toBe("judging");
+    expect(state.managerActivity.x.startedAt).toBe(2_000);
+  });
+
+  it("null activity clears the entry", () => {
+    let state = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "x", activity: mkActivity() },
+      { ...empty },
+    );
+    state = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "x", activity: null },
+      state,
+    );
+    expect(state.managerActivity).toEqual({});
+  });
+
+  it("null activity for an unknown change is a no-op", () => {
+    const state = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "never-seen", activity: null },
+      { ...empty },
+    );
+    expect(state.managerActivity).toEqual({});
+  });
+
+  it("multiple changes coexist and clear independently", () => {
+    let state: ManagerActivityState = { ...empty };
+    state = handleManagerActivityUpdated(
+      {
+        type: "manager-activity-updated",
+        changeId: "X",
+        activity: mkActivity({ changeId: "X", activity: "waiting", detail: "claude" }),
+      },
+      state,
+    );
+    state = handleManagerActivityUpdated(
+      {
+        type: "manager-activity-updated",
+        changeId: "Y",
+        activity: mkActivity({ changeId: "Y", stage: "review", activity: "judging" }),
+      },
+      state,
+    );
+    expect(Object.keys(state.managerActivity).sort()).toEqual(["X", "Y"]);
+    expect(state.managerActivity.X.activity).toBe("waiting");
+    expect(state.managerActivity.Y.stage).toBe("review");
+
+    state = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "X", activity: null },
+      state,
+    );
+    expect(Object.keys(state.managerActivity)).toEqual(["Y"]);
+  });
+
+  it("does not mutate the previous state object (zustand immutability)", () => {
+    const before: ManagerActivityState = { managerActivity: {} };
+    const after = handleManagerActivityUpdated(
+      { type: "manager-activity-updated", changeId: "x", activity: mkActivity() },
+      before,
+    );
+    expect(before.managerActivity).toEqual({});
+    expect(after).not.toBe(before);
   });
 });

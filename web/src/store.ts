@@ -8,6 +8,7 @@ import {
   fetchAgentConfig,
   fetchAgentJobs,
   fetchManagerStatus,
+  fetchManagerActivities,
   fetchGitConfig,
   fetchGitStatus,
   fetchDoctorReport,
@@ -27,6 +28,7 @@ import type {
   ImportCompletedEvent,
   JobStatus,
   JobSummary,
+  ManagerActivity,
   ManagerStatus,
   OutputLine,
   Progress,
@@ -115,6 +117,12 @@ type Store = {
    *  Landed by add-agents-tab-manager-section. */
   managerStatus: ManagerStatus | null;
   managerStatusError: string | null;
+  /** Per-change Manager orchestration activity, keyed by changeId
+   *  (expose-manager-activity-per-change). Populated by the
+   *  `manager-activity-updated` WS event plus a bootstrap fetch on load.
+   *  Server-side state is in-memory only — after a server restart this
+   *  legitimately resets to `{}`. */
+  managerActivity: Record<string, ManagerActivity>;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
   /** Per-change live progress derived from the running job's worktree
@@ -162,6 +170,8 @@ type Store = {
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
   loadManagerStatus: () => Promise<void>;
+  loadManagerActivities: () => Promise<void>;
+  setManagerActivity: (changeId: string, activity: ManagerActivity | null) => void;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -287,6 +297,7 @@ export const useStore = create<Store>((set, get) => ({
   agmsg: null,
   managerStatus: null,
   managerStatusError: null,
+  managerActivity: {},
   jobs: {},
   jobOutputs: {},
   worktreeProgress: {},
@@ -318,6 +329,29 @@ export const useStore = create<Store>((set, get) => ({
       set({ managerStatusError: err instanceof Error ? err.message : String(err) });
     }
   },
+  /** Bootstrap the Manager-activity record (expose-manager-activity-per-change).
+   *  Called from `load()` and after a WS reconnect so a dashboard opened
+   *  mid-dispatch shows the badges without waiting for the next boundary post. */
+  loadManagerActivities: async () => {
+    try {
+      const managerActivity = await fetchManagerActivities();
+      set({ managerActivity });
+    } catch {
+      // Non-fatal (401 on a stale token, server restarting) — the WS event
+      // stream repopulates the record at the next boundary post.
+    }
+  },
+  /** Upsert or clear one change's Manager activity. `null` clears the entry —
+   *  that is how the server reports an `idle` post. */
+  setManagerActivity: (changeId, activity) =>
+    set((s) => {
+      if (activity === null) {
+        if (!(changeId in s.managerActivity)) return {};
+        const { [changeId]: _drop, ...rest } = s.managerActivity;
+        return { managerActivity: rest };
+      }
+      return { managerActivity: { ...s.managerActivity, [changeId]: activity } };
+    }),
   loadJobs: async () => {
     try {
       const r = await fetchAgentJobs();
@@ -502,6 +536,9 @@ export const useStore = create<Store>((set, get) => ({
       // Best-effort agents bootstrap.
       void get().loadAgents();
       void get().loadJobs();
+      // Manager-activity bootstrap (expose-manager-activity-per-change) —
+      // a dashboard opened mid-dispatch should show the badges immediately.
+      void get().loadManagerActivities();
       // Best-effort git-identity bootstrap so the chip is populated on load,
       // not only after opening the modal for the first time.
       if (state.gitStatus.isRepo) void get().loadGitConfig();
@@ -533,6 +570,10 @@ export const useStore = create<Store>((set, get) => ({
     ws.onopen = () => {
       openedOnce = true;
       set({ connected: true });
+      // Resync Manager activity on every (re)connect — boundary posts that
+      // landed while the socket was down are otherwise lost, since the events
+      // are fire-and-forget. Landed by expose-manager-activity-per-change.
+      void get().loadManagerActivities();
     };
     ws.onclose = () => {
       if (currentWs === ws) currentWs = null;
@@ -650,6 +691,10 @@ export const useStore = create<Store>((set, get) => ({
         // entry is declared and its command/args — the Manager section
         // must reflect that too. Fire-and-forget refetch.
         void get().loadManagerStatus();
+      } else if (msg.type === "manager-activity-updated") {
+        // expose-manager-activity-per-change: `activity: null` is a clear
+        // (the Manager posted `idle` for that change).
+        get().setManagerActivity(msg.changeId, msg.activity ?? null);
       } else if (msg.type === "doctor-updated") {
         // add-doctor-and-installer: server broadcasts this after an install
         // completes. Update the cached report so Settings refreshes.
