@@ -101,8 +101,15 @@ Every command SHALL have its file at `.claude/commands/ithy-opsx/<verb>.md` in t
 #### Scenario: Ithyno-ui repo does not shadow upstream opsx commands
 - **GIVEN** a fresh clone of the ithyno-ui repo
 - **WHEN** the reviewer inspects `.claude/commands/opsx/`
-- **THEN** it contains no ithyno-authored files (`apply.md`, `archive.md`, `explore.md`, `propose.md`, `sync.md` are not present)
+- **THEN** every file present there is upstream openspec output, reproducible by running `openspec update` (currently `apply.md`, `archive.md`, `explore.md`, `propose.md`, `sync.md`)
+- **AND** none of ithyno's own commands (`answer.md`, `escalate.md`, `revert.md`) appear there
 - **AND** all ithyno-authored slash-command files live under `.claude/commands/ithy-opsx/`
+
+> Note: the point is that ithyno keeps no hand-maintained *copies* of
+> upstream commands, not that `/opsx:*` is absent from this repo. The
+> repo is itself an OpenSpec project and needs those commands — the
+> `code` role's prompt is `/opsx:apply <change-id>`. They must come from
+> `openspec update`, so they track upstream instead of drifting.
 
 #### Scenario: Namespace is closed
 - **GIVEN** any Manager PTY started by ithyno on any project

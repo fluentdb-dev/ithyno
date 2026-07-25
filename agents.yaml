@@ -32,7 +32,7 @@ agents:
       - --yolo
       - -s
     prompts:
-      review: /opsx:review ${change_id}
+      review: /ithy-opsx:review ${change_id}
 parallelExecution: true
 agmsg:
   team: openspec-ui
