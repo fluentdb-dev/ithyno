@@ -939,13 +939,17 @@ a.modal-btn:hover {
   }
 }
 
-/* Phase-lane board — 4 lanes in pipeline order (proposed / coded / reviewed
-   / done). Reuses `.kanban-col`-flavored column chrome so cards render
-   identically to the Board view; only the container grid differs.
-   Landed by add-phase-lane-view-toggle. */
+/* Phase-lane board — N lanes in workflow order, derived at render time from
+   the roles declared in agents.yaml (2 lanes when only `code` is wired up,
+   5 when propose/code/review/verify all are). The component sets
+   `--lane-count` inline; the `4` here is only a pre-hydration fallback.
+   Reuses `.kanban-col`-flavored column chrome so cards render identically to
+   the Board view; only the container grid differs.
+   Landed by add-phase-lane-view-toggle, made dynamic by
+   dynamic-phase-lanes-from-agents-roles. */
 .phase-lane-board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--lane-count, 4), minmax(0, 1fr));
   gap: 16px;
   margin-top: 18px;
 }
@@ -963,38 +967,6 @@ a.modal-btn:hover {
   color: var(--muted);
   font-style: italic;
 }
-/* Unphased fallback: a full-width section BELOW the 4 lanes. Its inner body
-   reuses the 3-column `.kanban-board` grid so the sub-columns match the
-   Board view exactly. */
-.phase-unphased-section {
-  margin-top: 24px;
-  border-top: 1px dashed var(--border);
-  padding-top: 16px;
-}
-.phase-unphased-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.phase-unphased-head h3 {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.phase-unphased-hint {
-  font-size: 12px;
-  color: var(--muted);
-}
-.phase-unphased-body {
-  margin-top: 0;
-}
-
 .kanban-col {
   background: var(--panel-2);
   border: 1px solid var(--border);
