@@ -1,5 +1,14 @@
 # Tasks
 
+> ⚠️ **SUPERSEDED (distribution question)** — sections 4, 5, 6, 7, 8, 9, 10, 11 below
+> are superseded by [`distribute-ithy-opsx-via-init-templates`](../distribute-ithy-opsx-via-init-templates/proposal.md).
+> The install-machinery those sections built (bundling into non-template npm/electron
+> paths, cross-platform installer, HTTP endpoints, Doctor field, Settings row, CLI
+> subcommands) is being removed. Distribution now happens via `templates/.claude/`
+> scaffolded through Init — the same mechanism that already ships `openspec-flow`.
+> Sections 1, 2, 3 (namespace rename + shadow-duplicate cleanup + internal refs) are
+> unaffected and remain the load-bearing part of this change.
+
 ## 1. Rename ithyno's `/opsx:*` additions to `/ithy-opsx:*`
 
 - [x] 1.1 `git mv .claude/commands/opsx/answer.md .claude/commands/ithy-opsx/answer.md`.
