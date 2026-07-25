@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import type { JobSummary } from "../types";
+import type { Phase } from "../phases";
 import { formatElapsedSince } from "../util/formatElapsed";
 
 /**
@@ -21,6 +22,22 @@ import { formatElapsedSince } from "../util/formatElapsed";
  */
 
 export type LaneContext = "board" | "phase";
+
+/**
+ * Where the change sits in the pipeline, and where it sat when its worker
+ * finished. Both are Phase-view lanes (`laneForPhase()`), but the signal is
+ * NOT view-dependent — a Board-view card is annotated by the same rule.
+ *
+ * `atFinish === undefined` means the finish was never observed by this tab
+ * (page loaded with the job already `completed`); the completed branch then
+ * falls back to the time window alone instead of guessing.
+ */
+export type StageSignal = {
+  /** The change's stage right now. */
+  current?: Phase;
+  /** The stage the change was in when this job finished. */
+  atFinish?: Phase;
+};
 
 /** How long a `completed` job keeps showing its transient "done" checkmark. */
 export const DONE_GRACE_MS = 30_000;
@@ -61,6 +78,7 @@ export function workerStateView(
   job: JobSummary | undefined,
   laneContext: LaneContext,
   now: number = Date.now(),
+  stage?: StageSignal,
 ): WorkerStateView | null {
   if (!job) return idleView(laneContext);
 
@@ -75,13 +93,21 @@ export function workerStateView(
       };
 
     case "completed": {
-      // Transient: the checkmark is a "it just finished" signal, not a
-      // standing state. Once the grace window lapses the card falls back
-      // to its idle branch — the Merge / View diff / Discard affordances
-      // (driven by the job itself, not by this indicator) stay put.
+      // Transient on TWO counts — the checkmark shows only while both hold:
+      //
+      //  1. within DONE_GRACE_MS of `finishedAt` — the checkmark is an "it
+      //     just finished" signal, not a standing state; and
+      //  2. the change has not moved off the stage the worker finished in —
+      //     once the Manager advances `change.phase` the completion has been
+      //     absorbed by that move, and a card sitting in the next lane still
+      //     saying "done ✓" misreports where the change actually is.
+      //
+      // Either way the card falls back to its idle branch; the Merge / View
+      // diff / Discard affordances (driven by the job itself, not by this
+      // indicator) stay put.
       const fresh =
         job.finishedAt === undefined || now - job.finishedAt < DONE_GRACE_MS;
-      if (!fresh) return idleView(laneContext);
+      if (!fresh || stageAdvanced(stage)) return idleView(laneContext);
       return {
         kind: "completed",
         label: "done",
@@ -120,6 +146,20 @@ export function workerStateView(
   }
 }
 
+/**
+ * True when the change has left the stage its worker finished in, i.e. the
+ * Manager already advanced the phase and absorbed the completion.
+ *
+ * Returns false when either side is unknown — an unobserved finish must not
+ * suppress a legitimately fresh checkmark. Any move counts, not just a
+ * forward one: a put-back also means the checkmark no longer describes the
+ * lane the card is rendered in.
+ */
+export function stageAdvanced(stage?: StageSignal): boolean {
+  if (!stage || stage.atFinish === undefined || stage.current === undefined) return false;
+  return stage.current !== stage.atFinish;
+}
+
 function idleView(laneContext: LaneContext): WorkerStateView | null {
   if (laneContext !== "phase") return null;
   return {
@@ -133,15 +173,18 @@ function idleView(laneContext: LaneContext): WorkerStateView | null {
 export function WorkerStateIndicator({
   job,
   laneContext,
+  stage,
 }: {
   job?: JobSummary;
   laneContext: LaneContext;
+  /** Current vs at-finish pipeline stage — gates the `completed` branch. */
+  stage?: StageSignal;
 }) {
   // `tick` exists only to force a re-render so the elapsed clock (and the
   // completed grace window) advance without a store update.
   const [, setTick] = useState(0);
 
-  const view = workerStateView(job, laneContext);
+  const view = workerStateView(job, laneContext, Date.now(), stage);
 
   // `running` needs a repeating clock; a fresh `completed` needs exactly one
   // wake-up when its grace window lapses. Everything else is static.

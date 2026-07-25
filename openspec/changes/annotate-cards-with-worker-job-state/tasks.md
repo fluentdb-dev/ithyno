@@ -19,19 +19,26 @@
 
 ## 3. WorkerStateIndicator component
 
-- [x] 3.1 New component `web/src/components/WorkerStateIndicator.tsx`. Props: `{ job: JobSummary | undefined; laneContext: "board" | "phase" }`.
-- [x] 3.2 Render decision tree (extracted to the pure `workerStateView(job, laneContext, now)` so it is unit-testable under this repo's node-environment vitest setup):
+- [x] 3.1 New component `web/src/components/WorkerStateIndicator.tsx`. Props: `{ job: JobSummary | undefined; laneContext: "board" | "phase"; stage?: StageSignal }`.
+- [x] 3.2 Render decision tree (extracted to the pure `workerStateView(job, laneContext, now, stage)` so it is unit-testable under this repo's node-environment vitest setup):
   - No job + `laneContext === "phase"` → muted `<span class="worker-state-dot queued" />` + "queued" text.
   - No job + `laneContext === "board"` → render nothing (return `null`).
   - `job.status === "running"` → animated pulse dot + `{job.agentName} · {formatElapsed(now - job.startedAt)}`. `useEffect` ticks every 30 s to force a re-render.
-  - `job.status === "completed"` → gray checkmark + "done" text; falls back to the idle branch once `DONE_GRACE_MS` lapses.
+  - `job.status === "completed"` → gray checkmark + "done" text, gated on BOTH halves of the transience rule: within `DONE_GRACE_MS` of `finishedAt` AND the change still in the stage its worker finished in. Either half failing falls back to the idle branch.
   - `job.status === "cancelled"` → gray dot + "cancelled". No timer.
   - `job.status === "crashed"` → red dot + "crashed"; tooltip = `exit code: {job.exitCode}`.
   - `job.status === "orphaned"` → red dot + "orphaned"; tooltip = worktree path.
 
+## 3b. Phase-aware suppression of `completed` (round 2)
+
+- [x] 3b.1 `web/src/phases.ts` — extract `laneForPhase(phase, priorPhase)`, the pipeline-stage resolver previously inlined in `PhaseLaneBoard.bucketizeByPhase()`. Now shared by the board (lane placement) and the card (stage comparison); `bucketizeByPhase` delegates to it, behavior unchanged.
+- [x] 3b.2 `web/src/store.ts` — new `jobStageAtFinish: Record<jobId, Phase>`. `setJobFinished` stamps the change's stage at the moment the finish is observed; `agent-job-removed` drops it alongside the job. A missing key = the finish was never observed in this tab (page loaded with the job already `completed`), in which case the grace window alone governs.
+- [x] 3b.3 `WorkerStateIndicator` — new `StageSignal { current?, atFinish? }` prop threaded into `workerStateView`; `stageAdvanced()` (exported, pure) decides suppression. Any move off the at-finish stage counts, forward or put-back — either way the checkmark no longer describes the lane the card renders in.
+- [x] 3b.4 `KanbanCard` reads `jobStageAtFinish[job.id]` from the store and passes `stage={{ current: laneForPhase(change.phase, change.priorPhase), atFinish }}`. Derived from `change.phase`, so the rule holds in the Board view too.
+
 ## 4. Integrate into KanbanCard
 
-- [x] 4.1 `web/src/components/KanbanCard.tsx` — `AgentBadge` replaced by `<WorkerStateIndicator job={job} laneContext={laneContext} />`.
+- [x] 4.1 `web/src/components/KanbanCard.tsx` — `AgentBadge` replaced by `<WorkerStateIndicator job={job} laneContext={laneContext} stage={stage} />`.
 - [x] 4.2 Thread the `laneContext` prop through:
   - `KanbanBoard` calls `<KanbanCard ... laneContext="board" />`.
   - `PhaseLaneBoard` calls `<KanbanCard ... laneContext="phase" />` (one-line edit only, to stay merge-clean with `dynamic-phase-lanes-from-agents-roles`).
@@ -53,7 +60,7 @@
 ## 6. Tests
 
 - [x] 6.1 `web/src/util/formatElapsed.test.ts` (from 2.2) — 6 tests.
-- [x] 6.2 `web/src/components/WorkerStateIndicator.test.ts` — 10 tests covering every branch of the render decision tree (no-job-phase, no-job-board, running, completed-fresh, completed-expired, completed-without-finishedAt, cancelled, crashed, orphaned, terminal-states-in-both-lanes). Filename is `.test.ts` not `.test.tsx`: `vitest.config.ts` globs `web/src/**/*.test.ts` in the `node` environment and the repo has no jsdom / testing-library, so the tests target the pure `workerStateView()` split (same pattern as `PhaseLaneBoard.test.ts`).
+- [x] 6.2 `web/src/components/WorkerStateIndicator.test.ts` — 15 tests covering every branch of the render decision tree, including round 2's phase gate (completed + stage unchanged → done; completed + stage advanced → suppressed in both lane contexts; unobserved at-finish stage → time window alone; expired checkmark not resurrected; running / crashed unaffected) plus a `stageAdvanced` unit block (no-job-phase, no-job-board, running, completed-fresh, completed-expired, completed-without-finishedAt, cancelled, crashed, orphaned, terminal-states-in-both-lanes). Filename is `.test.ts` not `.test.tsx`: `vitest.config.ts` globs `web/src/**/*.test.ts` in the `node` environment and the repo has no jsdom / testing-library, so the tests target the pure `workerStateView()` split (same pattern as `PhaseLaneBoard.test.ts`).
 
 ## 7. Verification
 

@@ -36,6 +36,7 @@ import type {
   WorkspaceState,
 } from "./types";
 import { CLI_PRIORITY } from "./types";
+import { laneForPhase, type Phase } from "./phases";
 
 export function taskKey(t: Pick<Task, "filePath" | "id" | "text">): string {
   return `${t.filePath}::${t.id || t.text}`;
@@ -117,6 +118,18 @@ type Store = {
   managerStatusError: string | null;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
+  /** Pipeline stage (Phase lane) the change was sitting in at the moment
+   *  each job was observed finishing, keyed by job id. Written by
+   *  `setJobFinished`, dropped with the job on `agent-job-removed`.
+   *
+   *  `annotate-cards-with-worker-job-state`: the card's transient "done ✓"
+   *  belongs to the lane its worker finished in. Once the Manager advances
+   *  `change.phase`, the completion has been absorbed by that move and the
+   *  checkmark must go, even inside the 30 s grace window. A missing key
+   *  means "never observed finishing in this tab" (e.g. the job was already
+   *  `completed` when the page loaded) — the indicator then falls back to
+   *  the time window alone rather than guessing. */
+  jobStageAtFinish: Record<string, Phase>;
   /** Per-change live progress derived from the running job's worktree
    *  tasks.md. Preferred over `change.progress` while a job is active or
    *  awaiting merge/discard. Cleared on merge/discard. */
@@ -289,6 +302,7 @@ export const useStore = create<Store>((set, get) => ({
   managerStatusError: null,
   jobs: {},
   jobOutputs: {},
+  jobStageAtFinish: {},
   worktreeProgress: {},
   worktreeChangeById: {},
   gitConfig: null,
@@ -347,11 +361,18 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => {
       const j = s.jobs[jobId];
       if (!j) return {};
+      // Snapshot the stage the change is in right now: the "done ✓" the card
+      // is about to show belongs to THIS lane, and stops belonging to it the
+      // moment the Manager advances the phase.
+      const change = s.state?.changes.find((c) => c.id === j.changeId);
       return {
         jobs: {
           ...s.jobs,
           [jobId]: { ...j, status, exitCode: exitCode ?? null, finishedAt: Date.now() },
         },
+        jobStageAtFinish: change
+          ? { ...s.jobStageAtFinish, [jobId]: laneForPhase(change.phase, change.priorPhase) }
+          : s.jobStageAtFinish,
       };
     }),
   loadGitConfig: async () => {
@@ -620,9 +641,11 @@ export const useStore = create<Store>((set, get) => ({
           delete jobs[msg.jobId];
           const jobOutputs = { ...s.jobOutputs };
           delete jobOutputs[msg.jobId];
+          const jobStageAtFinish = { ...s.jobStageAtFinish };
+          delete jobStageAtFinish[msg.jobId];
           const worktreeProgress = { ...s.worktreeProgress };
           delete worktreeProgress[msg.changeId];
-          return { jobs, jobOutputs, worktreeProgress };
+          return { jobs, jobOutputs, jobStageAtFinish, worktreeProgress };
         });
       } else if (msg.type === "worktree-progress-updated") {
         set((s) => ({

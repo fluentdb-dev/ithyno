@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
 import { TagChipList } from "./TagChip";
 import { WorkerStateIndicator, type LaneContext } from "./WorkerStateIndicator";
+import { laneForPhase } from "../phases";
 import type { Change, JobSummary } from "../types";
 import { hasNonVerifyWork } from "../util/changeState";
 
@@ -71,6 +72,14 @@ export function KanbanCard({
     !!worktreeProgress && (!job || job.status !== "cancelled");
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
 
+  // annotate-cards-with-worker-job-state: the worker-state indicator's
+  // transient "done ✓" belongs to the stage the worker finished in. Feed it
+  // both the change's current stage and the snapshot taken when the job
+  // finished, so the checkmark disappears the moment the Manager advances
+  // the phase rather than lingering for the rest of the grace window.
+  const stageAtFinish = useStore((s) => (job ? s.jobStageAtFinish[job.id] : undefined));
+  const stage = { current: laneForPhase(change.phase, change.priorPhase), atFinish: stageAtFinish };
+
   const slot = slotForChange(change);
   const showReadyDot = slot === "done";
 
@@ -96,7 +105,7 @@ export function KanbanCard({
         <div className="kanban-card-head">
           <h4>{change.id}</h4>
           {showReadyDot && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
-          <WorkerStateIndicator job={job} laneContext={laneContext} />
+          <WorkerStateIndicator job={job} laneContext={laneContext} stage={stage} />
           {/* assignee badge slot (reserved for future add-task-assignment) */}
           <span className="kanban-card-assignee-slot" />
         </div>

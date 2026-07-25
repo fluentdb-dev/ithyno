@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { workerStateView, DONE_GRACE_MS } from "./WorkerStateIndicator";
+import { workerStateView, stageAdvanced, DONE_GRACE_MS } from "./WorkerStateIndicator";
 import type { JobSummary } from "../types";
 
 /**
@@ -66,6 +66,66 @@ describe("workerStateView (annotate-cards-with-worker-job-state)", () => {
   it("completed without a finishedAt stamp stays on the done state", () => {
     const job = mkJob({ status: "completed", finishedAt: undefined });
     expect(workerStateView(job, "board", NOW)!.kind).toBe("completed");
+  });
+
+  // ---- phase-aware suppression (round 2) --------------------------------
+  //
+  // The checkmark needs BOTH halves: inside the grace window AND the change
+  // still sitting in the stage its worker finished in.
+
+  it("completed + stage unchanged → done checkmark still shows", () => {
+    const job = mkJob({ status: "completed", finishedAt: NOW - 5_000 });
+    const stage = { current: "proposed", atFinish: "proposed" } as const;
+    expect(workerStateView(job, "board", NOW, stage)!.kind).toBe("completed");
+    expect(workerStateView(job, "phase", NOW, stage)!.kind).toBe("completed");
+  });
+
+  it("completed + stage advanced → suppressed even inside the grace window", () => {
+    const job = mkJob({ status: "completed", finishedAt: NOW - 5_000 });
+    const stage = { current: "coded", atFinish: "proposed" } as const;
+    // Board view: no annotation at all.
+    expect(workerStateView(job, "board", NOW, stage)).toBeNull();
+    // Phase view: the card is in its new lane, queued for that lane's stage.
+    expect(workerStateView(job, "phase", NOW, stage)!.kind).toBe("queued");
+  });
+
+  it("completed + unobserved finish stage → time window alone decides", () => {
+    const fresh = mkJob({ status: "completed", finishedAt: NOW - 5_000 });
+    const stale = mkJob({ status: "completed", finishedAt: NOW - DONE_GRACE_MS - 1 });
+    // `atFinish` absent (job was already completed when the page loaded).
+    const stage = { current: "coded" } as const;
+    expect(workerStateView(fresh, "board", NOW, stage)!.kind).toBe("completed");
+    expect(workerStateView(stale, "board", NOW, stage)).toBeNull();
+  });
+
+  it("stage advance does not resurrect an expired checkmark", () => {
+    const job = mkJob({ status: "completed", finishedAt: NOW - DONE_GRACE_MS - 1 });
+    expect(workerStateView(job, "board", NOW, { current: "proposed", atFinish: "proposed" })).toBeNull();
+  });
+
+  it("stage gating leaves the non-completed branches alone", () => {
+    const stage = { current: "coded", atFinish: "proposed" } as const;
+    expect(workerStateView(mkJob({ status: "running" }), "board", NOW, stage)!.kind).toBe("running");
+    const crashed = mkJob({ status: "crashed", finishedAt: NOW, exitCode: 1 });
+    expect(workerStateView(crashed, "board", NOW, stage)!.kind).toBe("crashed");
+  });
+
+  describe("stageAdvanced", () => {
+    it("false when either side is unknown", () => {
+      expect(stageAdvanced(undefined)).toBe(false);
+      expect(stageAdvanced({})).toBe(false);
+      expect(stageAdvanced({ current: "coded" })).toBe(false);
+      expect(stageAdvanced({ atFinish: "proposed" })).toBe(false);
+    });
+
+    it("false while the change sits in the stage its worker finished in", () => {
+      expect(stageAdvanced({ current: "coded", atFinish: "coded" })).toBe(false);
+    });
+
+    it("true on any move off that stage, forward or put-back", () => {
+      expect(stageAdvanced({ current: "reviewed", atFinish: "coded" })).toBe(true);
+      expect(stageAdvanced({ current: "proposed", atFinish: "coded" })).toBe(true);
+    });
   });
 
   it("cancelled → muted cancelled label, no timer", () => {

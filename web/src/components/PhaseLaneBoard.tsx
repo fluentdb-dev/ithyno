@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useMemo } from "react";
 import type { Change } from "../types";
-import { PHASES, type Phase, isPhase, NEEDS_HUMAN } from "../phases";
+import { PHASES, type Phase, laneForPhase } from "../phases";
 import { KanbanCard } from "./KanbanCard";
 import { useKanbanActions } from "../hooks/useKanbanActions";
 
@@ -70,17 +70,10 @@ export function bucketizeByPhase(changes: Change[]): PhaseBuckets {
     done: [],
   };
   for (const c of changes) {
-    const raw = c.phase;
-    if (isPhase(raw)) {
-      b[raw].push(c);
-      continue;
-    }
-    if (raw === NEEDS_HUMAN && isPhase(c.priorPhase)) {
-      b[c.priorPhase].push(c);
-      continue;
-    }
-    // Undefined / unknown / needs-human without priorPhase → default to Propose lane.
-    b.proposed.push(c);
+    // `laneForPhase` (web/src/phases.ts) owns these rules — shared with the
+    // card's worker-state indicator, which compares the stage a worker
+    // finished in against the change's current stage.
+    b[laneForPhase(c.phase, c.priorPhase)].push(c);
   }
   return b;
 }

@@ -88,3 +88,85 @@ Board view and the Phase view.
 - **Clicking the agent name could deep-link to the Agents page / job
   output.** The proposal explicitly listed this as a non-goal, but the
   indicator is now the natural anchor for it.
+
+---
+
+## Round 2 — phase-aware `completed` suppression
+
+### The finding
+
+Review returned `needs-rework` with one `severity: high` item against
+`WorkerStateIndicator.tsx:77`: the `completed` branch keyed only on
+`job.status` / `finishedAt`, so a card could keep showing `done ✓` for up
+to 30 seconds after the change had already advanced to its next phase.
+
+### The adjudication
+
+The finding exposed a disagreement between the change's own artifacts:
+
+- `proposal.md` ("KanbanCard extension") stated the phase-aware rule —
+  *"`completed` (and change.phase advanced) → not shown (transient state
+  absorbed by the phase update)"*.
+- `specs/dashboard/spec.md` stated only the time rule — *"visible for up
+  to 30 seconds after `finishedAt`"*, with no phase condition.
+
+Round 1 implemented the spec, not the proposal. The Manager adjudicated in
+favor of the proposal: **implement the phase-aware rule and tighten the
+spec to match**, because a lingering "done ✓" on a card that has already
+moved lanes misreports the card's current state — the exact failure this
+change exists to fix. The `completed` state now requires BOTH halves:
+inside `DONE_GRACE_MS` **and** the change still in the stage its worker
+finished in.
+
+The Manager also explicitly accepted round 1's decision to decline tasks
+1.2 / 1.3 (30-second eviction from `jobByChange`) — the same map gates
+Merge / View diff / Discard and `perCardStartEligible`, so evicting would
+drop the Merge affordance and resurrect Start on an unmerged worktree.
+Left as-is; the spec's retention sentence was reworded to say so plainly
+instead of implying the entry gets dropped.
+
+### What changed
+
+- **`web/src/phases.ts`** — extracted `laneForPhase(phase, priorPhase)`,
+  the pipeline-stage resolver that was inlined in
+  `PhaseLaneBoard.bucketizeByPhase()`. It is now the single owner of the
+  "known phase → that lane; `needs-human` → `priorPhase`; anything else →
+  `proposed`" rules, shared by lane placement and stage comparison.
+- **`web/src/store.ts`** — new `jobStageAtFinish: Record<jobId, Phase>`.
+  `setJobFinished` stamps the change's stage at the instant the finish is
+  observed; `agent-job-removed` drops the entry with the job.
+- **`WorkerStateIndicator`** — new `StageSignal { current?, atFinish? }`
+  threaded through `workerStateView()`, with an exported pure
+  `stageAdvanced()` making the suppression decision.
+- **`KanbanCard`** — reads the snapshot and passes both stages down.
+- **Spec + tasks** — the `completed` bullet, the "Successful completion"
+  scenario, a new "Phase advance retires the checkmark early" scenario,
+  and a new task group 3b.
+
+### ⚠️ Surprises (round 2)
+
+- **A `JobSummary` carries no role.** The obvious reading of "the stage
+  the finished job belonged to" — map the job's dispatch role (`code` /
+  `review` / `verify`) to a phase — is not derivable client-side: the job
+  records `agentName`, not the role it was dispatched under, and a
+  multi-role agent makes the reverse lookup ambiguous. Nor does a phase
+  carry a timestamp, so "did the phase move after the job finished?"
+  cannot be answered from the two records alone.
+- **So the stage had to be observed, not derived.** Snapshotting the
+  change's stage at the moment `agent-job-finished` arrives is the
+  cheapest signal that needs no server change. Its one blind spot: a page
+  loaded with the job already `completed` never saw the transition, so
+  `atFinish` is absent. That case deliberately falls back to the time
+  window alone rather than guessing — an unobserved finish must not
+  suppress a legitimately fresh checkmark.
+- **Suppression triggers on any stage move, not only a forward one.** A
+  put-back also means the checkmark no longer describes the lane the card
+  is rendered in, so `stageAdvanced()` compares with `!==` rather than by
+  phase index.
+
+### 🌱 Follow-ups (round 2)
+
+- **A server-side `phaseAtFinish` (or a `role` on `JobSummary`) would
+  close the reload blind spot.** Either would make the signal derivable
+  rather than observed, and would survive a page reload. Out of scope
+  here — this change promised no server changes.
