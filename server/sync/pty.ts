@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import type { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import { SESSION_TOKEN } from "../util/auth.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -347,7 +348,17 @@ export async function attachPtyToSocket(
     cols: opts.cols ?? 80,
     rows: opts.rows ?? 24,
     cwd: opts.cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: {
+      ...process.env,
+      TERM: "xterm-256color",
+      // The Manager (and any CLI it launches from this shell) needs the
+      // session token to reach token-gated endpoints such as
+      // POST /api/manager/activity. The PTY is local-only and already
+      // origin/token gated at the WebSocket upgrade, so exporting it into
+      // the shell environment adds no new exposure surface.
+      // Landed by expose-manager-activity-per-change.
+      ITHYNO_SESSION_TOKEN: SESSION_TOKEN,
+    },
   });
 
   const entry: LiveTerminal = { term, ws, cwd: opts.cwd };

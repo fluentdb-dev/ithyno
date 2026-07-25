@@ -52,6 +52,47 @@ Landed by `add-multi-dispatch-orchestrator`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
 - `ITHYNO_BASE = http://localhost:4321` — phase API endpoint.
+- `ITHYNO_SESSION_TOKEN` — session token for the token-gated
+  `POST /api/manager/activity` endpoint. Exported into the Manager
+  PTY's environment by the ithyno server, so normally already set.
+  Warn once when absent and continue — activity publication is
+  best-effort telemetry, never a dispatch blocker.
+
+## Manager activity publication (per change)
+
+Same contract as `/ithy-opsx:dispatch`'s **Manager activity
+publication** section, with one difference that matters here: every
+post carries its own `changeId`, so N parallel dispatches produce N
+independent Kanban badges. Landed by
+`expose-manager-activity-per-change`.
+
+```bash
+postManagerActivity() {
+  # $1 = JSON body carrying changeId + stage + activity (+ detail).
+  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
+  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
+    -H 'content-type: application/json' \
+    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+    -d "$1" >/dev/null 2>&1 || true
+}
+```
+
+Boundary sequence per `(change, stage)` — identical to single
+dispatch:
+
+| Moment | activity | detail |
+| --- | --- | --- |
+| before spawning the worker | `dispatching` | — |
+| spawn returned, change enters the combined poll loop | `waiting` | worker agent name |
+| a routed `stage:… status:done change:<id>` message arrives | `judging` | — |
+| despawn / worktree teardown for that change | `cleanup` | step name |
+| writing that change's phase update | `transitioning` | — |
+| that change reaches `done` or `escalated` | `idle` | — (clears the badge) |
+
+**Never post a bare activity without its `changeId`.** In multi
+dispatch there is no "current change" — the combined poll loop
+interleaves them, and an unattributed post would land on whichever
+card was posted last.
 
 ## What this skill DOES
 
@@ -142,6 +183,14 @@ For every id in `RUNNING`, dispatch the code worker via the
 standard Dispatch helper protocol (agmsg / Task tool / subprocess)
 per `/ithy-opsx:dispatch`'s step 3.
 
+Publish the two spawn boundaries per id:
+
+```bash
+postManagerActivity "{\"changeId\":\"$id\",\"stage\":\"code\",\"activity\":\"dispatching\"}"
+# … spawn …
+postManagerActivity "{\"changeId\":\"$id\",\"stage\":\"code\",\"activity\":\"waiting\",\"detail\":\"$entry_name\"}"
+```
+
 **Boot-prompt report contract**: extend the token to include
 `change:<id>` so the Manager can route messages when multiple are
 in flight:
@@ -209,7 +258,17 @@ done
    `[dispatch-multi] duplicate message for <change_id> (already
    <status>)` and skip.
 
-**Per-stage advance** (same logic as single dispatch):
+**On every successfully routed message**, before inspecting the
+artifact, publish the judging boundary for the OWNING change:
+
+```bash
+postManagerActivity "{\"changeId\":\"$change_id\",\"stage\":\"$stage\",\"activity\":\"judging\"}"
+```
+
+**Per-stage advance** (same logic as single dispatch). Each advance
+publishes `transitioning` for its own change immediately before the
+`POST /api/changes/<id>/phase` call, and `cleanup` (with the step
+name as `detail`) around despawn / worktree teardown:
 
 - **`stage: code`** — commit worker output if dirty (Manager-commit
   contract), advance phase to `coded`, spawn review worker for
@@ -226,7 +285,19 @@ done
 ### 7. Termination + report
 
 Loop ends when every input id has a terminal state (`done` or
-`escalated`). Print a per-id summary:
+`escalated`). As EACH id reaches its terminal state — not once at
+the end — clear its badge:
+
+```bash
+postManagerActivity "{\"changeId\":\"$id\",\"activity\":\"idle\"}"
+```
+
+Changes finish at different times; clearing per-change is what keeps
+a finished card from showing a stale `waiting` while its siblings
+are still running. The 30-minute loop-ceiling escape path MUST clear
+every still-in-flight id before breaking.
+
+Print a per-id summary:
 
 ```
 Multi-dispatch complete.
@@ -267,7 +338,11 @@ Same 3-step ladder as `/ithy-opsx:dispatch`:
   one in-flight change uses that `entry_name`. Ambiguous legacy
   messages are logged and skipped, not guessed.
 - **Escalation is per-change**. Do not abort the whole loop when
-  one change escalates — others continue.
+  one change escalates — others continue. An escalated change still
+  gets its `activity: "idle"` clear.
+- **Every Manager-activity post carries a `changeId`**. There is no
+  ambient "current change" in this skill; an unattributed post
+  corrupts another card's badge.
 - **Loop ceiling** (30 min default) is a safety cap on the entire
   invocation. Individual per-stage timeouts still apply per the
   standard dispatch skill.
