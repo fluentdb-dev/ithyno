@@ -20,10 +20,23 @@ import {
 } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { resolveGitBash } from './resolve-git-bash';
 
 const TARGET_ROOT = join(homedir(), '.agents', 'skills', 'agmsg');
 const TARGET_MARKER = join(TARGET_ROOT, 'scripts', 'send.sh');
 const NEVER_ASK_MARKER = join(homedir(), '.ithyno-config', 'skip-agmsg-install');
+
+/** agmsg's own runtime dependency (see vendor/agmsg/README.md) — checked
+ *  on Windows only, where it's not guaranteed to be present the way it
+ *  usually is on macOS. */
+function hasSqlite3(): boolean {
+  try {
+    return spawnSync('where', ['sqlite3'], { stdio: 'ignore' }).status === 0;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolve the vendored agmsg tree in both dev (electron/out/main.js →
@@ -59,14 +72,32 @@ function chmodShellScripts(dir: string): void {
 
 /**
  * Guarantee `~/.agents/skills/agmsg/scripts/send.sh` exists, prompting
- * the user on first launch when it doesn't. Windows is skipped — the
- * tmux/agmsg pipeline isn't supported there in this iteration.
+ * the user on first launch when it doesn't.
+ *
+ * On Windows, agmsg's own runtime deps (bash + sqlite3, per
+ * vendor/agmsg/README.md) aren't guaranteed present the way they are on
+ * macOS — gate the prompt on both being resolvable first. Git Bash is
+ * resolved via `resolveGitBash()` (never a bare PATH search for `bash`
+ * — see its doc comment for why). The install step itself (a plain
+ * recursive copy + best-effort chmod, below) needs no shell at all, on
+ * any platform; the Git Bash check exists only to confirm the installed
+ * scripts will actually be runnable later, when the live Manager agent
+ * invokes them through its own Bash tool.
  *
  * Called from `app.whenReady()` in main.ts before window creation.
  */
 export async function ensureAgmsgInstalled(): Promise<void> {
-  // Windows: tmux/agmsg pipeline isn't supported. Skip the prompt.
-  if (platform() === 'win32') return;
+  if (platform() === 'win32') {
+    const gitBash = resolveGitBash();
+    const sqlite3 = hasSqlite3();
+    if (!gitBash || !sqlite3) {
+      const missing = [!gitBash && 'Git Bash', !sqlite3 && 'sqlite3'].filter(Boolean).join(', ');
+      console.warn(
+        `[agmsg-installer] Windows: ${missing} not found — skipping install prompt`,
+      );
+      return;
+    }
+  }
 
   // Already installed (either by ithyno's prior first-launch or by the
   // user via `/plugin marketplace add fujibee/agmsg`).

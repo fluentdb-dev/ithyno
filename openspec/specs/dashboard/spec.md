@@ -2669,6 +2669,8 @@ follow-up changes P2b and P2c.
 
 ### Requirement: Electron First-Launch Auto-Installs Agmsg
 
+> ⚠️ **PENDING MODIFIED** by [add-windows-agmsg-support](../../changes/add-windows-agmsg-support/): the "Windows launch skips the install step" scenario is replaced — Windows gets the same install-prompt flow as macOS/Linux, gated on Git Bash + sqlite3 detection instead of an unconditional platform skip.
+
 The Electron shell SHALL vendor fujibee/agmsg (MIT-licensed shell
 scripts) under `vendor/agmsg/` in the repository and package that
 directory into `resources/app/vendor/agmsg/` via
