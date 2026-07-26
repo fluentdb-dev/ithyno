@@ -3967,6 +3967,8 @@ The Manager's slash-command surface SHALL include a new skill `/ithy-opsx:import
 
 ### Requirement: Ithyno Init scaffolds `/ithy-opsx:*` into the target project
 
+> ⚠️ **PENDING MODIFIED** by [add-skill-e2e-harness](../../changes/add-skill-e2e-harness/): appends a scaffolded-target skill-e2e harness paragraph plus four scenarios (harness happy-path, resolution-regression, contract-regression, not part of `npm test`, cleanup) — the harness proves `/ithy-opsx:*` behaves end-to-end in a scaffolded target, not just that files land there.
+
 Ithyno's Init flow SHALL scaffold every ithyno-authored `/ithy-opsx:*` command file and every backing `ithy-opsx-*` skill directory into the target project's `.claude/` tree, alongside the upstream `/opsx:*` output that `openspec init` produces.
 
 The scaffold SHALL be delivered via the existing `templates/` mechanism used for `agents.yaml.tmpl`, `CLAUDE.md`, and `templates/.claude/skills/openspec-flow/` — that is, files placed under `templates/.claude/commands/ithy-opsx/` and `templates/.claude/skills/ithy-opsx-*/` in the ithyno distribution. `bin/init.js`'s existing `walkTemplates` picks them up without dedicated copy logic.
