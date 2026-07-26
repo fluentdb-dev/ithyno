@@ -58,6 +58,8 @@ Every release artifact SHALL embed the current `version` in its filename so mult
 
 ### Requirement: `release:build` orchestrator
 
+> ⚠️ **PENDING MODIFIED** by [add-bundle-verification-script](../../changes/add-bundle-verification-script/): adds a bundle-verification step (`scripts/verify-bundle.mjs`) that runs before the artifact summary and asserts the npm tarball + Electron bundle ship `/ithy-opsx:*` only under `templates/.claude/…`.
+
 The repository SHALL expose a single root npm script `release:build` that produces all release artifacts locally in a deterministic order.
 
 #### Scenario: End-to-end local release build
