@@ -46,6 +46,7 @@
     "electron:package:all": "npm run --workspace ithyno-electron package:all",
     "build:icons": "node scripts/build-icons.mjs",
     "release:build": "node scripts/release-build.mjs",
+    "release:verify-bundle": "node scripts/verify-bundle.mjs",
     "release:version": "node scripts/release-version.mjs"
   },
   "dependencies": {
