@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Distinct concurrency group from release.yml (`release-${{ github.ref }}`)
+# so a push to a PR cancels only its own previous test run and does not
+# cancel an in-flight release build.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # `fail-fast: false` so a Windows failure does not cancel the macOS
+      # or Linux jobs. See design.md D7.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+
+    # Every `run:` step uses bash (git-bash on Windows) so scripts are
+    # single-source across all three OSes. See design.md D3.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # `--include=optional` matches release.yml so node-pty and other
+      # optional-dep prebuilts resolve on all three OSes. See design.md D5.
+      - name: Install dependencies
+        run: npm ci --include=optional
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: OpenSpec validate
+        run: npm run openspec -- validate --all
