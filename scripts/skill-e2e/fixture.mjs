@@ -13,13 +13,15 @@
 import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { runInit } from "../../bin/init.js";
 import { info } from "./log.mjs";
 
 const execFile = promisify(execFileCb);
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Harness git identity — does NOT inherit developer's global config, so the
 // harness can be run on any machine (including CI) without spurious
@@ -50,6 +52,27 @@ export async function createScaffoldedTarget({ keepTmp = false, label = "" } = {
   });
   if (!result.ok) {
     throw new Error(`runInit failed against ${targetDir}: ${result.reason}`);
+  }
+
+  // Run `openspec init --tools claude` in the target so:
+  //   1. `.claude/commands/opsx/*` (upstream openspec commands) resolve
+  //      for Claude Code — without this, `/opsx:apply` is "Unknown
+  //      command" and the worker silently no-ops.
+  //   2. `openspec/config.yaml` exists so the ithyno server's
+  //      `resolveOpenspecDir` returns non-null, so /api/changes/:id/*
+  //      endpoints don't 404 (escalate hits /needs-human, phase probes
+  //      hit /phase).
+  // Runs the openspec bin from the repo's node_modules — faster than
+  // shelling to `npx -y -p @fission-ai/openspec@latest`.
+  const openspecBin = resolve(REPO_ROOT, "node_modules", ".bin", "openspec");
+  try {
+    await execFile(openspecBin, ["init", ".", "--tools", "claude"], {
+      cwd: targetDir,
+      env: { ...process.env, CI: "1" }, // skip interactive prompts
+    });
+    info(`fixture: openspec init completed in ${targetDir}`);
+  } catch (err) {
+    throw new Error(`openspec init failed in ${targetDir}: ${err.message}`);
   }
 
   // Seed an initial commit so a default branch exists. Without this, `git
@@ -153,11 +176,19 @@ Adds a trivial requirement to \`${capability}\` for round-trip validation.
 - Modified specs: \`${capability}\`
 `;
 
+  // Task must be UNCHECKED so /ithy-opsx:apply finds work to do. A
+  // pre-checked task makes apply a no-op — no commit, no branch advance,
+  // and the Flow A "impl: commit on agent/<id>" assertion fails.
+  // Concrete + trivial: create a marker file the assertion doesn't
+  // depend on, but that requires Claude to actually invoke Edit + commit.
   const tasks = `# Tasks
 
-## 1. Trivial
+## 1. Harness marker
 
-- [x] 1.1 Seed the fixture (already done by the harness).
+- [ ] 1.1 Create \`docs/harness-marker-${id}.md\` with a single line:
+  \`Applied by skill-e2e harness for ${id}.\`
+  Then commit as \`impl: ${id}\` (the ithy-opsx-apply skill handles the
+  commit step at end).
 `;
 
   // OpenSpec expects the ADDED delta format: `## ADDED Requirements` header

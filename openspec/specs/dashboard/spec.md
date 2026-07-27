@@ -3967,6 +3967,8 @@ The Manager's slash-command surface SHALL include a new skill `/ithy-opsx:import
 
 ### Requirement: Ithyno Init scaffolds `/ithy-opsx:*` into the target project
 
+> ⚠️ **PENDING MODIFIED** by [revert-skill-e2e-live-mode](../../changes/revert-skill-e2e-live-mode/): reshapes the skill-e2e harness paragraph and scenarios from "exercises every skill end-to-end" to "structural coverage only". Live semantic verification is documented as a manual procedure via `docs/skill-e2e-manual-verification.md` (Electron + VSCode paths). Rationale: `claude -p` non-determinism + interactive commit-approval traps in `/ithy-opsx:apply` and `:archive` make live-mode automation unreliable.
+
 Ithyno's Init flow SHALL scaffold every ithyno-authored `/ithy-opsx:*` command file and every backing `ithy-opsx-*` skill directory into the target project's `.claude/` tree, alongside the upstream `/opsx:*` output that `openspec init` produces.
 
 The scaffold SHALL be delivered via the existing `templates/` mechanism used for `agents.yaml.tmpl`, `CLAUDE.md`, and `templates/.claude/skills/openspec-flow/` — that is, files placed under `templates/.claude/commands/ithy-opsx/` and `templates/.claude/skills/ithy-opsx-*/` in the ithyno distribution. `bin/init.js`'s existing `walkTemplates` picks them up without dedicated copy logic.

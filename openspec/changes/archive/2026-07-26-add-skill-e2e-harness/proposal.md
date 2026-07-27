@@ -3,6 +3,8 @@ tags: [testing, e2e, ithy-opsx, dispatch, scaffold, harness]
 execution: worktree
 ---
 
+> **PARTIALLY REVERTED** by [revert-skill-e2e-live-mode](../../revert-skill-e2e-live-mode/): the live-Claude-CLI mode this proposal designed (Flows A–E dispatching real `claude -p '<slash>'` invocations, asserting per-skill semantic success signals like `agent/<id>` branches with `impl:` commits, `review.md` verdicts, phase transitions) proved unreliable — `claude -p` non-determinism and interactive commit-approval traps in `/ithy-opsx:apply` and `:archive` made the live-mode harness produce false positives / negatives across successive runs. The revert reshapes the harness to **structural coverage only** (does the scaffold land, do command files resolve, does the server boot) and moves live semantic verification to a manual procedure documented at `docs/skill-e2e-manual-verification.md`, keyed to Electron .app and VSCode extension paths. The structural coverage this proposal introduced (fixture scaffold + server lifecycle + skill-file resolution) is preserved intact — only the Claude-CLI-dispatch aspirations are removed.
+
 ## Why
 
 `distribute-ithy-opsx-via-init-templates` (archived 2026-07-25) made
