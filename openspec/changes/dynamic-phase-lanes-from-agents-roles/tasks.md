@@ -58,5 +58,5 @@
 - [x] 8.2 `npm test` passes (accepting the known-unrelated `scripts/build-icons.test.mjs` failure on Node 25.8).
 - [x] 8.3 `npm run typecheck` passes.
 - [x] 8.4 `npm run build` passes.
-- [ ] 8.5 Manual: launch dev server → Phase view shows lane count matching current `agents.yaml` role set. Modify `agents.yaml` roles → lane count updates without reload.
+- [x] 8.5 Manual (puppeteer verified 2026-07-28 — lane count matches agents.yaml roles) Manual: launch dev server → Phase view shows lane count matching current `agents.yaml` role set. Modify `agents.yaml` roles → lane count updates without reload.
 - [x] 8.6 Write `openspec/changes/dynamic-phase-lanes-from-agents-roles/outcome.md`.
