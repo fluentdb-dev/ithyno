@@ -1,0 +1,21 @@
+name: ithy-opsx-apply
+namespace: ithy-opsx
+command: apply
+description: >-
+  Implement an OpenSpec change and commit the work on the current branch.
+  Wraps the upstream /opsx:apply and adds a "commit before you stop" step
+  so worktree agents leave the agent branch with a proper implementation
+  commit rather than a dirty tree.
+supports:
+  - claude
+capabilities_required:
+  - subagent_spawn
+  - bash
+  - file_write
+per_cli:
+  claude:
+    # The upstream /opsx:apply command that this skill delegates to.
+    upstream_command: /opsx:apply
+    # Category and tags for Claude Code's command picker.
+    category: Workflow
+    tags: [workflow, apply, git, ithy-opsx]
