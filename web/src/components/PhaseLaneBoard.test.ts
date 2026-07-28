@@ -1,7 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { bucketizeByPhase, deriveLaneList, LANE_LABEL, type LaneId } from "./PhaseLaneBoard";
-import type { AgentPublic, Change, Progress } from "../types";
+import {
+  bucketizeByActiveRole,
+  deriveLaneList,
+  LANE_LABEL,
+  type LaneId,
+} from "./PhaseLaneBoard";
+import type {
+  AgentPublic,
+  Change,
+  JobSummary,
+  ManagerActivity,
+  Progress,
+} from "../types";
+
+/**
+ * Tests for PhaseLaneBoard's dynamic lane derivation + active-role
+ * bucketization (reshape-phase-view-to-active-agent-state).
+ *
+ * The pre-reshape API `bucketizeByPhase(changes, laneIds)` derived the lane
+ * from `change.phase` (a persistence signal). It was replaced by
+ * `bucketizeByActiveRole(changes, jobByChange, managerActivityByChange, laneIds)`
+ * which derives the lane from the ACTIVE agent's role — worker Job.role wins,
+ * else Manager fallback ManagerActivity.role, else the change is filtered out
+ * (except `phase === "done"` which stays as historical record in DONE).
+ */
 
 function mkChange(
   id: string,
@@ -28,6 +51,26 @@ function mkChange(
   } as unknown as Change;
 }
 
+function mkJob(changeId: string, role: string | undefined, status: JobSummary["status"] = "running"): JobSummary {
+  return {
+    id: `job-${changeId}`,
+    changeId,
+    agentName: "worker",
+    role,
+    status,
+    startedAt: 0,
+  } as unknown as JobSummary;
+}
+
+function mkActivity(role: ManagerActivity["role"], activity: ManagerActivity["activity"] = "waiting"): ManagerActivity {
+  return {
+    changeId: "x",
+    role,
+    activity,
+    startedAt: 0,
+  } as ManagerActivity;
+}
+
 /** Minimal AgentPublic — only `roles` matters to `deriveLaneList`. */
 function mkAgent(name: string, roles: string[]): AgentPublic {
   return {
@@ -41,6 +84,10 @@ function mkAgent(name: string, roles: string[]): AgentPublic {
 
 const ids = (lanes: { id: LaneId }[]) => lanes.map((l) => l.id);
 
+// ---------------------------------------------------------------------------
+// deriveLaneList — same as pre-reshape (not affected by this change)
+// ---------------------------------------------------------------------------
+
 describe("deriveLaneList (dynamic-phase-lanes-from-agents-roles)", () => {
   it("no agents at all → code + done only", () => {
     expect(ids(deriveLaneList([]))).toEqual(["code", "done"]);
@@ -49,10 +96,6 @@ describe("deriveLaneList (dynamic-phase-lanes-from-agents-roles)", () => {
   it("undefined / null agents degrade to code + done", () => {
     expect(ids(deriveLaneList(undefined))).toEqual(["code", "done"]);
     expect(ids(deriveLaneList(null))).toEqual(["code", "done"]);
-  });
-
-  it("roles [code] → 2 lanes", () => {
-    expect(ids(deriveLaneList([mkAgent("worker", ["code"])]))).toEqual(["code", "done"]);
   });
 
   it("roles [code, review] → 3 lanes in workflow order", () => {
@@ -93,185 +136,205 @@ describe("deriveLaneList (dynamic-phase-lanes-from-agents-roles)", () => {
     ]);
     expect(LANE_LABEL.review).toBe("REVIEWING");
   });
-
-  it("verify-only declaration still yields code + verify + done", () => {
-    expect(ids(deriveLaneList([mkAgent("v", ["verify"])]))).toEqual(["code", "verify", "done"]);
-  });
 });
+
+// ---------------------------------------------------------------------------
+// bucketizeByActiveRole — the reshape's core
+// ---------------------------------------------------------------------------
 
 const FULL: LaneId[] = ["propose", "code", "review", "verify", "done"];
 const MINIMAL: LaneId[] = ["code", "done"];
-const CODE_REVIEW: LaneId[] = ["code", "review", "done"];
 
-describe("bucketizeByPhase — shift by one (full 5-lane set)", () => {
-  it("routes every phase to its NEXT-stage lane", () => {
-    const b = bucketizeByPhase(
-      [
-        mkChange("u", { phase: undefined }),
-        mkChange("a", { phase: "proposed" }),
-        mkChange("b", { phase: "coded" }),
-        mkChange("c", { phase: "reviewed" }),
-        mkChange("d", { phase: "done" }),
-      ],
-      FULL,
-    );
-    expect(b.propose.map((c) => c.id)).toEqual(["u"]);
+describe("bucketizeByActiveRole — worker Job.role drives the lane", () => {
+  it("running worker with role=code lands in CODE", () => {
+    const changes = [mkChange("a", { phase: "proposed" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "code")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
     expect(b.code.map((c) => c.id)).toEqual(["a"]);
-    expect(b.review.map((c) => c.id)).toEqual(["b"]);
-    expect(b.verify.map((c) => c.id)).toEqual(["c"]);
-    expect(b.done.map((c) => c.id)).toEqual(["d"]);
+    expect(b.propose).toEqual([]);
+    expect(b.review).toEqual([]);
+    expect(b.verify).toEqual([]);
+    expect(b.done).toEqual([]);
   });
 
-  it("unknown phase string folds into propose", () => {
-    const b = bucketizeByPhase([mkChange("x", { phase: "not-a-real-phase" })], FULL);
-    expect(b.propose.map((c) => c.id)).toEqual(["x"]);
+  it("running worker with role=review lands in REVIEW regardless of change.phase", () => {
+    const changes = [mkChange("a", { phase: "proposed" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "review")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
+    expect(b.review.map((c) => c.id)).toEqual(["a"]);
   });
 
-  it("preserves input order within a lane", () => {
-    const b = bucketizeByPhase(
-      [
-        mkChange("p1", { phase: "proposed" }),
-        mkChange("c1", { phase: "coded" }),
-        mkChange("p2", { phase: "proposed" }),
-      ],
+  it("worker.role=verify lands in VERIFY (agents.yaml declared it)", () => {
+    const changes = [mkChange("a", { phase: "reviewed" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "verify")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
+    expect(b.verify.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("completed / crashed / cancelled job does NOT keep the change visible", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    for (const status of ["completed", "crashed", "cancelled", "orphaned"] as const) {
+      const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "code", status)]]);
+      const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
+      expect(b.code.map((c) => c.id)).toEqual([]);
+      expect(b.done).toEqual([]);
+    }
+  });
+});
+
+describe("bucketizeByActiveRole — Manager activity fills in when no worker", () => {
+  it("Manager fallback verify lands in VERIFY lane (A2 policy)", () => {
+    const changes = [mkChange("a", { phase: "reviewed" })];
+    const b = bucketizeByActiveRole(
+      changes,
+      new Map(),
+      { a: mkActivity("verify", "judging") },
       FULL,
     );
+    expect(b.verify.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("Manager between-role activity (cleanup) uses the preserved role (B2 policy)", () => {
+    // Server-side, cleanup preserves prev.role. The board treats this as
+    // that role being "still in play".
+    const changes = [mkChange("a", { phase: "coded" })];
+    const b = bucketizeByActiveRole(
+      changes,
+      new Map(),
+      { a: mkActivity("code", "cleanup") },
+      FULL,
+    );
+    expect(b.code.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("Manager transitioning uses the preserved role", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const b = bucketizeByActiveRole(
+      changes,
+      new Map(),
+      { a: mkActivity("review", "transitioning") },
+      FULL,
+    );
+    expect(b.review.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("Manager idle activity is treated as no activity → change is filtered", () => {
+    const changes = [mkChange("a", { phase: "proposed" })];
+    const b = bucketizeByActiveRole(
+      changes,
+      new Map(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { a: { changeId: "a", activity: "idle", startedAt: 0 } as any },
+      FULL,
+    );
+    expect(b.code.map((c) => c.id)).toEqual([]);
+  });
+
+  it("worker Job.role wins over Manager activity when both present", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "code")]]);
+    const b = bucketizeByActiveRole(
+      changes,
+      jobByChange,
+      { a: mkActivity("verify", "dispatching") },
+      FULL,
+    );
+    expect(b.code.map((c) => c.id)).toEqual(["a"]);
+    expect(b.verify).toEqual([]);
+  });
+});
+
+describe("bucketizeByActiveRole — idle changes are filtered out", () => {
+  it("no job and no manager activity → change does not appear in any lane", () => {
+    const changes = [
+      mkChange("a", { phase: "proposed" }),
+      mkChange("b", { phase: "coded" }),
+      mkChange("c", { phase: "reviewed" }),
+    ];
+    const b = bucketizeByActiveRole(changes, new Map(), {}, FULL);
+    expect(b.propose).toEqual([]);
+    expect(b.code).toEqual([]);
+    expect(b.review).toEqual([]);
+    expect(b.verify).toEqual([]);
+    expect(b.done).toEqual([]);
+  });
+
+  it("phase=done always appears in DONE even without job/activity (history)", () => {
+    const changes = [mkChange("a", { phase: "done" })];
+    const b = bucketizeByActiveRole(changes, new Map(), {}, FULL);
+    expect(b.done.map((c) => c.id)).toEqual(["a"]);
+  });
+});
+
+describe("bucketizeByActiveRole — A1 filter drops non-standard roles", () => {
+  it("worker role=other is filtered out", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "other")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
+    expect(b.code).toEqual([]);
+    expect(b.done).toEqual([]);
+  });
+
+  it("worker role=manager is filtered out (manager is not a lane)", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "manager")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
+    expect(b.code).toEqual([]);
+  });
+});
+
+describe("bucketizeByActiveRole — lane availability fallback", () => {
+  it("minimal [code, done]: worker role=review with no review lane falls through to DONE", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "review")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, MINIMAL);
+    expect(b.done.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("degenerate empty laneIds yields all-empty buckets", () => {
+    const changes = [mkChange("a", { phase: "coded" })];
+    const jobByChange = new Map<string, JobSummary>([["a", mkJob("a", "code")]]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, []);
+    expect(b.code).toEqual([]);
+    expect(b.done).toEqual([]);
+  });
+});
+
+describe("bucketizeByActiveRole — mixed scenarios", () => {
+  it("preserves input order within a lane", () => {
+    const changes = [
+      mkChange("p1", { phase: "proposed" }),
+      mkChange("p2", { phase: "proposed" }),
+      mkChange("c1", { phase: "coded" }),
+    ];
+    const jobByChange = new Map<string, JobSummary>([
+      ["p1", mkJob("p1", "code")],
+      ["p2", mkJob("p2", "code")],
+      ["c1", mkJob("c1", "review")],
+    ]);
+    const b = bucketizeByActiveRole(changes, jobByChange, {}, FULL);
     expect(b.code.map((c) => c.id)).toEqual(["p1", "p2"]);
     expect(b.review.map((c) => c.id)).toEqual(["c1"]);
   });
 
-  it("empty input yields all-empty buckets", () => {
-    const b = bucketizeByPhase([], FULL);
-    expect(b.propose).toEqual([]);
-    expect(b.code).toEqual([]);
-    expect(b.review).toEqual([]);
-    expect(b.verify).toEqual([]);
-    expect(b.done).toEqual([]);
-  });
-});
-
-describe("bucketizeByPhase — fallback when a lane is absent", () => {
-  it("minimal [code, done]: unphased + proposed → code, everything else → done", () => {
-    const b = bucketizeByPhase(
-      [
-        mkChange("u", { phase: undefined }),
-        mkChange("a", { phase: "proposed" }),
-        mkChange("b", { phase: "coded" }),
-        mkChange("c", { phase: "reviewed" }),
-        mkChange("d", { phase: "done" }),
-      ],
-      MINIMAL,
-    );
-    expect(b.code.map((c) => c.id)).toEqual(["u", "a"]);
-    expect(b.done.map((c) => c.id)).toEqual(["b", "c", "d"]);
-    expect(b.propose).toEqual([]);
-    expect(b.review).toEqual([]);
-    expect(b.verify).toEqual([]);
-  });
-
-  it("[code, review, done]: coded → review, reviewed → done (no verify stage)", () => {
-    const b = bucketizeByPhase(
-      [mkChange("b", { phase: "coded" }), mkChange("c", { phase: "reviewed" })],
-      CODE_REVIEW,
-    );
-    expect(b.review.map((c) => c.id)).toEqual(["b"]);
-    expect(b.done.map((c) => c.id)).toEqual(["c"]);
-  });
-
-  it("no change is dropped regardless of lane set", () => {
+  it("mixed: 2 running workers + 1 manager fallback + 1 done + 1 idle", () => {
     const changes = [
-      mkChange("u", { phase: undefined }),
-      mkChange("x", { phase: "garbage" }),
-      mkChange("a", { phase: "proposed" }),
-      mkChange("b", { phase: "coded" }),
-      mkChange("c", { phase: "reviewed" }),
+      mkChange("w1", { phase: "proposed" }),
+      mkChange("w2", { phase: "coded" }),
+      mkChange("m", { phase: "reviewed" }),
       mkChange("d", { phase: "done" }),
-      mkChange("nh", { phase: "needs-human", priorPhase: "coded" }),
-      mkChange("nh2", { phase: "needs-human" }),
+      mkChange("i", { phase: "proposed" }),
     ];
-    for (const laneIds of [FULL, MINIMAL, CODE_REVIEW, ["code", "verify", "done"] as LaneId[]]) {
-      const b = bucketizeByPhase(changes, laneIds);
-      const seen = laneIds.flatMap((id) => b[id].map((c) => c.id));
-      expect(seen.slice().sort()).toEqual(changes.map((c) => c.id).slice().sort());
-    }
-  });
-
-  it("degenerate empty laneIds drops nothing into a real lane and does not throw", () => {
-    const b = bucketizeByPhase([mkChange("a", { phase: "proposed" })], []);
-    expect(b.code).toEqual([]);
-    expect(b.done).toEqual([]);
-  });
-});
-
-describe("bucketizeByPhase — needs-human resolves via priorPhase", () => {
-  it("priorPhase coded + review lane declared → review lane", () => {
-    const b = bucketizeByPhase(
-      [mkChange("nh", { phase: "needs-human", priorPhase: "coded" })],
-      FULL,
-    );
-    expect(b.review.map((c) => c.id)).toEqual(["nh"]);
-  });
-
-  it("priorPhase proposed → code lane", () => {
-    const b = bucketizeByPhase(
-      [mkChange("nh", { phase: "needs-human", priorPhase: "proposed" })],
-      FULL,
-    );
-    expect(b.code.map((c) => c.id)).toEqual(["nh"]);
-  });
-
-  it("priorPhase coded with no review lane → done", () => {
-    const b = bucketizeByPhase(
-      [mkChange("nh", { phase: "needs-human", priorPhase: "coded" })],
-      MINIMAL,
-    );
-    expect(b.done.map((c) => c.id)).toEqual(["nh"]);
-  });
-
-  it("undefined priorPhase folds into the first lane", () => {
-    expect(
-      bucketizeByPhase(
-        [mkChange("nh", { phase: "needs-human", priorPhase: undefined })],
-        FULL,
-      ).propose.map((c) => c.id),
-    ).toEqual(["nh"]);
-    expect(
-      bucketizeByPhase(
-        [mkChange("nh", { phase: "needs-human", priorPhase: undefined })],
-        MINIMAL,
-      ).code.map((c) => c.id),
-    ).toEqual(["nh"]);
-  });
-
-  it("unknown priorPhase string folds into the first lane", () => {
-    const b = bucketizeByPhase(
-      [mkChange("nh", { phase: "needs-human", priorPhase: "garbage" })],
-      CODE_REVIEW,
-    );
-    expect(b.code.map((c) => c.id)).toEqual(["nh"]);
-  });
-});
-
-describe("deriveLaneList + bucketizeByPhase end-to-end", () => {
-  it("agents.yaml [code] only: coded change lands in DONE", () => {
-    const lanes = deriveLaneList([mkAgent("worker", ["code"])]);
-    const b = bucketizeByPhase([mkChange("b", { phase: "coded" })], ids(lanes));
-    expect(lanes.map((l) => l.label)).toEqual(["CODING", "DONE"]);
-    expect(b.done.map((c) => c.id)).toEqual(["b"]);
-  });
-
-  it("agents.yaml [code, review, verify]: reviewed change lands in VERIFYING", () => {
-    const lanes = deriveLaneList([mkAgent("worker", ["code", "review", "verify"])]);
-    const b = bucketizeByPhase([mkChange("c", { phase: "reviewed" })], ids(lanes));
-    expect(b.verify.map((x) => x.id)).toEqual(["c"]);
-  });
-
-  it("dropping the review role re-flows its changes to done", () => {
-    const changes = [mkChange("b", { phase: "coded" })];
-    const withReview = deriveLaneList([mkAgent("w", ["code", "review"])]);
-    expect(bucketizeByPhase(changes, ids(withReview)).review.map((c) => c.id)).toEqual(["b"]);
-
-    const withoutReview = deriveLaneList([mkAgent("w", ["code"])]);
-    expect(bucketizeByPhase(changes, ids(withoutReview)).done.map((c) => c.id)).toEqual(["b"]);
+    const jobByChange = new Map<string, JobSummary>([
+      ["w1", mkJob("w1", "code")],
+      ["w2", mkJob("w2", "review")],
+    ]);
+    const managerActivityByChange = { m: mkActivity("verify", "judging") };
+    const b = bucketizeByActiveRole(changes, jobByChange, managerActivityByChange, FULL);
+    expect(b.code.map((c) => c.id)).toEqual(["w1"]);
+    expect(b.review.map((c) => c.id)).toEqual(["w2"]);
+    expect(b.verify.map((c) => c.id)).toEqual(["m"]);
+    expect(b.done.map((c) => c.id)).toEqual(["d"]);
+    // "i" is idle → not present anywhere
   });
 });

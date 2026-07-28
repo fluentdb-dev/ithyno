@@ -3,6 +3,8 @@ tags: [dashboard, kanban, manager, dispatch, sidecar, ws-event, ithy-opsx-dispat
 execution: worktree
 ---
 
+> ⚠️ **PARTIALLY SUPERSEDED** by [reshape-phase-view-to-active-agent-state](../reshape-phase-view-to-active-agent-state/): the card-level `ManagerActivityBadge` component is removed per user preference (Terminal already surfaces Manager state). Server-side ManagerActivity tracking + WS broadcast + the store slice all remain — Phase view's `bucketizeByActiveRole` reads from them to place changes into role-keyed lanes. The reshape also renames `ManagerActivity.stage` → `role` and adds `"propose"` to the standard set.
+
 ## Why
 
 Phase 1 (`dynamic-phase-lanes-from-agents-roles`) and Phase 2

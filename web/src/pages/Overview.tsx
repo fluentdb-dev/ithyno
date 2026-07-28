@@ -177,7 +177,7 @@ export function Overview() {
       {overviewLayout === "board" ? (
         <KanbanBoard changes={visibleChanges} onNewChange={() => setProposeOpen(true)} />
       ) : overviewLayout === "phase" ? (
-        <PhaseLaneBoard changes={visibleChanges} onNewChange={() => setProposeOpen(true)} />
+        <PhaseLaneBoard changes={visibleChanges} />
       ) : (
         <>
           {visibleChanges.length === 0 && (

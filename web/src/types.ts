@@ -301,6 +301,13 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  /** Dispatch role — set at spawn time by Manager (or the /api/agents/run
+   *  caller). Standard values: "propose" | "code" | "review" | "verify".
+   *  Custom / non-standard values are accepted but the Phase view filters
+   *  them out of role-based bucketing. Undefined on legacy records from
+   *  before reshape-phase-view-to-active-agent-state — Phase view treats
+   *  those as "no role signal" and falls back to DONE lane. */
+  role?: string;
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
@@ -338,13 +345,16 @@ export type DiffPayload = {
   files: DiffFile[];
 };
 
-// ---- Manager activity (expose-manager-activity-per-change) ----------------
+// ---- Manager activity (expose-manager-activity-per-change,
+//      reshape-phase-view-to-active-agent-state renamed stage → role) ------
 
-/** The dispatch stage the Manager is orchestrating. Mirrors
- *  `server/manager-activity.ts`. */
-export type ManagerStage = "code" | "review" | "verify";
+/** The workflow role the Manager is currently executing. Unified with
+ *  `JobSummary.role` — Manager IS always playing one of these roles at any
+ *  active moment (fallback verify = Manager playing verify role). Mirrors
+ *  `server/manager-activity.ts` `ManagerRole`. */
+export type ManagerRole = "propose" | "code" | "review" | "verify";
 
-/** What the Manager is doing within that stage. `idle` is never stored —
+/** What the Manager is doing within that role. `idle` is never stored —
  *  posting it clears the entry — so a `ManagerActivity` in the store is
  *  always one of the five renderable values. */
 export type ManagerActivityKind =
@@ -359,7 +369,7 @@ export type ManagerActivityKind =
  *  restart clears every entry (there is deliberately no persistence). */
 export type ManagerActivity = {
   changeId: string;
-  stage: ManagerStage;
+  role: ManagerRole;
   activity: ManagerActivityKind;
   /** epoch ms — when this activity became current. Drives the elapsed suffix. */
   startedAt: number;

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useMemo } from "react";
-import type { Change, AgentPublic } from "../types";
-import { type Phase, isPhase, NEEDS_HUMAN } from "../phases";
+import type { Change, AgentPublic, JobSummary, ManagerActivity } from "../types";
 import { useStore } from "../store";
 import { KanbanCard } from "./KanbanCard";
 import { useKanbanActions } from "../hooks/useKanbanActions";
@@ -10,49 +9,44 @@ import { useKanbanActions } from "../hooks/useKanbanActions";
  * PhaseLaneBoard — the third Overview layout state alongside `board` (the
  * 3-column progress-derived TODO / IN-PROGRESS / DONE view) and `cards`
  * (the plain card grid). Landed by add-phase-lane-view-toggle, redesigned
- * by dynamic-phase-lanes-from-agents-roles.
+ * by dynamic-phase-lanes-from-agents-roles, RESHAPED by
+ * reshape-phase-view-to-active-agent-state.
  *
- * Layout:
- *   - Lanes are DERIVED from `agents.yaml` roles (read off the store's
- *     `agents` field, which `/api/agents/config` populates and the
- *     `agents-updated` WS event refreshes). The lane list is built in
- *     workflow order `[propose?, code, review?, verify?, done]`:
- *       * `code` is always present — the Manager self-dispatches via the
- *         Task tool when no `code`-role agent is declared.
- *       * `done` is always present — terminal state.
- *       * `propose` / `review` / `verify` appear only when at least one
- *         agent declares that role. A stage nobody will ever run is not a
- *         meaningful lane; rendering it would be a permanently empty column.
- *   - Each lane displays a label + card count; an empty lane renders a
- *     muted placeholder rather than collapsing.
- *   - The grid column count follows the lane count via the `--lane-count`
- *     CSS variable set inline on the container.
+ * Semantics (post-reshape):
+ *   - **Phase view displays agent state, not phase state.**
+ *   - A change appears ONLY when a role is actively in play — either via an
+ *     active worker Job (Job.role) or an active Manager activity
+ *     (ManagerActivity.role, e.g., Manager fallback verify).
+ *   - Idle / queued changes do NOT appear — they belong in the Board view.
+ *   - Bucketization key = the role currently being executed.
+ *   - Only standard 4 roles are lane-eligible: propose / code / review /
+ *     verify. `other` / custom roles are filtered out (Board view still
+ *     shows them).
+ *   - `phase === "done"` changes appear in the DONE lane regardless of
+ *     activity, as historical record.
+ *   - B2 policy: Manager between-role activities (dispatching / cleanup /
+ *     transitioning) keep the change in its last role's lane — enforced
+ *     server-side by preserving prev.role on updates that omit role.
  *
- * Bucketization is SHIFTED BY ONE relative to the persisted phase: a change
- * sits in the lane for the NEXT stage it awaits, not the last stage it
- * completed. `proposed` (propose stage finished) waits on code, so it lands
- * in `CODING`. When the target lane is absent from the derived list the
- * change falls through (usually to `DONE`) — no change is ever dropped.
- *
- * Non-goals (spec):
- *   - No drag-and-drop between lanes (READ-ONLY — phase transitions
- *     happen Manager-driven, not by user gesture).
- *   - No needs-human WaitBadges or phase-derived affordances beyond the
- *     lane grouping itself.
- *   - Cards render identically to the Board view (shared `<KanbanCard>`
- *     component). Only the container / grouping differs.
+ * Non-goals:
+ *   - No drag-and-drop.
+ *   - No card badge for Manager activity (removed by this reshape —
+ *     Terminal shows Manager state).
  */
 
-/** Lane identifiers. These are workflow STAGES (agents.yaml role names plus
- *  the terminal `done`), not `Phase` values — the two vocabularies differ
- *  deliberately, see the shift-by-one note above. */
+/** Lane identifiers. Same set as the workflow roles (propose / code /
+ *  review / verify) plus the terminal `done`. */
 export type LaneId = "propose" | "code" | "review" | "verify" | "done";
 
-/** Canonical workflow order. `deriveLaneList` filters this, never reorders. */
 const LANE_ORDER: readonly LaneId[] = ["propose", "code", "review", "verify", "done"];
 
 /** Lanes that render regardless of what `agents.yaml` declares. */
 const ALWAYS_PRESENT: readonly LaneId[] = ["code", "done"];
+
+/** The 4 role values that map to Phase view lanes. Any other role (e.g.,
+ *  `manager`, `other`, custom) is filtered out — those changes appear only
+ *  in Board view. */
+const STANDARD_ROLES: readonly string[] = ["propose", "code", "review", "verify"];
 
 export const LANE_LABEL: Record<LaneId, string> = {
   propose: "PROPOSING",
@@ -62,7 +56,7 @@ export const LANE_LABEL: Record<LaneId, string> = {
   done: "DONE",
 };
 
-const LANE_EMPTY_TEXT = "No changes at this phase.";
+const LANE_EMPTY_TEXT = "No agent is currently on this role.";
 
 export type Lane = { id: LaneId; label: string };
 
@@ -70,10 +64,11 @@ export type Lane = { id: LaneId; label: string };
  * Aggregate the role set across every declared agent and return the lanes
  * that should render, in workflow order.
  *
- * `code` and `done` are unconditional (see the component docblock).
- * `propose` / `review` / `verify` require at least one agent to declare the
- * role. Roles that are not lane identifiers (`manager`, `other`, custom
- * labels) are ignored.
+ * `code` and `done` are unconditional — Manager can fallback for either.
+ * `propose` / `review` / `verify` appear only when at least one agent
+ * declares that role, OR when Manager is currently doing fallback for it
+ * (the latter is handled dynamically by including the lane when Manager
+ * activity's role points there).
  */
 export function deriveLaneList(agents: AgentPublic[] | undefined | null): Lane[] {
   const declared = new Set<string>();
@@ -87,88 +82,89 @@ export function deriveLaneList(agents: AgentPublic[] | undefined | null): Lane[]
 }
 
 /** Buckets keyed by lane. Lanes absent from the `laneIds` argument are
- *  always empty arrays — the renderer iterates the derived lane list, not
- *  this object's keys. */
+ *  always empty arrays. */
 export type PhaseBuckets = Record<LaneId, Change[]>;
 
-/**
- * Preferred lane per resolved phase, most-specific first. `bucketizeByPhase`
- * walks the list and takes the first entry present in `laneIds`; if none
- * match it falls back to `laneIds[0]` so nothing is dropped.
- *
- * `unphased` covers undefined phase and unknown phase strings.
- */
-const LANE_PREFERENCE: Record<Phase | "unphased", readonly LaneId[]> = {
-  unphased: ["propose", "code", "done"],
-  proposed: ["code", "done"],
-  coded: ["review", "done"],
-  reviewed: ["verify", "done"],
-  done: ["done"],
-};
-
-function pickLane(key: Phase | "unphased", laneIds: readonly LaneId[]): LaneId {
-  for (const candidate of LANE_PREFERENCE[key]) {
-    if (laneIds.includes(candidate)) return candidate;
+/** Resolve the role currently in play for a change (post-reshape).
+ *  Returns the role string or `undefined` if the change is idle. */
+function activeRoleFor(
+  change: Change,
+  job: JobSummary | undefined,
+  managerActivity: ManagerActivity | undefined,
+): string | undefined {
+  if (change.phase === "done") return "done";
+  // Worker job takes precedence — a running worker is the authoritative
+  // "code role is executing" signal, over Manager's "dispatching" activity.
+  if (job && job.status === "running" && typeof job.role === "string") {
+    return job.role;
   }
-  return laneIds[0];
+  // Manager activity — includes both direct fallback (Manager plays verify)
+  // and between-role states (cleanup / transitioning) where prev.role is
+  // preserved server-side per B2.
+  if (managerActivity && managerActivity.activity !== "idle") {
+    return managerActivity.role;
+  }
+  return undefined;
 }
 
 /**
- * Route each change to the lane for the NEXT stage it awaits.
+ * Bucketize changes by the role currently being executed.
  *
- *   - undefined / unknown phase → `propose` when that lane exists, else the
- *     first lane.
- *   - `proposed` → `code`.
- *   - `coded` → `review` when declared, else `done`.
- *   - `reviewed` → `verify` when declared, else `done`.
- *   - `done` → `done`.
- *   - `needs-human` → resolved via `priorPhase` under the same rules; an
- *     unresolvable `priorPhase` folds into the first lane.
+ * Filters out any change without active role work (except `phase === "done"`
+ * which is always displayed as DONE lane history).
  *
- * `laneIds` comes from `deriveLaneList`, so the output only ever populates
- * lanes that are actually rendered.
+ * Restricts to the 4 standard roles. Any non-standard role (e.g., a
+ * custom `other` role) is filtered out of Phase view — that change is
+ * visible in Board view.
  */
-export function bucketizeByPhase(changes: Change[], laneIds: readonly LaneId[]): PhaseBuckets {
+export function bucketizeByActiveRole(
+  changes: Change[],
+  jobByChange: Map<string, JobSummary>,
+  managerActivityByChange: Record<string, ManagerActivity>,
+  laneIds: readonly LaneId[],
+): PhaseBuckets {
   const buckets: PhaseBuckets = { propose: [], code: [], review: [], verify: [], done: [] };
   if (laneIds.length === 0) return buckets;
 
   for (const c of changes) {
-    const raw = c.phase;
-    let lane: LaneId;
-    if (isPhase(raw)) {
-      lane = pickLane(raw, laneIds);
-    } else if (raw === NEEDS_HUMAN) {
-      // needs-human is a hold, not a stage — resolve through the phase the
-      // change was in when it stalled. Unresolvable → first lane.
-      lane = isPhase(c.priorPhase) ? pickLane(c.priorPhase, laneIds) : laneIds[0];
-    } else {
-      lane = pickLane("unphased", laneIds);
+    const job = jobByChange.get(c.id);
+    const activity = managerActivityByChange[c.id];
+    const role = activeRoleFor(c, job, activity);
+    if (role === undefined) continue; // idle → not in Phase view
+    if (role === "done") {
+      // Terminal state — show in DONE lane if it exists.
+      if (laneIds.includes("done")) buckets.done.push(c);
+      continue;
     }
-    buckets[lane].push(c);
+    if (!STANDARD_ROLES.includes(role)) continue; // A1: filter non-standard
+    // Bucket into the role's lane if it exists; otherwise fall through to
+    // DONE (rare — Manager falling back for a role no agent declared and
+    // no lane derived).
+    const target = laneIds.includes(role as LaneId) ? (role as LaneId) : "done";
+    if (laneIds.includes(target)) buckets[target].push(c);
   }
   return buckets;
 }
 
 export function PhaseLaneBoard({
   changes,
-  onNewChange,
 }: {
   changes: Change[];
-  onNewChange: () => void;
 }) {
   const { jobByChange, onStart, onArchive, onMerge, onDiscard, modals } = useKanbanActions();
-  // Sourced from `/api/agents/config` and kept fresh by the `agents-updated`
-  // WS event, so an agents.yaml edit re-derives the lanes without a reload.
   const agents = useStore((s) => s.agents);
+  const managerActivityByChange = useStore((s) => s.managerActivity);
 
   const lanes = useMemo(() => deriveLaneList(agents), [agents]);
   const buckets = useMemo(
     () =>
-      bucketizeByPhase(
+      bucketizeByActiveRole(
         changes,
+        jobByChange,
+        managerActivityByChange,
         lanes.map((l) => l.id),
       ),
-    [changes, lanes],
+    [changes, jobByChange, managerActivityByChange, lanes],
   );
 
   const renderCard = (c: Change) => (
@@ -190,21 +186,12 @@ export function PhaseLaneBoard({
         className="phase-lane-board"
         style={{ "--lane-count": lanes.length } as React.CSSProperties}
       >
-        {lanes.map((lane, i) => (
+        {lanes.map((lane) => (
           <PhaseLane
             key={lane.id}
             title={lane.label}
             count={buckets[lane.id].length}
             emptyText={LANE_EMPTY_TEXT}
-            headerAction={
-              // The "+ New Change" affordance lives in the leftmost lane
-              // to match the Board view's TODO-column placement.
-              i === 0 ? (
-                <button className="primary kanban-add" onClick={onNewChange}>
-                  + New Change
-                </button>
-              ) : null
-            }
           >
             {buckets[lane.id].map(renderCard)}
           </PhaseLane>
@@ -220,13 +207,11 @@ function PhaseLane({
   title,
   count,
   emptyText,
-  headerAction,
   children,
 }: {
   title: string;
   count: number;
   emptyText: string;
-  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -235,7 +220,6 @@ function PhaseLane({
         <h3>
           {title} <span className="kanban-col-count">{count}</span>
         </h3>
-        {headerAction}
       </header>
       <div className="kanban-col-body">
         {count === 0 ? (
