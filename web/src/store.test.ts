@@ -144,7 +144,7 @@ function handleManagerActivityUpdated(
 function mkActivity(partial: Partial<ManagerActivity> = {}): ManagerActivity {
   return {
     changeId: "x",
-    stage: "code",
+    role: "code",
     activity: "waiting",
     startedAt: 1_000,
     ...partial,
@@ -216,13 +216,13 @@ describe("manager-activity-updated WS message routing", () => {
       {
         type: "manager-activity-updated",
         changeId: "Y",
-        activity: mkActivity({ changeId: "Y", stage: "review", activity: "judging" }),
+        activity: mkActivity({ changeId: "Y", role: "review", activity: "judging" }),
       },
       state,
     );
     expect(Object.keys(state.managerActivity).sort()).toEqual(["X", "Y"]);
     expect(state.managerActivity.X.activity).toBe("waiting");
-    expect(state.managerActivity.Y.stage).toBe("review");
+    expect(state.managerActivity.Y.role).toBe("review");
 
     state = handleManagerActivityUpdated(
       { type: "manager-activity-updated", changeId: "X", activity: null },

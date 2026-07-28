@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * Per-change Manager activity tracking (expose-manager-activity-per-change).
+ * Per-change Manager activity tracking (expose-manager-activity-per-change,
+ * reshaped by reshape-phase-view-to-active-agent-state).
  *
  * The Manager (the `/ithy-opsx:dispatch` orchestrator running in the PTY)
  * publishes what it is currently doing for a given change at every
- * orchestration boundary. The dashboard renders that as a secondary badge on
- * the Kanban card so the long "nothing visible is happening" windows
- * (waiting for a worker report, despawn/cleanup, phase transition) become
- * legible.
+ * orchestration boundary. The Phase view uses this signal to decide which
+ * role lane a change appears in — the client-side badge on the Kanban card
+ * was removed per user preference ("Terminal で分かるので不要").
  *
  * **In-memory only.** There is deliberately no sidecar field and no
  * persistence: this is transient orchestration state, not workflow history.
@@ -15,10 +15,12 @@
  * activity as it re-enters its loop.
  */
 
-/** The dispatch stage the Manager is orchestrating. */
-export type ManagerStage = "code" | "review" | "verify";
+/** The workflow role the Manager is currently executing.
+ *  Unified with JobSummary.role — Manager IS always playing one of these
+ *  roles at any active moment (fallback verify = Manager playing verify). */
+export type ManagerRole = "propose" | "code" | "review" | "verify";
 
-/** What the Manager is doing within that stage. */
+/** What the Manager is doing within that role. */
 export type ManagerActivityKind =
   | "dispatching"
   | "waiting"
@@ -29,7 +31,7 @@ export type ManagerActivityKind =
 
 export type ManagerActivity = {
   changeId: string;
-  stage: ManagerStage;
+  role: ManagerRole;
   activity: ManagerActivityKind;
   /** epoch ms — when this activity became current. */
   startedAt: number;
@@ -37,16 +39,19 @@ export type ManagerActivity = {
   detail?: string;
 };
 
-/** Write shape accepted by `POST /api/manager/activity`. */
+/** Write shape accepted by `POST /api/manager/activity`.
+ *  Accepts both `role` (preferred) and `stage` (deprecated alias, one release
+ *  cycle). See reshape-phase-view-to-active-agent-state — Manager `stage`
+ *  was renamed to `role` for unified vocabulary. */
 export type ManagerActivityInput = {
   changeId: string;
-  /** Optional only when `activity === "idle"` (a clear needs no stage). */
-  stage?: ManagerStage;
+  /** Optional only when `activity === "idle"` (a clear needs no role). */
+  role?: ManagerRole;
   activity: ManagerActivityKind;
   detail?: string;
 };
 
-const STAGES: readonly string[] = ["code", "review", "verify"];
+const ROLES: readonly string[] = ["propose", "code", "review", "verify"];
 const ACTIVITIES: readonly string[] = [
   "dispatching",
   "waiting",
@@ -59,8 +64,8 @@ const ACTIVITIES: readonly string[] = [
 /** Keyed by changeId. Module-level so every request handler sees one map. */
 const activities = new Map<string, ManagerActivity>();
 
-export function isManagerStage(v: unknown): v is ManagerStage {
-  return typeof v === "string" && STAGES.includes(v);
+export function isManagerRole(v: unknown): v is ManagerRole {
+  return typeof v === "string" && ROLES.includes(v);
 }
 
 export function isManagerActivityKind(v: unknown): v is ManagerActivityKind {
@@ -69,12 +74,15 @@ export function isManagerActivityKind(v: unknown): v is ManagerActivityKind {
 
 /**
  * Validate an untrusted request body. Split out from the endpoint so the
- * 400-path is unit-testable without standing up Fastify (same pattern as the
- * doctor install guard).
+ * 400-path is unit-testable without standing up Fastify.
+ *
+ * Accepts both `role` (preferred) and `stage` (deprecated alias) — see the
+ * type doc. When both are present, `role` wins. When only `stage` is
+ * present, coerce and log deprecation.
  */
 export function parseManagerActivityBody(
   body: unknown,
-): { ok: true; value: ManagerActivityInput } | { ok: false; error: string } {
+): { ok: true; value: ManagerActivityInput; deprecatedStage: boolean } | { ok: false; error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, error: "body must be a JSON object" };
   }
@@ -93,19 +101,23 @@ export function parseManagerActivityBody(
   }
   const activity = b.activity;
 
-  // A clear ("idle") carries no meaningful stage — accept it without one.
-  // Every other activity must name the stage being orchestrated.
-  let stage: ManagerStage | undefined;
+  // Accept role (preferred) or stage (deprecated alias). `role` wins when both.
+  const roleField = b.role !== undefined ? b.role : b.stage;
+  const deprecatedStage = b.role === undefined && b.stage !== undefined;
+
+  // A clear ("idle") carries no meaningful role — accept it without one.
+  // Every other activity must name the role being executed.
+  let role: ManagerRole | undefined;
   if (activity === "idle") {
-    if (b.stage !== undefined && !isManagerStage(b.stage)) {
-      return { ok: false, error: `stage must be one of: ${STAGES.join(", ")}` };
+    if (roleField !== undefined && !isManagerRole(roleField)) {
+      return { ok: false, error: `role must be one of: ${ROLES.join(", ")}` };
     }
-    stage = isManagerStage(b.stage) ? b.stage : undefined;
+    role = isManagerRole(roleField) ? roleField : undefined;
   } else {
-    if (!isManagerStage(b.stage)) {
-      return { ok: false, error: `stage must be one of: ${STAGES.join(", ")}` };
+    if (!isManagerRole(roleField)) {
+      return { ok: false, error: `role must be one of: ${ROLES.join(", ")}` };
     }
-    stage = b.stage;
+    role = roleField;
   }
 
   if (b.detail !== undefined && typeof b.detail !== "string") {
@@ -116,10 +128,11 @@ export function parseManagerActivityBody(
     ok: true,
     value: {
       changeId: changeId.trim(),
-      stage,
+      role,
       activity,
       ...(typeof b.detail === "string" ? { detail: b.detail } : {}),
     },
+    deprecatedStage,
   };
 }
 
@@ -128,11 +141,17 @@ export function parseManagerActivityBody(
  *
  * Returns the stored record, or `null` when the write cleared the entry
  * (`activity === "idle"`). The return value IS the WS broadcast payload's
- * `activity` field — callers do not need a second lookup.
+ * `activity` field.
  *
  * `startedAt` is preserved across consecutive writes that do not change
- * `stage` + `activity`, so a skill that re-posts `waiting` with a refreshed
- * `detail` does not reset the elapsed clock the badge renders.
+ * `role` + `activity`, so a skill that re-posts `waiting` with a refreshed
+ * `detail` does not reset the elapsed clock.
+ *
+ * **B2 policy (reshape-phase-view-to-active-agent-state)**: when a subsequent
+ * update omits `role`, the previous `role` is preserved. This keeps a change
+ * in its last role's lane during Manager between-role activities
+ * (dispatching / cleanup / transitioning). Only writing a new role
+ * explicitly moves the change to a new lane.
  */
 export function setManagerActivity(update: ManagerActivityInput): ManagerActivity | null {
   if (update.activity === "idle") {
@@ -140,13 +159,13 @@ export function setManagerActivity(update: ManagerActivityInput): ManagerActivit
     return null;
   }
   const prev = activities.get(update.changeId);
+  // B2: preserve prev.role when the update omits it.
+  const nextRole: ManagerRole = update.role ?? prev?.role ?? "code";
   const sameActivity =
-    prev !== undefined && prev.stage === update.stage && prev.activity === update.activity;
+    prev !== undefined && prev.role === nextRole && prev.activity === update.activity;
   const record: ManagerActivity = {
     changeId: update.changeId,
-    // `stage` is always present for non-idle activities (enforced by
-    // parseManagerActivityBody); the fallback keeps direct callers honest.
-    stage: update.stage ?? "code",
+    role: nextRole,
     activity: update.activity,
     startedAt: sameActivity ? prev.startedAt : Date.now(),
     ...(update.detail !== undefined ? { detail: update.detail } : {}),

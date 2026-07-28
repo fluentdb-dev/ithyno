@@ -17,7 +17,7 @@ import {
   getAllManagerActivities,
   getManagerActivity,
   isManagerActivityKind,
-  isManagerStage,
+  isManagerRole,
   parseManagerActivityBody,
   resetManagerActivities,
   setManagerActivity,
@@ -36,13 +36,13 @@ describe("setManagerActivity / getManagerActivity / clearManagerActivity", () =>
   it("round-trips a set → get", () => {
     const stored = setManagerActivity({
       changeId: "x",
-      stage: "code",
+      role: "code",
       activity: "waiting",
       detail: "claude",
     });
     expect(stored).not.toBeNull();
     expect(stored!.changeId).toBe("x");
-    expect(stored!.stage).toBe("code");
+    expect(stored!.role).toBe("code");
     expect(stored!.activity).toBe("waiting");
     expect(stored!.detail).toBe("claude");
     expect(typeof stored!.startedAt).toBe("number");
@@ -52,24 +52,24 @@ describe("setManagerActivity / getManagerActivity / clearManagerActivity", () =>
   });
 
   it("omits detail entirely when not supplied", () => {
-    const stored = setManagerActivity({ changeId: "x", stage: "review", activity: "judging" });
+    const stored = setManagerActivity({ changeId: "x", role: "review", activity: "judging" });
     expect(stored).not.toBeNull();
     expect("detail" in stored!).toBe(false);
   });
 
   it("overwrites the entry on a subsequent set", () => {
-    setManagerActivity({ changeId: "x", stage: "code", activity: "dispatching" });
-    setManagerActivity({ changeId: "x", stage: "code", activity: "waiting", detail: "claude" });
+    setManagerActivity({ changeId: "x", role: "code", activity: "dispatching" });
+    setManagerActivity({ changeId: "x", role: "code", activity: "waiting", detail: "claude" });
     const got = getManagerActivity("x");
     expect(got?.activity).toBe("waiting");
     expect(got?.detail).toBe("claude");
   });
 
-  it("preserves startedAt across a re-post of the same stage+activity", () => {
-    const first = setManagerActivity({ changeId: "x", stage: "code", activity: "waiting" });
+  it("preserves startedAt across a re-post of the same role+activity", () => {
+    const first = setManagerActivity({ changeId: "x", role: "code", activity: "waiting" });
     const second = setManagerActivity({
       changeId: "x",
-      stage: "code",
+      role: "code",
       activity: "waiting",
       detail: "claude (5m)",
     });
@@ -78,23 +78,23 @@ describe("setManagerActivity / getManagerActivity / clearManagerActivity", () =>
   });
 
   it("resets startedAt when the activity changes", () => {
-    const first = setManagerActivity({ changeId: "x", stage: "code", activity: "waiting" });
+    const first = setManagerActivity({ changeId: "x", role: "code", activity: "waiting" });
     // Force a distinguishable timestamp without sleeping: rewrite via a new
     // activity and assert monotonic non-decrease plus a fresh identity.
-    const second = setManagerActivity({ changeId: "x", stage: "code", activity: "judging" });
+    const second = setManagerActivity({ changeId: "x", role: "code", activity: "judging" });
     expect(second!.startedAt).toBeGreaterThanOrEqual(first!.startedAt);
     expect(second!.activity).toBe("judging");
   });
 
   it("clearManagerActivity removes the entry and reports whether it did", () => {
-    setManagerActivity({ changeId: "x", stage: "code", activity: "waiting" });
+    setManagerActivity({ changeId: "x", role: "code", activity: "waiting" });
     expect(clearManagerActivity("x")).toBe(true);
     expect(getManagerActivity("x")).toBeUndefined();
     expect(clearManagerActivity("x")).toBe(false);
   });
 
   it('activity: "idle" is equivalent to a clear and returns null', () => {
-    setManagerActivity({ changeId: "x", stage: "code", activity: "waiting" });
+    setManagerActivity({ changeId: "x", role: "code", activity: "waiting" });
     const result = setManagerActivity({ changeId: "x", activity: "idle" });
     expect(result).toBeNull();
     expect(getManagerActivity("x")).toBeUndefined();
@@ -116,26 +116,26 @@ describe("getAllManagerActivities", () => {
   });
 
   it("keeps parallel dispatches independent", () => {
-    setManagerActivity({ changeId: "X", stage: "code", activity: "waiting", detail: "claude" });
-    setManagerActivity({ changeId: "Y", stage: "review", activity: "judging" });
+    setManagerActivity({ changeId: "X", role: "code", activity: "waiting", detail: "claude" });
+    setManagerActivity({ changeId: "Y", role: "review", activity: "judging" });
     const all = getAllManagerActivities();
     expect(Object.keys(all).sort()).toEqual(["X", "Y"]);
     expect(all.X.activity).toBe("waiting");
-    expect(all.X.stage).toBe("code");
+    expect(all.X.role).toBe("code");
     expect(all.Y.activity).toBe("judging");
-    expect(all.Y.stage).toBe("review");
+    expect(all.Y.role).toBe("review");
   });
 
   it("clearing one change leaves the other intact", () => {
-    setManagerActivity({ changeId: "X", stage: "code", activity: "waiting" });
-    setManagerActivity({ changeId: "Y", stage: "verify", activity: "cleanup", detail: "despawn" });
+    setManagerActivity({ changeId: "X", role: "code", activity: "waiting" });
+    setManagerActivity({ changeId: "Y", role: "verify", activity: "cleanup", detail: "despawn" });
     setManagerActivity({ changeId: "X", activity: "idle" });
     const all = getAllManagerActivities();
     expect(Object.keys(all)).toEqual(["Y"]);
   });
 
   it("returns a detached copy — mutating it does not corrupt the map", () => {
-    setManagerActivity({ changeId: "X", stage: "code", activity: "waiting" });
+    setManagerActivity({ changeId: "X", role: "code", activity: "waiting" });
     const all = getAllManagerActivities();
     delete all.X;
     expect(getManagerActivity("X")).toBeDefined();
@@ -150,7 +150,7 @@ describe("parseManagerActivityBody", () => {
   it("accepts a well-formed body", () => {
     const r = parseManagerActivityBody({
       changeId: "x",
-      stage: "code",
+      role: "code",
       activity: "waiting",
       detail: "claude",
     });
@@ -158,20 +158,20 @@ describe("parseManagerActivityBody", () => {
     if (r.ok) {
       expect(r.value).toEqual({
         changeId: "x",
-        stage: "code",
+        role: "code",
         activity: "waiting",
         detail: "claude",
       });
     }
   });
 
-  it("accepts an idle clear without a stage", () => {
+  it("accepts an idle clear without a role", () => {
     const r = parseManagerActivityBody({ changeId: "x", activity: "idle" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.stage).toBeUndefined();
+    if (r.ok) expect(r.value.role).toBeUndefined();
   });
 
-  it("requires a stage for every non-idle activity", () => {
+  it("requires a role for every non-idle activity", () => {
     for (const activity of ["dispatching", "waiting", "judging", "cleanup", "transitioning"]) {
       const r = parseManagerActivityBody({ changeId: "x", activity });
       expect(r.ok).toBe(false);
@@ -180,29 +180,52 @@ describe("parseManagerActivityBody", () => {
 
   it("rejects a missing or empty changeId", () => {
     for (const changeId of [undefined, null, "", "   ", 42, {}, []]) {
-      const r = parseManagerActivityBody({ changeId, stage: "code", activity: "waiting" });
+      const r = parseManagerActivityBody({ changeId, role: "code", activity: "waiting" });
       expect(r.ok).toBe(false);
     }
   });
 
   it("rejects an unknown activity", () => {
     for (const activity of [undefined, null, "", "thinking", "IDLE", 0, {}]) {
-      const r = parseManagerActivityBody({ changeId: "x", stage: "code", activity });
+      const r = parseManagerActivityBody({ changeId: "x", role: "code", activity });
       expect(r.ok).toBe(false);
     }
   });
 
-  it("rejects an unknown stage", () => {
-    for (const stage of ["archive", "CODE", 1, {}, null]) {
-      const r = parseManagerActivityBody({ changeId: "x", stage, activity: "waiting" });
+  it("rejects an unknown role", () => {
+    for (const role of ["archive", "CODE", 1, {}, null]) {
+      const r = parseManagerActivityBody({ changeId: "x", role, activity: "waiting" });
       expect(r.ok).toBe(false);
+    }
+  });
+
+  it("accepts the deprecated `stage` field as an alias for role and flags deprecatedStage", () => {
+    const r = parseManagerActivityBody({ changeId: "x", stage: "verify", activity: "judging" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.role).toBe("verify");
+      expect(r.deprecatedStage).toBe(true);
+    }
+  });
+
+  it("when both `role` and `stage` are present, `role` wins and deprecatedStage is false", () => {
+    const r = parseManagerActivityBody({
+      changeId: "x",
+      role: "code",
+      stage: "verify",
+      activity: "waiting",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.role).toBe("code");
+      expect(r.deprecatedStage).toBe(false);
     }
   });
 
   it("rejects a non-string detail", () => {
     const r = parseManagerActivityBody({
       changeId: "x",
-      stage: "code",
+      role: "code",
       activity: "waiting",
       detail: 5,
     });
@@ -216,16 +239,16 @@ describe("parseManagerActivityBody", () => {
   });
 
   it("trims the changeId", () => {
-    const r = parseManagerActivityBody({ changeId: "  x  ", stage: "code", activity: "waiting" });
+    const r = parseManagerActivityBody({ changeId: "  x  ", role: "code", activity: "waiting" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.changeId).toBe("x");
   });
 });
 
-describe("stage / activity type guards", () => {
-  it("isManagerStage accepts only the three stages", () => {
-    expect(["code", "review", "verify"].every(isManagerStage)).toBe(true);
-    expect(["", "done", "CODE", null, 1].some(isManagerStage)).toBe(false);
+describe("role / activity type guards", () => {
+  it("isManagerRole accepts the four workflow roles", () => {
+    expect(["propose", "code", "review", "verify"].every(isManagerRole)).toBe(true);
+    expect(["", "done", "manager", "CODE", null, 1].some(isManagerRole)).toBe(false);
   });
 
   it("isManagerActivityKind accepts only the six activities", () => {
@@ -262,7 +285,7 @@ describe("POST /api/manager/activity gating semantics", () => {
 
   it("rejects a missing / invalid token with 401 and leaves the map untouched", () => {
     for (const token of [null, "", "nope", SESSION_TOKEN.slice(0, -1)]) {
-      const r = handle(token, { changeId: "x", stage: "code", activity: "waiting" });
+      const r = handle(token, { changeId: "x", role: "code", activity: "waiting" });
       expect(r.status).toBe(401);
       expect(r.broadcast).toBeUndefined();
     }
@@ -278,7 +301,7 @@ describe("POST /api/manager/activity gating semantics", () => {
   it("broadcasts the stored record on a successful set", () => {
     const r = handle(SESSION_TOKEN, {
       changeId: "x",
-      stage: "code",
+      role: "code",
       activity: "waiting",
       detail: "claude",
     });
@@ -288,7 +311,7 @@ describe("POST /api/manager/activity gating semantics", () => {
   });
 
   it("broadcasts activity: null on an idle clear", () => {
-    handle(SESSION_TOKEN, { changeId: "x", stage: "code", activity: "waiting" });
+    handle(SESSION_TOKEN, { changeId: "x", role: "code", activity: "waiting" });
     const r = handle(SESSION_TOKEN, { changeId: "x", activity: "idle" });
     expect(r.status).toBe(200);
     expect(r.broadcast).toEqual({ changeId: "x", activity: null });
@@ -296,11 +319,11 @@ describe("POST /api/manager/activity gating semantics", () => {
 
   it("fires exactly one broadcast per accepted post", () => {
     const posts = [
-      { changeId: "x", stage: "code", activity: "dispatching" },
-      { changeId: "x", stage: "code", activity: "waiting", detail: "claude" },
-      { changeId: "x", stage: "code", activity: "judging" },
-      { changeId: "x", stage: "code", activity: "cleanup", detail: "despawn" },
-      { changeId: "x", stage: "code", activity: "transitioning" },
+      { changeId: "x", role: "code", activity: "dispatching" },
+      { changeId: "x", role: "code", activity: "waiting", detail: "claude" },
+      { changeId: "x", role: "code", activity: "judging" },
+      { changeId: "x", role: "code", activity: "cleanup", detail: "despawn" },
+      { changeId: "x", role: "code", activity: "transitioning" },
       { changeId: "x", activity: "idle" },
     ];
     const broadcasts = posts

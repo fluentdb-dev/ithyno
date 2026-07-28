@@ -3,6 +3,8 @@ tags: [dashboard, kanban, phase, agents-yaml, dynamic-ui]
 execution: worktree
 ---
 
+> ⚠️ **PARTIALLY SUPERSEDED** by [reshape-phase-view-to-active-agent-state](../reshape-phase-view-to-active-agent-state/): the "route by next-stage phase" bucketization (P1's `bucketizeByPhase`) is replaced by "bucketize by ACTIVE agent role" (`bucketizeByActiveRole`). The `deriveLaneList` dynamic-lane derivation, LANE_LABEL present-continuous naming, and DONE-lane always-present semantics carry through unchanged.
+
 ## Why
 
 The `add-phase-lane-view-toggle` change (in-flight on branch

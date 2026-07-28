@@ -2,7 +2,6 @@
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { ProgressBar } from "./ProgressBar";
-import { ManagerActivityBadge } from "./ManagerActivityBadge";
 import { TagChipList } from "./TagChip";
 import { WorkerStateIndicator, type LaneContext } from "./WorkerStateIndicator";
 import { laneForPhase } from "../phases";
@@ -73,10 +72,11 @@ export function KanbanCard({
     !!worktreeProgress && (!job || job.status !== "cancelled");
   const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
 
-  // Manager's own orchestration state for this change (in-memory, WS-driven).
-  // Renders as a secondary badge alongside the job's AgentBadge.
-  // Landed by expose-manager-activity-per-change.
-  const managerActivity = useStore((s) => s.managerActivity[change.id]);
+  // Manager activity badge on card was removed by
+  // reshape-phase-view-to-active-agent-state (user: "Terminal で分かるので不要").
+  // Server-side ManagerActivity + store slice remain — Phase view's
+  // bucketizeByActiveRole reads it from the store, but there is no card badge.
+  //
   // annotate-cards-with-worker-job-state: the worker-state indicator's
   // transient "done ✓" belongs to the stage the worker finished in. Feed it
   // both the change's current stage and the snapshot taken when the job
@@ -122,7 +122,6 @@ export function KanbanCard({
           </span>
         )}
       </Link>
-      <ManagerActivityBadge activity={managerActivity} />
       {change.proposal?.tags && change.proposal.tags.length > 0 && (
         <div className="kanban-card-tags">
           <TagChipList tags={change.proposal.tags} small />

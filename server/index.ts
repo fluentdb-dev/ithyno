@@ -650,6 +650,14 @@ fastify.post("/api/manager/activity", async (req, reply) => {
   if (!parsed.ok) {
     return reply.code(400).send({ error: parsed.error });
   }
+  if (parsed.deprecatedStage) {
+    // reshape-phase-view-to-active-agent-state: `stage` renamed to `role`.
+    // Accepted as a deprecated alias for one release cycle so in-flight
+    // Manager sessions from an older skill version don't 400.
+    req.log.warn(
+      `POST /api/manager/activity used deprecated 'stage' field; rename to 'role' (change: ${parsed.value.changeId})`,
+    );
+  }
   // setManagerActivity returns the stored record, or null when the write was
   // an idle-clear — that return value IS the broadcast payload.
   const activity = setManagerActivity(parsed.value);
