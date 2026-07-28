@@ -47,15 +47,26 @@ follow the doomed requirement without knowing a revert / rewrite is in
 flight. The annotation closes that gap; `openspec archive` rewrites or
 removes the requirement anyway, so the annotation disappears automatically.
 
-Format (insert directly under the `### Requirement:` heading):
+Format (insert **immediately after** the requirement's SHALL/MUST body
+paragraph, before any `#### Scenario:` header):
 
 ```md
 ### Requirement: <name>
 
+<existing SHALL/MUST body paragraph — must stay as the first non-empty line>
+
 > ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
 
-<existing requirement body>
+<remaining body / #### Scenario: blocks>
 ```
+
+Why after and not directly under the heading: the openspec CLI parser
+(`parseRequirements` in `@fission-ai/openspec/dist/core/parsers/`)
+captures each requirement's `text` field as the FIRST non-empty line
+after the header, and `RequirementSchema` requires that line to contain
+`SHALL` or `MUST`. An annotation blockquote in the natural
+under-heading slot would swallow the check, breaking `openspec archive`
+for unrelated changes on the same capability. Ref: `fix-pending-annotation-parser-compat`.
 
 Applies to `revert-*`, spec-tightening, and any propose that shifts an
 existing contract. Not needed for pure ADDED (the requirement doesn't
