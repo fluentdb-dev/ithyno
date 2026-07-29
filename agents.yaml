@@ -20,9 +20,6 @@ agents:
     roles:
       - manager
     command: claude
-    args:
-      - --resume
-      - 6f91588b-6030-4c63-b288-61f17794d82c
   - name: copilot-review
     mode: live-shell
     roles:

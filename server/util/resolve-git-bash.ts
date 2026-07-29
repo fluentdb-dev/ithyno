@@ -9,25 +9,33 @@
 // thing. Deriving the path from `git`'s own self-reported install
 // layout avoids that ambiguity entirely.
 //
-// Landed by add-windows-agmsg-support.
+// Kept in sync by hand with electron/src/resolve-git-bash.ts — the
+// electron/ and server/ workspaces communicate only via child-process
+// spawn + HTTP, not shared TS modules, so this ~15-line helper is
+// duplicated rather than factored into a new shared package. If you
+// fix a bug here, check the other copy too.
+//
+// Landed by add-doctor-and-installer (Windows support, §8).
 
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 
 /**
  * Resolve Git for Windows' `bash.exe`, or `null` if git isn't on PATH
  * or the derived bash.exe doesn't exist. Only meaningful on win32 —
  * callers should gate on `process.platform === 'win32'` themselves;
  * this function doesn't check platform itself since it's cheap and
- * harmless to call anywhere (macOS/Linux just won't have "git" resolve
- * usefully into a Windows-shaped layout, but that's not this
- * function's concern).
+ * harmless to call anywhere.
  */
 export function resolveGitBash(): string | null {
   let execPath: string;
   try {
-    const result = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    // See the electron/ copy's comment: spawnSync has no timeout by
+    // default, and this can run on a hot path (doctor checks, install
+    // gating) — bound it so a stalled `git` invocation degrades to
+    // "not found" instead of hanging the caller indefinitely.
+    const result = spawnSync("git", ["--exec-path"], { encoding: "utf8", timeout: 3000 });
     if (result.status !== 0 || !result.stdout) return null;
     execPath = result.stdout.trim();
   } catch {
@@ -38,6 +46,6 @@ export function resolveGitBash(): string | null {
   // execPath looks like "<gitRoot>/mingw64/libexec/git-core" — walk up
   // three levels to the Git for Windows installation root.
   const gitRoot = resolve(dirname(dirname(dirname(execPath))));
-  const bashExe = join(gitRoot, 'bin', 'bash.exe');
+  const bashExe = join(gitRoot, "bin", "bash.exe");
   return existsSync(bashExe) ? bashExe : null;
 }

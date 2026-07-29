@@ -2671,6 +2671,8 @@ follow-up changes P2b and P2c.
 
 > ⚠️ **PENDING MODIFIED** by [add-windows-agmsg-support](../../changes/add-windows-agmsg-support/): the "Windows launch skips the install step" scenario is replaced — Windows gets the same install-prompt flow as macOS/Linux, gated on Git Bash + sqlite3 detection instead of an unconditional platform skip.
 
+> ⚠️ **PENDING REMOVED** by [limit-agmsg-install-prompt-triggers](../../changes/limit-agmsg-install-prompt-triggers/): this whole requirement is removed — no automatic install prompt on launch. Replaced by "Agmsg Install Is Explicitly Triggered (Settings Or New Project Onboarding)" and "Agmsg Team Config Is A Shared Dialog (Settings And New Project Onboarding)".
+
 The Electron shell SHALL vendor fujibee/agmsg (MIT-licensed shell
 scripts) under `vendor/agmsg/` in the repository and package that
 directory into `resources/app/vendor/agmsg/` via

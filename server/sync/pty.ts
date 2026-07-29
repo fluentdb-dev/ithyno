@@ -49,10 +49,14 @@ export async function loadPty(): Promise<PtyAvailability> {
  * even with Git for Windows installed, since only `Git\cmd` is added to
  * PATH, not `Git\usr\bin`), so a spawn failure just means "not found".
  */
-function commandExistsOnPath(cmd: string): boolean {
+export function commandExistsOnPath(cmd: string): boolean {
   try {
     const probe = process.platform === "win32" ? "where" : "which";
-    return spawnSync(probe, [cmd], { stdio: "ignore" }).status === 0;
+    // timeout: spawnSync has none by default; bound it so a stalled probe
+    // degrades to "not found" instead of hanging the caller (this is now
+    // also called from doctor.ts / the doctor install endpoint, not just
+    // PTY startup).
+    return spawnSync(probe, [cmd], { stdio: "ignore", timeout: 3000 }).status === 0;
   } catch {
     return false;
   }

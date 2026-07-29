@@ -398,6 +398,8 @@ export type DoctorReport = {
   agents: Record<Cli, CliStatus>;
   tmux: CliStatus;
   agmsg: CliStatus;
+  /** Windows only — see server/doctor.ts's DoctorReport doc comment. */
+  gitBash?: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
 };

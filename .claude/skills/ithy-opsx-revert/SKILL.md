@@ -52,7 +52,7 @@ so that ithyno owns exactly one slash-command namespace end-to-end.
 2. **Git identity**. Verify `git config user.name` and `user.email`
    resolve. Not strictly required here (we do no commits) but the
    downstream `/opsx:apply` needs them and it's cheaper to catch now.
-3. **OpenSpec CLI**. Run `npm run openspec -- list` to confirm the
+3. **OpenSpec CLI**. Run `npx openspec list` to confirm the
    CLI works.
 4. **Scope argument**. If the invoker passed `<scope>` after
    `/ithy-opsx:revert`, use it. Otherwise, use the **AskUserQuestion tool**
@@ -112,7 +112,7 @@ Record each target's classification for the proposal.
    > <N> targets: <list>. Proceed?"
 2. On yes:
    ```
-   npm run openspec -- new change revert-<scope>
+   npx openspec new change revert-<scope>
    ```
 
 ### 5. Populate `proposal.md`
@@ -226,7 +226,7 @@ Write a standard revert checklist. Include:
 ## 1. Spec deltas
 
 - [ ] 1.1 <N> <REMOVED|MODIFIED|ADDED> requirements in specs/<capability>/spec.md
-- [ ] 1.2 `npm run openspec -- validate revert-<scope>` VALID
+- [ ] 1.2 `npx openspec validate revert-<scope>` VALID
 
 ## 2. Impl reverts
 
@@ -325,7 +325,7 @@ For each Case β target:
 ### 11. Validate
 
 ```
-npm run openspec -- validate revert-<scope>
+npx openspec validate revert-<scope>
 ```
 
 If NOT VALID:

@@ -12,7 +12,8 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath } from "./sync/pty.js";
+import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
@@ -396,7 +397,11 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       .send({ error: `only "tmux" and "agmsg" are installable via this endpoint` });
   }
 
-  // Set up SSE stream
+  // Set up SSE stream. hijack() first — see the identical comment on
+  // /api/init/stream — otherwise Fastify's own reply-completion logic
+  // fires after this handler resolves and crashes the process with
+  // ERR_HTTP_HEADERS_SENT if the client disconnected mid-install.
+  reply.hijack();
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -435,6 +440,23 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       // Broadcast doctor-updated
       void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
       return;
+    }
+
+    // Windows: agmsg also needs a real Git Bash and sqlite3 on PATH to
+    // actually run (see add-windows-agmsg-support) — check BEFORE
+    // copying the tree. Copying files that can't run is worse than not
+    // copying: the doctor report would then show a false-positive
+    // "installed" for the marker file alone.
+    if (process.platform === "win32") {
+      const missing: string[] = [];
+      if (!resolveGitBash()) missing.push("Git Bash (install Git for Windows)");
+      if (!commandExistsOnPath("sqlite3")) missing.push("sqlite3");
+      if (missing.length > 0) {
+        sendSse("progress", { line: `Cannot install agmsg — missing: ${missing.join(", ")}` });
+        sendSse("done", { ok: false, exitCode: 1 });
+        if (clientAlive) reply.raw.end();
+        return;
+      }
     }
 
     // Try to find the vendored tree
@@ -509,8 +531,21 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       if (clientAlive) reply.raw.end();
       return;
     }
+  } else if (os === "win32") {
+    // No package manager reliably installs a working tmux fork on
+    // Windows (confirmed during add-windows-agmsg-support dogfooding —
+    // psmux is the fork that was verified working, via Git Bash).
+    // There is no automated install path; stream guidance instead of
+    // a dead-end rejection. This is NOT a failure of the request
+    // itself, so respond via the normal stream-completion path
+    // (ok: false meaning "nothing was installed"), not a 400.
+    sendSse("progress", { line: "No automated tmux install exists for Windows." });
+    sendSse("progress", { line: "Download a Windows tmux fork (psmux): https://github.com/psmux/psmux/releases" });
+    sendSse("progress", { line: "Extract it and add the folder containing tmux.exe to your PATH, then re-run Doctor." });
+    sendSse("done", { ok: false, exitCode: 1 });
+    if (clientAlive) reply.raw.end();
+    return;
   } else {
-    // Windows or other
     sendSse("progress", { line: `Unsupported platform "${os}". See https://github.com/tmux/tmux/wiki/Installing` });
     sendSse("done", { ok: false, exitCode: 1 });
     if (clientAlive) reply.raw.end();
@@ -687,8 +722,8 @@ fastify.post("/api/git/init", async (req, reply) => {
 
 // POST /api/init — scaffold a new project via runInit (add-init-http-endpoint).
 // Backbone for UI-driven "New Project" flows. Electron / VS Code may import
-// runInit directly instead (agmsg-installer pattern); this endpoint remains
-// for browser mode and as a fallback.
+// runInit directly instead (see main.ts's onNewProject); this endpoint
+// remains for browser mode and as a fallback.
 //
 // Extended by expand-init-to-scaffold-agents:
 //   - Calls runDoctor() before scaffolding; 409 if readyForManager is false.
@@ -822,6 +857,16 @@ fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
   const v = await validateInitBody(body);
   if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
 
+  // hijack() tells Fastify to stop managing this reply once we start
+  // writing to reply.raw ourselves — without it, Fastify's own
+  // reply-completion logic still runs after this async handler
+  // resolves and calls reply.send() on a socket we've already ended
+  // (or that the client aborted mid-stream), throwing
+  // ERR_HTTP_HEADERS_SENT uncaught and crashing the whole process.
+  // Confirmed live: a client disconnecting mid-`openspec init` (e.g.
+  // a curl --max-time cutoff, or closing the onboarding window) took
+  // the entire server down.
+  reply.hijack();
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",

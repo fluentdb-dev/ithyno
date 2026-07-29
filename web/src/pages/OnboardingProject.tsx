@@ -11,6 +11,14 @@
 // X-Manager-Command header (or embedded in body once the SSE endpoint grows
 // manager support). For now, after the SSE chain completes, we POST /api/init
 // with the chosen manager to write agents.yaml.
+//
+// Extended by limit-agmsg-install-prompt-triggers: once the chain
+// completes (isComplete), an optional "Agmsg" section offers Install
+// (PrereqInstallModal) + Configure (AgmsgConfigModal) — deliberately
+// placed AFTER Manager CLI selection and the scaffold/openspec-init
+// steps, not alongside the Prerequisites list in InitDialog. agmsg is
+// unrelated to whether a Manager CLI can run at all, so it doesn't
+// belong in that gating step.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken } from "../runtime";
 import {
@@ -20,8 +28,11 @@ import {
   type OnboardingChannel,
 } from "../lib/onboardingChannel";
 import { InitDialog } from "../components/InitDialog";
-import { initProject } from "../api";
-import type { Cli } from "../types";
+import { PrereqInstallModal } from "../components/PrereqInstallModal";
+import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
+import { fetchDoctor, initProject } from "../api";
+import { isAbsolutePath } from "../lib/paths";
+import type { Cli, DoctorReport } from "../types";
 
 type Step = "prereq" | "scaffold" | "openspec-init" | "agents-yaml";
 type StepStatus = "pending" | "in-progress" | "done" | "failed";
@@ -90,7 +101,12 @@ export function OnboardingProject() {
   const logIdRef = useRef(0);
   const logPaneRef = useRef<HTMLDivElement | null>(null);
 
-  const targetValid = target.length > 0 && target.startsWith("/");
+  // Agmsg setup (optional) — only relevant once the main chain is done.
+  const [doctorReport, setDoctorReport] = useState<DoctorReport | null>(null);
+  const [installTool, setInstallTool] = useState<"agmsg" | null>(null);
+  const [showAgmsgConfig, setShowAgmsgConfig] = useState(false);
+
+  const targetValid = target.length > 0 && isAbsolutePath(target);
 
   // Run the onboarding chain after the dialog is dismissed with a chosen CLI.
   useEffect(() => {
@@ -245,6 +261,23 @@ export function OnboardingProject() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [logs.length]);
 
+  // Check agmsg's install status once the chain completes, so the
+  // optional Agmsg section knows whether to show Install.
+  useEffect(() => {
+    if (!isComplete) return;
+    let cancelled = false;
+    fetchDoctor()
+      .then((r) => {
+        if (!cancelled) setDoctorReport(r);
+      })
+      .catch(() => {
+        /* best-effort — the section just won't show install status */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isComplete]);
+
   if (!targetValid) {
     return (
       <div className="onboarding-page">
@@ -252,7 +285,8 @@ export function OnboardingProject() {
           <h2>Missing target</h2>
           <p className="muted">
             /onboarding requires a <code>?target=&lt;absolute-path&gt;</code>
-            query parameter.
+            query parameter (e.g. <code>/home/me/project</code> or{" "}
+            <code>C:\Users\me\project</code>).
           </p>
           <div className="onboarding-actions">
             <button type="button" onClick={() => closeOnboarding(channel)}>
@@ -338,6 +372,34 @@ export function OnboardingProject() {
           )}
         </div>
 
+        {canOpen && (
+          <section className="onboarding-section">
+            <h3 className="onboarding-section-title">Agmsg (optional — multi-agent messaging)</h3>
+            <ul className="onboarding-prereqs">
+              <li
+                className={`onboarding-prereq ${doctorReport?.agmsg.installed ? "prereq-ok" : "prereq-missing"}`}
+              >
+                <span className="onboarding-icon">{doctorReport?.agmsg.installed ? "✓" : "○"}</span>
+                <span className="onboarding-label">agmsg</span>
+                <span className="onboarding-prereq-buttons">
+                  {doctorReport && !doctorReport.agmsg.installed && (
+                    <button
+                      type="button"
+                      className="prereq-install-btn"
+                      onClick={() => setInstallTool("agmsg")}
+                    >
+                      Install
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setShowAgmsgConfig(true)}>
+                    Configure
+                  </button>
+                </span>
+              </li>
+            </ul>
+          </section>
+        )}
+
         <div className="onboarding-actions">
           <button
             type="button"
@@ -372,6 +434,21 @@ export function OnboardingProject() {
           </button>
         </div>
       </div>
+
+      {installTool && (
+        <PrereqInstallModal
+          tool={installTool}
+          onClose={(didInstall) => {
+            setInstallTool(null);
+            if (didInstall) {
+              void fetchDoctor()
+                .then(setDoctorReport)
+                .catch(() => {});
+            }
+          }}
+        />
+      )}
+      {showAgmsgConfig && <AgmsgConfigModal onClose={() => setShowAgmsgConfig(false)} />}
     </div>
   );
 }
