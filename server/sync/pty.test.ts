@@ -10,6 +10,8 @@ import {
   attachPtyToSocket,
   ptyStartup,
   resolveManagerStartup,
+  terminateAllLivePtys,
+  activeTerminalCount,
 } from "./pty.js";
 
 /**
@@ -455,5 +457,17 @@ describe("attachPtyToSocket refuses PTY spawn when agents.yaml is absent", () =>
     const result = await attachPtyToSocket(fakeWs, { cwd: dir });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("no-agents-yaml");
+  });
+});
+
+// ---- terminateAllLivePtys (respawn-manager-pty-on-project-switch) --------
+describe("terminateAllLivePtys", () => {
+  it("is a no-op when no live PTYs exist", () => {
+    // Nothing to assert beyond "does not throw" — the module-level `live`
+    // array is private and starts empty in this test process (no
+    // attachPtyToSocket has succeeded, since node-pty is unavailable in
+    // the test env). This documents the empty-array contract.
+    expect(() => terminateAllLivePtys()).not.toThrow();
+    expect(activeTerminalCount()).toBe(0);
   });
 });

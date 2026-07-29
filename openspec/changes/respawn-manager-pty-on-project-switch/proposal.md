@@ -7,83 +7,69 @@ tags: [pty, manager, project-switch, cwd, embedded-terminal]
 The Manager Claude Code session (spawned by ithyno's embedded PTY)
 inherits its cwd from `PROJECT_ROOT` — a constant resolved **once** at
 server boot from `ITHYNO_PROJECT_ROOT ?? process.cwd()`
-(`server/index.ts:68`). The `/pty` WebSocket handler then passes that
+(`server/index.ts:68`). The `/pty` WebSocket handler passes that
 constant as the PTY spawn cwd unconditionally
 (`server/index.ts:1693`).
 
-Consequence: once the server is up, the Manager's cwd is frozen. If the
-user opens a different project via the dashboard's Open Project flow,
-the Manager keeps operating in the ORIGINAL project's directory. All
-downstream effects follow:
-
-- `/opsx:propose <id>` creates the change scaffold under the wrong
-  project's `openspec/changes/`
-- `/opsx:apply` edits the wrong project's files
-- `/ithy-opsx:import <target>` (from `refactor-import-to-task-tool-subagent`)
-  spawns a sub-agent whose parent Manager is at the wrong cwd
-- Session-id resolution (`resolveClaudeSessionStartup(projectRoot)` in
-  `server/sync/pty.ts`) mints its `.ithyno/session-claude` file in the
-  original project, not the newly-opened one
-
-Electron gets this right by re-spawning the server per project
-(see `switchProject(picked)` in `electron/src/main.ts`), but the CLI
-`npm run dev` / production single-process paths do not — the server
-sticks to its boot-time cwd forever.
+Consequence: once the server is up, the Manager's cwd is frozen. There
+is no way to point a running ithyno at a different project without
+killing the process and relaunching with a new cwd. Any slash command
+(`/opsx:propose`, `/opsx:apply`, `/ithy-opsx:import`) runs at the boot
+cwd, regardless of what the dashboard thinks the "current" project is.
 
 Concrete failure surfaced 2026-07-29: user initialized a fresh project
-at `/Users/cishihara/Documents/works/test-proj`, expected the running
-ithyno session to pick it up, invoked `/opsx:propose` in that context.
-Change scaffold landed in the ithyno tool's own `openspec/changes/`
-(the server had booted with cwd = ithyno dev repo), not test-proj.
+at `/Users/cishihara/Documents/works/test-proj` and expected the
+running ithyno session to pick it up. `/opsx:propose` landed the
+scaffold in the ithyno tool's own `openspec/changes/`, not test-proj —
+the server had booted with cwd = ithyno dev repo.
 
 ## What Changes
 
-- **`PROJECT_ROOT` becomes mutable / dynamically resolved** — replace
-  the module-level `const PROJECT_ROOT = ...` with a getter or `let`
-  that can be updated by an Open Project handler. All handlers that
-  currently read `PROJECT_ROOT` re-read on each call.
+- **`PROJECT_ROOT` becomes mutable** — replace the module-level
+  `const PROJECT_ROOT = ...` with a `let currentProjectRoot` behind a
+  `getProjectRoot()` getter and a `setProjectRoot(next)` mutator.
+  Callers that today read `PROJECT_ROOT` re-read via the getter.
 - **New endpoint `POST /api/project/switch`** — accepts
   `{ projectRoot: string }`. Validates the path (absolute, exists, is
-  a directory), rejects unauthorized paths per existing `/api/import`
-  authorization list, then:
-  - Terminates all live PTYs (`live: LiveTerminal[]` in
-    `server/sync/pty.ts`) — their consumers see a clean WS close and
-    reconnect
-  - Updates the internal `PROJECT_ROOT` reference to the new path
-  - Re-resolves `openspecDir` from the new root
-  - Broadcasts `state-replaced` so dashboards refetch
-- **`/pty` WebSocket handler** — reads the current `PROJECT_ROOT`
-  (dynamic) on every new connection, so a reconnect after project
-  switch attaches to a PTY spawned in the NEW project's cwd
-- **Dashboard triggers `POST /api/project/switch`** — the existing
-  `NoProjectDecisionPanel` Initialize path AND the `add-electron-welcome-window` /
-  Open Project flow both call the endpoint before reloading state
-- **Electron `switchProject(picked)` demoted** — no longer needs to
-  respawn the whole server process. Instead calls the endpoint. This
-  removes the "server restart" flicker on project switch
-- **VS Code parity** — the extension's "Open Project" command hits the
-  same endpoint
+  a directory), rejects unauthorized paths per the existing
+  `/api/import/spec-generation` allow-list. On accept: terminates all
+  live PTYs, updates the internal project root, broadcasts
+  `state-replaced`, returns 200.
+- **`terminateAllLivePtys()` helper in `server/sync/pty.ts`** — walks
+  the module-level `live: LiveTerminal[]` array and cleanly kills each
+  PTY + closes its WebSocket.
+- **`/pty` WebSocket handler** — reads `getProjectRoot()` dynamically
+  on each new connection, so a reconnect after switch attaches to a
+  PTY spawned in the new project's cwd.
+
+**Explicitly out of scope for this change** (deferred to follow-ups):
+- Electron `switchProject()` rewrite (removing the server subprocess
+  respawn in favor of the endpoint).
+- VS Code `onDidChangeWorkspaceFolders` listener wiring.
+- A dashboard-side "Open Project" trigger. The endpoint exists; the
+  caller can invoke it via devtools / curl / an external tool for the
+  initial rollout.
+
+Those follow-ups are legitimate but tangential to the root fix. Land
+the core mutable-root + endpoint + PTY kill helper first; each caller
+change can be its own small follow-up change.
 
 ## Success
 
 - User launches ithyno (`ithyno` CLI or `npm run dev`) from directory
-  A. Opens project B via the dashboard. Terminal panel's PTY respawns
-  with cwd = B. `/opsx:propose <id>` in the Manager creates the
-  scaffold at B/openspec/changes/, not A.
-- User launches ithyno, imports a project via
-  `/ithy-opsx:import <target>` (which uses the Manager PTY). The
-  Task-tool sub-agent runs at `<target>` as intended.
-- Server restart is NOT required to switch projects. No process kill,
-  no port re-bind, no session state loss.
-- Electron shell no longer respawns the server on Open Project — same
-  process, PTY respawn only.
-- Session-id file mints at the correct project root.
+  A. Invokes `POST /api/project/switch { projectRoot: "/path/B" }` via
+  devtools / curl. Terminal panel's PTY respawns with cwd = B on
+  reconnect. `/opsx:propose <id>` in the reconnected Manager creates
+  the scaffold at `/path/B/openspec/changes/`, not `/path/A/`.
+- Server restart is NOT required to switch projects at runtime.
+- Existing PTY tests keep passing — `cwd` is still passed explicitly
+  to `attachPtyToSocket` from the WS handler.
 
 ## Non-goals
 
-- No change to the Kanban Start / dispatch flow (those already pass
-  correct `cwd` per-worktree, not per-project).
-- No change to how PROJECT_ROOT is initially resolved (env var + cwd
-  fallback).
-- No new UI for project switch — this change is purely about making
-  the existing Open Project flow correctly re-target the Manager PTY.
+- No UI change (no dashboard button that calls the endpoint).
+- No Electron / VS Code integration change.
+- No change to how `PROJECT_ROOT` is initially resolved
+  (`ITHYNO_PROJECT_ROOT` env + cwd fallback).
+- No session-id migration logic — `resolveClaudeSessionStartup`
+  already reads per-project files at spawn time; no changes needed.
