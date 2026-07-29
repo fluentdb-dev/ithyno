@@ -157,13 +157,20 @@ function resolveWelcomeHtml(): string {
 let _iconDataUrlCache: string | null | undefined = undefined;
 function readAppIconDataUrl(): string | null {
   if (_iconDataUrlCache !== undefined) return _iconDataUrlCache;
+  // In dev, app.getAppPath() IS the electron/ directory (that's where
+  // its package.json lives), so the icon sits at
+  // <appPath>/build/icon.png — NO leading `..`. An earlier version had
+  // `..` and resolved to <repo-root>/build/icon.png, which doesn't
+  // exist; that made readFileSync throw and the welcome page fell back
+  // to `display:none` (icon invisible).
   const iconPath = app.isPackaged
     ? join(process.resourcesPath, 'app', 'electron', 'build', 'icon.png')
-    : resolve(app.getAppPath(), '..', 'build', 'icon.png');
+    : resolve(app.getAppPath(), 'build', 'icon.png');
   try {
     const buf = readFileSync(iconPath);
     _iconDataUrlCache = `data:image/png;base64,${buf.toString('base64')}`;
-  } catch {
+  } catch (err) {
+    console.warn('[welcome] failed to read icon at', iconPath, err);
     _iconDataUrlCache = null;
   }
   return _iconDataUrlCache;
