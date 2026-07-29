@@ -49,6 +49,11 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
 
   const onSave = async () => {
     setBusy(true);
+    // Close the modal on success. Standard modal-form convention: Save
+    // commits + dismisses. Without this the modal stayed open after a
+    // successful write, and the only feedback was a small toast — users
+    // read that as "Save didn't do anything" and clicked again.
+    let succeeded = false;
     try {
       if (enabled) {
         const trimmedTeam = team.trim();
@@ -67,11 +72,13 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
         useStore.setState({ agmsg: null });
         pushToast("info", "agmsg block removed");
       }
+      succeeded = true;
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
+    if (succeeded) onClose();
   };
 
   return (
