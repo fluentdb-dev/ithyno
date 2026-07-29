@@ -1,7 +1,7 @@
 {
   "name": "ithyno",
   "version": "0.0.1-alpha.0",
-  "description": "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.",
+  "description": "Local dashboard for OpenSpec — dispatches propose / apply / review / verify skills to AI CLI agents.",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",

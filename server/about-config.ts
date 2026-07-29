@@ -40,7 +40,7 @@ export type AboutInfo = {
  * show the same description regardless of which package.json was loaded.
  */
 export const ROOT_DESCRIPTION =
-  "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.";
+  "Local dashboard for OpenSpec — dispatches propose / apply / review / verify skills to AI CLI agents.";
 
 /**
  * Sponsor entries rendered on all About surfaces.
