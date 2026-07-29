@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ithyno.dev/schemas/skill-manifest.schema.json",
+  "title": "ithyno Skill Manifest",
+  "description": "Metadata for a universal skill source under ithyno/skills/<name>/. Consumed by per-CLI renderers at install time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "namespace", "command", "description", "supports", "capabilities_required"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Skill id in kebab-case. MUST match the directory name."
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Command namespace (e.g. 'opsx' for /opsx:*, 'ithy-opsx' for /ithy-opsx:*)."
+    },
+    "command": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Command name within the namespace (e.g. 'apply' for /ithy-opsx:apply)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 300,
+      "description": "One-line description shown in each CLI's command picker."
+    },
+    "supports": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["claude", "codex", "antigravity", "cursor", "gemini", "copilot", "opencode"]
+      },
+      "description": "Set of CLIs for which a renderer will be invoked. Uninstalled CLIs are skipped at install time."
+    },
+    "capabilities_required": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["subagent_spawn", "file_write", "bash"]
+      },
+      "description": "Capability tokens the skill body uses. Renderers refuse to emit for CLIs that cannot satisfy a required capability."
+    },
+    "per_cli": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "description": "Per-CLI overrides. Keys are CLI ids from the `supports` set; values are renderer-specific hint objects."
+    }
+  }
+}
