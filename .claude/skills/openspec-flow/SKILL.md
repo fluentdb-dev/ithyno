@@ -392,17 +392,27 @@ its own naming convention and disposition rules, formalized by
 ### PENDING annotation (Hard rule for MODIFIED / REMOVED deltas)
 
 At **propose time** for any change carrying a MODIFIED or REMOVED
-delta against a landed requirement, insert a one-line notice directly
-under that requirement's heading in the current
+delta against a landed requirement, insert a one-line notice **after
+the SHALL/MUST body paragraph** (before any `#### Scenario:` header)
+of that requirement in the current
 `openspec/specs/<capability>/spec.md`:
 
 ```md
 ### Requirement: <name>
 
+<existing SHALL/MUST body paragraph — must stay first non-empty line>
+
 > ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
 
-<existing body — untouched>
+<remaining body / #### Scenario: blocks>
 ```
+
+**Why after the body, not directly under the heading**: the openspec
+CLI parser (`parseRequirements`) captures the FIRST non-empty line
+after the header as `text`, and `RequirementSchema` requires that line
+to contain SHALL/MUST. The annotation in the pre-body slot swallows
+the check and breaks `openspec archive` for unrelated changes on the
+same capability. See `fix-pending-annotation-parser-compat`.
 
 Rationale: between propose and archive the spec still shows the
 requirement as if it were authoritative. Any agent / session reading

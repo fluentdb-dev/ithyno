@@ -266,15 +266,26 @@ Write a standard revert checklist. Include:
 ### 8. Insert PENDING annotations into current specs
 
 For each targeted requirement in `openspec/specs/<capability>/spec.md`,
-insert immediately under the `### Requirement:` heading:
+insert the annotation **immediately after the SHALL/MUST body paragraph**
+(before any `#### Scenario:` header) — NOT directly under the
+`### Requirement:` heading:
 
 ```md
 ### Requirement: <name>
 
+<existing SHALL/MUST body paragraph — must stay first non-empty line>
+
 > ⚠️ **PENDING <REMOVAL|MODIFICATION>** by [revert-<scope>](../../changes/revert-<scope>/): <one-line reason>.
 
-<existing body — untouched>
+<remaining body / #### Scenario: blocks>
 ```
+
+Why after the body: the openspec CLI parser captures the FIRST
+non-empty line after the header as the requirement's `text` field and
+requires SHALL/MUST there. An annotation blockquote in the natural
+under-heading slot swallows the check and breaks `openspec archive`
+for every change on the same capability. Ref:
+[fix-pending-annotation-parser-compat](../../../openspec/changes/archive/fix-pending-annotation-parser-compat/).
 
 - Case α + REMOVED delta → `PENDING REMOVAL`
 - Case α + MODIFIED delta → `PENDING MODIFICATION`
