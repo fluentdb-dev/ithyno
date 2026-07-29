@@ -138,23 +138,33 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * See wrap-embedded-pty-in-tmux.
  */
 /**
- * Read `<projectRoot>/.ithyno/session-id` and pick the corresponding
- * `claude` startup. Mints a fresh UUID (and writes the file) on first
- * launch or when the file is missing / empty. Returns plain `claude`
- * when no `projectRoot` is available (older callers, tests).
+ * Read `<projectRoot>/.ithyno/session-claude` and pick the
+ * corresponding Claude startup line. Mints a fresh UUID (and writes
+ * the file) on first launch or when the file is missing / empty.
+ * Returns plain `claude` when no `projectRoot` is available (older
+ * callers, tests).
  *
- * Landed by pty-startup-uses-project-session-id.
+ * Landed by pty-startup-uses-project-session-id (2026-07-19).
+ * Renamed + per-CLI split by the Manager-args cleanup that removed the
+ * bogus `args: [--continue]` template default: session-id semantics
+ * are Claude-only (Codex/Copilot/etc have their own resume flags), so
+ * naming and storage now say "claude" explicitly. The legacy
+ * `.ithyno/session-id` file (Claude-only from day one) is still read
+ * as fallback for existing dev environments.
  */
-function resolveSessionIdStartup(projectRoot: string | undefined): string {
+function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
   if (!projectRoot) return "claude";
-  const idPath = join(projectRoot, ".ithyno", "session-id");
+  const idPath = join(projectRoot, ".ithyno", "session-claude");
+  const legacyPath = join(projectRoot, ".ithyno", "session-id");
   let uuid = "";
-  if (existsSync(idPath)) {
+  for (const p of [idPath, legacyPath]) {
+    if (!existsSync(p)) continue;
     try {
-      uuid = readFileSync(idPath, "utf8").trim();
+      uuid = readFileSync(p, "utf8").trim();
     } catch {
-      /* fall through to mint */
+      /* fall through */
     }
+    if (uuid) break;
   }
   if (uuid) {
     return `claude --resume ${shellQuote(uuid)}`;
@@ -172,6 +182,40 @@ function resolveSessionIdStartup(projectRoot: string | undefined): string {
   return `claude --session-id ${shellQuote(fresh)}`;
 }
 
+/**
+ * Per-CLI startup strategy for Manager PTY spawn.
+ *
+ * Each strategy takes an optional `projectRoot` and returns the exact
+ * shell line to launch that CLI as Manager. Missing entries fall back
+ * to plain `<cli>` (safe first-launch default for any CLI, no
+ * session resume).
+ *
+ * Adding session persistence for a new CLI = add its strategy here.
+ * The picker's "動作未確認" label in InitDialog SHALL be dropped for a
+ * CLI once its strategy is landed AND the dispatch skill resolves in
+ * that CLI's command surface.
+ */
+type ManagerStartupStrategy = (projectRoot: string | undefined) => string;
+
+const MANAGER_STARTUP_STRATEGIES: Readonly<Record<string, ManagerStartupStrategy>> = {
+  claude: resolveClaudeSessionStartup,
+  // codex/copilot/gemini/agy/opencode/cursor: no strategy yet — plain
+  // command via resolveManagerStartup fallback. Each CLI's session
+  // resume mechanism is a separate follow-up (research per CLI).
+};
+
+/** Resolve the startup line for a Manager CLI. Uses the CLI's registered
+ *  strategy when available, otherwise plain command (safe first-launch
+ *  default). Exported for tests. */
+export function resolveManagerStartup(
+  command: string,
+  projectRoot: string | undefined,
+): string {
+  const strategy = MANAGER_STARTUP_STRATEGIES[command];
+  if (strategy) return strategy(projectRoot);
+  return command;
+}
+
 export function ptyStartup(
   registry: AgentRegistry | null,
   projectRoot?: string,
@@ -186,16 +230,24 @@ export function ptyStartup(
   let initialInput: string | undefined;
   if (manager && manager.command) {
     const args = manager.args ?? [];
-    baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    if (args.length === 0) {
+      // Empty args → defer to per-CLI Manager startup strategy
+      // (Claude gets --session-id mint / --resume; other CLIs get
+      // plain command as safe first-launch default). Explicit args in
+      // agents.yaml override this smart resolver.
+      baseStartup = resolveManagerStartup(manager.command, projectRoot);
+    } else {
+      baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    }
     initialInput = manager.initialInput;
   } else {
     const v = process.env.ITHYNO_TERMINAL_STARTUP;
     if (v !== undefined) {
       baseStartup = v;
     } else {
-      // Priority 3: per-project session UUID at .ithyno/session-id.
+      // Priority 3: per-project Claude session UUID (legacy no-manager path).
       // See doc comment above.
-      baseStartup = resolveSessionIdStartup(projectRoot);
+      baseStartup = resolveClaudeSessionStartup(projectRoot);
     }
     initialInput = undefined;
   }

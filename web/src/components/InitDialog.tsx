@@ -49,6 +49,25 @@ const CLI_LABELS: Record<Cli, string> = {
   antigravity: "Antigravity (antigravity)",
 };
 
+/** Manager-eligible CLIs — the picker offers only these. The rest
+ *  (copilot/gemini/opencode/cursor/antigravity) are still valid as
+ *  agmsg-spawned WORKERS but have not been validated as Manager.
+ *  See `server/sync/pty.ts` MANAGER_STARTUP_STRATEGIES: each CLI here
+ *  needs a startup strategy AND its own dispatch skill surface to run
+ *  the workflow. */
+const MANAGER_VERIFIED: readonly Cli[] = ["claude"];
+const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "agy"];
+const MANAGER_CANDIDATES: readonly Cli[] = [
+  ...MANAGER_VERIFIED,
+  ...MANAGER_UNVERIFIED,
+];
+function isManagerCandidate(cli: Cli): boolean {
+  return MANAGER_CANDIDATES.includes(cli);
+}
+function isManagerUnverified(cli: Cli): boolean {
+  return MANAGER_UNVERIFIED.includes(cli);
+}
+
 export function InitDialog({
   dir,
   initOptions = {},
@@ -72,13 +91,19 @@ export function InitDialog({
       .then((r) => {
         if (cancelled) return;
         setReport(r);
-        // Pre-select: defaultManager if installed, else first by priority
-        const installed = CLI_PRIORITY.filter((cli) => r.agents[cli].installed);
-        if (installed.length > 0) {
+        // Pre-select: defaultManager if installed AND Manager-eligible,
+        // else first eligible-installed by priority. Manager-eligible ⊂
+        // installed — see MANAGER_CANDIDATES above.
+        const eligible = CLI_PRIORITY.filter(
+          (cli) => r.agents[cli].installed && isManagerCandidate(cli),
+        );
+        if (eligible.length > 0) {
           const preferred =
-            defaultManager && installed.includes(defaultManager)
+            defaultManager &&
+            eligible.includes(defaultManager) &&
+            isManagerCandidate(defaultManager)
               ? defaultManager
-              : installed[0];
+              : eligible[0];
           setSelectedCli(preferred);
         }
       })
@@ -97,7 +122,12 @@ export function InitDialog({
   const installedClis = report
     ? CLI_PRIORITY.filter((cli) => report.agents[cli].installed)
     : [];
-  const readyForManager = report?.readyForManager ?? false;
+  /** Manager picker: only claude / codex / agy show up (of those,
+   *  only ones actually installed on the host). Non-candidates still
+   *  appear in the Prerequisites list as reachable CLIs — they're just
+   *  not usable as Manager yet. */
+  const managerChoices = installedClis.filter(isManagerCandidate);
+  const readyForManager = managerChoices.length > 0;
 
   async function handleInit() {
     if (!selectedCli || !readyForManager) return;
@@ -208,7 +238,7 @@ export function InitDialog({
             Which agent CLI runs as the Manager in this project.
           </p>
           <div className="onboarding-picker">
-            {installedClis.map((cli) => (
+            {managerChoices.map((cli) => (
               <label
                 key={cli}
                 className={`onboarding-picker-item ${selectedCli === cli ? "is-selected" : ""}`}
@@ -221,7 +251,12 @@ export function InitDialog({
                   disabled={initializing}
                   onChange={() => setSelectedCli(cli)}
                 />
-                <span>{CLI_LABELS[cli]}</span>
+                <span>
+                  {CLI_LABELS[cli]}
+                  {isManagerUnverified(cli) && (
+                    <span className="muted"> (動作未確認)</span>
+                  )}
+                </span>
               </label>
             ))}
           </div>
