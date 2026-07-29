@@ -31,6 +31,13 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
   const [team, setTeam] = useState<string>(storeAgmsg?.team ?? "");
   const [storage, setStorage] = useState<string>(storeAgmsg?.storage ?? "");
   const [busy, setBusy] = useState(false);
+  // saved = user has successfully saved at least once in this modal
+  //   session. Distinguishes "clean-open (no work yet)" from
+  //   "post-save (completion state)": in the post-save case we surface a
+  //   "✓ Saved" indicator and highlight Close so the user can dismiss
+  //   the modal as an explicit acknowledgement of completion. Editing
+  //   any field flips the modal back into the working state.
+  const [saved, setSaved] = useState(false);
 
   // Sync from store when a WS broadcast lands (Settings context only —
   // harmless no-op in the onboarding context, which never gets one).
@@ -45,14 +52,17 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
     (enabled && team !== (storeAgmsg?.team ?? "")) ||
     (enabled && (storage || "") !== (storeAgmsg?.storage ?? ""));
 
+  // Clear the "✓ Saved" indicator as soon as the user starts editing
+  // again — the completion state only holds for the last committed
+  // shape.
+  useEffect(() => {
+    if (dirty) setSaved(false);
+  }, [dirty]);
+
   const canSave = dirty && !busy && (!enabled || team.trim().length > 0);
 
   const onSave = async () => {
     setBusy(true);
-    // Close the modal on success. Standard modal-form convention: Save
-    // commits + dismisses. Without this the modal stayed open after a
-    // successful write, and the only feedback was a small toast — users
-    // read that as "Save didn't do anything" and clicked again.
     let succeeded = false;
     try {
       if (enabled) {
@@ -78,7 +88,7 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
-    if (succeeded) onClose();
+    if (succeeded) setSaved(true);
   };
 
   return (
@@ -140,8 +150,19 @@ export function AgmsgConfigModal(props: { onClose: () => void }) {
           </label>
         </div>
 
+        {saved && (
+          <p className="prereq-ok" role="status">
+            ✓ Saved. You can close this dialog.
+          </p>
+        )}
+
         <div className="prereq-modal-actions">
-          <button type="button" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className={saved ? "btn-primary" : undefined}
+          >
             Close
           </button>
           <button type="button" disabled={!canSave} onClick={() => void onSave()}>
