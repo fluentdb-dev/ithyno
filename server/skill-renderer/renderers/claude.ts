@@ -12,26 +12,47 @@
  * slash-command wrapper and a discoverable skill). For v1 we emit only
  * the command wrapper — matches how existing ithy-opsx commands work.
  */
+import { stringify as yamlStringify } from "yaml";
 import type { Renderer, RenderedFile, SkillSource } from "../types.js";
 
-/** Render capability tokens into Claude-native phrasing. */
+/** Render capability tokens into Claude-native phrasing.
+ *
+ *  Uses the function form of `String.replace` so any `$&`, `$'`, `$1`
+ *  in the source body cannot re-splice matched text into the output.
+ *  (The `body` argument itself is trusted markdown, but this keeps the
+ *  code shape uniform with placeholder fill, which does handle
+ *  manifest-supplied values.)
+ */
 function expandTokens(body: string): string {
   return body
     .replace(
       /<capability:subagent_spawn>/g,
-      "invoke via the Task tool (or /ithy-opsx:dispatch for a live-shell worker)",
+      () => "invoke via the Task tool (or /ithy-opsx:dispatch for a live-shell worker)",
     )
-    .replace(/<capability:file_write>/g, "use the Edit or Write tool")
-    .replace(/<capability:bash>/g, "run via the Bash tool");
+    .replace(/<capability:file_write>/g, () => "use the Edit or Write tool")
+    .replace(/<capability:bash>/g, () => "run via the Bash tool");
 }
 
-/** Fill `{{namespace}}` / `{{command}}` placeholders that skill bodies use. */
+/** Fill `{{namespace}}` / `{{command}}` placeholders that skill bodies use.
+ *
+ *  Uses the function form of `String.replace` so a manifest value
+ *  containing `$&`, `$'`, or `$1..$9` cannot re-splice the placeholder
+ *  or leak surrounding text into the output. The JSON schema patterns
+ *  already forbid such characters in `namespace`/`command`, but the
+ *  schema is not enforced at runtime yet (Ajv deferred), so we defend
+ *  in depth.
+ */
 function fillPlaceholders(body: string, source: SkillSource): string {
-  return body
-    .replace(/\{\{namespace\}\}/g, source.manifest.namespace)
-    .replace(/\{\{command\}\}/g, source.manifest.command);
+  const ns = source.manifest.namespace;
+  const cmd = source.manifest.command;
+  return body.replace(/\{\{namespace\}\}/g, () => ns).replace(/\{\{command\}\}/g, () => cmd);
 }
 
+/** Serialize the Claude command frontmatter via `yaml.stringify` so any
+ *  scalar containing `: `, a leading `#`/`[`/`>`/`&`, an unbalanced
+ *  quote, or a backslash is quoted/escaped correctly. Hand-rolling
+ *  `key: ${value}` breaks the moment a description happens to contain
+ *  a colon-space. */
 function frontmatter(source: SkillSource): string {
   const claudeOverrides = (source.manifest.per_cli?.claude ?? {}) as {
     category?: string;
@@ -40,17 +61,14 @@ function frontmatter(source: SkillSource): string {
   const displayName = `${source.manifest.namespace.toUpperCase()}: ${
     source.manifest.command.charAt(0).toUpperCase() + source.manifest.command.slice(1)
   }`;
-  const lines = [
-    "---",
-    `name: "${displayName}"`,
-    `description: ${source.manifest.description.replace(/\s+/g, " ").trim()}`,
-    ...(claudeOverrides.category ? [`category: ${claudeOverrides.category}`] : []),
-    ...(claudeOverrides.tags && claudeOverrides.tags.length > 0
-      ? [`tags: [${claudeOverrides.tags.join(", ")}]`]
-      : []),
-    "---",
-  ];
-  return lines.join("\n");
+  const doc: Record<string, unknown> = {
+    name: displayName,
+    description: source.manifest.description.replace(/\s+/g, " ").trim(),
+  };
+  if (claudeOverrides.category) doc.category = claudeOverrides.category;
+  if (claudeOverrides.tags && claudeOverrides.tags.length > 0) doc.tags = claudeOverrides.tags;
+  const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
+  return `---\n${yaml}\n---`;
 }
 
 function generatedBanner(source: SkillSource): string {

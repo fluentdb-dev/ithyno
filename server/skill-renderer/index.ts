@@ -12,12 +12,12 @@
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { discoverSkillSources } from "./discover.js";
-import { getRenderer } from "./renderers/index.js";
+import { discoverSkillSourcesDetailed } from "./discover.js";
+import { getRenderer, knownRendererClis } from "./renderers/index.js";
 import type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export { KNOWN_CLIS } from "./types.js";
-export { discoverSkillSources } from "./discover.js";
+export { discoverSkillSources, discoverSkillSourcesDetailed } from "./discover.js";
 export { knownRendererClis, getRenderer } from "./renderers/index.js";
 
 function supportsSkill(source: SkillSource, cli: CliId): boolean {
@@ -32,16 +32,33 @@ async function readIfExists(path: string): Promise<string | null> {
   }
 }
 
+function utf8Bytes(s: string): number {
+  return Buffer.byteLength(s, "utf8");
+}
+
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {
   const result: InstallResult = { written: [], skipped: [], errors: [] };
-  const sources = await discoverSkillSources(opts.sourcesDir);
+
+  // Discover with per-entry error routing (one bad skill directory
+  // does NOT block installing every healthy one).
+  const { sources, errors: discoverErrors } = await discoverSkillSourcesDetailed(opts.sourcesDir);
+  for (const de of discoverErrors) {
+    result.errors.push({
+      // Discovery errors are not tied to a specific CLI — attribute
+      // to the first selected CLI so structured consumers still see
+      // them; the `skill` field pinpoints the broken source.
+      cli: opts.selectedClis[0] ?? ("claude" as CliId),
+      skill: de.skill,
+      message: `discover: ${de.message}`,
+    });
+  }
 
   for (const cli of opts.selectedClis) {
     const renderer = getRenderer(cli);
     if (!renderer) {
       result.errors.push({
         cli,
-        message: `no renderer registered for CLI "${cli}" (v1 supports: ${["claude"].join(", ")})`,
+        message: `no renderer registered for CLI "${cli}" (available: ${knownRendererClis().join(", ")})`,
       });
       continue;
     }
@@ -75,27 +92,34 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
           });
           continue;
         }
+        const contentBytes = utf8Bytes(file.content);
         if (opts.dryRun) {
           const existing = await readIfExists(abs);
           if (opts.diff && existing !== null && existing !== file.content) {
-            result.errors.push({
+            // Diff surfacing: report to written with a `diff` note
+            // rather than result.errors (a pending update is not an
+            // error). Consumers gating on `errors.length === 0`
+            // should stay clean under dry-run + diff.
+            result.written.push({
               cli,
-              skill: source.id,
-              message: `[dry-run diff] ${file.path} differs from on-disk content (${existing.length} → ${file.content.length} bytes)`,
+              path: file.path,
+              bytes: contentBytes,
+              diff: `would update: ${utf8Bytes(existing)} → ${contentBytes} bytes`,
             });
+          } else {
+            result.written.push({ cli, path: file.path, bytes: contentBytes });
           }
-          result.written.push({ cli, path: file.path, bytes: file.content.length });
           continue;
         }
         // Byte-identical no-op: skip mtime touch.
         const existing = await readIfExists(abs);
         if (existing === file.content) {
-          result.written.push({ cli, path: file.path, bytes: file.content.length });
+          result.written.push({ cli, path: file.path, bytes: contentBytes });
           continue;
         }
         await mkdir(dirname(abs), { recursive: true });
         await writeFile(abs, file.content, "utf-8");
-        result.written.push({ cli, path: file.path, bytes: file.content.length });
+        result.written.push({ cli, path: file.path, bytes: contentBytes });
       }
     }
   }

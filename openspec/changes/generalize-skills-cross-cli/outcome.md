@@ -1,5 +1,62 @@
 # Outcome — v1 pilot slice
 
+## 🔁 Round 2 — fable review rework (2026-07-29)
+
+An independent code review by a fable-model agent flagged 10 findings
+(3 Med, 5 Low, 2 deferred to natural follow-up changes). Addressed 8
+in this same commit before archive:
+
+- **#1 YAML escape** — `frontmatter()` now emits via `yaml.stringify`
+  instead of hand-rolled `key: ${value}`. Descriptions containing `: `,
+  leading `#`/`[`/`>`/`&`, or backslashes now round-trip cleanly. Test
+  covers the pathological case.
+- **#2 vacuous skip test** — replaced with a synthetic-fixture test
+  that builds a `supports: [codex]` skill in a tmpdir and installs for
+  `[claude]`, asserting the real skip branch is exercised.
+- **#3 all-or-nothing discovery** — `discoverSkillSourcesDetailed()`
+  now returns `{sources, errors}`. Malformed YAML, name mismatch, and
+  stat failures route per-entry into `installSkills().errors` with a
+  `discover:` prefix; healthy skills still install. Tested with a
+  mixed fixture (1 healthy + 1 broken YAML + 1 name-mismatch).
+- **#4 leak guard matrix** — new test loops over
+  `knownRendererClis() × KNOWN_TOKENS`, rendering a synthetic body per
+  pair and asserting no raw `<capability:*>` survives. Regex widened
+  to `[a-z0-9_]*` (matches the linter's).
+- **#6 hardcoded `["claude"]` list** — replaced with
+  `knownRendererClis().join(", ")` so the error message updates
+  automatically when codex/others land.
+- **#7 byte count wrong unit** — `InstallResult.bytes` now uses
+  `Buffer.byteLength(content, "utf8")`. Test asserts it matches
+  `stat.size` on disk and diverges from `content.length` (proven by
+  the em-dash-bearing GENERATED banner).
+- **#8 `String.replace` $-pattern defense** — placeholder fill and
+  token expansion both use the function form
+  (`.replace(re, () => value)`). Test constructs a manifest with
+  `namespace: "ns$&x"` and asserts the literal is preserved.
+- **#10 comment + path** — fixed the self-referencing comment
+  ("install-skills.test.ts" → "server/skill-renderer.test.ts") and
+  replaced `import.meta.url === \`file://${process.argv[1]}\`` with
+  `pathToFileURL(process.argv[1]).href` (works with paths containing
+  spaces).
+
+**Deferred to follow-up changes** (per the review's own recommendation
++ my judgment):
+
+- **#5 status discriminant** — partial fix (dry-run diff surfaced in
+  `written` with a `diff` note instead of `errors`, so consumers
+  gating on `errors.length === 0` stay clean). The full `created |
+  updated | unchanged` discriminant belongs to the wire-into-init
+  change where the consumer's needs shape the API.
+- **#9 capability skip mechanism** — deferred to the Copilot renderer
+  change (first concrete need for a renderer that can't satisfy all
+  three v1 capabilities). Documented in that change's design when
+  landed.
+
+Test count: 12 → 18. All green. Build clean. Linter clean.
+
+---
+
+
 ## ✅ Worked
 
 - **The three-piece separation (source / manifest / renderer) is clean.**

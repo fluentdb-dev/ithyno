@@ -2,10 +2,10 @@
 // Scans ithyno/skills/**/SKILL.md for <capability:*> tokens and rejects
 // any not in the v1 vocabulary (docs/skill-capabilities.md).
 //
-// Also invocable as a vitest via install-skills.test.ts.
+// Also invocable as a vitest via server/skill-renderer.test.ts.
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const KNOWN_TOKENS = new Set(["subagent_spawn", "file_write", "bash"]);
 
@@ -42,8 +42,9 @@ export async function lintSkillsDir(skillsDir) {
   return offenders;
 }
 
-// CLI mode
-if (import.meta.url === `file://${process.argv[1]}`) {
+// CLI mode. `pathToFileURL` handles paths containing spaces / URL-encodable
+// characters — plain `file://${process.argv[1]}` string-concat would break.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const skillsDir = join(REPO, "ithyno", "skills");
   const offenders = await lintSkillsDir(skillsDir);

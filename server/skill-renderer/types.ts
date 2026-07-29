@@ -103,7 +103,15 @@ export interface InstallOptions {
 }
 
 export interface InstallResult {
-  written: Array<{ cli: CliId; path: string; bytes: number }>;
+  /**
+   * Files the installer wrote or would write. Each entry carries UTF-8
+   * `bytes` (not UTF-16 code units). Under `dryRun + diff`, entries for
+   * paths whose content differs from disk include a non-empty `diff`
+   * string; entries without `diff` are "would create" or "byte-identical
+   * no-op." Consumers wanting a hard status discriminant (created /
+   * updated / unchanged) are the domain of the wire-into-init follow-up.
+   */
+  written: Array<{ cli: CliId; path: string; bytes: number; diff?: string }>;
   skipped: Array<{ cli: CliId; skill: string; reason: string }>;
   errors: Array<{ cli: CliId; skill?: string; message: string }>;
 }
