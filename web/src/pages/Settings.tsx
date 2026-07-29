@@ -8,7 +8,13 @@ import { PrereqInstallModal } from "../components/PrereqInstallModal";
 import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
 import { isAbsolutePath } from "../lib/paths";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
-import { CLI_PRIORITY } from "../types";
+// Note: the `defaultManager` store slice + localStorage persistence remain
+// in place. The Settings-side radio group was removed by
+// `remove-default-manager-settings-ui` because it duplicated the Agents
+// tab's Manager section with a non-obvious scope difference. InitDialog
+// still consults the slice for preselect; a future implicit-set path
+// (e.g., remember the last-Init CLI) can wire `setDefaultManager` without
+// re-introducing a Settings UI.
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -28,8 +34,6 @@ export function Settings() {
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
   const doctorReport = useStore((s) => s.doctorReport);
   const loadDoctorReport = useStore((s) => s.loadDoctorReport);
-  const defaultManager = useStore((s) => s.defaultManager);
-  const setDefaultManager = useStore((s) => s.setDefaultManager);
   const [busy, setBusy] = useState(false);
 
   // Fetch the doctor report on mount
@@ -108,13 +112,6 @@ export function Settings() {
       </section>
 
       <AgmsgSummarySection agmsg={agmsg} disabled={busy} />
-
-      <DefaultManagerSection
-        defaultManager={defaultManager}
-        onSet={setDefaultManager}
-        disabled={busy}
-        report={doctorReport}
-      />
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
@@ -366,78 +363,8 @@ function PrerequisitesSection(props: {
   );
 }
 
-/** Human-readable labels for each CLI. Mirrors InitDialog's CLI_LABELS. */
-const CLI_LABELS_SETTINGS: Record<Cli, string> = {
-  claude: "Claude (claude)",
-  codex: "Codex (codex)",
-  agy: "Agy (agy)",
-  copilot: "GitHub Copilot (copilot)",
-  gemini: "Gemini (gemini)",
-  opencode: "OpenCode (opencode)",
-  cursor: "Cursor (cursor)",
-  antigravity: "Antigravity (antigravity)",
-};
-
-/**
- * Default Manager preference section (expand-init-to-scaffold-agents).
- * Reads the doctor report from the store (already fetched by the parent
- * Settings page via loadDoctorReport). Radio group limited to installed CLIs.
- */
-function DefaultManagerSection(props: {
-  defaultManager: Cli | null;
-  onSet: (cli: Cli) => void;
-  disabled: boolean;
-  report: DoctorReport | null;
-}) {
-  const { defaultManager, onSet, disabled, report } = props;
-
-  const installed = report
-    ? CLI_PRIORITY.filter((cli) => report.agents[cli]?.installed)
-    : [];
-
-  const effective: Cli | null =
-    defaultManager && installed.includes(defaultManager)
-      ? defaultManager
-      : installed[0] ?? null;
-
-  return (
-    <section className="settings-section">
-      <h3>Default Manager</h3>
-      <p className="muted">
-        The agent CLI used as Manager when you initialize a new project. Only
-        installed CLIs are shown. Persisted to{" "}
-        <code>localStorage["ithyno.defaultManager"]</code>.
-      </p>
-
-      {!report && <p className="muted">Checking installed CLIs…</p>}
-
-      {report && installed.length === 0 && (
-        <p className="muted">
-          No agent CLI detected. Install one (e.g.{" "}
-          <code>npm i -g @anthropic-ai/claude-code</code>) and reload.
-        </p>
-      )}
-
-      {installed.length > 0 && (
-        <div className="settings-radio-group">
-          {installed.map((cli) => (
-            <label key={cli} className="settings-radio">
-              <input
-                type="radio"
-                name="default-manager"
-                value={cli}
-                checked={effective === cli}
-                disabled={disabled}
-                onChange={() => onSet(cli)}
-              />
-              <span>{CLI_LABELS_SETTINGS[cli]}</span>
-              {effective === cli && !defaultManager && (
-                <span className="muted"> (auto)</span>
-              )}
-            </label>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
+// DefaultManagerSection was removed by `remove-default-manager-settings-ui`.
+// The Agents tab's Manager section is the sole UI for viewing / editing the
+// current project's Manager entry. The `defaultManager` store slice + its
+// localStorage persistence remain intact for InitDialog preselect and any
+// future implicit-set path.
