@@ -2,171 +2,279 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'" />
     <title>ithyno</title>
+    <script>
+      /* Pre-paint theme resolver. Runs before <body> paints so there's no
+       * FOUC between the default palette and the resolved one. Mirrors
+       * web/index.html's inline guard. */
+      (function () {
+        try {
+          var pref = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light';
+          document.documentElement.dataset.theme = pref;
+        } catch (_) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
     <style>
-      :root {
-        --bg: #0f1115;
-        --panel: #171a20;
-        --panel-2: #1d2028;
-        --border: #262a34;
-        --text: #e6e8ee;
-        --muted: #8a92a1;
-        --accent: #4c8dff;
-        --accent-hover: #5f9dff;
+      /* Palette mirrors web/src/styles.css so welcome-window colors match
+       * the main app exactly. Only the tokens welcome uses are pulled in. */
+      :root[data-theme="dark"] {
+        --bg-page: #0f1115;
+        --bg-panel: #181b22;
+        --bg-panel-2: #1f232c;
+        --bg-hover: rgba(255, 255, 255, 0.04);
+        --fg-primary: #e6e9ef;
+        --fg-muted: #8b93a3;
+        --border: #2a2f3a;
+        --accent: #6ea8fe;
+        --accent-hover: #85b6ff;
+      }
+      :root[data-theme="light"] {
+        --bg-page: #f1f5f9;
+        --bg-panel: #ffffff;
+        --bg-panel-2: #f8fafc;
+        --bg-hover: rgba(27, 31, 36, 0.06);
+        --fg-primary: #1f2328;
+        --fg-muted: #64748b;
+        --border: #d0d7de;
+        --accent: #0969da;
+        --accent-hover: #0550ae;
       }
       * { box-sizing: border-box; }
       html, body {
         margin: 0;
         padding: 0;
         height: 100%;
-        background: var(--bg);
-        color: var(--text);
+        background: var(--bg-page);
+        color: var(--fg-primary);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        font-size: 13px;
+        font-size: 14px;
         overflow: hidden;
         user-select: none;
       }
       body {
         display: flex;
         flex-direction: column;
-        padding: 20px 24px;
+        min-height: 0;
       }
-      header {
+      main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 48px 64px 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      header.hero {
         display: flex;
         align-items: center;
-        gap: 14px;
-        margin-bottom: 6px;
+        gap: 20px;
+        margin-bottom: 40px;
       }
-      header img {
-        width: 48px;
-        height: 48px;
-        border-radius: 8px;
+      header.hero img {
+        width: 64px;
+        height: 64px;
+        border-radius: 12px;
         flex: none;
       }
-      header .title {
+      header.hero h1 {
+        font-size: 32px;
+        font-weight: 300;
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+      header.hero .subtitle {
+        color: var(--fg-muted);
+        font-size: 14px;
+        margin: 4px 0 0;
+        line-height: 1.4;
+      }
+      .sections {
+        display: grid;
+        grid-template-columns: 1fr 1.4fr;
+        gap: 48px;
+      }
+      @media (max-width: 720px) {
+        .sections { grid-template-columns: 1fr; gap: 32px; }
+        main { padding: 32px 24px 16px; }
+        header.hero { margin-bottom: 24px; }
+      }
+      section h2 {
+        font-size: 22px;
+        font-weight: 400;
+        margin: 0 0 14px;
+        color: var(--fg-primary);
+      }
+      .action-list {
         display: flex;
         flex-direction: column;
         gap: 2px;
-        min-width: 0;
       }
-      header .name {
-        font-size: 18px;
-        font-weight: 600;
-      }
-      header .version {
-        color: var(--muted);
-        font-size: 12px;
-        font-variant-numeric: tabular-nums;
-      }
-      .description {
-        color: var(--muted);
-        font-size: 12px;
-        margin: 4px 0 12px;
-        line-height: 1.4;
-      }
-      .license {
-        color: var(--muted);
-        font-size: 11px;
-        margin: 0 0 16px;
-      }
-      .section-label {
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin: 0 0 6px;
-      }
-      .recent {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        margin-bottom: 12px;
-        background: var(--panel);
-        border: 1px solid var(--border);
+      .action-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        margin-left: -10px;
         border-radius: 6px;
+        color: var(--accent);
+        background: transparent;
+        border: none;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .action-link:hover {
+        background: var(--bg-hover);
+        color: var(--accent-hover);
+      }
+      .action-link:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .action-link svg {
+        width: 14px;
+        height: 14px;
+        flex: none;
+      }
+      .recent-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
       .recent-empty {
-        padding: 14px;
-        color: var(--muted);
-        font-size: 12px;
-        text-align: center;
-      }
-      .recent ul {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-      .recent li {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        cursor: pointer;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 12px;
-        word-break: break-all;
-      }
-      .recent li:last-child { border-bottom: none; }
-      .recent li:hover { background: var(--panel-2); }
-      .actions {
-        display: flex;
-        justify-content: flex-end;
-        margin-bottom: 12px;
-      }
-      button {
-        background: var(--accent);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 8px 16px;
+        color: var(--fg-muted);
         font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        font-family: inherit;
+        padding: 8px 0;
       }
-      button:hover { background: var(--accent-hover); }
-      button:focus-visible {
-        outline: 2px solid var(--accent-hover);
-        outline-offset: 2px;
+      .recent-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 10px;
+        margin-left: -10px;
+        border-radius: 6px;
+        cursor: pointer;
+        background: transparent;
+        border: none;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        width: calc(100% + 10px);
+      }
+      .recent-item:hover {
+        background: var(--bg-hover);
+      }
+      .recent-item:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .recent-name {
+        font-size: 14px;
+        color: var(--accent);
+      }
+      .recent-item:hover .recent-name {
+        color: var(--accent-hover);
+      }
+      .recent-path {
+        font-size: 12px;
+        color: var(--fg-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       footer {
-        display: flex;
-        gap: 12px;
-        padding-top: 10px;
+        padding: 16px 64px 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+        width: 100%;
         border-top: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+      @media (max-width: 720px) {
+        footer { padding: 16px 24px 20px; }
+      }
+      .meta-item {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .meta-label {
+        color: var(--fg-muted);
+      }
+      .meta-value {
+        color: var(--fg-primary);
+      }
+      .meta-value code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 11px;
       }
       footer a {
-        color: var(--muted);
+        color: var(--accent);
         text-decoration: none;
         cursor: pointer;
       }
-      footer a:hover { color: var(--text); text-decoration: underline; }
+      footer a:hover {
+        color: var(--accent-hover);
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
-    <header>
-      <img id="icon" alt="" />
-      <div class="title">
-        <div class="name" id="app-name">ithyno</div>
-        <div class="version" id="app-version"></div>
+    <main>
+      <header class="hero">
+        <img id="icon" alt="" />
+        <div>
+          <h1 id="app-name">ithyno</h1>
+          <p class="subtitle" id="app-description"></p>
+        </div>
+      </header>
+
+      <div class="sections">
+        <section>
+          <h2>Start</h2>
+          <div class="action-list">
+            <button id="open-folder" type="button" class="action-link">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>Open Folder…</span>
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Recent</h2>
+          <div id="recent" class="recent-list">
+            <div class="recent-empty">No recent projects.</div>
+          </div>
+        </section>
       </div>
-    </header>
-    <p class="description" id="app-description"></p>
-    <p class="license" id="app-license"></p>
-
-    <p class="section-label">Recent projects</p>
-    <div class="recent" id="recent">
-      <div class="recent-empty">No recent projects.</div>
-    </div>
-
-    <div class="actions">
-      <button id="open-folder" type="button">Open Folder…</button>
-    </div>
+    </main>
 
     <footer>
-      <a id="footer-license" href="#">License</a>
-      <a id="footer-repo" href="#">Repository</a>
+      <div class="meta-item">
+        <span class="meta-label">Version</span>
+        <span class="meta-value"><code id="app-version"></code></span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">License</span>
+        <span class="meta-value" id="app-license-wrap">
+          <a id="app-license-link"></a>
+        </span>
+      </div>
+      <div class="meta-item">
+        <a id="app-repo-link">Repository</a>
+      </div>
     </footer>
 
     <script>
@@ -177,22 +285,40 @@
         return document.getElementById(id);
       }
 
+      function basename(p) {
+        const parts = p.split(/[\\/]/);
+        return parts[parts.length - 1] || p;
+      }
+
       function renderRecent(paths) {
         const container = el('recent');
+        container.innerHTML = '';
         if (!paths || paths.length === 0) {
-          container.innerHTML = '<div class="recent-empty">No recent projects.</div>';
+          const empty = document.createElement('div');
+          empty.className = 'recent-empty';
+          empty.textContent = 'No recent projects.';
+          container.appendChild(empty);
           return;
         }
-        const ul = document.createElement('ul');
         for (const p of paths) {
-          const li = document.createElement('li');
-          li.textContent = p;
-          li.title = p;
-          li.addEventListener('click', () => api.openRecent(p));
-          ul.appendChild(li);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'recent-item';
+          btn.title = p;
+
+          const name = document.createElement('span');
+          name.className = 'recent-name';
+          name.textContent = basename(p);
+
+          const pathEl = document.createElement('span');
+          pathEl.className = 'recent-path';
+          pathEl.textContent = p;
+
+          btn.appendChild(name);
+          btn.appendChild(pathEl);
+          btn.addEventListener('click', () => api.openRecent(p));
+          container.appendChild(btn);
         }
-        container.innerHTML = '';
-        container.appendChild(ul);
       }
 
       async function init() {
@@ -203,23 +329,27 @@
           el('icon').style.display = 'none';
         }
         el('app-name').textContent = about.name;
-        el('app-version').textContent = 'v' + about.version;
         el('app-description').textContent = about.description || '';
-        el('app-license').textContent = 'License: ' + about.license;
+        el('app-version').textContent = about.version;
         document.title = about.name;
 
-        const licenseLink = el('footer-license');
-        const repoLink = el('footer-repo');
+        const licenseWrap = el('app-license-wrap');
+        const licenseLink = el('app-license-link');
         if (about.licenseUrl) {
-          licenseLink.textContent = 'License (' + about.license + ')';
+          licenseLink.textContent = about.license;
+          licenseLink.href = '#';
           licenseLink.addEventListener('click', (e) => {
             e.preventDefault();
             api.openExternal(about.licenseUrl);
           });
         } else {
-          licenseLink.style.display = 'none';
+          licenseWrap.textContent = about.license;
+          licenseWrap.className = 'meta-value';
         }
+
+        const repoLink = el('app-repo-link');
         if (about.repositoryUrl) {
+          repoLink.href = '#';
           repoLink.addEventListener('click', (e) => {
             e.preventDefault();
             api.openExternal(about.repositoryUrl);

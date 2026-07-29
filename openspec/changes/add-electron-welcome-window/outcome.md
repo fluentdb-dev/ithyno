@@ -2,95 +2,109 @@
 
 ## ✅ Worked
 
-- **Single source of truth for identity.** `readAboutConfig()` already
-  returned everything the welcome window needed (name, version,
-  license, description, licenseUrl, repositoryUrl). Adding one field
-  (`iconDataUrl`) via a wrapper in the `welcome:get-about` handler
-  gave the welcome page every asset it uses, without touching the
-  About panel path or duplicating strings anywhere.
-- **Data-URL icon dodged packaging headaches.** First cut used a
-  relative `<img src="./build/icon.png">` in welcome.html, which
-  works in dev but breaks under electron-builder's packaged layout
-  (the `build/` dir is buildResources, not extraResources, and
-  `files` puts things under `resources/app.asar/` not
-  `resources/app/electron/build/`). Switching to a base64 data URL
-  computed once in main + cached made the whole path-resolution
-  category disappear.
-- **Followed the onboarding-window pattern verbatim.** Preload
-  resolver mirrors `resolveOnboardingPreload`; IPC channel naming
-  (`welcome:*` matches `onboarding-*`); `closed` handler cleans up
-  window state and conditionally quits. Nothing novel was needed at
-  the Electron layer — the pattern already worked for a second
-  BrowserWindow.
-- **Kept "reopen last project" as zero-friction.** Users who work in
-  one project every day don't see the welcome window at all — the
-  same `store.getLastProject()` check runs first, and the welcome
-  path only kicks in when there's no valid saved state. The change is
-  invisible to daily drivers.
+- **Same-window swap eliminates the "window closes → window opens"
+  flicker.** After the pivot, the main BrowserWindow is created
+  ONCE and its content transitions via `loadFile(welcome.html)` →
+  `loadURL(spawn.url)`. Window bounds persist across the swap, the
+  menu bar is set once, and Cmd+Q / Cmd+W behaviour is uniform. The
+  original v1 design (separate welcome BrowserWindow, then create a
+  second main BrowserWindow, then close welcome) has all of these
+  concerns as separate coordination problems; v2 makes them
+  non-problems by construction.
+- **Unified preload made the swap trivial.** `contextBridge`
+  exposes `ithynoWelcome` alongside `openspecUI` / `ithyno` from the
+  same preload script. Each page (welcome.html, main React app)
+  reads only the globals it needs; the other stays unused. This is
+  what unlocks "one BrowserWindow, two pages" — preload is fixed at
+  construction time in Electron, so a single unified preload was the
+  only path.
+- **Palette re-use via CSS variables kept the redesign small.**
+  Copied the same `--bg-page` / `--bg-panel` / `--border` /
+  `--fg-primary` / `--fg-muted` / `--accent` variable names from
+  `web/src/styles.css` into welcome.html's `<style>` block, gated by
+  `:root[data-theme="dark|light"]`. Welcome now visually matches the
+  main app in either theme without any React or CSS-module
+  infrastructure.
+- **About-panel pattern (muted-label + raw value) fits welcome
+  naturally.** Removing the `"v" + version` / `"License: " + license`
+  string concatenation and rendering `<span class="muted">Version</span>
+  <code>0.0.1-alpha.0</code>` instead removed the double-prefixing
+  and put welcome in visual alignment with AboutModal.
 
 ## ⚠️ Surprises
 
-- **`files` vs `extraResources` in electron-builder is subtle.** The
-  onboarding-preload path (`resources/app/electron/out/…`) exists
-  because SOMETHING in the build ships electron/ under `app/`. I
-  couldn't find an explicit `extraResources` mapping for it in
-  `electron/package.json`. Two possibilities: (1) an implicit
-  electron-builder default I'm not seeing, (2) the onboarding
-  packaged path is actually wrong and no one has run it in packaged
-  mode. Either way, matching the pattern for `welcome-preload` +
-  `welcome.html` is the safest bet — if onboarding is broken in
-  packaged mode, welcome breaks the same way (and gets fixed the same
-  way). Adding `welcome.html` + `build/icon.png` to `files` at least
-  makes them present in the app bundle regardless of the layout.
-- **CSP for a file:// page is stricter than for an http:// page.**
-  Wrote `img-src 'self' data:` in the meta CSP to allow data URLs,
-  then double-checked the `contextBridge` API surface only exposes
-  what's declared. No script inline required for the vanilla JS
-  bootstrap because the `<script>` at end-of-body doesn't violate
-  `script-src 'self'` (same-origin file: source).
-- **`ProjectStore.getRecent` was already there.** Poking at the file
-  I expected to add it — turns out `add-electron-new-project-flow` or
-  earlier had already implemented Recent tracking. Zero work needed
-  there.
+- **First cut was a separate BrowserWindow — the wrong architecture.**
+  I followed the `add-new-project-onboarding-window` pattern
+  (separate window with its own preload + IPC) without checking
+  whether it fit the welcome case. Onboarding is a wizard flow with
+  its own life; welcome is "the app started but no project is
+  selected yet", which is a natural state of the main window. That
+  mistake cost one impl commit, one code review round, and this
+  outcome-and-rework pass — but the pivot itself was cheap once the
+  right architecture was named.
+- **`prefers-color-scheme` is the ONLY signal welcome.html can
+  read.** The main app's theme preference lives in
+  `localStorage["ithyno.theme"]` under the
+  `http://localhost:<port>` origin. welcome.html loads from
+  `file://`, a different origin, so localStorage is not shared.
+  Adding IPC to expose the preference from Electron main would
+  require reading (or duplicating) what today lives only in the
+  renderer. `prefers-color-scheme` is correct for the welcome case
+  anyway — welcome appears only when no project is loaded, i.e. the
+  user has not yet had a chance to override the OS default.
+- **The auto-mode classifier blocked `git reset --hard HEAD~1`**
+  when I tried to squash the v1 (separate window) impl into the v2
+  (same-window swap) impl. Landing two impl commits (`impl v1
+  separate window` → `impl v2 same-window swap pivot`) is the
+  correct outcome given the constraint — if the operator wants a
+  clean single-impl history they can squash locally with
+  interactive rebase later.
+- **`prefers-color-scheme` inline script needed `'unsafe-inline'`
+  in `script-src` for CSP.** The pre-paint theme resolver has to
+  run before body paints (to avoid FOUC), so it can't be
+  external-loaded. Added `'unsafe-inline'` to the meta CSP. This
+  is the same trade-off `web/index.html` makes for its inline FOUC
+  guard.
 
 ## 🔁 Differently
 
-- **Would have written the IPC handler tests up front if the harness
-  were less painful.** Testing Electron main-process code with a
-  mocked `ipcMain` / `BrowserWindow` requires nontrivial fake-module
-  scaffolding, and the ROI is low compared to a manual launch. The
-  existing electron-side code follows the same "verified by manual
-  launch, not unit tests" pattern (see `add-electron-shell` /
-  `add-new-project-onboarding-window`), so this change fits the norm.
-  A future dedicated test harness for main-process would pay dividends
-  across all these windows.
+- **Would have named the architecture (same-window swap vs separate
+  window) in the proposal from the start.** The v1 proposal said
+  "new welcome BrowserWindow" without justifying WHY it needed to
+  be separate. That framing invited the wrong implementation.
+  Naming the architecture explicitly ("same-window swap: welcome
+  and main share one BrowserWindow, its URL swaps in place") is
+  what surfaced the design problem in code review.
+- **Would have written the IPC handler tests up front if the
+  harness were less painful.** Testing Electron main-process code
+  with a mocked `ipcMain` / `BrowserWindow` requires nontrivial
+  fake-module scaffolding, and the ROI is low compared to a manual
+  launch. The existing electron-side code follows the same
+  "verified by manual launch, not unit tests" pattern (see
+  `add-electron-shell` / `add-new-project-onboarding-window`), so
+  this change fits the norm.
 
 ## 🌱 Follow-ups
 
-- **New Project button in the welcome window.** Deferred per user
-  direction ("Open Folder is enough — NoProjectDecisionPanel handles
-  the initialize case"). If friction shows up (users don't discover
-  the initialize button post-selection), add a dedicated New Project
-  entry that routes straight to `/onboarding?target=<picked>`.
-- **Recent list pruning at startup, not just on click.** Currently a
-  stale recent entry survives until the user actually clicks it in
-  the welcome window. A one-time sweep on welcome window open —
+- **New Project button in the welcome view.** Deferred per user
+  direction ("Open Folder is enough — NoProjectDecisionPanel
+  handles the initialize case"). If friction shows up (users don't
+  discover the initialize button post-selection), add a dedicated
+  New Project entry that routes straight to
+  `/onboarding?target=<picked>`.
+- **Recent list pruning at startup, not just on click.** Currently
+  a stale recent entry survives until the user actually clicks it
+  in the welcome view. A one-time sweep on welcome-view load —
   `store.getRecent().filter(isDirectory)` + write back the pruned
-  list — would keep the visible list honest without waiting for the
-  user to hit a dead entry.
+  list — would keep the visible list honest without waiting for
+  the user to hit a dead entry.
 - **Actual manual test on packaged binary.** The main-process code
   matches the onboarding pattern and typechecks cleanly, but only a
-  packaged run confirms electron-builder ships `welcome.html` +
-  `build/icon.png` correctly. Adding a smoke test to
-  `add-release-build-workflow`'s bundle-verification-script would
-  automate this.
-- **`resolveOnboardingPreload` layout audit.** If it turns out the
-  onboarding preload isn't actually reachable in packaged mode (see
-  Surprises), fix both onboarding and welcome together — same class
-  of bug, same fix (add explicit `extraResources` for
-  `../electron/out` → `app/electron/out` and `../electron/welcome.html`
-  → `app/electron/welcome.html`).
-- **Preload consolidation.** With three preloads (main, onboarding,
-  welcome), each with slightly different exposed APIs, factoring the
-  "sanitize channel name" boilerplate into a shared helper would
-  save a small amount of typing. Not urgent.
+  packaged run confirms electron-builder ships `welcome.html`
+  correctly under `resources/app/electron/welcome.html`.
+- **Reading the app's stored `theme` preference for welcome.html.**
+  Currently `prefers-color-scheme` only. If a user has set a hard
+  override in the app (light on a dark OS, or vice versa) and then
+  the saved project becomes stale, they'll briefly see welcome in
+  the OS palette before opening a new project. Ambient cost is
+  small; fix path is IPC handler that reads a shared config file.

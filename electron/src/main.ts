@@ -54,7 +54,6 @@ function readAboutConfig(): AboutConfig {
 const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
 let mainWindow: BrowserWindow | null = null;
-let welcomeWindow: BrowserWindow | null = null;
 let currentSpawn: SpawnResult | null = null;
 let currentProjectRoot: string | null = null;
 let quitting = false;
@@ -130,17 +129,12 @@ function validateWindowState(ws: WindowState): WindowState {
 }
 
 /**
- * Resolve the packaged / dev path to the welcome window's preload script
- * and static HTML. Mirrors resolveOnboardingPreload / resolveBinPath.
- * (add-electron-welcome-window.)
+ * Resolve the packaged / dev path to welcome.html. The welcome page is
+ * loaded into the SAME BrowserWindow that becomes the main window after
+ * the user picks a project (same-window swap) — its preload is the
+ * standard main preload (electron/src/preload.ts), so no separate
+ * welcome-preload path is needed. (add-electron-welcome-window.)
  */
-function resolveWelcomePreload(): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, 'app', 'electron', 'out', 'welcome-preload.js');
-  }
-  return resolve(app.getAppPath(), 'out', 'welcome-preload.js');
-}
-
 function resolveWelcomeHtml(): string {
   if (app.isPackaged) {
     return join(process.resourcesPath, 'app', 'electron', 'welcome.html');
@@ -215,56 +209,79 @@ function saveWindowState(win: BrowserWindow): void {
   });
 }
 
-async function createWindowForProject(projectRoot: string): Promise<void> {
+/**
+ * Create (or reuse) the single main BrowserWindow.
+ *
+ * - `projectRoot` non-null → spawn the server pinned to that root and load
+ *   its URL. This is the standard "open a project" path.
+ * - `projectRoot` null → skip server spawn and load welcome.html. Same
+ *   BrowserWindow instance; when the user picks a folder from welcome, we
+ *   call this function again with the picked path and the SAME window's
+ *   URL swaps to localhost. That's the "same-window swap" contract — the
+ *   welcome page and the main app share one window, one preload, and one
+ *   set of window bounds.
+ *
+ * When `mainWindow` already exists (either a running project or a running
+ * welcome view), we reuse it via loadURL / loadFile — no BrowserWindow
+ * teardown, no bounds reset, no flicker.
+ * (add-electron-welcome-window, same-window swap pivot.)
+ */
+async function createWindowForProject(projectRoot: string | null): Promise<void> {
   await tearDownServer();
 
-  const binPath = resolveBinPath();
-  if (!existsSync(binPath)) {
-    dialog.showErrorBox(
-      'ithyno',
-      `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
-    );
-    app.quit();
-    return;
-  }
-
-  let spawn: SpawnResult;
-  try {
-    spawn = await spawnServer({
-      binPath,
-      projectRoot,
-      onLog: (line, stream) => {
-        if (stream === 'stderr') process.stderr.write(line);
-        else process.stdout.write(line);
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const choice = dialog.showMessageBoxSync({
-      type: 'error',
-      title: 'ithyno',
-      message: 'Failed to start the ithyno server',
-      detail: message,
-      buttons: ['Retry', 'Quit'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (choice === 0) {
-      await createWindowForProject(projectRoot);
-    } else {
+  let spawn: SpawnResult | null = null;
+  if (projectRoot !== null) {
+    const binPath = resolveBinPath();
+    if (!existsSync(binPath)) {
+      dialog.showErrorBox(
+        'ithyno',
+        `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
+      );
       app.quit();
+      return;
     }
-    return;
+
+    try {
+      spawn = await spawnServer({
+        binPath,
+        projectRoot,
+        onLog: (line, stream) => {
+          if (stream === 'stderr') process.stderr.write(line);
+          else process.stdout.write(line);
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const choice = dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'ithyno',
+        message: 'Failed to start the ithyno server',
+        detail: message,
+        buttons: ['Retry', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice === 0) {
+        await createWindowForProject(projectRoot);
+      } else {
+        app.quit();
+      }
+      return;
+    }
+    currentSpawn = spawn;
+    currentProjectRoot = resolve(projectRoot);
+    store.setProject(projectRoot);
+    refreshMenu();
   }
-  currentSpawn = spawn;
-  currentProjectRoot = resolve(projectRoot);
-  store.setProject(projectRoot);
-  refreshMenu();
 
   const savedWs = validateWindowState(store.getWindowState());
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.loadURL(spawn.url);
+    if (spawn) {
+      void mainWindow.loadURL(spawn.url);
+    } else {
+      void mainWindow.loadFile(resolveWelcomeHtml());
+    }
     mainWindow.focus();
     return;
   }
@@ -304,7 +321,11 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     if (mainWindow === win) mainWindow = null;
   });
 
-  await win.loadURL(spawn.url);
+  if (spawn) {
+    await win.loadURL(spawn.url);
+  } else {
+    await win.loadFile(resolveWelcomeHtml());
+  }
 }
 
 async function switchProject(projectRoot: string): Promise<void> {
@@ -410,63 +431,12 @@ function resolveOnboardingPreload(): string {
 }
 
 /**
- * Open the welcome BrowserWindow used at first launch when there is no
- * valid saved project. Shows app identity from readAboutConfig (same
- * source as the About panel) + a Recent list + a single "Open Folder"
- * action. Closing without selecting a project quits the app.
+ * IPC channels used by welcome.html (loaded into the main BrowserWindow
+ * when no project is open). All handlers target `mainWindow` — the same
+ * window instance whose URL will swap to localhost:<port> as soon as the
+ * user picks a folder (same-window swap; see `createWindowForProject`).
  * (add-electron-welcome-window.)
  */
-function createWelcomeWindow(): BrowserWindow {
-  const win = new BrowserWindow({
-    width: 520,
-    height: 460,
-    title: 'ithyno',
-    resizable: false,
-    minimizable: true,
-    maximizable: false,
-    fullscreenable: false,
-    autoHideMenuBar: true,
-    backgroundColor: DEFAULT_CHROME_COLOR,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: resolveWelcomePreload(),
-    },
-  });
-  win.setMenuBarVisibility(false);
-  welcomeWindow = win;
-
-  void win.loadFile(resolveWelcomeHtml());
-
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-  win.on('closed', () => {
-    if (welcomeWindow === win) welcomeWindow = null;
-    // Closing the welcome window with no project selected quits the app —
-    // matches the terminal semantics of the pre-welcome cancel-picker
-    // path but with explicit user intent.
-    if (!mainWindow && !quitting) {
-      app.quit();
-    }
-  });
-
-  return win;
-}
-
-/** Route an "open a project" request from the welcome window through the
- *  standard createWindowForProject flow, then close the welcome window.
- *  Shared by open-folder and open-recent handlers. */
-async function openProjectFromWelcome(path: string): Promise<void> {
-  const w = welcomeWindow;
-  await createWindowForProject(path);
-  if (w && !w.isDestroyed()) {
-    // Prevent the closed handler from quitting the app now that we have a
-    // main window in flight.
-    w.close();
-  }
-}
-
 function registerWelcomeIpc(): void {
   ipcMain.handle('welcome:get-about', () => {
     // Extend the About payload with an inline icon data URL so
@@ -477,21 +447,21 @@ function registerWelcomeIpc(): void {
   });
   ipcMain.handle('welcome:get-recent', () => store.getRecent());
   ipcMain.on('welcome:open-folder', () => {
-    const picked = pickProjectDialog(welcomeWindow ?? undefined);
-    if (!picked) return; // cancel — welcome stays open
-    void openProjectFromWelcome(picked);
+    const picked = pickProjectDialog(mainWindow ?? undefined);
+    if (!picked) return; // cancel — welcome stays visible in the same window
+    void createWindowForProject(picked);
   });
   ipcMain.on('welcome:open-recent', (_e, path: unknown) => {
     if (typeof path !== 'string' || !path) return;
     if (!isDirectory(path)) {
       store.removeFromRecent(path);
-      const w = welcomeWindow;
+      const w = mainWindow;
       if (w && !w.isDestroyed()) {
         w.webContents.send('welcome:recent-updated', store.getRecent());
       }
       return;
     }
-    void openProjectFromWelcome(path);
+    void createWindowForProject(path);
   });
   ipcMain.on('welcome:open-external', (_e, url: unknown) => {
     if (typeof url !== 'string' || !url) return;
@@ -638,20 +608,16 @@ if (!gotLock) {
     });
     refreshMenu(aboutConfig);
 
-    // First-launch flow (add-electron-welcome-window):
-    //   - Valid saved project → auto-open (daily-driver: zero friction)
-    //   - No / stale saved → open welcome window with identity + Recent
-    //     + single Open Folder action, instead of firing the bare native
-    //     picker with no context.
+    // First-launch flow (add-electron-welcome-window, same-window swap):
+    //   - Valid saved project → open with project (daily-driver: zero
+    //     friction, no welcome flicker).
+    //   - No / stale saved → open the SAME main window on welcome.html;
+    //     Open Folder swaps its URL to localhost:<port> in place.
     const saved = store.getLastProject();
-    if (saved && isDirectory(saved)) {
-      await createWindowForProject(saved);
-      return;
-    }
     if (saved && !isDirectory(saved)) {
       store.removeFromRecent(saved);
     }
-    createWelcomeWindow();
+    await createWindowForProject(saved && isDirectory(saved) ? saved : null);
   });
 
   app.on('window-all-closed', () => {
@@ -668,17 +634,13 @@ if (!gotLock) {
   });
 
   app.on('activate', () => {
-    if (mainWindow || welcomeWindow || quitting) return;
+    if (mainWindow || quitting) return;
     void app.whenReady().then(async () => {
       const saved = store.getLastProject();
-      if (saved && isDirectory(saved)) {
-        await createWindowForProject(saved);
-        return;
-      }
       if (saved && !isDirectory(saved)) {
         store.removeFromRecent(saved);
       }
-      createWelcomeWindow();
+      await createWindowForProject(saved && isDirectory(saved) ? saved : null);
     });
   });
 }
