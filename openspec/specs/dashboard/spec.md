@@ -3092,6 +3092,8 @@ about to be spawned (initial connection or reconnect that spawns
 a new process). This resolution is independent of any tmux
 wrapping applied later:
 
+> ⚠️ **PENDING MODIFIED** by [fix-manager-startup-per-cli-dispatch](../../changes/fix-manager-startup-per-cli-dispatch/): priority 1 gets an "empty `args` defers to per-CLI dispatch" sub-rule; priority 3's `.ithyno/session-id` file renamed to `.ithyno/session-claude` (legacy path stays as fallback read).
+
 1. **`registry.managerAgent()`** — the first `agents.yaml` entry
    whose `roles` array contains `manager`. Its `command` + `args`
    form the startup line. If the entry defines `initialInput`
