@@ -254,7 +254,7 @@ export function InitDialog({
                 <span>
                   {CLI_LABELS[cli]}
                   {isManagerUnverified(cli) && (
-                    <span className="muted"> (動作未確認)</span>
+                    <span className="muted"> (unverified)</span>
                   )}
                 </span>
               </label>

@@ -126,14 +126,14 @@ describe("Manager picker candidate filter", () => {
     }
   });
 
-  it("codex and agy are marked 動作未確認 (unverified)", () => {
+  it("codex and agy are marked unverified", () => {
     for (const cli of MANAGER_UNVERIFIED) {
       expect(MANAGER_UNVERIFIED.includes(cli)).toBe(true);
       expect(MANAGER_VERIFIED.includes(cli)).toBe(false);
     }
   });
 
-  it("claude is verified (no 動作未確認 label)", () => {
+  it("claude is verified (no unverified label)", () => {
     expect(MANAGER_VERIFIED).toContain("claude" as Cli);
     expect(MANAGER_UNVERIFIED).not.toContain("claude" as Cli);
   });

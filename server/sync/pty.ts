@@ -191,7 +191,7 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
  * session resume).
  *
  * Adding session persistence for a new CLI = add its strategy here.
- * The picker's "動作未確認" label in InitDialog SHALL be dropped for a
+ * The picker's "(unverified)" label in InitDialog SHALL be dropped for a
  * CLI once its strategy is landed AND the dispatch skill resolves in
  * that CLI's command surface.
  */
