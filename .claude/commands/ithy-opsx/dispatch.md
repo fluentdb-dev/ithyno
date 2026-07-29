@@ -52,6 +52,63 @@ The dispatch advances the change through `proposed → coded → reviewed
 - `ITHYNO_BASE = http://localhost:4321` — adjust if the user's
   `ITHYNO_PORT` differs.
 
+- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
+  token. Required by every token-gated endpoint, including
+  `POST /api/manager/activity` (see **Manager activity publication**
+  below). The server exports it into the Manager PTY's environment at
+  spawn time, so in the normal case it is already set and you do
+  nothing. Verify once at dispatch start:
+
+  ```bash
+  if [ -z "$ITHYNO_SESSION_TOKEN" ]; then
+    echo "[dispatch] ITHYNO_SESSION_TOKEN unset — Manager activity will not be published."
+    echo "[dispatch] It is exported into the terminal PTY by the ithyno server;"
+    echo "[dispatch] if you launched this shell outside the dashboard terminal,"
+    echo "[dispatch] copy the token from the launch URL (…/?token=<token>)."
+  fi
+  ```
+
+  A missing token is NOT a dispatch blocker — activity publication is
+  best-effort telemetry. Continue the dispatch either way.
+
+## Manager activity publication
+
+The dashboard shows a per-card badge for what Manager itself is doing
+between worker spawns (`dispatching` → `waiting` → `judging` →
+`cleanup` → `transitioning` → cleared). That badge is fed ONLY by this
+skill posting at each boundary. Landed by
+`expose-manager-activity-per-change`.
+
+Define the helper once, near the top of the dispatch run:
+
+```bash
+postManagerActivity() {
+  # $1 = JSON body: {"changeId":…,"stage":"code|review|verify",
+  #                  "activity":"dispatching|waiting|judging|cleanup|
+  #                              transitioning|idle","detail":"…"}
+  # Best-effort: never let a telemetry failure abort the dispatch.
+  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
+  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
+    -H 'content-type: application/json' \
+    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+    -d "$1" >/dev/null 2>&1 || true
+}
+```
+
+Rules:
+
+- **State is in-memory server-side.** Nothing is persisted; a server
+  restart clears every badge. Do not treat a lost badge as an error.
+- **`activity: "idle"` clears the entry.** It is the only way to
+  remove a badge, and `stage` may be omitted on that post.
+- **Post exactly once per boundary.** The server broadcasts a WS
+  event on every accepted write; a chatty loop is visible noise.
+  Re-posting the same `stage` + `activity` (e.g. refreshing
+  `waiting`'s detail with an elapsed hint) preserves the badge's
+  elapsed clock, so it is safe but rarely needed.
+- **Always reach the final `idle` post.** Success, escalation, and
+  timeout all end with a clear — see the exit paths in **Steps**.
+
 ## Dispatch helper protocol (referenced by every stage)
 
 For each stage `S ∈ {code, review, verify}`:
@@ -147,6 +204,23 @@ For each stage `S ∈ {code, review, verify}`:
    `/opsx:apply ${change_id}`.
 
 3. **Dispatch**. Branch priority (first match wins):
+
+   **Boundary post — before the spawn** (any branch):
+
+   ```bash
+   postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"dispatching\"}"
+   ```
+
+   **Boundary post — immediately after the spawn returns**, before
+   entering the poll loop / awaiting the subagent:
+
+   ```bash
+   postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"waiting\",\"detail\":\"$entry_name\"}"
+   ```
+
+   For the Task-tool branch the "spawn returns" moment is when the
+   Task call is issued (the subagent then runs to completion); for
+   the subprocess branch it is the moment the child process starts.
 
    Manager (`roles` includes `manager`) is never dispatched through
    these branches — the Manager IS the dispatcher and runs in tmux
@@ -329,6 +403,14 @@ exist, create it first.
 
 4. **Judge success**:
 
+   **Boundary post — the worker's result is in hand and Manager
+   starts inspecting it** (report message received, subprocess
+   exited, or Task-tool subagent returned):
+
+   ```bash
+   postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"judging\"}"
+   ```
+
    - **`S = code`**: no artifact contract for Task tool / subprocess
      branches. Success = subprocess exit 0 / Task-tool subagent
      returned; failure = non-zero exit / tool failure → escalate
@@ -449,6 +531,18 @@ escalation, or via a hung worker), clean up worker panes and team
 memberships using the following ordered ladder. Each step is tried
 in order; on failure, fall through to the next step; escalate with
 a message naming the leaked resource only after step 3 fails.
+
+Publish the cleanup boundary before entering the ladder, naming the
+step being attempted (cleanup is the slowest invisible window —
+10 s to 2 min — so the badge earns its keep here):
+
+```bash
+postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"cleanup\",\"detail\":\"despawn\"}"
+```
+
+Re-post with `"detail":"leave+kill-pane"` if the ladder falls through
+to step 2, and with `"detail":"worktree-remove"` for any worktree
+teardown done outside the ladder.
 
 1. **Preferred — graceful despawn.**
 
@@ -659,6 +753,7 @@ a message naming the leaked resource only after step 3 fails.
      instead of advancing.
    - Advance phase:
      ```bash
+     postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "coded"}'
@@ -682,6 +777,7 @@ a message naming the leaked resource only after step 3 fails.
 
    - `verdict: pass`:
      ```bash
+     postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "reviewed"}'
@@ -714,6 +810,7 @@ a message naming the leaked resource only after step 3 fails.
 
    - `verdict: pass`:
      ```bash
+     postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
      curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
        -H 'content-type: application/json' \
        -d '{"phase": "done"}'
@@ -725,6 +822,9 @@ a message naming the leaked resource only after step 3 fails.
          rm -f .worktrees/.lock
        fi
      fi
+
+     # Final boundary — clears the Manager badge for this change.
+     postManagerActivity "{\"changeId\":\"<change-id>\",\"activity\":\"idle\"}"
      ```
      Report:
      ```
@@ -798,6 +898,20 @@ a message naming the leaked resource only after step 3 fails.
 
   Do NOT delete the lock when it's held by a different change (that
   would be a bug — you'd release someone else's lock).
+
+- **Manager-activity clear on every exit path**. Every path that
+  returns control to the user — verify pass, `/ithy-opsx:escalate`
+  from any stage, worker timeout, the phase-check no-op in step 2 —
+  MUST end with:
+
+  ```bash
+  postManagerActivity "{\"changeId\":\"<change-id>\",\"activity\":\"idle\"}"
+  ```
+
+  A stale `waiting` badge on a dispatch that already exited is worse
+  than no badge: it tells the user work is in flight when nothing is.
+  The post is best-effort (no token → no-op) and never blocks the
+  exit.
 
 ## Follow-ups (not this file)
 

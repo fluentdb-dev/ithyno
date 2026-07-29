@@ -28,6 +28,14 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  /** Dispatch role — set by Manager (or the AgentRunner.run caller) at
+   *  dispatch time. Standard workflow values: "propose" | "code" | "review"
+   *  | "verify". Custom roles are accepted at the type level but filtered
+   *  out of Phase view rendering. Undefined on legacy records from before
+   *  this change was applied — Phase view treats those as "unroleable"
+   *  and buckets to DONE lane as fallback. Added by
+   *  reshape-phase-view-to-active-agent-state. */
+  role?: string;
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
@@ -227,10 +235,18 @@ export class AgentRunner {
     return stripOutput(all[0]);
   }
 
-  /** Spawn an agent for a change. */
+  /** Spawn an agent for a change.
+   *
+   *  `role` is the dispatch role — set by the caller (Manager, or an
+   *  HTTP client hitting /api/agents/run). When omitted, falls back to
+   *  the agent's first declared role (`def.roles[0]`), which is the
+   *  legacy behavior. Phase view uses this to bucket the change into
+   *  the correct role lane. Added by
+   *  reshape-phase-view-to-active-agent-state. */
   async run(
     changeId: string,
     agentName: string,
+    role?: string,
   ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
@@ -306,6 +322,10 @@ export class AgentRunner {
     console.log(`[runner] spawn ${resolved.command} ${finalArgs.join(" ")} (cwd=${worktreePath})`);
 
     const id = this.newId();
+    // Dispatch role — caller-supplied (Manager, /api/agents/run) takes
+    // precedence; fall back to the agent's first declared role for legacy
+    // callers. Phase view reads this via jobByChange in the store.
+    const dispatchRole = role ?? def.roles[0];
     const job: Job = {
       id,
       changeId,
@@ -313,6 +333,7 @@ export class AgentRunner {
       branch,
       worktreePath,
       status: "running",
+      role: dispatchRole,
       startedAt: Date.now(),
       output: [],
     };

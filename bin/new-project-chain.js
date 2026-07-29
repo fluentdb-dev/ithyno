@@ -35,6 +35,81 @@ function splitLines(chunk, tail) {
 }
 
 /**
+ * Spawn a command, streaming stdout/stderr as "log" ChainEvents under
+ * `step`, and resolve with its outcome. Shared by both npx and npm
+ * invocations below.
+ *
+ * Windows has no bare "npx"/"npm" executable — only "npx.cmd"/"npm.cmd".
+ * Node's spawn() refuses to run a .cmd file directly without shell:true
+ * — recent Node versions throw EINVAL *synchronously* for this
+ * (hardening after GHSA-9qxr-qj54-h672 / CVE-2024-27980, since
+ * batch-file argv escaping isn't safe outside a shell). Confirmed live:
+ * without shell:true this throw escaped uncaught from the Promise
+ * executor, and — since nothing downstream ever caught it — the SSE
+ * stream was simply left open forever with no further events, hanging
+ * the whole onboarding chain. shell:true routes through cmd.exe, which
+ * does the .cmd lookup and argv quoting correctly. POSIX doesn't need
+ * any of this.
+ *
+ * @param {string} cmd base command name, e.g. "npx" or "npm" (no .cmd suffix)
+ * @param {string[]} args
+ * @param {string} cwd
+ * @param {Step} step
+ * @param {(e: ChainEvent) => void} onEvent
+ * @returns {Promise<{ ok: boolean, code: number, message: string }>}
+ */
+function spawnStreamed(cmd, args, cwd, step, onEvent) {
+  return new Promise((resolve) => {
+    const winCmd = process.platform === "win32" ? `${cmd}.cmd` : cmd;
+    let child;
+    try {
+      child = spawn(winCmd, args, {
+        cwd,
+        env: process.env,
+        shell: process.platform === "win32",
+      });
+    } catch (err) {
+      resolve({ ok: false, code: -1, message: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    let stdoutTail = "";
+    let stderrTail = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      const { lines, tail } = splitLines(chunk, stdoutTail);
+      stdoutTail = tail;
+      for (const line of lines) {
+        onEvent({ type: "log", step, line, stream: "stdout" });
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      const { lines, tail } = splitLines(chunk, stderrTail);
+      stderrTail = tail;
+      for (const line of lines) {
+        onEvent({ type: "log", step, line, stream: "stderr" });
+      }
+    });
+    child.on("error", (err) => {
+      resolve({ ok: false, code: -1, message: err.message });
+    });
+    child.on("close", (code) => {
+      if (stdoutTail.length > 0) {
+        onEvent({ type: "log", step, line: stdoutTail, stream: "stdout" });
+      }
+      if (stderrTail.length > 0) {
+        onEvent({ type: "log", step, line: stderrTail, stream: "stderr" });
+      }
+      resolve({
+        ok: code === 0,
+        code: code ?? -1,
+        message: code === 0 ? "" : `${cmd} ${args.join(" ")} exited with code ${code}`,
+      });
+    });
+  });
+}
+
+/**
  * @param {string} target
  * @param {(e: ChainEvent) => void} onEvent
  * @returns {Promise<{ ok: boolean, target: string }>}
@@ -73,80 +148,46 @@ export async function runNewProjectChain(target, onEvent) {
   }
   onEvent({ type: "step-done", step: "scaffold" });
 
-  // Step 2 — spawn `npx openspec init`.
+  // Step 2 — install `openspec` as a project-level devDependency BEFORE
+  // running `openspec init`, so init itself uses the same resolvable
+  // local install that stays behind afterward. Without this, every
+  // OpenSpec-authored slash command (`/opsx:propose` etc., installed by
+  // `openspec init` below) calls the bare `openspec` binary directly —
+  // which resolves nowhere, since nothing installs it persistently
+  // anywhere on PATH. A naive fallback of `npx openspec ...` (no pin)
+  // doesn't help either: npx can't resolve an unscoped package literally
+  // named "openspec" and fails with "could not determine executable to
+  // run". Confirmed live on a fresh project — reproduces the exact
+  // failure a user hit at /opsx:propose time. `npm install` auto-creates
+  // package.json if one doesn't exist yet.
   onEvent({ type: "step-start", step: "openspec-init" });
   const finalTarget = initResult.target ?? target;
-  const args = [
-    "-y",
-    "-p",
-    "@fission-ai/openspec@latest",
-    "openspec",
-    "init",
+  const npmResult = await spawnStreamed(
+    "npm",
+    ["install", "--save-dev", "@fission-ai/openspec@latest"],
     finalTarget,
-    "--tools",
-    "claude",
-  ];
-  const result = await new Promise((resolve) => {
-    const child = spawn("npx", args, {
-      cwd: finalTarget,
-      env: process.env,
+    "openspec-init",
+    onEvent,
+  );
+  if (!npmResult.ok) {
+    onEvent({
+      type: "error",
+      step: "openspec-init",
+      message: npmResult.message,
     });
-    let stdoutTail = "";
-    let stderrTail = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      const { lines, tail } = splitLines(chunk, stdoutTail);
-      stdoutTail = tail;
-      for (const line of lines) {
-        onEvent({
-          type: "log",
-          step: "openspec-init",
-          line,
-          stream: "stdout",
-        });
-      }
-    });
-    child.stderr.on("data", (chunk) => {
-      const { lines, tail } = splitLines(chunk, stderrTail);
-      stderrTail = tail;
-      for (const line of lines) {
-        onEvent({
-          type: "log",
-          step: "openspec-init",
-          line,
-          stream: "stderr",
-        });
-      }
-    });
-    child.on("error", (err) => {
-      resolve({ ok: false, code: -1, message: err.message });
-    });
-    child.on("close", (code) => {
-      // Flush residual tails as final lines.
-      if (stdoutTail.length > 0) {
-        onEvent({
-          type: "log",
-          step: "openspec-init",
-          line: stdoutTail,
-          stream: "stdout",
-        });
-      }
-      if (stderrTail.length > 0) {
-        onEvent({
-          type: "log",
-          step: "openspec-init",
-          line: stderrTail,
-          stream: "stderr",
-        });
-      }
-      resolve({
-        ok: code === 0,
-        code: code ?? -1,
-        message: code === 0 ? "" : `openspec init exited with code ${code}`,
-      });
-    });
-  });
+    return { ok: false, target: finalTarget };
+  }
+
+  // Step 3 — `openspec init`, now resolved from ./node_modules/.bin
+  // (npx checks local node_modules/.bin before ever considering the
+  // registry) instead of an ephemeral, separately-pinned npx fetch.
+  const result = await spawnStreamed(
+    "npx",
+    ["openspec", "init", finalTarget, "--tools", "claude"],
+    finalTarget,
+    "openspec-init",
+    onEvent,
+  );
   if (!result.ok) {
     onEvent({
       type: "error",
@@ -155,6 +196,7 @@ export async function runNewProjectChain(target, onEvent) {
     });
     return { ok: false, target: finalTarget };
   }
+
   onEvent({ type: "step-done", step: "openspec-init" });
   onEvent({ type: "complete", target: finalTarget });
   return { ok: true, target: finalTarget };

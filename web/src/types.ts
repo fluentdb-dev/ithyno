@@ -301,6 +301,13 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  /** Dispatch role — set at spawn time by Manager (or the /api/agents/run
+   *  caller). Standard values: "propose" | "code" | "review" | "verify".
+   *  Custom / non-standard values are accepted but the Phase view filters
+   *  them out of role-based bucketing. Undefined on legacy records from
+   *  before reshape-phase-view-to-active-agent-state — Phase view treats
+   *  those as "no role signal" and falls back to DONE lane. */
+  role?: string;
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
@@ -336,6 +343,46 @@ export type DiffPayload = {
   branch: string;
   base: string;
   files: DiffFile[];
+};
+
+// ---- Manager activity (expose-manager-activity-per-change,
+//      reshape-phase-view-to-active-agent-state renamed stage → role) ------
+
+/** The workflow role the Manager is currently executing. Unified with
+ *  `JobSummary.role` — Manager IS always playing one of these roles at any
+ *  active moment (fallback verify = Manager playing verify role). Mirrors
+ *  `server/manager-activity.ts` `ManagerRole`. */
+export type ManagerRole = "propose" | "code" | "review" | "verify";
+
+/** What the Manager is doing within that role. `idle` is never stored —
+ *  posting it clears the entry — so a `ManagerActivity` in the store is
+ *  always one of the five renderable values. */
+export type ManagerActivityKind =
+  | "dispatching"
+  | "waiting"
+  | "judging"
+  | "cleanup"
+  | "transitioning"
+  | "idle";
+
+/** Per-change Manager orchestration state. In-memory server-side: a server
+ *  restart clears every entry (there is deliberately no persistence). */
+export type ManagerActivity = {
+  changeId: string;
+  role: ManagerRole;
+  activity: ManagerActivityKind;
+  /** epoch ms — when this activity became current. Drives the elapsed suffix. */
+  startedAt: number;
+  /** Short hint: worker name for `waiting`, step name for `cleanup`, … */
+  detail?: string;
+};
+
+/** Payload for the `manager-activity-updated` server WS event.
+ *  `activity: null` means the entry was cleared. */
+export type ManagerActivityUpdatedEvent = {
+  type: "manager-activity-updated";
+  changeId: string;
+  activity: ManagerActivity | null;
 };
 
 // ---- import-completed WS event (enable-import-both-patterns) ---------------
@@ -398,6 +445,8 @@ export type DoctorReport = {
   agents: Record<Cli, CliStatus>;
   tmux: CliStatus;
   agmsg: CliStatus;
+  /** Windows only — see server/doctor.ts's DoctorReport doc comment. */
+  gitBash?: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
 };

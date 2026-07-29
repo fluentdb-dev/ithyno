@@ -26,3 +26,24 @@ export function isPhase(value: unknown): value is Phase {
 export function isPersistedPhase(value: unknown): value is PersistedPhase {
   return isPhase(value) || value === NEEDS_HUMAN;
 }
+
+/**
+ * Resolve the pipeline stage (Phase-view lane) a change currently sits in.
+ *
+ * Same rules `PhaseLaneBoard.bucketizeByPhase()` uses for lane placement:
+ *   - Known phase → that lane.
+ *   - `needs-human` → the `priorPhase` lane when it resolves.
+ *   - Anything else (undefined / unknown string / `needs-human` without a
+ *     resolvable `priorPhase`) → `proposed`, the starting stage.
+ *
+ * Lives here rather than in the board component because
+ * `annotate-cards-with-worker-job-state` also needs it outside the Phase
+ * view: the card's transient "done ✓" is suppressed once the change's stage
+ * moves off the one its worker finished in, and that rule holds in the Board
+ * view too.
+ */
+export function laneForPhase(phase?: unknown, priorPhase?: unknown): Phase {
+  if (isPhase(phase)) return phase;
+  if (phase === NEEDS_HUMAN && isPhase(priorPhase)) return priorPhase;
+  return "proposed";
+}

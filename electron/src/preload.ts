@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
 const IPC_IMPORT_PROJECT = 'ithyno:import-project';
 const IPC_OPEN_PROJECT = 'ithyno:open-project';
+const IPC_WELCOME_RECENT_UPDATED = 'welcome:recent-updated';
 
 export const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 
@@ -34,5 +35,37 @@ contextBridge.exposeInMainWorld('ithyno', {
    *  switchProject(path). */
   openProject: (path: string): void => {
     ipcRenderer.send(IPC_OPEN_PROJECT, path);
+  },
+});
+
+/**
+ * Welcome-view API — used only by welcome.html, which is loaded into the
+ * SAME BrowserWindow that becomes the main window after Open Folder swaps
+ * its URL to localhost:<port>. Keeping this on the main preload (rather
+ * than a separate welcome-preload file) is what makes the "same-window
+ * swap" possible: preload is fixed at BrowserWindow construction time, so
+ * one preload has to serve both pages. The main React app never touches
+ * `window.ithynoWelcome`.
+ * (add-electron-welcome-window, same-window swap pivot.)
+ */
+contextBridge.exposeInMainWorld('ithynoWelcome', {
+  getAbout: (): Promise<unknown> => ipcRenderer.invoke('welcome:get-about'),
+  getRecent: (): Promise<string[]> => ipcRenderer.invoke('welcome:get-recent'),
+  openFolder: (): void => {
+    ipcRenderer.send('welcome:open-folder');
+  },
+  openRecent: (path: string): void => {
+    ipcRenderer.send('welcome:open-recent', path);
+  },
+  openExternal: (url: string): void => {
+    ipcRenderer.send('welcome:open-external', url);
+  },
+  quit: (): void => {
+    ipcRenderer.send('welcome:quit');
+  },
+  onRecentUpdated: (cb: (paths: string[]) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, paths: string[]): void => cb(paths);
+    ipcRenderer.on(IPC_WELCOME_RECENT_UPDATED, listener);
+    return () => ipcRenderer.removeListener(IPC_WELCOME_RECENT_UPDATED, listener);
   },
 });

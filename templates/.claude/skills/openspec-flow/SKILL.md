@@ -62,7 +62,7 @@ Pick the right entry point:
   by `openspec init` derives a kebab-case id, scaffolds the change directory,
   and fills in all four artifacts using the official templates.
 - **CLI scaffold + hand-write:** when you already know exactly what to write,
-  `npm run openspec -- new change <id>` creates the dir; then fill in by hand.
+  `npx openspec new change <id>` creates the dir; then fill in by hand.
 
 Every change must end up with four artifacts:
 
@@ -88,8 +88,8 @@ Conventions specific to this project:
 ### ② Validate
 
 ```
-npm run openspec -- validate <id>
-npm run openspec -- validate --all   # before merging anything significant
+npx openspec validate <id>
+npx openspec validate --all   # before merging anything significant
 ```
 
 If a main spec validation complains about a missing `## Requirements` section,
@@ -110,17 +110,16 @@ Claude Code, which will tick items as it completes them.
 
 ### ④ Verify
 
-Before archiving, run the project checks:
+Before archiving, run this project's verification commands (tests, type
+check, build — whatever applies here), plus:
 
 ```
-npm test
-npm run typecheck
-npm run build
-npm run openspec -- validate --all
+npx openspec validate --all
 ```
 
-For UI-affecting changes, also start `npm run dev` and exercise the feature in
-the browser. Don't claim completion without seeing the behavior.
+For UI-affecting changes, also start this project's dev server and exercise
+the feature in the browser. Don't claim completion without seeing the
+behavior.
 
 ### ⑤ Archive
 
@@ -154,7 +153,7 @@ the experience, not completeness.
 #### Archive command
 
 ```
-npm run openspec -- archive <id>
+npx openspec archive <id>
 # or in the terminal:
 /opsx:archive <id>
 ```
@@ -172,7 +171,7 @@ preserved in archive.
 
 If a spec-level change slipped through and got implemented without a proposal:
 
-1. Create the change directory: `npm run openspec -- new change <id>`.
+1. Create the change directory: `npx openspec new change <id>`.
 2. Write the four artifacts to **describe what is now true**. Mark tasks already
    done as `[x]` because the work is complete.
 3. Validate.
@@ -220,7 +219,7 @@ answer determines the procedure.
   deltas use `## ADDED Requirements` directly. Validate after writing.
 - **Tasks that are too coarse.** Each task should be testable on its own.
   Prefer 6–12 leaf tasks per change over 3 mega-tasks.
-- **Skipping `npm run openspec -- validate --all` after an archive.** The merge
+- **Skipping `npx openspec validate --all` after an archive.** The merge
   can introduce duplicate requirement names; validate catches it.
 
 ---
@@ -360,19 +359,19 @@ agents in parallel.
 
 ```bash
 # Scaffold
-npm run openspec -- new change <id>
+npx openspec new change <id>
 
 # Inspect
-npm run openspec -- list
-npm run openspec -- status --change <id>
-npm run openspec -- status --change <id> --json   # to get artifact templates programmatically
+npx openspec list
+npx openspec status --change <id>
+npx openspec status --change <id> --json   # to get artifact templates programmatically
 
 # Validate
-npm run openspec -- validate <id>
-npm run openspec -- validate --all
+npx openspec validate <id>
+npx openspec validate --all
 
 # Archive (merges delta into main specs)
-npm run openspec -- archive <id>
+npx openspec archive <id>
 
 # In the embedded terminal (Claude Code)
 /opsx:propose "<description>"
@@ -392,17 +391,27 @@ its own naming convention and disposition rules, formalized by
 ### PENDING annotation (Hard rule for MODIFIED / REMOVED deltas)
 
 At **propose time** for any change carrying a MODIFIED or REMOVED
-delta against a landed requirement, insert a one-line notice directly
-under that requirement's heading in the current
+delta against a landed requirement, insert a one-line notice **after
+the SHALL/MUST body paragraph** (before any `#### Scenario:` header)
+of that requirement in the current
 `openspec/specs/<capability>/spec.md`:
 
 ```md
 ### Requirement: <name>
 
+<existing SHALL/MUST body paragraph — must stay first non-empty line>
+
 > ⚠️ **PENDING <ADDED|MODIFIED|REMOVED>** by [<change-id>](../../changes/<change-id>/): <一行理由>.
 
-<existing body — untouched>
+<remaining body / #### Scenario: blocks>
 ```
+
+**Why after the body, not directly under the heading**: the openspec
+CLI parser (`parseRequirements`) captures the FIRST non-empty line
+after the header as `text`, and `RequirementSchema` requires that line
+to contain SHALL/MUST. The annotation in the pre-body slot swallows
+the check and breaks `openspec archive` for unrelated changes on the
+same capability. See `fix-pending-annotation-parser-compat`.
 
 Rationale: between propose and archive the spec still shows the
 requirement as if it were authoritative. Any agent / session reading

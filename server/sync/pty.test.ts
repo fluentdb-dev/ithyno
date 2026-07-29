@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
-import { _setTmuxCacheForTest, attachPtyToSocket, ptyStartup } from "./pty.js";
+import {
+  _setTmuxCacheForTest,
+  attachPtyToSocket,
+  ptyStartup,
+  resolveManagerStartup,
+} from "./pty.js";
 
 /**
  * Priority chain for the Terminal panel's PTY startup command
@@ -53,7 +58,7 @@ describe("ptyStartup — priority chain", () => {
     expect(ptyStartup(null)).toEqual({ startup: "claude" });
   });
 
-  it("null registry + no env + projectRoot without .ithyno/session-id → mints UUID and emits --session-id", async () => {
+  it("null registry + no env + projectRoot without any session file → mints UUID and emits --session-id at .ithyno/session-claude", async () => {
     const { mkdtempSync, rmSync, existsSync, readFileSync } = await import(
       "node:fs"
     );
@@ -65,24 +70,26 @@ describe("ptyStartup — priority chain", () => {
       expect(result.startup).toMatch(
         /^claude --session-id [0-9a-f-]{36}$/,
       );
-      // Session-id file was created and contains the same UUID.
-      const idPath = pathJoin(proj, ".ithyno", "session-id");
-      expect(existsSync(idPath)).toBe(true);
-      const stored = readFileSync(idPath, "utf8").trim();
+      // First mint lands in the new per-CLI location.
+      const claudePath = pathJoin(proj, ".ithyno", "session-claude");
+      expect(existsSync(claudePath)).toBe(true);
+      const stored = readFileSync(claudePath, "utf8").trim();
       expect(result.startup).toContain(stored);
+      // Legacy generic location is NOT written on fresh launch.
+      expect(existsSync(pathJoin(proj, ".ithyno", "session-id"))).toBe(false);
     } finally {
       rmSync(proj, { recursive: true, force: true });
     }
   });
 
-  it("null registry + no env + projectRoot WITH .ithyno/session-id → --resume", async () => {
+  it("null registry + no env + legacy .ithyno/session-id (only) → --resume (fallback read for existing dev envs)", async () => {
     const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
       "node:fs"
     );
     const { tmpdir: osTmpdir } = await import("node:os");
     const { join: pathJoin } = await import("node:path");
-    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-resume-"));
-    const uuid = "12345678-1234-1234-1234-123456789012";
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-legacy-"));
+    const uuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     try {
       mkdirSync(pathJoin(proj, ".ithyno"), { recursive: true });
       writeFileSync(pathJoin(proj, ".ithyno", "session-id"), `${uuid}\n`);
@@ -93,7 +100,25 @@ describe("ptyStartup — priority chain", () => {
     }
   });
 
-  it("empty session-id file → mints fresh", async () => {
+  it("null registry + no env + projectRoot WITH .ithyno/session-claude → --resume", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
+      "node:fs"
+    );
+    const { tmpdir: osTmpdir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-resume-"));
+    const uuid = "12345678-1234-1234-1234-123456789012";
+    try {
+      mkdirSync(pathJoin(proj, ".ithyno"), { recursive: true });
+      writeFileSync(pathJoin(proj, ".ithyno", "session-claude"), `${uuid}\n`);
+      const result = ptyStartup(null, proj);
+      expect(result.startup).toBe(`claude --resume ${uuid}`);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("empty session-claude file → mints fresh", async () => {
     const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
       "node:fs"
     );
@@ -102,7 +127,7 @@ describe("ptyStartup — priority chain", () => {
     const proj = mkdtempSync(pathJoin(osTmpdir(), "pty-session-empty-"));
     try {
       mkdirSync(pathJoin(proj, ".ithyno"), { recursive: true });
-      writeFileSync(pathJoin(proj, ".ithyno", "session-id"), "   \n");
+      writeFileSync(pathJoin(proj, ".ithyno", "session-claude"), "   \n");
       const result = ptyStartup(null, proj);
       expect(result.startup).toMatch(
         /^claude --session-id [0-9a-f-]{36}$/,
@@ -188,6 +213,91 @@ describe("ptyStartup — priority chain", () => {
     );
     // "my project" contains a space → single-quoted; --project is fine unquoted.
     expect(ptyStartup(reg).startup).toBe("claude --project 'my project'");
+  });
+});
+
+// ---- per-CLI Manager startup dispatch (this-merge Manager fix) ----
+describe("Manager startup — per-CLI dispatch (empty args → smart resolver)", () => {
+  it("resolveManagerStartup(claude, projectRoot) mints session-id on first launch", async () => {
+    const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir: osTmpdir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const proj = mkdtempSync(pathJoin(osTmpdir(), "mgr-claude-fresh-"));
+    try {
+      const line = resolveManagerStartup("claude", proj);
+      expect(line).toMatch(/^claude --session-id [0-9a-f-]{36}$/);
+      expect(existsSync(pathJoin(proj, ".ithyno", "session-claude"))).toBe(true);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveManagerStartup(codex, projectRoot) → plain 'codex' (no strategy yet)", () => {
+    const line = resolveManagerStartup("codex", "/nowhere");
+    expect(line).toBe("codex");
+  });
+
+  it("resolveManagerStartup(agy, undefined) → plain 'agy' (no strategy, no projectRoot)", () => {
+    expect(resolveManagerStartup("agy", undefined)).toBe("agy");
+  });
+
+  it("resolveManagerStartup(claude, undefined) → plain 'claude' (no projectRoot for session file)", () => {
+    expect(resolveManagerStartup("claude", undefined)).toBe("claude");
+  });
+
+  it("ptyStartup with manager 'claude' + empty args uses smart session dispatch (NOT --continue)", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: claude
+    args: []
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+    const line = ptyStartup(reg, dir).startup;
+    // Must NOT be the broken template default; must be a session-id line.
+    expect(line).not.toContain("--continue");
+    expect(line).toMatch(/^claude --session-id [0-9a-f-]{36}$/);
+  });
+
+  it("ptyStartup with manager 'codex' + empty args → plain 'codex' (safe first-launch default)", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: codex
+    args: []
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+    const line = ptyStartup(reg, dir).startup;
+    expect(line).toBe("codex");
+    // Critically: no --continue leak into a CLI that doesn't support it.
+    expect(line).not.toContain("--continue");
+  });
+
+  it("ptyStartup honors explicit args (backward compat — smart dispatch is opt-in via empty args)", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: claude
+    args: ['--dangerously-skip-permissions']
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+    const line = ptyStartup(reg, dir).startup;
+    expect(line).toBe("claude --dangerously-skip-permissions");
   });
 });
 

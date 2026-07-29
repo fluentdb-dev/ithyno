@@ -12,7 +12,8 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath } from "./sync/pty.js";
+import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
@@ -39,6 +40,12 @@ import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js
 import { getAboutInfo } from "./about.js";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
+import {
+  getAllManagerActivities,
+  parseManagerActivityBody,
+  setManagerActivity,
+  type ManagerActivity,
+} from "./manager-activity.js";
 
 // Same shape as the change-id validation done implicitly by other endpoints
 // (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
@@ -134,7 +141,10 @@ type ServerEvent =
       agmsg: import("./agents/registry.js").AgmsgConfig | null;
       warnings: string[];
     }
-  | { type: "doctor-updated"; report: DoctorReport };
+  | { type: "doctor-updated"; report: DoctorReport }
+  // expose-manager-activity-per-change: `activity: null` means the entry was
+  // cleared (the Manager posted `idle` for that change).
+  | { type: "manager-activity-updated"; changeId: string; activity: ManagerActivity | null };
 
 function broadcast(event: ServerEvent): void {
   const payload = JSON.stringify(event);
@@ -396,7 +406,11 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       .send({ error: `only "tmux" and "agmsg" are installable via this endpoint` });
   }
 
-  // Set up SSE stream
+  // Set up SSE stream. hijack() first — see the identical comment on
+  // /api/init/stream — otherwise Fastify's own reply-completion logic
+  // fires after this handler resolves and crashes the process with
+  // ERR_HTTP_HEADERS_SENT if the client disconnected mid-install.
+  reply.hijack();
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -435,6 +449,23 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       // Broadcast doctor-updated
       void runDoctor().then((report) => broadcast({ type: "doctor-updated", report }));
       return;
+    }
+
+    // Windows: agmsg also needs a real Git Bash and sqlite3 on PATH to
+    // actually run (see add-windows-agmsg-support) — check BEFORE
+    // copying the tree. Copying files that can't run is worse than not
+    // copying: the doctor report would then show a false-positive
+    // "installed" for the marker file alone.
+    if (process.platform === "win32") {
+      const missing: string[] = [];
+      if (!resolveGitBash()) missing.push("Git Bash (install Git for Windows)");
+      if (!commandExistsOnPath("sqlite3")) missing.push("sqlite3");
+      if (missing.length > 0) {
+        sendSse("progress", { line: `Cannot install agmsg — missing: ${missing.join(", ")}` });
+        sendSse("done", { ok: false, exitCode: 1 });
+        if (clientAlive) reply.raw.end();
+        return;
+      }
     }
 
     // Try to find the vendored tree
@@ -509,8 +540,21 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
       if (clientAlive) reply.raw.end();
       return;
     }
+  } else if (os === "win32") {
+    // No package manager reliably installs a working tmux fork on
+    // Windows (confirmed during add-windows-agmsg-support dogfooding —
+    // psmux is the fork that was verified working, via Git Bash).
+    // There is no automated install path; stream guidance instead of
+    // a dead-end rejection. This is NOT a failure of the request
+    // itself, so respond via the normal stream-completion path
+    // (ok: false meaning "nothing was installed"), not a 400.
+    sendSse("progress", { line: "No automated tmux install exists for Windows." });
+    sendSse("progress", { line: "Download a Windows tmux fork (psmux): https://github.com/psmux/psmux/releases" });
+    sendSse("progress", { line: "Extract it and add the folder containing tmux.exe to your PATH, then re-run Doctor." });
+    sendSse("done", { ok: false, exitCode: 1 });
+    if (clientAlive) reply.raw.end();
+    return;
   } else {
-    // Windows or other
     sendSse("progress", { line: `Unsupported platform "${os}". See https://github.com/tmux/tmux/wiki/Installing` });
     sendSse("done", { ok: false, exitCode: 1 });
     if (clientAlive) reply.raw.end();
@@ -576,6 +620,54 @@ fastify.get("/api/auth/check", async (req, reply) => {
     return reply.code(401).send({ error: "auth required" });
   }
   return { ok: true };
+});
+
+// ---- Manager activity (expose-manager-activity-per-change) -----------------
+// In-memory, per-change record of what the Manager (the /ithy-opsx:dispatch
+// orchestrator) is currently doing. Written ONLY by the dispatch skill from
+// the Manager PTY, which is why both endpoints are session-token gated rather
+// than open like /api/state. Nothing here is persisted: a server restart
+// legitimately returns {} and the skill re-posts as it re-enters its loop.
+
+// POST /api/manager/activity — set (or clear, when `activity: "idle"`) the
+// activity for one change, then broadcast the new value to every dashboard.
+fastify.post("/api/manager/activity", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  const parsed = parseManagerActivityBody(req.body);
+  if (!parsed.ok) {
+    return reply.code(400).send({ error: parsed.error });
+  }
+  if (parsed.deprecatedStage) {
+    // reshape-phase-view-to-active-agent-state: `stage` renamed to `role`.
+    // Accepted as a deprecated alias for one release cycle so in-flight
+    // Manager sessions from an older skill version don't 400.
+    req.log.warn(
+      `POST /api/manager/activity used deprecated 'stage' field; rename to 'role' (change: ${parsed.value.changeId})`,
+    );
+  }
+  // setManagerActivity returns the stored record, or null when the write was
+  // an idle-clear — that return value IS the broadcast payload.
+  const activity = setManagerActivity(parsed.value);
+  broadcast({ type: "manager-activity-updated", changeId: parsed.value.changeId, activity });
+  return { ok: true, activity };
+});
+
+// GET /api/manager/activity — bulk snapshot for client bootstrap / reconnect.
+fastify.get("/api/manager/activity", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  return getAllManagerActivities();
 });
 
 fastify.get("/api/state", async () => {
@@ -687,8 +779,8 @@ fastify.post("/api/git/init", async (req, reply) => {
 
 // POST /api/init — scaffold a new project via runInit (add-init-http-endpoint).
 // Backbone for UI-driven "New Project" flows. Electron / VS Code may import
-// runInit directly instead (agmsg-installer pattern); this endpoint remains
-// for browser mode and as a fallback.
+// runInit directly instead (see main.ts's onNewProject); this endpoint
+// remains for browser mode and as a fallback.
 //
 // Extended by expand-init-to-scaffold-agents:
 //   - Calls runDoctor() before scaffolding; 409 if readyForManager is false.
@@ -822,6 +914,16 @@ fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
   const v = await validateInitBody(body);
   if (!v.ok) return reply.code(v.status).send({ ok: false, reason: v.reason });
 
+  // hijack() tells Fastify to stop managing this reply once we start
+  // writing to reply.raw ourselves — without it, Fastify's own
+  // reply-completion logic still runs after this async handler
+  // resolves and calls reply.send() on a socket we've already ended
+  // (or that the client aborted mid-stream), throwing
+  // ERR_HTTP_HEADERS_SENT uncaught and crashing the whole process.
+  // Confirmed live: a client disconnecting mid-`openspec init` (e.g.
+  // a curl --max-time cutoff, or closing the onboarding window) took
+  // the entire server down.
+  reply.hijack();
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",

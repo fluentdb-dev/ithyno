@@ -923,8 +923,10 @@ a.modal-btn:hover {
 }
 
 /* Kanban board — 3 columns: TODO / IN-PROGRESS / DONE. Phase state is a
-   Manager-internal concern and is NOT rendered on the board (see
-   revert-kanban-ui-lanes). */
+   Manager-internal concern and is NOT rendered on the board by default (see
+   revert-kanban-ui-lanes). Users who want the pipeline view opt in via the
+   Overview layout toggle (add-phase-lane-view-toggle) which swaps the
+   `.kanban-board` grid for a `.phase-lane-board` grid. */
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -937,6 +939,34 @@ a.modal-btn:hover {
   }
 }
 
+/* Phase-lane board — N lanes in workflow order, derived at render time from
+   the roles declared in agents.yaml (2 lanes when only `code` is wired up,
+   5 when propose/code/review/verify all are). The component sets
+   `--lane-count` inline; the `4` here is only a pre-hydration fallback.
+   Reuses `.kanban-col`-flavored column chrome so cards render identically to
+   the Board view; only the container grid differs.
+   Landed by add-phase-lane-view-toggle, made dynamic by
+   dynamic-phase-lanes-from-agents-roles. */
+.phase-lane-board {
+  display: grid;
+  grid-template-columns: repeat(var(--lane-count, 4), minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+@media (max-width: 1200px) {
+  .phase-lane-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .phase-lane-board {
+    grid-template-columns: 1fr;
+  }
+}
+.phase-lane-empty {
+  color: var(--muted);
+  font-style: italic;
+}
 .kanban-col {
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -1278,6 +1308,95 @@ a.modal-btn:hover {
 @keyframes agentpulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* Manager activity badge CSS removed by reshape-phase-view-to-active-agent-state.
+   The Terminal already surfaces Manager state (dispatching / judging /
+   cleanup), so the card badge was redundant — only role-level lane
+   placement is kept in Phase view. */
+
+/* Worker-state indicator (kanban card) — annotate-cards-with-worker-job-state.
+   Replaces the card-local AgentBadge; reports what the dispatched worker is
+   doing right now in BOTH the Board and Phase views. */
+.worker-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.worker-state-running {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.worker-state-completed {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+  color: var(--green);
+}
+.worker-state-crashed,
+.worker-state-orphaned {
+  background: color-mix(in oklab, var(--danger) 18%, transparent);
+  color: var(--red);
+}
+.worker-state-queued {
+  background: transparent;
+  opacity: 0.7;
+}
+
+.worker-state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.worker-state-dot.running {
+  background: var(--accent);
+  animation: workerpulse 1.5s ease-in-out infinite;
+}
+.worker-state-dot.completed {
+  background: var(--success);
+}
+.worker-state-dot.cancelled {
+  background: var(--muted);
+}
+.worker-state-dot.crashed,
+.worker-state-dot.orphaned {
+  background: var(--red);
+}
+.worker-state-dot.queued {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.worker-state-glyph {
+  line-height: 1;
+}
+.worker-state-elapsed {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.worker-state-running .worker-state-elapsed {
+  color: inherit;
+  opacity: 0.8;
+}
+@keyframes workerpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mgr-activity-icon.spinner { animation-duration: 3s; }
+  .worker-state-dot.running { animation: none; }
 }
 
 /* Agents page */
@@ -2068,6 +2187,23 @@ a.modal-btn:hover {
 .terminal-host .xterm-viewport,
 .terminal-host .xterm-screen {
   height: 100% !important;
+}
+/* Copy/paste shortcut hint — bottom-left of the terminal pane, Windows/
+   Linux only (see Terminal.tsx: plain Ctrl+C/V stay untouched there, so
+   the shortcut is easy to miss without a visible reminder). */
+.terminal-copypaste-hint {
+  position: absolute;
+  bottom: 6px;
+  left: 10px;
+  z-index: 10;
+  font-size: 11px;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--panel) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  pointer-events: none;
+  opacity: 0.75;
 }
 .term-toggle {
   margin-left: 12px;
@@ -3284,6 +3420,11 @@ a.modal-btn:hover {
   font-size: 13px;
 }
 .onboarding-prereq:first-child { border-top: none; }
+.onboarding-prereq-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
 .onboarding-prereq.prereq-ok .onboarding-icon {
   color: #fff;
   background: var(--success, #34c759);
@@ -3589,6 +3730,12 @@ a.modal-btn:hover {
   color: var(--fg-muted);
 }
 
+.prereq-hint {
+  font-size: 11px;
+  max-width: 220px;
+  white-space: normal;
+}
+
 .prereq-path {
   color: var(--fg-muted);
   font-size: 11px;
@@ -3672,6 +3819,48 @@ a.modal-btn:hover {
 .prereq-modal-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+/* Buttons inside any prereq-family modal (PrereqInstallModal's own
+ * "Close"/"Installing…" button, AgmsgConfigModal's "Close"/"Save") were
+ * previously unstyled browser defaults — only worked visually for
+ * PrereqInstallModal because it's a single button with nothing to clash
+ * against. Explicit styling here matches Settings' `.settings-actions
+ * button` look so every install/config modal is visually consistent. */
+.prereq-modal-actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--fg));
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.prereq-modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.prereq-modal-actions button:first-child:not(:last-child) {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+/* AgmsgConfigModal reuses Settings' .settings-toggle/.settings-field
+ * markup, which was designed for the full-width Settings page. Inside
+ * the narrower prereq-modal (max 640px, minus padding), the grid's
+ * fixed-width input column and 280px input min-width don't fit — stack
+ * label and input instead of side-by-side, and let the input fill the
+ * available width. */
+.agmsg-config-modal .settings-field label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.agmsg-config-modal .settings-field input[type="text"] {
+  min-width: 0;
+  width: 100%;
 }
 
 /* ---- Import-completion notifications (enable-import-both-patterns) ---- */

@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import type { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import { SESSION_TOKEN } from "../util/auth.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -44,10 +45,19 @@ export async function loadPty(): Promise<PtyAvailability> {
  * shell that isn't actually on PATH throws "File not found" from node-pty's
  * native binding instead of falling back. `where` mirrors that PATH search
  * without spawning anything, so we can check first and fall back in JS.
+ * POSIX has no `where` — use `which` there, same idea. Neither tool is
+ * guaranteed on PATH itself (e.g. a plain PowerShell session has no `which`
+ * even with Git for Windows installed, since only `Git\cmd` is added to
+ * PATH, not `Git\usr\bin`), so a spawn failure just means "not found".
  */
-function existsOnWindowsPath(cmd: string): boolean {
+export function commandExistsOnPath(cmd: string): boolean {
   try {
-    return spawnSync("where", [cmd], { stdio: "ignore" }).status === 0;
+    const probe = process.platform === "win32" ? "where" : "which";
+    // timeout: spawnSync has none by default; bound it so a stalled probe
+    // degrades to "not found" instead of hanging the caller (this is now
+    // also called from doctor.ts / the doctor install endpoint, not just
+    // PTY startup).
+    return spawnSync(probe, [cmd], { stdio: "ignore", timeout: 3000 }).status === 0;
   } catch {
     return false;
   }
@@ -60,7 +70,7 @@ export function defaultShell(): { cmd: string; args: string[] } {
   }
   if (process.platform === "win32") {
     // Prefer pwsh.exe (PowerShell 7+) when on PATH; fall back to powershell.exe.
-    const cmd = existsOnWindowsPath("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
+    const cmd = commandExistsOnPath("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
     return { cmd, args: [] };
   }
   const sh = process.env.SHELL ?? "/bin/bash";
@@ -78,12 +88,7 @@ let tmuxCache: boolean | null = null;
  *  Landed by wrap-embedded-pty-in-tmux. */
 export function hasTmux(): boolean {
   if (tmuxCache !== null) return tmuxCache;
-  try {
-    const r = spawnSync("which", ["tmux"], { encoding: "utf8" });
-    tmuxCache = r.status === 0;
-  } catch {
-    tmuxCache = false;
-  }
+  tmuxCache = commandExistsOnPath("tmux");
   return tmuxCache;
 }
 
@@ -133,23 +138,33 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * See wrap-embedded-pty-in-tmux.
  */
 /**
- * Read `<projectRoot>/.ithyno/session-id` and pick the corresponding
- * `claude` startup. Mints a fresh UUID (and writes the file) on first
- * launch or when the file is missing / empty. Returns plain `claude`
- * when no `projectRoot` is available (older callers, tests).
+ * Read `<projectRoot>/.ithyno/session-claude` and pick the
+ * corresponding Claude startup line. Mints a fresh UUID (and writes
+ * the file) on first launch or when the file is missing / empty.
+ * Returns plain `claude` when no `projectRoot` is available (older
+ * callers, tests).
  *
- * Landed by pty-startup-uses-project-session-id.
+ * Landed by pty-startup-uses-project-session-id (2026-07-19).
+ * Renamed + per-CLI split by the Manager-args cleanup that removed the
+ * bogus `args: [--continue]` template default: session-id semantics
+ * are Claude-only (Codex/Copilot/etc have their own resume flags), so
+ * naming and storage now say "claude" explicitly. The legacy
+ * `.ithyno/session-id` file (Claude-only from day one) is still read
+ * as fallback for existing dev environments.
  */
-function resolveSessionIdStartup(projectRoot: string | undefined): string {
+function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
   if (!projectRoot) return "claude";
-  const idPath = join(projectRoot, ".ithyno", "session-id");
+  const idPath = join(projectRoot, ".ithyno", "session-claude");
+  const legacyPath = join(projectRoot, ".ithyno", "session-id");
   let uuid = "";
-  if (existsSync(idPath)) {
+  for (const p of [idPath, legacyPath]) {
+    if (!existsSync(p)) continue;
     try {
-      uuid = readFileSync(idPath, "utf8").trim();
+      uuid = readFileSync(p, "utf8").trim();
     } catch {
-      /* fall through to mint */
+      /* fall through */
     }
+    if (uuid) break;
   }
   if (uuid) {
     return `claude --resume ${shellQuote(uuid)}`;
@@ -167,6 +182,40 @@ function resolveSessionIdStartup(projectRoot: string | undefined): string {
   return `claude --session-id ${shellQuote(fresh)}`;
 }
 
+/**
+ * Per-CLI startup strategy for Manager PTY spawn.
+ *
+ * Each strategy takes an optional `projectRoot` and returns the exact
+ * shell line to launch that CLI as Manager. Missing entries fall back
+ * to plain `<cli>` (safe first-launch default for any CLI, no
+ * session resume).
+ *
+ * Adding session persistence for a new CLI = add its strategy here.
+ * The picker's "(unverified)" label in InitDialog SHALL be dropped for a
+ * CLI once its strategy is landed AND the dispatch skill resolves in
+ * that CLI's command surface.
+ */
+type ManagerStartupStrategy = (projectRoot: string | undefined) => string;
+
+const MANAGER_STARTUP_STRATEGIES: Readonly<Record<string, ManagerStartupStrategy>> = {
+  claude: resolveClaudeSessionStartup,
+  // codex/copilot/gemini/agy/opencode/cursor: no strategy yet — plain
+  // command via resolveManagerStartup fallback. Each CLI's session
+  // resume mechanism is a separate follow-up (research per CLI).
+};
+
+/** Resolve the startup line for a Manager CLI. Uses the CLI's registered
+ *  strategy when available, otherwise plain command (safe first-launch
+ *  default). Exported for tests. */
+export function resolveManagerStartup(
+  command: string,
+  projectRoot: string | undefined,
+): string {
+  const strategy = MANAGER_STARTUP_STRATEGIES[command];
+  if (strategy) return strategy(projectRoot);
+  return command;
+}
+
 export function ptyStartup(
   registry: AgentRegistry | null,
   projectRoot?: string,
@@ -181,16 +230,24 @@ export function ptyStartup(
   let initialInput: string | undefined;
   if (manager && manager.command) {
     const args = manager.args ?? [];
-    baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    if (args.length === 0) {
+      // Empty args → defer to per-CLI Manager startup strategy
+      // (Claude gets --session-id mint / --resume; other CLIs get
+      // plain command as safe first-launch default). Explicit args in
+      // agents.yaml override this smart resolver.
+      baseStartup = resolveManagerStartup(manager.command, projectRoot);
+    } else {
+      baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    }
     initialInput = manager.initialInput;
   } else {
     const v = process.env.ITHYNO_TERMINAL_STARTUP;
     if (v !== undefined) {
       baseStartup = v;
     } else {
-      // Priority 3: per-project session UUID at .ithyno/session-id.
+      // Priority 3: per-project Claude session UUID (legacy no-manager path).
       // See doc comment above.
-      baseStartup = resolveSessionIdStartup(projectRoot);
+      baseStartup = resolveClaudeSessionStartup(projectRoot);
     }
     initialInput = undefined;
   }
@@ -347,7 +404,17 @@ export async function attachPtyToSocket(
     cols: opts.cols ?? 80,
     rows: opts.rows ?? 24,
     cwd: opts.cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: {
+      ...process.env,
+      TERM: "xterm-256color",
+      // The Manager (and any CLI it launches from this shell) needs the
+      // session token to reach token-gated endpoints such as
+      // POST /api/manager/activity. The PTY is local-only and already
+      // origin/token gated at the WebSocket upgrade, so exporting it into
+      // the shell environment adds no new exposure surface.
+      // Landed by expose-manager-activity-per-change.
+      ITHYNO_SESSION_TOKEN: SESSION_TOKEN,
+    },
   });
 
   const entry: LiveTerminal = { term, ws, cwd: opts.cwd };

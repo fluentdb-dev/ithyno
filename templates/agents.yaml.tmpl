@@ -7,4 +7,7 @@ agents:
     roles: [manager]
     mode: live-shell
     command: {{MANAGER_COMMAND}}
-    args: [--continue]
+    # args intentionally empty: runtime chooses per-CLI startup args
+    # (session-id mint / resume for Claude; plain command for other CLIs).
+    # Override here with an explicit list to bypass the smart resolver.
+    args: []

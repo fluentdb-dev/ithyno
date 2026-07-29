@@ -10,6 +10,8 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveGitBash } from "./util/resolve-git-bash.js";
+import { commandExistsOnPath } from "./sync/pty.js";
 
 // ---------------------------------------------------------------------------
 // Types (exported — used by server/index.ts and external callers)
@@ -50,6 +52,12 @@ export type DoctorReport = {
   agents: Record<Cli, CliStatus>;
   tmux: CliStatus;
   agmsg: CliStatus;
+  /** Windows only — distinguishes a real Git Bash install from the
+   *  platform's WSL launcher stubs (System32 / WindowsApps bash.exe),
+   *  both of which satisfy a bare PATH check without being Git Bash.
+   *  Omitted on macOS/Linux (no equivalent ambiguity there). See
+   *  add-doctor-and-installer §8 / add-windows-agmsg-support. */
+  gitBash?: CliStatus;
   /** true when at least one agent CLI has installed === true */
   readyForManager: boolean;
   /** ISO timestamp of when the check was performed */
@@ -189,12 +197,49 @@ function parseVersion(output: string): string | undefined {
 }
 
 /**
- * Check agmsg presence via file existence (not a CLI).
- * Looks for `~/.agents/skills/agmsg/scripts/send.sh`.
+ * Windows only — distinguishes a real Git Bash install from the
+ * platform's WSL launcher stubs. See DoctorReport.gitBash doc comment.
  */
-function checkAgmsg(): CliStatus {
+function checkGitBash(): CliStatus {
+  const path = resolveGitBash();
+  if (path) return { installed: true, path };
+  return {
+    installed: false,
+    error:
+      "Only a WSL launcher stub was found on PATH (or git itself is missing) — install Git for Windows to get a real Git Bash.",
+  };
+}
+
+/**
+ * Check agmsg presence via file existence (not a CLI). Looks for
+ * `~/.agents/skills/agmsg/scripts/send.sh`.
+ *
+ * On Windows, file presence alone isn't enough — agmsg also needs a
+ * real Git Bash and `sqlite3` on PATH to actually run (see
+ * add-windows-agmsg-support). A prior copy that "succeeded" at the
+ * file level is still reported as unavailable when either dependency
+ * is missing, so the report reflects runtime readiness, not just
+ * whether bytes were once copied.
+ */
+function checkAgmsg(gitBash: CliStatus | undefined): CliStatus {
   const marker = join(homedir(), ".agents", "skills", "agmsg", "scripts", "send.sh");
-  if (existsSync(marker)) {
+  const markerExists = existsSync(marker);
+
+  if (process.platform === "win32") {
+    const missing: string[] = [];
+    if (!gitBash?.installed) missing.push("Git Bash");
+    if (!commandExistsOnPath("sqlite3")) missing.push("sqlite3");
+    if (missing.length > 0) {
+      return {
+        installed: false,
+        error: markerExists
+          ? `agmsg files are present but cannot run — missing: ${missing.join(", ")}`
+          : `missing: ${missing.join(", ")}`,
+      };
+    }
+  }
+
+  if (markerExists) {
     return { installed: true, path: join(homedir(), ".agents", "skills", "agmsg") };
   }
   return { installed: false };
@@ -223,7 +268,8 @@ export async function runDoctor(): Promise<DoctorReport> {
     agents[agentDefs[i].key] = agentResults[i];
   }
 
-  const agmsgResult = checkAgmsg();
+  const gitBashResult = process.platform === "win32" ? checkGitBash() : undefined;
+  const agmsgResult = checkAgmsg(gitBashResult);
 
   // readyForManager: at least one NAMED agent CLI is installed.
   // "antigravity" is excluded because it is an alias for "agy" (same binary);
@@ -235,6 +281,7 @@ export async function runDoctor(): Promise<DoctorReport> {
     agents,
     tmux: tmuxResult,
     agmsg: agmsgResult,
+    ...(gitBashResult ? { gitBash: gitBashResult } : {}),
     readyForManager,
     checkedAt: new Date().toISOString(),
   };

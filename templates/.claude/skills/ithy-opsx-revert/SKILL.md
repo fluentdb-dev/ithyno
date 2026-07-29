@@ -52,7 +52,7 @@ so that ithyno owns exactly one slash-command namespace end-to-end.
 2. **Git identity**. Verify `git config user.name` and `user.email`
    resolve. Not strictly required here (we do no commits) but the
    downstream `/opsx:apply` needs them and it's cheaper to catch now.
-3. **OpenSpec CLI**. Run `npm run openspec -- list` to confirm the
+3. **OpenSpec CLI**. Run `npx openspec list` to confirm the
    CLI works.
 4. **Scope argument**. If the invoker passed `<scope>` after
    `/ithy-opsx:revert`, use it. Otherwise, use the **AskUserQuestion tool**
@@ -112,7 +112,7 @@ Record each target's classification for the proposal.
    > <N> targets: <list>. Proceed?"
 2. On yes:
    ```
-   npm run openspec -- new change revert-<scope>
+   npx openspec new change revert-<scope>
    ```
 
 ### 5. Populate `proposal.md`
@@ -226,7 +226,7 @@ Write a standard revert checklist. Include:
 ## 1. Spec deltas
 
 - [ ] 1.1 <N> <REMOVED|MODIFIED|ADDED> requirements in specs/<capability>/spec.md
-- [ ] 1.2 `npm run openspec -- validate revert-<scope>` VALID
+- [ ] 1.2 `npx openspec validate revert-<scope>` VALID
 
 ## 2. Impl reverts
 
@@ -266,15 +266,26 @@ Write a standard revert checklist. Include:
 ### 8. Insert PENDING annotations into current specs
 
 For each targeted requirement in `openspec/specs/<capability>/spec.md`,
-insert immediately under the `### Requirement:` heading:
+insert the annotation **immediately after the SHALL/MUST body paragraph**
+(before any `#### Scenario:` header) — NOT directly under the
+`### Requirement:` heading:
 
 ```md
 ### Requirement: <name>
 
+<existing SHALL/MUST body paragraph — must stay first non-empty line>
+
 > ⚠️ **PENDING <REMOVAL|MODIFICATION>** by [revert-<scope>](../../changes/revert-<scope>/): <one-line reason>.
 
-<existing body — untouched>
+<remaining body / #### Scenario: blocks>
 ```
+
+Why after the body: the openspec CLI parser captures the FIRST
+non-empty line after the header as the requirement's `text` field and
+requires SHALL/MUST there. An annotation blockquote in the natural
+under-heading slot swallows the check and breaks `openspec archive`
+for every change on the same capability. Ref:
+[fix-pending-annotation-parser-compat](../../../openspec/changes/archive/fix-pending-annotation-parser-compat/).
 
 - Case α + REMOVED delta → `PENDING REMOVAL`
 - Case α + MODIFIED delta → `PENDING MODIFICATION`
@@ -325,7 +336,7 @@ For each Case β target:
 ### 11. Validate
 
 ```
-npm run openspec -- validate revert-<scope>
+npx openspec validate revert-<scope>
 ```
 
 If NOT VALID:
