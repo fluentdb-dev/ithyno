@@ -45,10 +45,19 @@ export async function loadPty(): Promise<PtyAvailability> {
  * shell that isn't actually on PATH throws "File not found" from node-pty's
  * native binding instead of falling back. `where` mirrors that PATH search
  * without spawning anything, so we can check first and fall back in JS.
+ * POSIX has no `where` — use `which` there, same idea. Neither tool is
+ * guaranteed on PATH itself (e.g. a plain PowerShell session has no `which`
+ * even with Git for Windows installed, since only `Git\cmd` is added to
+ * PATH, not `Git\usr\bin`), so a spawn failure just means "not found".
  */
-function existsOnWindowsPath(cmd: string): boolean {
+export function commandExistsOnPath(cmd: string): boolean {
   try {
-    return spawnSync("where", [cmd], { stdio: "ignore" }).status === 0;
+    const probe = process.platform === "win32" ? "where" : "which";
+    // timeout: spawnSync has none by default; bound it so a stalled probe
+    // degrades to "not found" instead of hanging the caller (this is now
+    // also called from doctor.ts / the doctor install endpoint, not just
+    // PTY startup).
+    return spawnSync(probe, [cmd], { stdio: "ignore", timeout: 3000 }).status === 0;
   } catch {
     return false;
   }
@@ -61,7 +70,7 @@ export function defaultShell(): { cmd: string; args: string[] } {
   }
   if (process.platform === "win32") {
     // Prefer pwsh.exe (PowerShell 7+) when on PATH; fall back to powershell.exe.
-    const cmd = existsOnWindowsPath("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
+    const cmd = commandExistsOnPath("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
     return { cmd, args: [] };
   }
   const sh = process.env.SHELL ?? "/bin/bash";
@@ -79,12 +88,7 @@ let tmuxCache: boolean | null = null;
  *  Landed by wrap-embedded-pty-in-tmux. */
 export function hasTmux(): boolean {
   if (tmuxCache !== null) return tmuxCache;
-  try {
-    const r = spawnSync("which", ["tmux"], { encoding: "utf8" });
-    tmuxCache = r.status === 0;
-  } catch {
-    tmuxCache = false;
-  }
+  tmuxCache = commandExistsOnPath("tmux");
   return tmuxCache;
 }
 

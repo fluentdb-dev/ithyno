@@ -38,5 +38,10 @@ run(
   `npm run --workspace ithyno-electron ${electronScript}`
 );
 
+// Verify bundle shape + scaffold reachability before announcing artifacts.
+// See add-bundle-verification-script (Phase B of the 2026-07-26 comprehensive
+// skill test plan). Fails fast on any invariant violation.
+run("bundle verify", "node scripts/verify-bundle.mjs");
+
 // Print artifact summary.
 run("artifact summary", "node scripts/release-summary.mjs");

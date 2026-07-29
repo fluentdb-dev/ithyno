@@ -7,7 +7,11 @@
 //   - `walkTemplates`, `copyFile`, `updateGitignore` are individually testable
 //
 // Templates ship under <package_root>/templates/ and are resolved relative
-// to this file via import.meta.url.
+// to this file via import.meta.url. Notable scaffold targets: `openspec-flow`
+// (the project's spec-driven workflow skill) and every `ithy-opsx-*` skill +
+// `commands/ithy-opsx/*` command backing the `/ithy-opsx:*` slash surface —
+// ithyno's own commands travel with Init rather than being installed globally
+// (see distribute-ithy-opsx-via-init-templates).
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";

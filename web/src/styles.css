@@ -2188,6 +2188,23 @@ a.modal-btn:hover {
 .terminal-host .xterm-screen {
   height: 100% !important;
 }
+/* Copy/paste shortcut hint — bottom-left of the terminal pane, Windows/
+   Linux only (see Terminal.tsx: plain Ctrl+C/V stay untouched there, so
+   the shortcut is easy to miss without a visible reminder). */
+.terminal-copypaste-hint {
+  position: absolute;
+  bottom: 6px;
+  left: 10px;
+  z-index: 10;
+  font-size: 11px;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--panel) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  pointer-events: none;
+  opacity: 0.75;
+}
 .term-toggle {
   margin-left: 12px;
   background: var(--panel);
@@ -3403,6 +3420,11 @@ a.modal-btn:hover {
   font-size: 13px;
 }
 .onboarding-prereq:first-child { border-top: none; }
+.onboarding-prereq-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
 .onboarding-prereq.prereq-ok .onboarding-icon {
   color: #fff;
   background: var(--success, #34c759);
@@ -3708,6 +3730,12 @@ a.modal-btn:hover {
   color: var(--fg-muted);
 }
 
+.prereq-hint {
+  font-size: 11px;
+  max-width: 220px;
+  white-space: normal;
+}
+
 .prereq-path {
   color: var(--fg-muted);
   font-size: 11px;
@@ -3791,6 +3819,48 @@ a.modal-btn:hover {
 .prereq-modal-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+/* Buttons inside any prereq-family modal (PrereqInstallModal's own
+ * "Close"/"Installing…" button, AgmsgConfigModal's "Close"/"Save") were
+ * previously unstyled browser defaults — only worked visually for
+ * PrereqInstallModal because it's a single button with nothing to clash
+ * against. Explicit styling here matches Settings' `.settings-actions
+ * button` look so every install/config modal is visually consistent. */
+.prereq-modal-actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--fg));
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.prereq-modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.prereq-modal-actions button:first-child:not(:last-child) {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+/* AgmsgConfigModal reuses Settings' .settings-toggle/.settings-field
+ * markup, which was designed for the full-width Settings page. Inside
+ * the narrower prereq-modal (max 640px, minus padding), the grid's
+ * fixed-width input column and 280px input min-width don't fit — stack
+ * label and input instead of side-by-side, and let the input fill the
+ * available width. */
+.agmsg-config-modal .settings-field label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.agmsg-config-modal .settings-field input[type="text"] {
+  min-width: 0;
+  width: 100%;
 }
 
 /* ---- Import-completion notifications (enable-import-both-patterns) ---- */

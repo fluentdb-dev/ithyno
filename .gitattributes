@@ -1,0 +1,26 @@
+# Enforce LF line endings for all text files on checkout across all
+# platforms (including Windows). Without this, git converts LF to CRLF
+# for text-classified files on Windows checkout, which breaks:
+#   - server/init.test.ts template drift guard (byte-comparison)
+#   - the npm-pack shape assertion (byte-comparison of tarball entries)
+# See openspec/changes/add-windows-ci-matrix/design.md D4.
+* text=auto eol=lf
+
+# Binary patterns — never treat as text, never touch line endings.
+*.png    -text
+*.jpg    -text
+*.jpeg   -text
+*.gif    -text
+*.ico    -text
+*.icns   -text
+*.pdf    -text
+*.woff   -text
+*.woff2  -text
+*.ttf    -text
+*.otf    -text
+*.dmg    -text
+*.exe    -text
+*.vsix   -text
+*.tgz    -text
+*.zip    -text
+*.node   -text

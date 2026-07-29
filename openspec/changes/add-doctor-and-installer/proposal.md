@@ -71,6 +71,35 @@ Init flow (change 2) will call the doctor programmatically:
   `server/doctor.ts` so `expand-init-to-scaffold-agents-yaml` can
   reuse it during the Init flow.
 
+### Windows support (added during Windows dogfooding)
+
+`POST /api/doctor/install { tool: "tmux" }` currently rejects
+Windows outright ("Unsupported platform"), and the `agmsg` install
+path (a plain recursive copy of `vendor/agmsg` to
+`~/.agents/skills/agmsg`) has no gate on Windows for agmsg's own
+runtime dependencies — it would happily "succeed" at copying files
+that then can't run. Both gaps were found and root-caused during
+hands-on Windows testing of `add-windows-agmsg-support`:
+
+- **tmux**: no Windows package manager reliably installs a tmux
+  fork (psmux is the one verified working, via Git Bash — see
+  `add-windows-agmsg-support`). There is no automated install path.
+  Replace the current 400 rejection with a 200 response carrying
+  install *guidance* (download link + "add the extracted folder to
+  PATH" instructions) instead of a dead end.
+- **agmsg**: gate the existing copy step on Windows behind the same
+  Git Bash + sqlite3 resolution `add-windows-agmsg-support` already
+  built for the Electron first-launch installer
+  (`electron/src/resolve-git-bash.ts`'s technique, needed here too
+  since this is a second, independent call site doing the same
+  copy). When either is missing, report which one via the SSE
+  stream instead of copying a tree that won't run.
+- **DoctorReport**: add a `gitBash: CliStatus`-shaped diagnostic
+  (Windows only; `installed: true` when a real Git Bash resolves,
+  `false` — with a hint — when only a WSL launcher stub was found)
+  so Settings can explain *why* agmsg is marked unavailable instead
+  of just showing a red x.
+
 ## Success
 
 - `ithyno doctor` prints a report like:

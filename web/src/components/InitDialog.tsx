@@ -63,6 +63,7 @@ export function InitDialog({
   const [loading, setLoading] = useState(true);
   const [selectedCli, setSelectedCli] = useState<Cli | null>(null);
   const [initializing, setInitializing] = useState(false);
+
   // Fetch doctor report on mount
   useEffect(() => {
     let cancelled = false;
@@ -102,9 +103,19 @@ export function InitDialog({
     if (!selectedCli || !readyForManager) return;
     setInitializing(true);
     try {
+      // agentsYamlOnly: true — this dialog only exists as the
+      // Prerequisites/Manager-picker step ahead of OnboardingProject's
+      // own SSE-streamed run (see its useEffect), which is what
+      // actually does scaffold + `npm install` + `openspec init` with
+      // live progress. Without this flag, that whole (slow, network-
+      // bound) chain ran a second time here first — synchronously,
+      // hidden behind "Initializing…" — before the log screen even
+      // appeared, so pressing Continue looked frozen and the
+      // subsequent "live" log was really just a redundant replay.
       const result = await initProject({
         dir,
         manager: { command: selectedCli },
+        agentsYamlOnly: true,
         ...initOptions,
       });
       if (!result.ok) {
@@ -156,10 +167,11 @@ export function InitDialog({
                 </li>
               );
             })}
-            {/* Optional tooling: tmux + agmsg. Status only — install happens
-                inside the chosen Manager agent after Init completes, not from
-                here (the server-side installer would side-step the agent's
-                own tooling context). */}
+            {/* Optional tooling: tmux + agmsg. Status only — neither
+                belongs to the Manager-CLI gating this dialog exists
+                for. Both are installable from the onboarding screen's
+                own Agmsg section after Continue (limit-agmsg-install-
+                prompt-triggers), or from Settings > Prerequisites. */}
             {(["tmux", "agmsg"] as const).map((tool) => {
               const status = report[tool];
               return (
@@ -169,7 +181,7 @@ export function InitDialog({
                 >
                   <span className="onboarding-icon">{status.installed ? "✓" : "○"}</span>
                   <span className="onboarding-label">
-                    {tool} <span className="muted">(optional — installed by Manager after Init)</span>
+                    {tool} <span className="muted">(optional — set up after Continue)</span>
                   </span>
                   {status.version && (
                     <span className="muted"> ({status.version})</span>

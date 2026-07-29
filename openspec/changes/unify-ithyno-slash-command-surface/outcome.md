@@ -1,5 +1,28 @@
 # Outcome — unify-ithyno-slash-command-surface
 
+> ⚠️ **Distribution decision superseded (2026-07-25)** by
+> [`distribute-ithy-opsx-via-init-templates`](../distribute-ithy-opsx-via-init-templates/proposal.md).
+> The user-global install path this change added (sha256 manifest under
+> `~/.claude/`, HTTP install/uninstall endpoints, Doctor `ithyOpsx` field,
+> Settings row, `ithyno install-skills`/`uninstall-skills` subcommands,
+> non-template npm `files` + electron `extraResources` entries) is being
+> removed. Distribution now goes via Init scaffolding
+> (`templates/.claude/commands/ithy-opsx/` +
+> `templates/.claude/skills/ithy-opsx-*/`), mirrored to the dev-copy under
+> the same paths and byte-identity-guarded by a Vitest.
+>
+> Reasons: the dev repo is also a consumer; the manifest fast-path never
+> observed local edits so drift was structural; `resolveBundledSkillsRoot()`
+> resolved from module dir meant a server started in a worktree could
+> overwrite user config from an unmerged branch; putting ithyno-tied
+> `/ithy-opsx:*` into a user's global shell contradicted the namespace's
+> project-scoped charter defined in `redesign-skill-namespace-and-dispatch`.
+>
+> The consolidation this change made — one namespace exclusively under
+> `/ithy-opsx:*`, with the three renames + shadow-duplicate deletion — is
+> unaffected and remains load-bearing. The ✅ Worked / ⚠️ Surprises entries
+> tagged "installer" below are historical.
+
 Landed 2026-07-24. Consolidates ithyno's Claude Code slash-command surface exclusively under `/ithy-opsx:*` and makes it a proper distributable/installable skill pack, replacing the earlier split between ithyno's `/opsx:*` additions and its `/ithy-opsx:*` orchestration commands.
 
 ## ✅ Worked
@@ -30,7 +53,7 @@ Landed 2026-07-24. Consolidates ithyno's Claude Code slash-command surface exclu
 1. **Manager PTY restart** on the boilerplate project (or wherever Pattern B users have ithyno running) to pick up `~/.claude/commands/ithy-opsx/*.md`. Claude Code doesn't hot-reload commands. Document in release notes.
 2. **Clean up phantom `/opsx:code` requirement** — either REMOVE the "Code Worker Slash Command" requirement from `dashboard/spec.md` (it never shipped) or actually create the file and formalize it. Separate revert-scope change.
 3. **`openspec update` on the ithyno-ui repo** to pull in upstream openspec's newer `opsx/update.md` and `openspec-update-change` skill. Housekeeping.
-4. **Windows CI job** running `install-skills`/`uninstall-skills` and asserting the `%USERPROFILE%\.claude\` layout. Add to release matrix.
+4. ~~**Windows CI job** running `install-skills`/`uninstall-skills` and asserting the `%USERPROFILE%\.claude\` layout. Add to release matrix.~~ — **void** per `distribute-ithy-opsx-via-init-templates`: `install-skills`/`uninstall-skills` subcommands no longer exist.
 5. **`scripts/verify-bundle.mjs`** — a scripted assertion that both npm pack and Electron packaging outputs contain the expected file set. Wire into `npm run release:build`.
-6. **User manual entry** in `docs/user-manual-init-and-import.md` describing the auto-install: what gets installed, where, how to uninstall, how to hand-edit safely.
-7. **Consider a Doctor row hint** on first launch after install: "Manager PTY may need a restart to pick up newly-installed commands" — the install runs after `fastify.listen`, but any Manager PTY already running (rare during first launch, common during upgrade) won't see the new commands.
+6. ~~**User manual entry** in `docs/user-manual-init-and-import.md` describing the auto-install: what gets installed, where, how to uninstall, how to hand-edit safely.~~ — **void** per `distribute-ithy-opsx-via-init-templates`: there is no auto-install; scaffolding happens through Init and is documented alongside the rest of Init.
+7. ~~**Consider a Doctor row hint** on first launch after install: "Manager PTY may need a restart to pick up newly-installed commands" — the install runs after `fastify.listen`, but any Manager PTY already running (rare during first launch, common during upgrade) won't see the new commands.~~ — **void** per `distribute-ithy-opsx-via-init-templates`: there is no auto-install and no Doctor `ithyOpsx` row.

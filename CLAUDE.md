@@ -117,4 +117,5 @@ npm test                             # vitest
 npm run typecheck                    # tsc --noEmit
 npm run openspec -- list             # active changes
 npm run openspec -- validate --all   # validate everything
+npm run e2e:skills                   # scaffolded-target e2e harness for /ithy-opsx:* skills, gated behind E2E=1 (add --dry-run to skip live Claude round-trips)
 ```

@@ -17,7 +17,6 @@ const DEFAULT_CHROME_COLOR = '#0f1115';
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu, type AboutConfig } from './menu';
-import { ensureAgmsgInstalled } from './agmsg-installer';
 import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
 
 /**
@@ -275,10 +274,15 @@ async function switchProject(projectRoot: string): Promise<void> {
 }
 
 /**
- * File → New Project… handler. Follows the agmsg-installer pattern:
- * native OS dialog + direct `runInit` import + switch to the new
- * project on success. No HTTP round-trip through the local server.
- * (add-electron-new-project-flow.)
+ * File → New Project… handler: native OS directory-picker dialog, then
+ * opens the same shared `/onboarding` window used by every other New
+ * Project entry point (Settings' New Project form, and "No OpenSpec
+ * project found" → "Initialize openspec here") — see
+ * `openOnboardingWindow` below. All three converge on the same
+ * `InitDialog` + `POST /api/init/stream` flow; this handler's only
+ * Electron-specific part is picking the target directory natively
+ * instead of via a text field. (add-electron-new-project-flow,
+ * superseded by add-new-project-onboarding-window.)
  */
 async function onNewProject(): Promise<void> {
   try {
@@ -360,7 +364,7 @@ function openOnboardingWindow(target: string, serverUrl: string): void {
 }
 
 function resolveOnboardingPreload(): string {
-  // Same layout resolution as resolveBinPath / agmsg-installer.
+  // Same layout resolution as resolveBinPath.
   if (app.isPackaged) {
     return join(process.resourcesPath, 'app', 'electron', 'out', 'onboarding-preload.js');
   }
@@ -492,7 +496,6 @@ if (!gotLock) {
       copyright: `License: ${aboutConfig.license}`,
     });
     refreshMenu(aboutConfig);
-    await ensureAgmsgInstalled();
     const project = await ensureProject();
     if (!project) {
       app.quit();

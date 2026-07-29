@@ -64,3 +64,15 @@
 - [ ] 7.5 Manual: `ithyno doctor` prints a report; exit 0 when claude is installed, exit 1 when none are.
 - [ ] 7.6 Manual: Settings page shows prerequisites; [Install] tmux on a mac without tmux shells out to brew and shows live output.
 - [x] 7.7 Write `openspec/changes/add-doctor-and-installer/outcome.md`.
+
+## 8. Windows support (added during Windows dogfooding, after §1-7 shipped)
+
+- [x] 8.1 Added `server/util/resolve-git-bash.ts` (duplicated from `electron/src/resolve-git-bash.ts`, cross-referenced in both files' comments).
+- [x] 8.2 `server/doctor.ts` — `DoctorReport.gitBash` added; computed on `win32` only via `checkGitBash()`.
+- [x] 8.3 `server/doctor.ts` — `checkAgmsg()` now takes the resolved `gitBash` status and, on `win32`, also checks `sqlite3` via `commandExistsOnPath` (exported from `server/sync/pty.ts`). Reports which dependency is missing even when the marker file exists.
+- [x] 8.4 `server/index.ts`'s agmsg install branch — Windows gate added before the `cpSync` copy, streaming which dependency (Git Bash / sqlite3) is missing.
+- [x] 8.5 `server/index.ts`'s tmux install branch — Windows now gets its own `else if (os === "win32")` branch streaming psmux download guidance (https://github.com/psmux/psmux/releases) instead of the generic "Unsupported platform" rejection.
+- [x] 8.6 Settings UI — `renderRow()` takes an optional `hint`; the agmsg row passes `report.gitBash?.error` when `gitBash.installed === false`. CSS: `.prereq-hint`.
+- [x] 8.7 Manual: verified via a direct `runDoctor()` call on this Windows machine — `gitBash.installed: true` (real path), `agmsg.installed: true`, `tmux.installed: true`, matching the machine's actual state (Git Bash + sqlite3 + the working agmsg install from `add-windows-agmsg-support`).
+- [ ] 8.8 Manual: with `sqlite3` temporarily removed from PATH — not tested (would require disturbing the only sqlite3 on this machine, which other tools may depend on); logic mirrors the already-proven `commandExistsOnPath` pattern used elsewhere.
+- [ ] 8.9 Manual: `POST /api/doctor/install { tool: "tmux" }` streaming guidance — not exercised end-to-end through the live HTTP endpoint this session (code path verified by reading + typecheck only).

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
@@ -11,6 +11,27 @@ import { resolveManagerFromDoctor, writeAgentsYaml } from "./init-handler.js";
 import type { DoctorReport } from "./doctor.js";
 
 const execFile = promisify(execFileCb);
+
+/** Repo root — every test that walks the dev-copy or template tree
+ *  resolves paths against this. `process.cwd()` is the repo root under
+ *  Vitest (invoked from `npm test`). */
+const REPO_ROOT = process.cwd();
+
+/** Recursive file walk. Returns absolute paths sorted lexicographically.
+ *  Shared by the drift guard, scaffold reachability smoke, and any
+ *  future tree-walking test in this file. */
+async function walkFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  async function inner(cur: string) {
+    for (const ent of await readdir(cur, { withFileTypes: true })) {
+      const p = join(cur, ent.name);
+      if (ent.isDirectory()) await inner(p);
+      else if (ent.isFile()) out.push(p);
+    }
+  }
+  await inner(dir);
+  return out.sort();
+}
 
 let dir: string;
 
@@ -207,6 +228,215 @@ describe("template drift guard", () => {
   });
 });
 
+describe("ithy-opsx template drift guard", () => {
+  // distribute-ithy-opsx-via-init-templates: the ithy-opsx surface
+  // ships via Init (templates/.claude/…), and this repo's own
+  // .claude/ copy IS the dev-copy that the templates mirror.
+  // Byte-identity between the two prevents drift landing in a PR
+  // that only edits one side. On failure, the message names the
+  // specific pair so the fix is one grep away.
+  it("every .claude/commands/ithy-opsx/*.md file is byte-identical to templates/.claude/commands/ithy-opsx/*.md", async () => {
+    const devDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
+    const tmplDir = join(REPO_ROOT, "templates/.claude/commands/ithy-opsx");
+    const files = await walkFiles(devDir);
+    expect(files.length).toBeGreaterThan(0);
+    for (const dev of files) {
+      const rel = dev.slice(devDir.length + 1);
+      const tmpl = join(tmplDir, rel);
+      const [devBuf, tmplBuf] = await Promise.all([
+        readFile(dev),
+        readFile(tmpl).catch((e) => {
+          throw new Error(
+            `template missing for ${rel} (expected at templates/.claude/commands/ithy-opsx/${rel}): ${(e as Error).message}`,
+          );
+        }),
+      ]);
+      if (!devBuf.equals(tmplBuf)) {
+        throw new Error(
+          `drift: .claude/commands/ithy-opsx/${rel} differs from templates/.claude/commands/ithy-opsx/${rel}`,
+        );
+      }
+    }
+  });
+
+  it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {
+    const devSkillsRoot = join(REPO_ROOT, ".claude/skills");
+    const tmplSkillsRoot = join(REPO_ROOT, "templates/.claude/skills");
+    const skills = (
+      await readdir(devSkillsRoot, { withFileTypes: true })
+    ).filter((e) => e.isDirectory() && e.name.startsWith("ithy-opsx-"));
+    expect(skills.length).toBeGreaterThan(0);
+    for (const skill of skills) {
+      const devDir = join(devSkillsRoot, skill.name);
+      const tmplDir = join(tmplSkillsRoot, skill.name);
+      const files = await walkFiles(devDir);
+      for (const dev of files) {
+        const rel = dev.slice(devDir.length + 1);
+        const tmpl = join(tmplDir, rel);
+        const [devBuf, tmplBuf] = await Promise.all([
+          readFile(dev),
+          readFile(tmpl).catch((e) => {
+            throw new Error(
+              `template missing for ${skill.name}/${rel} (expected at templates/.claude/skills/${skill.name}/${rel}): ${(e as Error).message}`,
+            );
+          }),
+        ]);
+        if (!devBuf.equals(tmplBuf)) {
+          throw new Error(
+            `drift: .claude/skills/${skill.name}/${rel} differs from templates/.claude/skills/${skill.name}/${rel}`,
+          );
+        }
+      }
+    }
+  });
+});
+
+describe("ithy-opsx scaffold reachability smoke", () => {
+  // add-init-scaffold-smoke-test: the drift guard proves dev-copy ≡
+  // templates/, but nothing so far proves the Init flow *actually*
+  // copies templates/.claude/… into a fresh target. An edit to
+  // bin/init.js or walkTemplates that stops picking up ithy-opsx
+  // would pass drift but ship broken Init. These tests close that
+  // gap by invoking runInit() against a mkdtemp() target and
+  // asserting every dev-copy file lands byte-identical.
+  let scaffoldDir: string;
+
+  beforeEach(async () => {
+    scaffoldDir = await mkdtemp(join(tmpdir(), "ithyno-scaffold-"));
+  });
+
+  afterEach(async () => {
+    await rm(scaffoldDir, { recursive: true, force: true });
+  });
+
+  it("runInit() copies every .claude/commands/ithy-opsx/*.md into the target", async () => {
+    const res = await runInit({
+      targetDir: scaffoldDir,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+
+    const devDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
+    const targetDir = join(scaffoldDir, ".claude/commands/ithy-opsx");
+    const files = await walkFiles(devDir);
+    expect(files.length).toBeGreaterThan(0);
+    for (const dev of files) {
+      const rel = dev.slice(devDir.length + 1);
+      const target = join(targetDir, rel);
+      const [devBuf, targetBuf] = await Promise.all([
+        readFile(dev),
+        readFile(target).catch((e) => {
+          throw new Error(
+            `scaffold missing commands/ithy-opsx/${rel} at target — regression in bin/init.js walkTemplates or templates/? (${(e as Error).message})`,
+          );
+        }),
+      ]);
+      if (!devBuf.equals(targetBuf)) {
+        throw new Error(
+          `scaffold mismatch: commands/ithy-opsx/${rel} in target differs from dev-copy`,
+        );
+      }
+    }
+  });
+
+  it("runInit() copies every .claude/skills/ithy-opsx-*/** into the target", async () => {
+    const res = await runInit({
+      targetDir: scaffoldDir,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+
+    const devSkillsRoot = join(REPO_ROOT, ".claude/skills");
+    const targetSkillsRoot = join(scaffoldDir, ".claude/skills");
+    const skills = (
+      await readdir(devSkillsRoot, { withFileTypes: true })
+    ).filter((e) => e.isDirectory() && e.name.startsWith("ithy-opsx-"));
+    expect(skills.length).toBeGreaterThan(0);
+    for (const skill of skills) {
+      const devDir = join(devSkillsRoot, skill.name);
+      const targetDir = join(targetSkillsRoot, skill.name);
+      const files = await walkFiles(devDir);
+      for (const dev of files) {
+        const rel = dev.slice(devDir.length + 1);
+        const target = join(targetDir, rel);
+        const [devBuf, targetBuf] = await Promise.all([
+          readFile(dev),
+          readFile(target).catch((e) => {
+            throw new Error(
+              `scaffold missing skills/${skill.name}/${rel} at target — regression in bin/init.js walkTemplates or templates/? (${(e as Error).message})`,
+            );
+          }),
+        ]);
+        if (!devBuf.equals(targetBuf)) {
+          throw new Error(
+            `scaffold mismatch: skills/${skill.name}/${rel} in target differs from dev-copy`,
+          );
+        }
+      }
+    }
+  });
+});
+
+describe("ithy-opsx package shape smoke", () => {
+  // add-init-scaffold-smoke-test: the corrective distribution
+  // (distribute-ithy-opsx-via-init-templates) removed bare
+  // .claude/commands/ithy-opsx and .claude/skills/ithy-opsx-*/**
+  // from package.json `files`. This test locks that in: `npm pack
+  // --dry-run --json` MUST show ithy-opsx only under templates/, and
+  // MUST NOT show it under a bare .claude/ prefix. A regression that
+  // re-adds either would silently double-ship the dev-copy to
+  // consumers.
+  it("npm pack --dry-run ships ithy-opsx only under templates/", async () => {
+    // ~2-3s on typical hardware; can spike on cold caches. Vitest's
+    // default per-test timeout (5s) is tight — bump for safety.
+    const { stdout } = await execFile("npm", ["pack", "--dry-run", "--json"], {
+      cwd: REPO_ROOT,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (e) {
+      throw new Error(
+        `npm pack --json output was not valid JSON — output shape changed? First 200 chars: ${stdout.slice(0, 200)}`,
+      );
+    }
+    if (
+      !Array.isArray(parsed) ||
+      typeof parsed[0] !== "object" ||
+      parsed[0] === null ||
+      !Array.isArray((parsed[0] as { files?: unknown }).files)
+    ) {
+      throw new Error(
+        "npm pack --json output shape changed — expected `[{files: [...], ...}]`. If this fails after an npm upgrade, update the parser.",
+      );
+    }
+    const entries = (parsed[0] as { files: { path: string }[] }).files;
+    const ithyOpsxEntries = entries.filter((f) => /ithy-opsx/.test(f.path));
+    expect(ithyOpsxEntries.length).toBeGreaterThan(0);
+
+    for (const entry of ithyOpsxEntries) {
+      if (!entry.path.startsWith("templates/.claude/")) {
+        throw new Error(
+          `package shape regression: '${entry.path}' does not sit under 'templates/.claude/'. distribute-ithy-opsx-via-init-templates removed bare .claude/ shipping; something re-added it. Check root package.json 'files' array.`,
+        );
+      }
+      if (/^\.claude\/commands\/ithy-opsx/.test(entry.path)) {
+        throw new Error(
+          `package shape regression: bare '.claude/commands/ithy-opsx' entry '${entry.path}' — should ship only under templates/. See distribute-ithy-opsx-via-init-templates.`,
+        );
+      }
+      if (/^\.claude\/skills\/ithy-opsx-/.test(entry.path)) {
+        throw new Error(
+          `package shape regression: bare '.claude/skills/ithy-opsx-' entry '${entry.path}' — should ship only under templates/. See distribute-ithy-opsx-via-init-templates.`,
+        );
+      }
+    }
+  }, 30_000);
+});
+
 // ---- expand-init-to-scaffold-agents: doctor gate + agents.yaml write -------
 
 /** Minimal DoctorReport fixture with only claude installed. */
@@ -228,15 +458,6 @@ function makeReport(overrides: Partial<Record<string, boolean>> = {}): DoctorRep
     ) as DoctorReport["agents"],
     tmux: { installed: false },
     agmsg: { installed: false },
-    ithyOpsx: {
-      installed: false,
-      installedVersion: null,
-      bundledVersion: "0.0.0-test",
-      commandCount: 0,
-      skillCount: 0,
-      userModifiedFiles: [],
-      installError: null,
-    },
     checkedAt: new Date().toISOString(),
   };
 }
