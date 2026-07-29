@@ -54,6 +54,7 @@ function readAboutConfig(): AboutConfig {
 const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 
 let mainWindow: BrowserWindow | null = null;
+let welcomeWindow: BrowserWindow | null = null;
 let currentSpawn: SpawnResult | null = null;
 let currentProjectRoot: string | null = null;
 let quitting = false;
@@ -128,13 +129,50 @@ function validateWindowState(ws: WindowState): WindowState {
   return ws;
 }
 
-async function ensureProject(): Promise<string | null> {
-  const saved = store.getLastProject();
-  if (saved && isDirectory(saved)) return saved;
-  if (saved && !isDirectory(saved)) {
-    store.removeFromRecent(saved);
+/**
+ * Resolve the packaged / dev path to the welcome window's preload script
+ * and static HTML. Mirrors resolveOnboardingPreload / resolveBinPath.
+ * (add-electron-welcome-window.)
+ */
+function resolveWelcomePreload(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'app', 'electron', 'out', 'welcome-preload.js');
   }
-  return pickProjectDialog() ?? null;
+  return resolve(app.getAppPath(), 'out', 'welcome-preload.js');
+}
+
+function resolveWelcomeHtml(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'app', 'electron', 'welcome.html');
+  }
+  // Dev: app.getAppPath() is the electron/ directory (where package.json
+  // lives); welcome.html sits at its root.
+  return resolve(app.getAppPath(), 'welcome.html');
+}
+
+/**
+ * Read the app icon (electron/build/icon.png, same file bundled as the
+ * dock/taskbar icon) and return it as a base64 data URL. Injecting via
+ * data URL avoids any file:// / CSP / packaging-path resolution
+ * concerns in welcome.html; the icon is small enough (~few KB) that
+ * inlining is cheap.
+ *
+ * Returns null when the icon file is missing — welcome.html degrades
+ * gracefully to no icon.
+ */
+let _iconDataUrlCache: string | null | undefined = undefined;
+function readAppIconDataUrl(): string | null {
+  if (_iconDataUrlCache !== undefined) return _iconDataUrlCache;
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'app', 'electron', 'build', 'icon.png')
+    : resolve(app.getAppPath(), '..', 'build', 'icon.png');
+  try {
+    const buf = readFileSync(iconPath);
+    _iconDataUrlCache = `data:image/png;base64,${buf.toString('base64')}`;
+  } catch {
+    _iconDataUrlCache = null;
+  }
+  return _iconDataUrlCache;
 }
 
 async function tearDownServer(): Promise<void> {
@@ -371,6 +409,107 @@ function resolveOnboardingPreload(): string {
   return resolve(app.getAppPath(), 'out', 'onboarding-preload.js');
 }
 
+/**
+ * Open the welcome BrowserWindow used at first launch when there is no
+ * valid saved project. Shows app identity from readAboutConfig (same
+ * source as the About panel) + a Recent list + a single "Open Folder"
+ * action. Closing without selecting a project quits the app.
+ * (add-electron-welcome-window.)
+ */
+function createWelcomeWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 520,
+    height: 460,
+    title: 'ithyno',
+    resizable: false,
+    minimizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    backgroundColor: DEFAULT_CHROME_COLOR,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: resolveWelcomePreload(),
+    },
+  });
+  win.setMenuBarVisibility(false);
+  welcomeWindow = win;
+
+  void win.loadFile(resolveWelcomeHtml());
+
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  win.on('closed', () => {
+    if (welcomeWindow === win) welcomeWindow = null;
+    // Closing the welcome window with no project selected quits the app —
+    // matches the terminal semantics of the pre-welcome cancel-picker
+    // path but with explicit user intent.
+    if (!mainWindow && !quitting) {
+      app.quit();
+    }
+  });
+
+  return win;
+}
+
+/** Route an "open a project" request from the welcome window through the
+ *  standard createWindowForProject flow, then close the welcome window.
+ *  Shared by open-folder and open-recent handlers. */
+async function openProjectFromWelcome(path: string): Promise<void> {
+  const w = welcomeWindow;
+  await createWindowForProject(path);
+  if (w && !w.isDestroyed()) {
+    // Prevent the closed handler from quitting the app now that we have a
+    // main window in flight.
+    w.close();
+  }
+}
+
+function registerWelcomeIpc(): void {
+  ipcMain.handle('welcome:get-about', () => {
+    // Extend the About payload with an inline icon data URL so
+    // welcome.html can render the same asset that the About panel /
+    // dock uses, without depending on file:// paths that differ
+    // between dev and packaged layouts.
+    return { ...readAboutConfig(), iconDataUrl: readAppIconDataUrl() };
+  });
+  ipcMain.handle('welcome:get-recent', () => store.getRecent());
+  ipcMain.on('welcome:open-folder', () => {
+    const picked = pickProjectDialog(welcomeWindow ?? undefined);
+    if (!picked) return; // cancel — welcome stays open
+    void openProjectFromWelcome(picked);
+  });
+  ipcMain.on('welcome:open-recent', (_e, path: unknown) => {
+    if (typeof path !== 'string' || !path) return;
+    if (!isDirectory(path)) {
+      store.removeFromRecent(path);
+      const w = welcomeWindow;
+      if (w && !w.isDestroyed()) {
+        w.webContents.send('welcome:recent-updated', store.getRecent());
+      }
+      return;
+    }
+    void openProjectFromWelcome(path);
+  });
+  ipcMain.on('welcome:open-external', (_e, url: unknown) => {
+    if (typeof url !== 'string' || !url) return;
+    const about = readAboutConfig();
+    const allowed =
+      (about.licenseUrl && url === about.licenseUrl) ||
+      (about.repositoryUrl && url.startsWith(about.repositoryUrl));
+    if (!allowed) {
+      console.warn('[welcome] refused external URL not in allowlist:', url);
+      return;
+    }
+    void shell.openExternal(url);
+  });
+  ipcMain.on('welcome:quit', () => {
+    app.quit();
+  });
+}
+
 let _aboutConfig: AboutConfig | null = null;
 
 function refreshMenu(aboutConfig?: AboutConfig): void {
@@ -488,6 +627,8 @@ if (!gotLock) {
     void switchProject(path);
   });
 
+  registerWelcomeIpc();
+
   void app.whenReady().then(async () => {
     const aboutConfig = readAboutConfig();
     app.setAboutPanelOptions({
@@ -496,12 +637,21 @@ if (!gotLock) {
       copyright: `License: ${aboutConfig.license}`,
     });
     refreshMenu(aboutConfig);
-    const project = await ensureProject();
-    if (!project) {
-      app.quit();
+
+    // First-launch flow (add-electron-welcome-window):
+    //   - Valid saved project → auto-open (daily-driver: zero friction)
+    //   - No / stale saved → open welcome window with identity + Recent
+    //     + single Open Folder action, instead of firing the bare native
+    //     picker with no context.
+    const saved = store.getLastProject();
+    if (saved && isDirectory(saved)) {
+      await createWindowForProject(saved);
       return;
     }
-    await createWindowForProject(project);
+    if (saved && !isDirectory(saved)) {
+      store.removeFromRecent(saved);
+    }
+    createWelcomeWindow();
   });
 
   app.on('window-all-closed', () => {
@@ -518,11 +668,17 @@ if (!gotLock) {
   });
 
   app.on('activate', () => {
-    if (!mainWindow && !quitting) {
-      void app.whenReady().then(async () => {
-        const project = await ensureProject();
-        if (project) await createWindowForProject(project);
-      });
-    }
+    if (mainWindow || welcomeWindow || quitting) return;
+    void app.whenReady().then(async () => {
+      const saved = store.getLastProject();
+      if (saved && isDirectory(saved)) {
+        await createWindowForProject(saved);
+        return;
+      }
+      if (saved && !isDirectory(saved)) {
+        store.removeFromRecent(saved);
+      }
+      createWelcomeWindow();
+    });
   });
 }

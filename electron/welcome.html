@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>ithyno</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #171a20;
+        --panel-2: #1d2028;
+        --border: #262a34;
+        --text: #e6e8ee;
+        --muted: #8a92a1;
+        --accent: #4c8dff;
+        --accent-hover: #5f9dff;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-size: 13px;
+        overflow: hidden;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        padding: 20px 24px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 6px;
+      }
+      header img {
+        width: 48px;
+        height: 48px;
+        border-radius: 8px;
+        flex: none;
+      }
+      header .title {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      header .name {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      header .version {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .description {
+        color: var(--muted);
+        font-size: 12px;
+        margin: 4px 0 12px;
+        line-height: 1.4;
+      }
+      .license {
+        color: var(--muted);
+        font-size: 11px;
+        margin: 0 0 16px;
+      }
+      .section-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin: 0 0 6px;
+      }
+      .recent {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        margin-bottom: 12px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .recent-empty {
+        padding: 14px;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
+      }
+      .recent ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .recent li {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        word-break: break-all;
+      }
+      .recent li:last-child { border-bottom: none; }
+      .recent li:hover { background: var(--panel-2); }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 12px;
+      }
+      button {
+        background: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      button:hover { background: var(--accent-hover); }
+      button:focus-visible {
+        outline: 2px solid var(--accent-hover);
+        outline-offset: 2px;
+      }
+      footer {
+        display: flex;
+        gap: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+      }
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      footer a:hover { color: var(--text); text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <img id="icon" alt="" />
+      <div class="title">
+        <div class="name" id="app-name">ithyno</div>
+        <div class="version" id="app-version"></div>
+      </div>
+    </header>
+    <p class="description" id="app-description"></p>
+    <p class="license" id="app-license"></p>
+
+    <p class="section-label">Recent projects</p>
+    <div class="recent" id="recent">
+      <div class="recent-empty">No recent projects.</div>
+    </div>
+
+    <div class="actions">
+      <button id="open-folder" type="button">Open Folder…</button>
+    </div>
+
+    <footer>
+      <a id="footer-license" href="#">License</a>
+      <a id="footer-repo" href="#">Repository</a>
+    </footer>
+
+    <script>
+      /* eslint-disable no-undef */
+      const api = window.ithynoWelcome;
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function renderRecent(paths) {
+        const container = el('recent');
+        if (!paths || paths.length === 0) {
+          container.innerHTML = '<div class="recent-empty">No recent projects.</div>';
+          return;
+        }
+        const ul = document.createElement('ul');
+        for (const p of paths) {
+          const li = document.createElement('li');
+          li.textContent = p;
+          li.title = p;
+          li.addEventListener('click', () => api.openRecent(p));
+          ul.appendChild(li);
+        }
+        container.innerHTML = '';
+        container.appendChild(ul);
+      }
+
+      async function init() {
+        const about = await api.getAbout();
+        if (about.iconDataUrl) {
+          el('icon').src = about.iconDataUrl;
+        } else {
+          el('icon').style.display = 'none';
+        }
+        el('app-name').textContent = about.name;
+        el('app-version').textContent = 'v' + about.version;
+        el('app-description').textContent = about.description || '';
+        el('app-license').textContent = 'License: ' + about.license;
+        document.title = about.name;
+
+        const licenseLink = el('footer-license');
+        const repoLink = el('footer-repo');
+        if (about.licenseUrl) {
+          licenseLink.textContent = 'License (' + about.license + ')';
+          licenseLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            api.openExternal(about.licenseUrl);
+          });
+        } else {
+          licenseLink.style.display = 'none';
+        }
+        if (about.repositoryUrl) {
+          repoLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            api.openExternal(about.repositoryUrl);
+          });
+        } else {
+          repoLink.style.display = 'none';
+        }
+
+        renderRecent(await api.getRecent());
+        api.onRecentUpdated(renderRecent);
+
+        el('open-folder').addEventListener('click', () => api.openFolder());
+      }
+
+      init().catch((err) => {
+        console.error('welcome init failed:', err);
+      });
+    </script>
+  </body>
+</html>
