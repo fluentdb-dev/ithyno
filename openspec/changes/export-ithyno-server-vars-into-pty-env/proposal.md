@@ -71,8 +71,19 @@ server. Fall back to `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`
 when neither is set. Do NOT hardcode 4321 — dispatch will
 connection-refuse under Electron."
 
-`.claude/` and `templates/.claude/` MUST stay byte-identical
-(`scripts/verify-bundle.mjs` drift guard).
+Also replace `curl … http://localhost:4321/…` with
+`curl … "${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}/…"`
+in the two remaining hardcoded-port skills — both were the same
+class of bug as dispatch and would have failed under Electron for
+their respective flows:
+
+- `.claude/commands/ithy-opsx/answer.md` — `POST /api/changes/<id>/needs-human/answer`
+- `templates/.claude/commands/ithy-opsx/answer.md`
+- `.claude/commands/ithy-opsx/escalate.md` — `POST /api/changes/<id>/needs-human`
+- `templates/.claude/commands/ithy-opsx/escalate.md`
+
+`.claude/` and `templates/.claude/` MUST stay byte-identical for
+each file (`scripts/verify-bundle.mjs` drift guard).
 
 ### 3. Formalize the PTY env contract (new spec requirement)
 

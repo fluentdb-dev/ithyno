@@ -30,10 +30,15 @@ returning the change to the phase it was in before being escalated.
    Use the Bash tool:
 
    ```bash
-   curl -sS -X POST http://localhost:4321/api/changes/<change-id>/needs-human/answer \
+   curl -sS -X POST "${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}/api/changes/<change-id>/needs-human/answer" \
      -H 'content-type: application/json' \
      -d '{"answer":"<answer>"}'
    ```
+
+   `ITHYNO_BASE` is exported into the Manager PTY by the ithyno server
+   (per-project ephemeral port under Electron / VSCode). Do NOT
+   hardcode `http://localhost:4321` — it will connection-refuse under
+   packaged shells.
 
    JSON-escape the answer body (heredoc or JSON.stringify).
 

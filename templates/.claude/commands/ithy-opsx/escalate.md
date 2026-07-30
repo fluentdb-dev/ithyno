@@ -42,10 +42,15 @@ in the needs-human state and hand off to the user.
    Use the Bash tool:
 
    ```bash
-   curl -sS -X POST http://localhost:4321/api/changes/<change-id>/needs-human \
+   curl -sS -X POST "${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}/api/changes/<change-id>/needs-human" \
      -H 'content-type: application/json' \
      -d '{"question":"<question>","context":"<context>"}'
    ```
+
+   `ITHYNO_BASE` is exported into the Manager PTY by the ithyno server
+   (per-project ephemeral port under Electron / VSCode). Do NOT
+   hardcode `http://localhost:4321` — it will connection-refuse under
+   packaged shells.
 
    Escape the JSON body appropriately (use a heredoc or Node's
    JSON.stringify equivalent to avoid quoting bugs).
