@@ -32,6 +32,7 @@ returning the change to the phase it was in before being escalated.
    ```bash
    curl -sS -X POST "${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}/api/changes/<change-id>/needs-human/answer" \
      -H 'content-type: application/json' \
+     -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
      -d '{"answer":"<answer>"}'
    ```
 

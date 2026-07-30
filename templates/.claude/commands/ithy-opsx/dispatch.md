@@ -760,8 +760,9 @@ teardown done outside the ladder.
    - Advance phase:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
+     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
        -H 'content-type: application/json' \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
        -d '{"phase": "coded"}'
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
@@ -784,8 +785,9 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
+     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
        -H 'content-type: application/json' \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
        -d '{"phase": "reviewed"}'
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
@@ -817,8 +819,9 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST $ITHYNO_BASE/api/changes/<change-id>/phase \
+     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
        -H 'content-type: application/json' \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
        -d '{"phase": "done"}'
 
      # Release the .worktrees/.lock semaphore (parallelExecution=false only).
