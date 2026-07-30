@@ -49,8 +49,14 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE = http://localhost:4321` — adjust if the user's
-  `ITHYNO_PORT` differs.
+- `ITHYNO_BASE` — base URL of the local ithyno server. The Electron
+  shell and VSCode extension each spawn the server on an ephemeral
+  per-project port and export `ITHYNO_PORT` + `ITHYNO_BASE` into the
+  Manager PTY, so `$ITHYNO_BASE` is already resolved. In the CLI dev
+  workflow (no parent shell), fall back to
+  `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`.
+  Every `curl` block below uses `$ITHYNO_BASE` as-is — Manager MUST
+  read the shell's env, NOT hardcode 4321.
 
 - `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
   token. Required by every token-gated endpoint, including

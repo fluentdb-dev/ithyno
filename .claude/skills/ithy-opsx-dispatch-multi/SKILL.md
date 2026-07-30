@@ -51,7 +51,12 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
-- `ITHYNO_BASE = http://localhost:4321` — phase API endpoint.
+- `ITHYNO_BASE` — phase API base URL. Exported into the Manager PTY
+  by the ithyno server (Electron / VSCode each spawn on an ephemeral
+  per-project port and set `ITHYNO_PORT` + `ITHYNO_BASE` accordingly).
+  Fall back to `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`
+  when neither is set. Do NOT hardcode 4321 — dispatch will
+  connection-refuse under Electron.
 - `ITHYNO_SESSION_TOKEN` — session token for the token-gated
   `POST /api/manager/activity` endpoint. Exported into the Manager
   PTY's environment by the ithyno server, so normally already set.

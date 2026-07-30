@@ -474,6 +474,17 @@ export async function attachPtyToSocket(
       // the shell environment adds no new exposure surface.
       // Landed by expose-manager-activity-per-change.
       ITHYNO_SESSION_TOKEN: SESSION_TOKEN,
+      // The Electron shell (server-spawner.ts) and the VSCode extension
+      // both spawn the server on an ephemeral per-project port. Without
+      // these two vars the Manager's dispatch skill has no way to reach
+      // /api/changes/<id>/phase — it would fall back to the hardcoded
+      // 4321 and hit connection-refused. Set here so any subshell that
+      // needs to curl the server picks up the actual port:
+      //   ITHYNO_PORT — bare port number, e.g. "57703".
+      //   ITHYNO_BASE — full base URL, e.g. "http://localhost:57703".
+      // Falls back to 4321 when PORT isn't set (CLI dev workflow).
+      ITHYNO_PORT: process.env.PORT ?? "4321",
+      ITHYNO_BASE: `http://localhost:${process.env.PORT ?? "4321"}`,
     },
   });
 
