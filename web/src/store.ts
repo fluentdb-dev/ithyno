@@ -279,11 +279,28 @@ function readDefaultManager(): Cli | null {
 }
 
 function replaceChange(state: WorkspaceState, change: Change): WorkspaceState {
-  return { ...state, changes: state.changes.map((c) => (c.id === change.id ? change : c)) };
+  // Upsert semantics: the server fires `change-updated` for both create
+  // AND update (chokidar `add` on any file inside a change dir), so a
+  // freshly-created change reaches the client via this same code path.
+  // A pure `.map` would silently drop the new id (every element maps to
+  // itself when no id matches), leaving the Kanban blind to new changes
+  // until a full reload. Append when the id is not already present.
+  const idx = state.changes.findIndex((c) => c.id === change.id);
+  const changes = idx >= 0
+    ? state.changes.map((c, i) => (i === idx ? change : c))
+    : [...state.changes, change];
+  return { ...state, changes };
 }
 
 function replaceSpec(state: WorkspaceState, domain: string, spec: SpecDomain): WorkspaceState {
-  return { ...state, specs: state.specs.map((s) => (s.domain === domain ? spec : s)) };
+  // Same upsert as replaceChange — `spec-updated` also fires on new
+  // capability creation (e.g. an ADDED spec delta landing during
+  // archive). A pure .map would silently drop the new domain.
+  const idx = state.specs.findIndex((s) => s.domain === domain);
+  const specs = idx >= 0
+    ? state.specs.map((s, i) => (i === idx ? spec : s))
+    : [...state.specs, spec];
+  return { ...state, specs };
 }
 
 export const useStore = create<Store>((set, get) => ({
