@@ -96,6 +96,8 @@ The system SHALL keep the scaffold templates inside this package under a
 `templates/` directory so they evolve alongside the code and version with
 each release.
 
+> ⚠️ **PENDING MODIFIED** by [scaffold-ithy-opsx-skills-per-cli](../../changes/scaffold-ithy-opsx-skills-per-cli/): `templates/` narrows to CLI-neutral fixtures only — `templates/.claude/commands/` and `templates/.claude/skills/` are removed and their content is emitted by per-CLI renderers instead.
+
 #### Scenario: Templates resolved relative to package root
 - **WHEN** the init handler reads its templates
 - **THEN** it resolves the path from the package's own location, not from the user's working directory

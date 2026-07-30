@@ -108,6 +108,8 @@ Re-running with the **same** CLI selection and unchanged sources SHALL produce b
 
 The `.claude/commands/` and `.claude/skills/` directories SHALL become generated output, not committed source. The `.gitignore` SHALL exclude them (with an exception for renderer-emitted stub README files that explain their generated status). `templates/.claude/skills/` SHALL be removed once every skill it holds has a renderer path; the init scaffolder's `walkTemplates` SHALL skip `.claude/skills/` and defer to the renderer for that content.
 
+> ⚠️ **PENDING MODIFIED** by [scaffold-ithy-opsx-skills-per-cli](../../changes/scaffold-ithy-opsx-skills-per-cli/): extend retirement to `templates/.claude/commands/` (not just `skills/`), clarify that this repo's own top-level `.claude/` is exempt, and add commands-side + repo-preservation scenarios.
+
 The `server/init.test.ts` template-drift guard SHALL be updated to compare against renderer output rather than `templates/.claude/skills/`.
 
 #### Scenario: fresh clone flow
@@ -125,6 +127,8 @@ The `server/init.test.ts` template-drift guard SHALL be updated to compare again
 ### Requirement: openspec init invokes per-CLI renderers rather than blind template copy
 
 The `openspec init` flow SHALL scaffold the project's skill surface by invoking the cross-CLI renderers for each user-selected CLI, rather than by copying a hardcoded `.claude/skills/` template tree verbatim. The renderer set is defined by `server/install-skills/renderers/index.ts` and aligns with the CLI enum documented above.
+
+> ⚠️ **PENDING MODIFIED** by [scaffold-ithy-opsx-skills-per-cli](../../changes/scaffold-ithy-opsx-skills-per-cli/): wire `runInit` to accept `managerCli`, add renderers for all 8 CLIs (or hard-fail loudly), add non-Claude scenarios + fail-loud + fallback scenarios. Also renames the renderer set location to `server/skill-renderer/renderers/`.
 
 The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g., `CLAUDE.md`, `openspec/README.md`) that do not depend on which CLI the user chose. `templates/.claude/skills/` SHALL be removed once every skill it holds has a renderer path.
 
