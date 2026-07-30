@@ -83,6 +83,11 @@ export function KanbanCard({
   // finished, so the checkmark disappears the moment the Manager advances
   // the phase rather than lingering for the rest of the grace window.
   const stageAtFinish = useStore((s) => (job ? s.jobStageAtFinish[job.id] : undefined));
+  // Non-idle manager activity for this change — used by the Start
+  // gate below so the button hides the moment Manager begins the
+  // dispatch, before the worktree/phase mutations have made it back
+  // to the client.
+  const managerActivity = useStore((s) => s.managerActivity[change.id]);
   const stage = { current: laneForPhase(change.phase, change.priorPhase), atFinish: stageAtFinish };
 
   const slot = slotForChange(change);
@@ -95,22 +100,36 @@ export function KanbanCard({
   const showArchiveInSlot = !jobStillRunning && slot === "done";
 
   // Start button: any non-done slot with no live job AND no evidence a
-  // prior dispatch already ran (worktree present or phase advanced past
-  // proposed). UI does NOT gate on `hasAgents` — when agents.yaml lacks
-  // a code role, the skill falls back to Manager (which has built-in
-  // defaults). Post wire-role-to-cli-in-manager-skill (Phase 1).
+  // prior dispatch already ran. UI does NOT gate on `hasAgents` —
+  // when agents.yaml lacks a code role, the skill falls back to
+  // Manager (which has built-in defaults). Post
+  // wire-role-to-cli-in-manager-skill (Phase 1).
   //
-  // Why also gate on worktree/phase (post revert-agent-pty-layers):
-  // dispatch-skill-driven runs no longer create a runtime Job in
-  // jobByChange, so `!!job` alone stayed false forever after the
-  // skill completed. The Start button therefore lingered on cards
-  // whose worktree was already checked out and sidecar already at
-  // `phase: coded` — a second click re-injected the dispatch command
-  // and `git worktree add` failed on the existing directory. Gating on
-  // the durable "dispatch has happened" signals (worktree present /
-  // phase recorded) removes the lingering button.
+  // Three complementary "already dispatched" signals — Start hides
+  // when ANY is true, so no matter which one propagates to the
+  // client first, the button doesn't linger:
+  //
+  //   1. `change.worktree` present — durable, reaches the client
+  //      after Manager POSTs phase and chokidar re-parses.
+  //   2. `change.phase` past `proposed` — sidecar was written.
+  //   3. `managerActivity` non-idle — arrives via
+  //      `manager-activity-updated` WS event, typically the FASTEST
+  //      signal (Manager posts `dispatching` before it even runs
+  //      `git worktree add`). Without this, Start stayed visible on
+  //      cards mid-dispatch — the initial in-flight window where
+  //      Phase view already showed them in the CODING lane but the
+  //      card gate had no worktree/phase yet.
+  //
+  // Why not just `!!job`: post revert-agent-pty-layers the dispatch
+  // skill no longer creates runtime Jobs, so `!!job` alone stayed
+  // false forever after the skill completed → Start button
+  // lingered on cards whose skill already ran. Double-click then
+  // re-injected `/ithy-opsx:dispatch` and `git worktree add`
+  // failed on the existing directory.
   const alreadyDispatched =
-    !!change.worktree || (change.phase != null && change.phase !== "proposed");
+    !!change.worktree ||
+    (change.phase != null && change.phase !== "proposed") ||
+    (managerActivity != null && managerActivity.activity !== "idle");
   const showStartArea = perCardStartEligible(slot, !!job) && !alreadyDispatched;
 
   return (
