@@ -6,7 +6,7 @@
 // build/install (feature detection — see /api/health).
 
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -269,11 +269,34 @@ export function ptyStartup(
       ? { startup: baseStartup }
       : { startup: baseStartup, initialInput };
   }
-  const session = process.env.ITHYNO_TMUX_SESSION || "ithyno";
+  const session = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
   const startup = `tmux new-session -A -s ${shellQuote(session)} -- ${baseStartup}`;
   return initialInput === undefined
     ? { startup }
     : { startup, initialInput };
+}
+
+/**
+ * Derive the default tmux session name for a project root.
+ *
+ * Per-project (rather than global "ithyno") so that opening ithyno for
+ * two different projects — sequentially or concurrently — creates two
+ * distinct tmux sessions. With the `-A` flag on
+ * `tmux new-session -A -s <name>`, a global name causes the second
+ * instance to attach to the first's pane instead of creating a fresh
+ * one, contaminating the second dashboard with the first's cwd.
+ * See scope-tmux-session-name-per-project (2026-07-30).
+ *
+ * Falls back to the legacy literal `"ithyno"` when no `projectRoot`
+ * is supplied (test callers, older invocations without a resolved
+ * root) so behavior does not change out from under such callers.
+ * `ITHYNO_TMUX_SESSION` env var override takes precedence at the
+ * call site.
+ */
+export function tmuxSessionName(projectRoot?: string): string {
+  if (!projectRoot) return "ithyno";
+  const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 12);
+  return `ithyno-${hash}`;
 }
 
 function tmuxMissingFallback(): string {
@@ -379,7 +402,7 @@ export function activeTerminalCount(): number {
  * a subsequent call to `activeTerminalCount()` reflects the drained
  * state after the sockets flush.
  */
-export function terminateAllLivePtys(): void {
+export function terminateAllLivePtys(oldProjectRoot?: string): void {
   // Snapshot before iterating — the ws.on("close") handler mutates
   // `live` as each socket finishes closing, and we don't want the
   // iteration to skip entries due to concurrent splice().
@@ -387,6 +410,21 @@ export function terminateAllLivePtys(): void {
   for (const entry of snapshot) {
     try { entry.term.kill(); } catch { /* already dead */ }
     try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+  }
+
+  // Also kill the tmux session for the outgoing project root, so a
+  // future `tmux new-session -A -s <name>` for a different project
+  // does not attach to a lingering pane with the wrong cwd. Best
+  // effort — swallow errors (session not found, tmux missing, env
+  // override that we cannot mirror here, etc.).
+  // See scope-tmux-session-name-per-project.
+  if (oldProjectRoot) {
+    const sessionName = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(oldProjectRoot);
+    try {
+      spawnSync("tmux", ["kill-session", "-t", sessionName], { stdio: "ignore", timeout: 3000 });
+    } catch {
+      /* tmux missing or permission denied — nothing to clean */
+    }
   }
 }
 

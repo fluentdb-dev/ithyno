@@ -12,6 +12,7 @@ import {
   resolveManagerStartup,
   terminateAllLivePtys,
   activeTerminalCount,
+  tmuxSessionName,
 } from "./pty.js";
 
 /**
@@ -469,5 +470,29 @@ describe("terminateAllLivePtys", () => {
     // the test env). This documents the empty-array contract.
     expect(() => terminateAllLivePtys()).not.toThrow();
     expect(activeTerminalCount()).toBe(0);
+  });
+});
+
+// ---- tmuxSessionName (scope-tmux-session-name-per-project) ---------------
+describe("tmuxSessionName", () => {
+  it("returns literal `ithyno` when projectRoot is undefined (test-friendly fallback)", () => {
+    expect(tmuxSessionName()).toBe("ithyno");
+    expect(tmuxSessionName(undefined)).toBe("ithyno");
+  });
+
+  it("returns literal `ithyno` when projectRoot is empty (defensive)", () => {
+    expect(tmuxSessionName("")).toBe("ithyno");
+  });
+
+  it("returns a distinct ithyno-<hash> per project root", () => {
+    const a = tmuxSessionName("/path/to/A");
+    const b = tmuxSessionName("/path/to/B");
+    expect(a).toMatch(/^ithyno-[0-9a-f]{12}$/);
+    expect(b).toMatch(/^ithyno-[0-9a-f]{12}$/);
+    expect(a).not.toBe(b);
+  });
+
+  it("is deterministic for the same input", () => {
+    expect(tmuxSessionName("/path/to/A")).toBe(tmuxSessionName("/path/to/A"));
   });
 });

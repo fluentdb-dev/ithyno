@@ -1605,7 +1605,11 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
 
     projectSwitchInProgress = true;
     try {
-      terminateAllLivePtys();
+      // Capture the old root BEFORE setProjectRoot() so
+      // terminateAllLivePtys() kills the correct tmux session
+      // (scope-tmux-session-name-per-project).
+      const oldRoot = getProjectRoot();
+      terminateAllLivePtys(oldRoot);
       setProjectRoot(resolvedNext);
       broadcast({ type: "state-replaced" });
       return reply.code(200).send({ projectRoot: resolvedNext });

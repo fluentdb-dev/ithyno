@@ -16,9 +16,9 @@
  * masking the unit under test.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { statSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 
