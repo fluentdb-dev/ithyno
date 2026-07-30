@@ -608,9 +608,19 @@ export const useStore = create<Store>((set, get) => ({
     ws.onopen = () => {
       openedOnce = true;
       set({ connected: true });
-      // Resync Manager activity on every (re)connect — boundary posts that
-      // landed while the socket was down are otherwise lost, since the events
-      // are fire-and-forget. Landed by expose-manager-activity-per-change.
+      // Resync ALL workspace state on every (re)connect. `change-updated`
+      // / `spec-updated` broadcasts that landed while the socket was down
+      // are otherwise lost — the events are fire-and-forget with no
+      // per-client replay. Without this, a WS drop during a new-change
+      // creation (Electron backgrounding, network hiccup, server restart)
+      // leaves the Kanban frozen on pre-drop state until a full page
+      // reload; new changes appear on disk and in `/api/state` but never
+      // in the UI. `load()` refetches `/api/state` — the same call the
+      // initial mount uses.
+      void get().load();
+      // Same rationale for Manager activity (landed by
+      // expose-manager-activity-per-change): boundary posts fired during
+      // the socket outage never redeliver.
       void get().loadManagerActivities();
     };
     ws.onclose = () => {
