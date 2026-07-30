@@ -369,6 +369,28 @@ export function activeTerminalCount(): number {
 }
 
 /**
+ * Kill every live PTY and close its attached WebSocket. Used by
+ * `POST /api/project/switch` (respawn-manager-pty-on-project-switch)
+ * to force clients to reconnect after the server has re-targeted its
+ * project root. Safe to call with an empty `live` array (no-op).
+ *
+ * The per-entry `ws.on("close")` handler (in `attachPtyToSocket`)
+ * removes each entry from `live` when the socket finishes closing, so
+ * a subsequent call to `activeTerminalCount()` reflects the drained
+ * state after the sockets flush.
+ */
+export function terminateAllLivePtys(): void {
+  // Snapshot before iterating — the ws.on("close") handler mutates
+  // `live` as each socket finishes closing, and we don't want the
+  // iteration to skip entries due to concurrent splice().
+  const snapshot = live.slice();
+  for (const entry of snapshot) {
+    try { entry.term.kill(); } catch { /* already dead */ }
+    try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+  }
+}
+
+/**
  * Attach a WebSocket to a freshly-spawned PTY. The socket sends raw stdout
  * bytes as text frames and accepts a small JSON control protocol for input
  * and resize. The PTY dies when the socket closes.

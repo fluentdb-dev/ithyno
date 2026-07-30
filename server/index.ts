@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { resolveOpenspecDir, scanWorkspace, parseChange, changeIdForPath } from "./parser/workspace.js";
@@ -12,7 +12,7 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys } from "./sync/pty.js";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
@@ -65,19 +65,34 @@ const PORT = Number(process.env.PORT ?? 4321);
 // resolved targetPaths in Pattern classification (A/B). Fall back to the
 // non-real path if realpath fails (e.g., the dir was just created and the
 // filesystem hasn't finalized).
-const PROJECT_ROOT = (() => {
+// Mutable — updated at runtime by `setProjectRoot()` when
+// `POST /api/project/switch` is called (respawn-manager-pty-on-project-switch).
+// All handlers that read the current project root MUST go through
+// `getProjectRoot()` rather than capturing this identifier by closure.
+let currentProjectRoot = (() => {
   const resolved = resolve(process.env.ITHYNO_PROJECT_ROOT ?? process.cwd());
   try { return realpathSync(resolved, { encoding: "utf8" }); } catch { return resolved; }
 })();
+export function getProjectRoot(): string { return currentProjectRoot; }
+function setProjectRoot(next: string): void {
+  currentProjectRoot = next;
+  openspecDir = resolveOpenspecDir(currentProjectRoot);
+}
 const DEV = process.env.ITHYNO_DEV === "1";
 const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
 // Mutable — updated at runtime when the ProjectRootWatcher detects that
-// openspec/ has been created by an import sub-agent or `openspec init`.
-// All handlers that read this variable call resolveOpenspecDir(PROJECT_ROOT)
+// openspec/ has been created by an import sub-agent or `openspec init`,
+// AND by setProjectRoot() on runtime project switch.
+// All handlers that read this variable call resolveOpenspecDir(getProjectRoot())
 // live (see /api/state) or read this variable after it has been updated.
 // Never cache this in a local const inside a long-lived closure.
-let openspecDir = resolveOpenspecDir(PROJECT_ROOT);
+let openspecDir = resolveOpenspecDir(currentProjectRoot);
+
+// Concurrency guard for POST /api/project/switch — a second concurrent
+// call receives 409. Cleared in `finally` so error paths don't leave
+// the flag stuck.
+let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
 
@@ -189,13 +204,13 @@ function startOpenspecWatcher(resolvedDir: string): void {
           basename(filePath) === "needs-human.md" &&
           dirname(filePath) === join(resolvedDir, "changes", changeId);
         if (event !== "unlink" && isDirectNeedsHuman) {
-          const raw = await readSidecar(PROJECT_ROOT, changeId);
+          const raw = await readSidecar(getProjectRoot(), changeId);
           const cur = extractSidecarFields(raw, changeId);
           if (cur.phase === NEEDS_HUMAN) {
-            const doc = await parseNeedsHuman(PROJECT_ROOT, changeId);
+            const doc = await parseNeedsHuman(getProjectRoot(), changeId);
             if (doc?.answered) {
               const restored = cur.priorPhase ?? "proposed";
-              await writeSidecar(PROJECT_ROOT, changeId, {
+              await writeSidecar(getProjectRoot(), changeId, {
                 phase: restored,
                 priorPhase: undefined,
                 escalatedAt: undefined,
@@ -237,15 +252,15 @@ if (openspecDir) {
   // ProjectRootWatcher's own `stopped` flag makes this practically impossible
   // today, but a module-level boolean is cheap insurance. (NF1)
   let openspecWatcherStarted = false;
-  const projectRootWatcher = new ProjectRootWatcher(PROJECT_ROOT, () => {
+  const projectRootWatcher = new ProjectRootWatcher(getProjectRoot(), () => {
     if (openspecWatcherStarted) {
       console.log(`[watcher] openspec/ detected again — idempotency guard: ignoring duplicate call`);
       return;
     }
     openspecWatcherStarted = true;
 
-    const newOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
-    console.log(`[watcher] openspec/ detected at ${PROJECT_ROOT} — starting Watcher`);
+    const newOpenspecDir = resolveOpenspecDir(getProjectRoot());
+    console.log(`[watcher] openspec/ detected at ${getProjectRoot()} — starting Watcher`);
     if (newOpenspecDir) {
       // Update the module-level variable so all subsequent requests
       // (withinOpenspec, change endpoints, /api/state) see the real path.
@@ -261,15 +276,15 @@ if (openspecDir) {
 
 // Second watcher for the design-docs space (`docs/`). Reuses the same Watcher
 // class with echo suppression; it just points at a different root.
-const DOCS_DIR = join(PROJECT_ROOT, "docs");
+const DOCS_DIR = join(getProjectRoot(), "docs");
 let docsWatcher: Watcher | null = null;
 if (existsSync(DOCS_DIR)) {
   docsWatcher = new Watcher(DOCS_DIR, async (filePath) => {
     try {
-      const relPath = docsRelPath(PROJECT_ROOT, filePath);
-      const tree = await scanDocs(PROJECT_ROOT);
+      const relPath = docsRelPath(getProjectRoot(), filePath);
+      const tree = await scanDocs(getProjectRoot());
       let file: DocsFile | null = null;
-      if (relPath) file = await readDocsFile(PROJECT_ROOT, relPath);
+      if (relPath) file = await readDocsFile(getProjectRoot(), relPath);
       broadcast({ type: "doc-updated", path: relPath ?? "", file, tree });
       broadcast({ type: "tags-updated" });
     } catch {
@@ -280,7 +295,7 @@ if (existsSync(DOCS_DIR)) {
 }
 
 // ---- Agent runner ----------------------------------------------------------
-const agentRegistry = new AgentRegistry(PROJECT_ROOT);
+const agentRegistry = new AgentRegistry(getProjectRoot());
 await agentRegistry.load();
 // auto-sync-agmsg-spawn-options: on boot, ensure ~/.agmsg/config/spawn_options.yaml
 // mirrors non-`--model` args of live-shell workers in agents.yaml. Silent on failure —
@@ -292,7 +307,7 @@ try {
     `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
   );
 }
-const agentRunner = new AgentRunner(PROJECT_ROOT, agentRegistry, (ev) => broadcast(ev));
+const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
 // having to shell out. Awaited so that the very first `/api/agents/jobs`
@@ -344,7 +359,7 @@ function withinOpenspec(filePath: string): boolean {
   // Also accept `<projectRoot>/.worktrees/<safe-id>/openspec/…` so verify
   // ticks on the worktree view can write back. Enforce a safe id charset and
   // require the `openspec` segment to prevent writes into worktree code.
-  const worktreesRoot = resolve(PROJECT_ROOT, ".worktrees");
+  const worktreesRoot = resolve(getProjectRoot(), ".worktrees");
   if (!(abs === worktreesRoot || abs.startsWith(worktreesRoot + sep))) return false;
   const rel = abs.slice(worktreesRoot.length + 1);
   const [id, second] = rel.split(sep);
@@ -369,7 +384,7 @@ fastify.get("/api/health", async () => {
   return {
     ok: true,
     openspecDir,
-    projectRoot: PROJECT_ROOT,
+    projectRoot: getProjectRoot(),
     terminal: pty.available
       ? { available: true as const }
       : { available: false as const, reason: pty.reason },
@@ -676,13 +691,13 @@ fastify.get("/api/state", async () => {
   // restart. The module-level `openspecDir` is updated by the ProjectRootWatcher
   // callback, but calling resolveOpenspecDir here as well ensures correctness
   // even if there is a narrow race between the watcher fire and this handler.
-  const liveOpenspecDir = resolveOpenspecDir(PROJECT_ROOT);
+  const liveOpenspecDir = resolveOpenspecDir(getProjectRoot());
   if (liveOpenspecDir && !openspecDir) {
     // Watcher callback hasn't fired yet — update the module-level var so
     // other handlers (withinOpenspec, change endpoints) also see it.
     openspecDir = liveOpenspecDir;
   }
-  return scanWorkspace(liveOpenspecDir, PROJECT_ROOT);
+  return scanWorkspace(liveOpenspecDir, getProjectRoot());
 });
 
 // ---- Browse endpoints (unify-open-project-3-branch) -----------------------
@@ -692,7 +707,7 @@ fastify.get("/api/state", async () => {
 
 fastify.get("/api/browse/markdown-tree", async () => {
   const { buildMarkdownTree } = await import("./browse.js");
-  return buildMarkdownTree(PROJECT_ROOT);
+  return buildMarkdownTree(getProjectRoot());
 });
 
 fastify.get<{ Querystring: { path?: string } }>(
@@ -700,7 +715,7 @@ fastify.get<{ Querystring: { path?: string } }>(
   async (req, reply) => {
     const relPath = req.query.path ?? "";
     const { resolveSafePath } = await import("./browse.js");
-    const resolved = await resolveSafePath(PROJECT_ROOT, relPath);
+    const resolved = await resolveSafePath(getProjectRoot(), relPath);
     if (!resolved.ok) {
       return reply.code(400).send({ error: resolved.reason });
     }
@@ -729,14 +744,14 @@ fastify.get<{ Querystring: { path?: string } }>(
 // ---- git identity ----------------------------------------------------------
 fastify.get("/api/git/status", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
-  return getGitStatus(PROJECT_ROOT);
+  return getGitStatus(getProjectRoot());
 });
 
 fastify.get("/api/git/config", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
-  const status = await getGitStatus(PROJECT_ROOT);
+  const status = await getGitStatus(getProjectRoot());
   if (!status.isRepo) return reply.code(409).send({ error: "not a git repository" });
-  return readGitConfig(PROJECT_ROOT);
+  return readGitConfig(getProjectRoot());
 });
 
 type GitConfigBody = { userName?: string; userEmail?: string };
@@ -746,10 +761,10 @@ fastify.post<{ Body: GitConfigBody }>("/api/git/config", async (req, reply) => {
   if (body.userName === undefined && body.userEmail === undefined) {
     return reply.code(400).send({ error: "at least one of userName / userEmail required" });
   }
-  const status = await getGitStatus(PROJECT_ROOT);
+  const status = await getGitStatus(getProjectRoot());
   if (!status.isRepo) return reply.code(409).send({ error: "not a git repository — run /api/git/init first" });
   try {
-    await writeLocalConfig(PROJECT_ROOT, body);
+    await writeLocalConfig(getProjectRoot(), body);
     console.log(`[git] wrote local config: ${JSON.stringify(body)}`);
   } catch (err) {
     console.error(`[git] writeLocalConfig failed:`, err);
@@ -762,7 +777,7 @@ fastify.post<{ Body: GitConfigBody }>("/api/git/config", async (req, reply) => {
 fastify.post("/api/git/init", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   try {
-    const gitStatus = await gitInit(PROJECT_ROOT);
+    const gitStatus = await gitInit(getProjectRoot());
     if (!gitStatus.isRepo) {
       const reason = gitStatus.reason === "git-missing" ? "git binary not found in PATH" : "init failed";
       console.warn(`[git] init did not result in a repo: ${reason}`);
@@ -964,7 +979,7 @@ fastify.get<{ Params: { id: string }; Querystring: { tree?: string } }>(
       // add-worktree-change-view: serve from `.worktrees/<id>/openspec/` so
       // the dashboard can render the running agent's live tasks.md, proposal
       // edits, delta specs — anything the agent has touched on its branch.
-      const worktreeOpenspec = join(PROJECT_ROOT, ".worktrees", req.params.id, "openspec");
+      const worktreeOpenspec = join(getProjectRoot(), ".worktrees", req.params.id, "openspec");
       if (!existsSync(worktreeOpenspec)) {
         return reply.code(404).send({
           error: `no worktree at .worktrees/${req.params.id}. The plain URL /change/${req.params.id} shows the main-tree view.`,
@@ -1014,7 +1029,7 @@ fastify.get<{ Params: { id: string } }>(
   async (req, reply) => {
     if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
     if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
-    return getChangeGitState(PROJECT_ROOT, req.params.id);
+    return getChangeGitState(getProjectRoot(), req.params.id);
   },
 );
 
@@ -1028,7 +1043,7 @@ fastify.post<{ Params: { id: string } }>(
     if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
     if (!isSafeChangeId(req.params.id)) return reply.code(400).send({ error: "invalid change id" });
     try {
-      const { commitHash } = await commitChangeProposal(PROJECT_ROOT, req.params.id);
+      const { commitHash } = await commitChangeProposal(getProjectRoot(), req.params.id);
       return { ok: true, commitHash };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1054,7 +1069,7 @@ fastify.get<{ Params: { id: string } }>(
     if (!openspecDir) return reply.code(404).send({ error: "no openspec directory" });
     const changeDir = join(openspecDir, "changes", req.params.id);
     if (!existsSync(changeDir)) return reply.code(404).send({ error: "change not found" });
-    const raw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const raw = await readSidecar(getProjectRoot(), req.params.id);
     const { phase } = extractSidecarFields(raw, req.params.id);
     return { phase: phase ?? null };
   },
@@ -1082,7 +1097,7 @@ fastify.post<{ Params: { id: string }; Body: PhasePostBody }>(
     }
 
     await writeSidecar(
-      PROJECT_ROOT,
+      getProjectRoot(),
       req.params.id,
       { phase: requested },
       watcher ?? undefined,
@@ -1114,7 +1129,7 @@ fastify.post<{ Params: { id: string }; Body: EscalatePostBody }>(
     const context = typeof req.body?.context === "string" ? req.body.context : undefined;
 
     // 409 when already escalated — one open escalation per change.
-    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const currentRaw = await readSidecar(getProjectRoot(), req.params.id);
     const current = extractSidecarFields(currentRaw, req.params.id);
     if (current.phase === NEEDS_HUMAN) {
       return reply.code(409).send({ error: "change already escalated" });
@@ -1122,9 +1137,9 @@ fastify.post<{ Params: { id: string }; Body: EscalatePostBody }>(
 
     const priorPhase = current.phase ?? "proposed";
     const escalatedAt = new Date().toISOString();
-    await writeNeedsHuman(PROJECT_ROOT, req.params.id, question, context);
+    await writeNeedsHuman(getProjectRoot(), req.params.id, question, context);
     await writeSidecar(
-      PROJECT_ROOT,
+      getProjectRoot(),
       req.params.id,
       { phase: NEEDS_HUMAN, priorPhase, escalatedAt },
       watcher ?? undefined,
@@ -1148,18 +1163,18 @@ fastify.post<{ Params: { id: string }; Body: AnswerPostBody }>(
     const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
     if (!answer) return reply.code(400).send({ error: "answer required" });
 
-    const currentRaw = await readSidecar(PROJECT_ROOT, req.params.id);
+    const currentRaw = await readSidecar(getProjectRoot(), req.params.id);
     const current = extractSidecarFields(currentRaw, req.params.id);
     if (current.phase !== NEEDS_HUMAN) {
       return reply.code(409).send({ error: "change is not in needs-human" });
     }
 
-    await appendAnswer(PROJECT_ROOT, req.params.id, answer);
+    await appendAnswer(getProjectRoot(), req.params.id, answer);
     // Restore prior phase; clear escalation fields (undefined DELETES them
     // via the writeSidecar contract).
     const restored = current.priorPhase ?? "proposed";
     await writeSidecar(
-      PROJECT_ROOT,
+      getProjectRoot(),
       req.params.id,
       { phase: restored, priorPhase: undefined, escalatedAt: undefined },
       watcher ?? undefined,
@@ -1189,7 +1204,7 @@ fastify.post("/api/agents/config", async (req, reply) => {
   if ("error" in coerced) {
     return reply.code(400).send({ error: coerced.error });
   }
-  const result = await applyAgentConfigPayload(PROJECT_ROOT, coerced);
+  const result = await applyAgentConfigPayload(getProjectRoot(), coerced);
   if (!result.ok) {
     return reply.code(result.status).send({ error: result.error });
   }
@@ -1213,7 +1228,7 @@ fastify.post<{ Body: { value?: unknown } }>("/api/config/parallel-execution", as
   if (typeof value !== "boolean") {
     return reply.code(400).send({ error: "value must be a boolean" });
   }
-  const result = await writeParallelExecution(PROJECT_ROOT, value);
+  const result = await writeParallelExecution(getProjectRoot(), value);
   if (!result.ok) return reply.code(result.status).send({ error: result.error });
   // Registry reload — same rationale as /api/agents/config's POST handler:
   // watcher is best-effort, race with client refetch.
@@ -1251,7 +1266,7 @@ fastify.post<{
   } else {
     block = null;
   }
-  const result = await writeAgmsg(PROJECT_ROOT, block);
+  const result = await writeAgmsg(getProjectRoot(), block);
   if (!result.ok) return reply.code(result.status).send({ error: result.error });
   await agentRegistry.load();
   return { ok: true };
@@ -1343,7 +1358,7 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id/diff", async (req,
   if (job.status !== "running" && job.cachedDiff) {
     return job.cachedDiff as DiffPayload;
   }
-  const diff = await extractDiff(PROJECT_ROOT, job.id, job.branch);
+  const diff = await extractDiff(getProjectRoot(), job.id, job.branch);
   if (job.status !== "running") job.cachedDiff = diff;
   return diff;
 });
@@ -1357,7 +1372,7 @@ fastify.post<{ Params: { id: string } }>("/api/agents/jobs/:id/cancel", async (r
 
 // ---- tagging endpoints -----------------------------------------------------
 fastify.get("/api/tags", async () => {
-  const { index } = await collectTags(PROJECT_ROOT);
+  const { index } = await collectTags(getProjectRoot());
   return index;
 });
 
@@ -1365,16 +1380,16 @@ fastify.get<{ Params: { ns: string; "*": string } }>("/api/tags/:ns/*", async (r
   const ns = decodeURIComponent(req.params.ns);
   const name = decodeURIComponent((req.params as any)["*"] ?? "");
   const tag = ns === "other" ? name : `${ns}/${name}`;
-  return getTagDetail(PROJECT_ROOT, tag);
+  return getTagDetail(getProjectRoot(), tag);
 });
 
 // ---- design-docs endpoints -------------------------------------------------
-fastify.get("/api/docs", async () => scanDocs(PROJECT_ROOT));
+fastify.get("/api/docs", async () => scanDocs(getProjectRoot()));
 
 fastify.get<{ Querystring: { path?: string } }>("/api/docs/file", async (req, reply) => {
   const p = req.query.path;
   if (!p) return reply.code(400).send({ error: "missing path" });
-  const file = await readDocsFile(PROJECT_ROOT, p);
+  const file = await readDocsFile(getProjectRoot(), p);
   if (!file) return reply.code(404).send({ error: "not found" });
   return file;
 });
@@ -1421,7 +1436,7 @@ fastify.post<{ Body: ToggleBody }>("/api/tasks/toggle", async (req, reply) => {
   });
 
   // Determine whether this edit targets the main openspec dir or a worktree's.
-  const worktreesRoot = resolve(PROJECT_ROOT, ".worktrees");
+  const worktreesRoot = resolve(getProjectRoot(), ".worktrees");
   const isWorktreePath = filePath.startsWith(worktreesRoot + sep);
   let worktreeOpenspecDir: string | null = null;
   let worktreeChangeId: string | null = null;
@@ -1553,6 +1568,52 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     return true;
   }
 
+  // ---- POST /api/project/switch (respawn-manager-pty-on-project-switch) ----
+  type ProjectSwitchBody = { projectRoot?: unknown };
+  fastify.post<{ Body: ProjectSwitchBody }>("/api/project/switch", async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+      return reply.code(403).send({ error: "local only" });
+    }
+    if (projectSwitchInProgress) {
+      return reply.code(409).send({ error: "A project switch is already in progress." });
+    }
+    const body = req.body ?? {};
+    const next = body.projectRoot;
+    if (typeof next !== "string" || next.length === 0) {
+      return reply.code(400).send({ error: "`projectRoot` is required and must be a non-empty string" });
+    }
+    if (!next.startsWith("/")) {
+      return reply.code(400).send({ error: "`projectRoot` must be an absolute path" });
+    }
+    if (!isAuthorizedImportPath(next)) {
+      return reply.code(403).send({ error: `Path is not authorized: ${next}` });
+    }
+    let stat: import("node:fs").Stats;
+    try {
+      stat = statSync(next);
+    } catch {
+      return reply.code(400).send({ error: `Path does not exist: ${next}` });
+    }
+    if (!stat.isDirectory()) {
+      return reply.code(400).send({ error: `Path is not a directory: ${next}` });
+    }
+    // Normalize via realpath so a symlinked project root still matches
+    // equally-resolved comparisons downstream (matches the boot-time
+    // PROJECT_ROOT resolution shape).
+    let resolvedNext = next;
+    try { resolvedNext = realpathSync(next, { encoding: "utf8" }); } catch { /* keep next */ }
+
+    projectSwitchInProgress = true;
+    try {
+      terminateAllLivePtys();
+      setProjectRoot(resolvedNext);
+      broadcast({ type: "state-replaced" });
+      return reply.code(200).send({ projectRoot: resolvedNext });
+    } finally {
+      projectSwitchInProgress = false;
+    }
+  });
+
   type ImportBody = { projectRoot?: unknown; force?: unknown; dry?: unknown };
   fastify.post<{ Body: ImportBody }>("/api/import/spec-generation", async (req, reply) => {
     if (!isLocal(req.socket.remoteAddress ?? undefined)) {
@@ -1588,7 +1649,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     // Resolve symlinks so a symlinked project root still classifies as Pattern B.
     let realTarget = targetPath;
     try { realTarget = realpathSync(targetPath, { encoding: "utf8" }); } catch { /* keep targetPath */ }
-    const pattern: "A" | "B" = realTarget === PROJECT_ROOT ? "B" : "A";
+    const pattern: "A" | "B" = realTarget === getProjectRoot() ? "B" : "A";
 
     // Dry-run: return preflight info + pattern without dispatching
     if (dry) {
@@ -1609,7 +1670,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     // ---- Inject `/ithy-opsx:import <targetPath>` into the Manager PTY -----
     // injectImportCommand validates the path for control characters (→ 400)
     // and then routes to the Manager PTY by cwd (→ 503 when not running).
-    const managerCwd = PROJECT_ROOT;
+    const managerCwd = getProjectRoot();
     const injectResult = injectImportCommand(
       targetPath,
       (data, terminate) => injectIntoManager(managerCwd, data, terminate),
@@ -1692,7 +1753,7 @@ fastify.server.on("upgrade", (request, socket, head) => {
 ptyWss.on("connection", async (ws) => {
   const cwd = openspecDir
     ? resolve(openspecDir, "..") // project root, not openspec/ itself
-    : PROJECT_ROOT;
+    : getProjectRoot();
   const result = await attachPtyToSocket(ws, { cwd, registry: agentRegistry });
   if (!result.ok) {
     try {
@@ -1710,7 +1771,7 @@ try {
   // Runs before we start serving so the first workspace scan sees the
   // clean state.
   const { cleanupStaleLock } = await import("./agents/worktree-lock.js");
-  const cleaned = await cleanupStaleLock(PROJECT_ROOT);
+  const cleaned = await cleanupStaleLock(getProjectRoot());
   if (cleaned === null) {
     // Either no lock existed, or we just removed a stale one. Either
     // way, the current state is "no lock held" — nothing to log unless
@@ -1724,7 +1785,7 @@ try {
   ORIGIN_ALLOW = buildOriginAllowList(PORT, DEV_EXTRA_ORIGINS);
   const launchUrl = `http://localhost:${PORT}/?token=${SESSION_TOKEN}`;
   if (!openspecDir) {
-    console.log(`⚠  No openspec/ directory found under ${PROJECT_ROOT}`);
+    console.log(`⚠  No openspec/ directory found under ${getProjectRoot()}`);
     console.log(`   Run this from an OpenSpec project root, or use --dir <path>.`);
   } else {
     console.log(`✔  ithyno watching ${openspecDir}`);
