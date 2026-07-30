@@ -175,7 +175,7 @@ export function KanbanCard({
               verify only
             </span>
           ))}
-        {job?.status === "orphaned" && (
+        {job?.status === "orphaned" && !showArchiveInSlot && (
           <button
             className="action-btn"
             onClick={(e) => {
