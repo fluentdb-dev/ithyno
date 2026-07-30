@@ -2544,6 +2544,8 @@ command in a `tmux new-session` invocation whenever `agents.yaml`
 includes a valid top-level `agmsg` block, and SHALL spawn the manager
 command directly (pre-P2 behavior) when the block is absent.
 
+> ⚠️ **PENDING MODIFIED** by [scope-tmux-session-name-per-project](../../changes/scope-tmux-session-name-per-project/): Default session name becomes per-project (`ithyno-<hash>`) instead of global `ithyno` to prevent cross-project cwd contamination; `terminateAllLivePtys()` gains a companion `tmux kill-session` for the switched-away project.
+
 The tmux-wrapped startup command SHALL take the shape:
 
 ```
