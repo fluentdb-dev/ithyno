@@ -110,11 +110,45 @@ function spawnStreamed(cmd, args, cwd, step, onEvent) {
 }
 
 /**
+ * Map an ithyno CLI key (from `Cli` in server/doctor.ts) to the tool
+ * name recognized by `openspec init --tools <t>`. openspec's tool list
+ * covers more CLIs than we surface, but the ones ithyno's picker /
+ * agents.yaml can name all map to a supported one. Falls back to
+ * "claude" for unknown / undefined input so a mis-configured caller
+ * still ends up with a working project.
+ *
+ * The rename from `agy` → `antigravity` and `copilot` →
+ * `github-copilot` reflects openspec's naming — see
+ * `openspec init --help`'s tool list.
+ *
+ * @param {string | undefined} cli
+ * @returns {string}
+ */
+export function openspecToolForCli(cli) {
+  switch (cli) {
+    case "claude":
+    case "codex":
+    case "gemini":
+    case "opencode":
+    case "cursor":
+    case "antigravity":
+      return cli;
+    case "agy":
+      return "antigravity";
+    case "copilot":
+      return "github-copilot";
+    default:
+      return "claude";
+  }
+}
+
+/**
  * @param {string} target
  * @param {(e: ChainEvent) => void} onEvent
+ * @param {{ managerCli?: string }} [options]
  * @returns {Promise<{ ok: boolean, target: string }>}
  */
-export async function runNewProjectChain(target, onEvent) {
+export async function runNewProjectChain(target, onEvent, options = {}) {
   // Step 1 — scaffold via runInit. quiet: false so per-file
   // create/skip/overwrite lines flow through the log callback; the
   // trailing "Next steps" hints are ignored by the onboarding UI
@@ -181,9 +215,14 @@ export async function runNewProjectChain(target, onEvent) {
   // Step 3 — `openspec init`, now resolved from ./node_modules/.bin
   // (npx checks local node_modules/.bin before ever considering the
   // registry) instead of an ephemeral, separately-pinned npx fetch.
+  // `--tools` is derived from the Manager CLI the caller picked (see
+  // openspecToolForCli above). Prior to this the tool was hard-coded
+  // "claude" — an agy / codex / etc pick still got a Claude scaffold
+  // and the picked CLI had no AGENTS.md to read.
+  const openspecTool = openspecToolForCli(options.managerCli);
   const result = await spawnStreamed(
     "npx",
-    ["openspec", "init", finalTarget, "--tools", "claude"],
+    ["openspec", "init", finalTarget, "--tools", openspecTool],
     finalTarget,
     "openspec-init",
     onEvent,

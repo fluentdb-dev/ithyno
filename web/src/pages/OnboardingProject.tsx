@@ -168,6 +168,12 @@ export function OnboardingProject() {
             dir: target,
             autoCreateDir: true,
             autoGitInit: true,
+            // Forward the picked Manager so the SSE-driven
+            // `openspec init --tools <t>` scaffolds the AGENTS.md
+            // the chosen CLI reads (e.g. antigravity for agy).
+            // Without this the scaffold was always "claude" and
+            // non-Claude Managers had no AGENTS.md to consume.
+            manager: { command: chosenCli },
           }),
         });
         if (!res.ok || !res.body) {

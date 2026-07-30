@@ -14,7 +14,10 @@ export type ChainEvent =
   | { type: "complete"; target: string }
   | { type: "error"; step: Step; message: string };
 
+export function openspecToolForCli(cli: string | undefined): string;
+
 export function runNewProjectChain(
   target: string,
   onEvent: (e: ChainEvent) => void,
+  options?: { managerCli?: string },
 ): Promise<{ ok: boolean; target: string }>;

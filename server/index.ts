@@ -889,11 +889,12 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
   if (body.agentsYamlOnly !== true) {
     const { runNewProjectChain } = await import("../bin/new-project-chain.js");
     const events: Array<{ step: string; line?: string; message?: string; type: string }> = [];
+    // Pass the resolved Manager CLI so `openspec init --tools <t>`
+    // scaffolds the AGENTS.md that CLI reads instead of the always-
+    // "claude" scaffold (e.g. agy picker → --tools antigravity).
     const chainResult = await runNewProjectChain(v.dir, (ev) => {
-      // Non-streaming caller — capture events for the JSON response instead
-      // of an SSE stream. Errors are surfaced via chainResult.ok = false.
       events.push(ev as { step: string; line?: string; message?: string; type: string });
-    });
+    }, { managerCli: chosenCli });
     if (!chainResult.ok) {
       const errorEvent = events.find((e) => e.type === "error");
       return reply.code(500).send({
@@ -960,7 +961,20 @@ fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
     }
   };
 
-  await runNewProjectChain(v.dir, write);
+  // SSE endpoint has no doctor gate — trust the caller's `manager`
+  // hint (the picker already asked / defaulted at the same UI step).
+  // Body shape matches /api/init: `{ command: string }`. Chain's
+  // openspecToolForCli falls back to "claude" on unknown / undefined
+  // so a body that omits manager still scaffolds workably.
+  const managerCli =
+    body.manager !== undefined &&
+    body.manager !== null &&
+    typeof body.manager === "object" &&
+    "command" in (body.manager as object) &&
+    typeof (body.manager as { command: unknown }).command === "string"
+      ? (body.manager as { command: string }).command
+      : undefined;
+  await runNewProjectChain(v.dir, write, { managerCli });
 
   if (clientAlive) {
     try {
