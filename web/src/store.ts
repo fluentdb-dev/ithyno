@@ -891,3 +891,12 @@ function findTask(state: WorkspaceState, target: Task): Task | null {
   }
   return null;
 }
+
+// Dev-only exposure: makes `useStore` reachable from the DevTools Console
+// as `window.__ithyno`. Read-only usage recommended
+// (e.g. `__ithyno.getState().state?.changes.map(c=>c.id)`), but writes
+// via `__ithyno.setState({...})` also work if you're forcing a state for
+// debugging. Guarded on `typeof window` so SSR / test envs don't break.
+if (typeof window !== "undefined") {
+  (window as unknown as { __ithyno: typeof useStore }).__ithyno = useStore;
+}
