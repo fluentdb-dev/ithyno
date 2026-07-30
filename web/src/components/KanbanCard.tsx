@@ -94,11 +94,24 @@ export function KanbanCard({
   const jobStillRunning = job?.status === "running";
   const showArchiveInSlot = !jobStillRunning && slot === "done";
 
-  // Start button: any non-done slot with no live job. UI does NOT gate on
-  // `hasAgents` — when agents.yaml lacks a code role, the skill falls back
-  // to Manager (which has built-in defaults). Post
-  // wire-role-to-cli-in-manager-skill (Phase 1).
-  const showStartArea = perCardStartEligible(slot, !!job);
+  // Start button: any non-done slot with no live job AND no evidence a
+  // prior dispatch already ran (worktree present or phase advanced past
+  // proposed). UI does NOT gate on `hasAgents` — when agents.yaml lacks
+  // a code role, the skill falls back to Manager (which has built-in
+  // defaults). Post wire-role-to-cli-in-manager-skill (Phase 1).
+  //
+  // Why also gate on worktree/phase (post revert-agent-pty-layers):
+  // dispatch-skill-driven runs no longer create a runtime Job in
+  // jobByChange, so `!!job` alone stayed false forever after the
+  // skill completed. The Start button therefore lingered on cards
+  // whose worktree was already checked out and sidecar already at
+  // `phase: coded` — a second click re-injected the dispatch command
+  // and `git worktree add` failed on the existing directory. Gating on
+  // the durable "dispatch has happened" signals (worktree present /
+  // phase recorded) removes the lingering button.
+  const alreadyDispatched =
+    !!change.worktree || (change.phase != null && change.phase !== "proposed");
+  const showStartArea = perCardStartEligible(slot, !!job) && !alreadyDispatched;
 
   return (
     <div className="kanban-card">
