@@ -2,12 +2,12 @@
 
 ## 1. Wire `managerCli` through init callers
 
-- [ ] 1.1 Extend `runInit` in `bin/init.js` to accept `managerCli` option (string). When undefined, default to `"claude"` at the renderer-invocation call site — keeps the bare-CLI workflow working.
-- [ ] 1.2 Update `bin/init.d.ts` to match the new option.
-- [ ] 1.3 Extend `runNewProjectChain` in `bin/new-project-chain.js` to forward `options.managerCli` into its inner `runInit` call (currently the chain only uses `managerCli` for the openspec-init `--tools` mapping — extend to also feed the ithyno-side scaffold).
-- [ ] 1.4 `server/index.ts` `/api/init` — pass `chosenCli` (from `resolveManagerFromDoctor`) as `managerCli` when calling into the chain.
-- [ ] 1.5 `server/index.ts` `/api/init/stream` — pass extracted `body.manager.command` (same shape check as `/api/init`) as `managerCli`.
-- [ ] 1.6 `server/init.test.ts` — extend the existing scaffold smoke test to assert `runInit({ managerCli: "claude", ... })` still lands the claude renderer output at the expected paths (regression guard for the default-fallback path).
+- [x] 1.1 Extend `runInit` in `bin/init.js` to accept `managerCli` option (string). When undefined, default to `"claude"` at the renderer-invocation call site — keeps the bare-CLI workflow working.
+- [x] 1.2 Update `bin/init.d.ts` to match the new option.
+- [x] 1.3 Extend `runNewProjectChain` in `bin/new-project-chain.js` to forward `options.managerCli` into its inner `runInit` call (currently the chain only uses `managerCli` for the openspec-init `--tools` mapping — extend to also feed the ithyno-side scaffold).
+- [x] 1.4 `server/index.ts` `/api/init` — pass `chosenCli` (from `resolveManagerFromDoctor`) as `managerCli` when calling into the chain. Already done by `a48ed8d` for chain-level; task 1.3 forwards it further into `runInit`.
+- [x] 1.5 `server/index.ts` `/api/init/stream` — pass extracted `body.manager.command` (same shape check as `/api/init`) as `managerCli`. Already done by `a48ed8d` for chain-level; task 1.3 forwards it further into `runInit`.
+- [x] 1.6 `server/init.test.ts` — add regression tests: `runInit({ managerCli: "claude" | undefined | "agy", ... })` all succeed (option accepted, not silently dropped by destructuring regression). Full renderer output assertion lands with task 3+2.1 (needs renderer wiring).
 
 ## 2. Ship all missing renderers
 

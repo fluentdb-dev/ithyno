@@ -163,6 +163,12 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
       quiet: false,
       log: (line) =>
         onEvent({ type: "log", step: "scaffold", line, stream: "stdout" }),
+      // Forward the picked Manager CLI so runInit's renderer step
+      // (added by scaffold-ithy-opsx-skills-per-cli task 3) can emit
+      // the per-CLI skill surface. Undefined here means the CLI
+      // caller didn't specify one — runInit's own default kicks in
+      // ("claude", matching the bare `bin/ithyno init` fallback).
+      managerCli: options.managerCli,
     });
   } catch (err) {
     onEvent({
