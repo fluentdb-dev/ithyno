@@ -139,6 +139,8 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the two dispatch entry points (`opsx:propose` / `opsx:apply` at minimum) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
+> ⚠️ **PENDING MODIFIED** by [port-ithy-opsx-dispatch-to-universal-source](../../changes/port-ithy-opsx-dispatch-to-universal-source/): baseline coverage minimum bumps from just `ithy-opsx-apply` to also include `ithy-opsx-dispatch`, plus a new scenario asserting every ported ithy-opsx skill lands per selected CLI.
+
 Migration for projects scaffolded before this change: those projects already have `.claude/commands/ithy-opsx/*` on disk even if their Manager isn't Claude. This change does NOT auto-migrate them. Recovery is to re-run `openspec init` on the same project directory (idempotent by design) OR manually remove stale `.claude/` entries and re-run.
 
 #### Scenario: init emits per-CLI files based on selection
