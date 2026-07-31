@@ -2,13 +2,16 @@ name: Release Build
 
 on:
   push:
-    branches:
-      - main
     tags:
       # v-prefixed semver tags (e.g., v0.0.1-alpha.1, v1.2.3) fire the
-      # publish path — GitHub Release created, assets attached. Non-tag
-      # pushes / PRs / dispatches still run build for regression signal
-      # but skip publish.
+      # publish path — 3-OS build + GitHub Release created with assets
+      # attached. Tag push is the ONLY branch/ref push trigger for this
+      # workflow; branch pushes (including to main) do NOT re-run the
+      # build. Rationale: main-push builds were duplicating the tag-
+      # push build on the same commit (see the release cadence: cut
+      # release PR → merge to main → tag → push tag; the same SHA got
+      # built by both the main push and the tag push). PRs still run
+      # the build as a regression-check on incoming changes.
       - 'v*.*.*'
   pull_request:
   workflow_dispatch:

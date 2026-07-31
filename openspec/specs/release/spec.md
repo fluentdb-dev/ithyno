@@ -140,7 +140,7 @@ The repository SHALL maintain a `CHANGELOG.md` at its root and a `docs/release.m
 
 ### Requirement: Reproducibility CI workflow
 
-The repository SHALL provide a `.github/workflows/release.yml` GitHub Actions workflow that runs `release:build` on macOS, Windows, and Linux hosts and uploads the resulting artifacts. Non-tag runs (`push` to `main`, `pull_request`, `workflow_dispatch`) SHALL produce ephemeral CI artifacts only. Tag pushes matching `v*.*.*` SHALL additionally trigger a `publish` job that creates a GitHub Release for the tag and attaches every produced asset.
+The repository SHALL provide a `.github/workflows/release.yml` GitHub Actions workflow that runs `release:build` on macOS, Windows, and Linux hosts. The workflow's build SHALL fire on exactly three trigger classes: tag pushes matching `v*.*.*`, `pull_request` events, and manual `workflow_dispatch`. Branch pushes (including to `main`) SHALL NOT trigger the build — the tag push that follows a release-branch merge is the single authoritative build for a given release commit. Tag pushes SHALL additionally trigger a `publish` job that creates a GitHub Release for the tag and attaches every produced asset. PR builds SHALL skip artifact upload (regression check only). Dispatch runs SHALL upload artifacts to the workflow run.
 
 The workflow SHALL use the default `GITHUB_TOKEN` (scoped narrowly per job) for artifact upload and — on tag runs — for creating the Release. It SHALL NOT reference any personal / signing / notarization secrets (no `VSCE_PAT`, no `APPLE_ID_PASSWORD`, no signing certs).
 
@@ -148,11 +148,12 @@ Before any tag-triggered build step, the workflow SHALL fail loudly if the pushe
 
 #### Scenario: Matrix build on push and manual dispatch
 
-- **GIVEN** a push to `main` or a manual `workflow_dispatch` trigger
+- **GIVEN** a tag push matching `v*.*.*` OR a manual `workflow_dispatch` trigger
 - **WHEN** the workflow runs
 - **THEN** three jobs execute in parallel on `macos-latest`, `windows-latest`, `ubuntu-latest`
 - **AND** each job runs `npm ci` followed by `npm run release:build`
 - **AND** each job uploads its produced artifacts via `actions/upload-artifact@v4` under a name that includes the runner OS and the commit SHA
+- **AND** a plain push to `main` (or any other branch) does NOT trigger the workflow — the workflow's `on.push` block declares only `tags:`, not `branches:`
 
 #### Scenario: No secrets referenced
 
@@ -190,9 +191,9 @@ Before any tag-triggered build step, the workflow SHALL fail loudly if the pushe
 
 #### Scenario: Non-tag pushes do NOT create a Release
 
-- **GIVEN** any push to `main` (not a tag) or a manual `workflow_dispatch` trigger
+- **GIVEN** a `workflow_dispatch` trigger OR a `pull_request` event (branch pushes to `main` do not trigger the workflow at all)
 - **WHEN** the workflow runs to completion
 - **THEN** the `publish` job is skipped (its `if: startsWith(github.ref, 'refs/tags/')` guard evaluates false)
 - **AND** no GitHub Release is created
-- **AND** ephemeral CI artifacts remain the only distribution surface for non-tag runs
+- **AND** ephemeral CI artifacts (for dispatch runs) or a build-only regression check (for PR events) remain the only workflow outputs for non-tag runs
 
