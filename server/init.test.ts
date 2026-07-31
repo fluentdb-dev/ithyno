@@ -205,6 +205,51 @@ describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () 
     expect(res.ok).toBe(true);
     expect(res.gitInitPerformed).toBe(false);
   });
+
+  // scaffold-ithy-opsx-skills-per-cli task 1 — `managerCli` option is
+  // accepted at the signature level so callers (server /api/init,
+  // /api/init/stream, runNewProjectChain) can pass the picker's
+  // chosen CLI through without further plumbing when the renderer
+  // step (task 3) lands. Nothing observable changes at task 1 —
+  // this test's job is only to catch a future regression where the
+  // option gets accidentally dropped from the destructuring in
+  // runInit.
+  it("accepts managerCli option and still succeeds (task 1 plumbing)", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({
+      targetDir: dir,
+      autoGitInit: false,
+      quiet: true,
+      managerCli: "claude",
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts managerCli: undefined without error", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({
+      targetDir: dir,
+      autoGitInit: false,
+      quiet: true,
+      managerCli: undefined,
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts managerCli for a non-claude CLI (renderer wiring reserved for task 3)", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({
+      targetDir: dir,
+      autoGitInit: false,
+      quiet: true,
+      managerCli: "agy",
+    });
+    // Task 1 accepts the option; task 3 will add the renderer
+    // dispatch that could conceivably return `ok: false` for
+    // unknown CLIs. Until then, non-claude values are simply
+    // stored / passed through.
+    expect(res.ok).toBe(true);
+  });
 });
 
 describe("template drift guard", () => {
