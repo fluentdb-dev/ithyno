@@ -13,7 +13,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
-import { migrateLegacyAntigravityDir } from "./migrate-agy.js";
+import { copyClaudeIthyOpsxCommandsToAgents, migrateLegacyAntigravityDir } from "./migrate-agy.js";
 import { getRenderer, knownRendererClis } from "./renderers/index.js";
 import type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
@@ -46,15 +46,32 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
   // migration then correctly sees "target absent" vs "target present."
   // Currently only antigravity has a migration.
   if (opts.selectedClis.includes("antigravity")) {
+    // MOVE: legacy `.agent/workflows/*.md` → `.agents/workflows/`
     try {
       const migration = await migrateLegacyAntigravityDir(opts.projectRoot, {
         dryRun: opts.dryRun,
       });
-      result.migrations.push({ cli: "antigravity", ...migration });
+      result.migrations.push({ cli: "antigravity", kind: "move", ...migration });
     } catch (err) {
       result.errors.push({
         cli: "antigravity",
         message: `migration failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+
+    // COPY: `.claude/commands/ithy-opsx/*.md` → `.agents/workflows/ithy-opsx/`
+    // Non-destructive — source .claude/ preserved for Claude users.
+    // Runs BEFORE the render loop so a same-run renderer write at the
+    // target correctly takes precedence via target-exists skip.
+    try {
+      const copy = await copyClaudeIthyOpsxCommandsToAgents(opts.projectRoot, {
+        dryRun: opts.dryRun,
+      });
+      result.migrations.push({ cli: "antigravity", kind: "copy", ...copy });
+    } catch (err) {
+      result.errors.push({
+        cli: "antigravity",
+        message: `claude-commands copy failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   }

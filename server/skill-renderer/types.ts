@@ -115,17 +115,27 @@ export interface InstallResult {
   skipped: Array<{ cli: CliId; skill: string; reason: string }>;
   errors: Array<{ cli: CliId; skill?: string; message: string }>;
   /**
-   * One entry per CLI whose install triggered a legacy-directory
-   * migration. Emitted regardless of whether files actually moved —
-   * an empty `moved`/`skipped` pair distinguishes "ran and found
-   * nothing" from "did not run for this CLI." Currently only the
-   * antigravity CLI has a migration (legacy `.agent/workflows/` →
-   * `.agents/workflows/` — openspec's own antigravity adapter still
-   * writes to the stale `.agent/`).
+   * One entry per legacy-directory operation an install triggered.
+   * Emitted regardless of whether files actually moved / copied —
+   * an empty `moved`/`copied`/`skipped` triple distinguishes "ran
+   * and found nothing" from "did not run for this CLI."
+   *
+   * As of `copy-claude-ithy-opsx-into-agents-workflows-for-agy`,
+   * antigravity installs generate TWO entries per run:
+   *   1. MOVE  legacy `.agent/workflows/*.md` → `.agents/workflows/`
+   *   2. COPY  `.claude/commands/ithy-opsx/*.md` → `.agents/workflows/ithy-opsx/`
+   *
+   * `kind` is optional to keep the shape back-compatible with pre-
+   * copy consumers; entries without a `kind` field are implicit-MOVE.
+   * `moved` is populated only for `kind: "move"` entries; `copied`
+   * only for `kind: "copy"`. Consumers ignoring the discriminant
+   * SHOULD union both arrays for a "changed-paths" view.
    */
   migrations: Array<{
     cli: CliId;
-    moved: string[];
+    kind?: "move" | "copy";
+    moved?: string[];
+    copied?: string[];
     skipped: Array<{ path: string; reason: string }>;
   }>;
 }

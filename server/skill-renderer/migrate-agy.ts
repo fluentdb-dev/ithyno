@@ -20,12 +20,17 @@
  * `moved` and `skipped` arrays. Non-`.md` files under `.agent/` are
  * left untouched (defensive — respect user files).
  */
-import { access, mkdir, readdir, rename, rmdir } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, rename, rmdir } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { join } from "node:path";
 
 export interface MigrationResult {
   moved: string[];
+  skipped: Array<{ path: string; reason: string }>;
+}
+
+export interface CopyResult {
+  copied: string[];
   skipped: Array<{ path: string; reason: string }>;
 }
 
@@ -129,5 +134,77 @@ export async function migrateLegacyAntigravityDir(
     }
   }
 
+  return result;
+}
+
+/**
+ * COPY `.claude/commands/ithy-opsx/*.md` into `.agents/workflows/ithy-opsx/`.
+ *
+ * Complements `migrateLegacyAntigravityDir` for a different legacy shape:
+ * pre-per-CLI-renderer scaffolds hand-authored (or blind-copied) their
+ * ithy-opsx commands under `.claude/commands/ithy-opsx/`. agy doesn't
+ * read `.claude/`, so those `/ithy-opsx:*` slash-commands are invisible
+ * until they're mirrored into the `.agents/workflows/ithy-opsx/`
+ * subdirectory (nested colon-form path that agy exposes as
+ * `/ithy-opsx:<cmd>`).
+ *
+ * COPY (not MOVE) semantics — the source `.claude/commands/ithy-opsx/`
+ * files are preserved unmodified so Claude users of the same project
+ * remain unaffected. Skip-on-conflict guards the target: never
+ * overwrite an existing `.agents/workflows/ithy-opsx/<basename>`
+ * (which may be renderer output from the same install run).
+ * Idempotent, dryRun-aware.
+ */
+export async function copyClaudeIthyOpsxCommandsToAgents(
+  projectRoot: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<CopyResult> {
+  const sourceDir = join(projectRoot, ".claude", "commands", "ithy-opsx");
+  const targetDir = join(projectRoot, ".agents", "workflows", "ithy-opsx");
+  const result: CopyResult = { copied: [], skipped: [] };
+
+  if (!(await pathExists(sourceDir))) return result;
+
+  let entries: string[];
+  try {
+    entries = await readdir(sourceDir);
+  } catch {
+    return result;
+  }
+
+  const mdFiles = entries.filter((e) => e.endsWith(".md"));
+
+  if (mdFiles.length > 0 && !opts.dryRun) {
+    await mkdir(targetDir, { recursive: true });
+  }
+
+  for (const basename of mdFiles) {
+    const from = join(sourceDir, basename);
+    const to = join(targetDir, basename);
+    const relFrom = join(".claude", "commands", "ithy-opsx", basename);
+
+    if (await pathExists(to)) {
+      result.skipped.push({ path: relFrom, reason: "target exists" });
+      continue;
+    }
+
+    if (opts.dryRun) {
+      result.copied.push(relFrom);
+      continue;
+    }
+
+    try {
+      await copyFile(from, to);
+      result.copied.push(relFrom);
+    } catch (err) {
+      result.skipped.push({
+        path: relFrom,
+        reason: `copy failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // COPY does NOT touch the source dir — .claude/ stays intact for
+  // Claude users. Do not rmdir source parents.
   return result;
 }
