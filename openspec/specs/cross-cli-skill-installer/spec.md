@@ -139,6 +139,8 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the currently-ported ithy-opsx skills (baseline: `ithy-opsx-apply` and `ithy-opsx-dispatch` as of `port-ithy-opsx-dispatch-to-universal-source`) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
+> ⚠️ **PENDING MODIFIED** by [migrate-legacy-agent-workflows-to-agents-on-init](../../changes/migrate-legacy-agent-workflows-to-agents-on-init/): antigravity renderer gains a legacy `.agent/workflows/` → `.agents/workflows/` migration step invoked once per install; three new scenarios (migrate, skip-on-conflict, idempotent, dry-run).
+
 Migration for projects scaffolded before this change: those projects already have `.claude/commands/ithy-opsx/*` on disk even if their Manager isn't Claude. This change does NOT auto-migrate them. Recovery is to re-run `openspec init` on the same project directory (idempotent by design) OR manually remove stale `.claude/` entries and re-run.
 
 The set of ported universal skills under `ithyno/skills/` grows over time as ithy-opsx surface is migrated from `.claude/commands/*.md` (hand-authored, Claude-only) to `ithyno/skills/*/SKILL.md + manifest.yaml` (universal + rendered). Renderers pick up new sources automatically — no renderer-side code change is required when a new skill is ported.
