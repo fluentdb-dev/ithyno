@@ -142,6 +142,8 @@ The repository SHALL maintain a `CHANGELOG.md` at its root and a `docs/release.m
 
 The repository SHALL provide a `.github/workflows/release.yml` GitHub Actions workflow that runs `release:build` on macOS, Windows, and Linux hosts and uploads the resulting artifacts, without referencing any repository secrets.
 
+> ⚠️ **PENDING MODIFIED** by [publish-tagged-release-to-github-releases](../../changes/publish-tagged-release-to-github-releases/): adds `v*.*.*` tag trigger that publishes assets to GitHub Releases (via `softprops/action-gh-release@v2` and default `GITHUB_TOKEN`), plus a version-tag consistency guard; the "no secrets" scenario is relaxed to permit narrow-scope `GITHUB_TOKEN` while still forbidding signing / notarization / personal creds.
+
 #### Scenario: Matrix build on push and manual dispatch
 
 - **GIVEN** a push to `main` or a manual `workflow_dispatch` trigger
