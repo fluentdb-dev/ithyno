@@ -128,8 +128,8 @@ export function Overview() {
           <button
             role="tab"
             aria-selected={overviewLayout === "board"}
-            aria-label="Board layout"
-            title="Board"
+            aria-label="Phase — Kanban lanes by progress (todo / in-progress / done)"
+            title="Phase — lanes by progress (todo / in-progress / done)"
             className={overviewLayout === "board" ? "active" : ""}
             onClick={() => setOverviewLayout("board")}
           >
@@ -142,8 +142,8 @@ export function Overview() {
           <button
             role="tab"
             aria-selected={overviewLayout === "phase"}
-            aria-label="Phase lanes layout"
-            title="Phase lanes"
+            aria-label="Agent — active workers grouped by role"
+            title="Agent — active workers grouped by role"
             className={overviewLayout === "phase" ? "active" : ""}
             onClick={() => setOverviewLayout("phase")}
           >
@@ -159,8 +159,8 @@ export function Overview() {
           <button
             role="tab"
             aria-selected={overviewLayout === "cards"}
-            aria-label="Cards layout"
-            title="Cards"
+            aria-label="All — every change as a card"
+            title="All — every change as a card"
             className={overviewLayout === "cards" ? "active" : ""}
             onClick={() => setOverviewLayout("cards")}
           >

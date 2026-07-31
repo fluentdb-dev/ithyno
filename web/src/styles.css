@@ -216,12 +216,21 @@ a:hover {
 }
 
 /* Topbar */
+/* --topbar-height: single source of truth for the app's top bar.
+ * Overridden by .is-electron-mac below to account for the 28px
+ * traffic-light region. Everything docked "just below the topbar"
+ * (global terminal, terminal-hidden anchor, sticky column headers)
+ * uses this var so a topbar-height change ripples correctly.
+ */
+:root {
+  --topbar-height: 56px;
+}
 .topbar {
   display: flex;
   align-items: center;
   gap: 24px;
   padding: 0 20px;
-  height: 56px;
+  height: var(--topbar-height);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -241,9 +250,14 @@ a:hover {
 .is-electron .topbar .topbar-right > * {
   -webkit-app-region: no-drag;
 }
+.is-electron-mac {
+  /* Traffic-light region (28px) sits INSIDE the topbar, so the topbar
+     grows by 28px. Update the var so global-terminal / anchors dock
+     below the enlarged bar instead of overlapping it. */
+  --topbar-height: 84px;
+}
 .is-electron-mac .topbar {
   padding-top: 28px;
-  height: 84px;
 }
 .brand {
   font-weight: 700;
@@ -2114,10 +2128,10 @@ a.modal-btn:hover {
 }
 .global-terminal {
   position: fixed;
-  top: 56px;
+  top: var(--topbar-height);
   right: 0;
   width: var(--terminal-width);
-  height: calc(100vh - 56px);
+  height: calc(100vh - var(--topbar-height));
   display: flex;
   flex-direction: column;
   background: var(--terminal-bg);
@@ -2247,12 +2261,14 @@ a.modal-btn:hover {
 }
 
 /* Standalone terminal-restore button when terminalSize === "hidden".
- * Docked just below the topbar (56px + margin) so the entry point is
- * immediately visible after hiding; the terminal-chevron glyph identifies
- * which pane will restore. */
+ * Docked just below the topbar so the entry point is immediately visible
+ * after hiding; the terminal-chevron glyph identifies which pane will
+ * restore. Uses --topbar-height so the anchor tracks the topbar size on
+ * platforms where it differs (e.g. Electron mac +28px traffic-light row).
+ */
 .terminal-hidden-anchor {
   position: fixed;
-  top: 56px;
+  top: var(--topbar-height);
   right: 0;
   z-index: 6;
 }
