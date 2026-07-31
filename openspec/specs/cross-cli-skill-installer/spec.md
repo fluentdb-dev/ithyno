@@ -137,11 +137,11 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 `bin/init.js`'s `runInit` SHALL accept the chosen Manager CLI (`managerCli` option or equivalent) and pass it to renderer invocation. The `resolveManagerFromDoctor` result (already computed in the HTTP init flow) is the source of truth for which CLI to render. If no CLI is passed (e.g. a bare `bin/ithyno init` CLI invocation), the flow SHALL fall back to `"claude"` to keep single-user CLI workflows working without a picker.
 
-For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the two dispatch entry points (`opsx:propose` / `opsx:apply` at minimum) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
-
-> ⚠️ **PENDING MODIFIED** by [port-ithy-opsx-dispatch-to-universal-source](../../changes/port-ithy-opsx-dispatch-to-universal-source/): baseline coverage minimum bumps from just `ithy-opsx-apply` to also include `ithy-opsx-dispatch`, plus a new scenario asserting every ported ithy-opsx skill lands per selected CLI.
+For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the currently-ported ithy-opsx skills (baseline: `ithy-opsx-apply` and `ithy-opsx-dispatch` as of `port-ithy-opsx-dispatch-to-universal-source`) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
 Migration for projects scaffolded before this change: those projects already have `.claude/commands/ithy-opsx/*` on disk even if their Manager isn't Claude. This change does NOT auto-migrate them. Recovery is to re-run `openspec init` on the same project directory (idempotent by design) OR manually remove stale `.claude/` entries and re-run.
+
+The set of ported universal skills under `ithyno/skills/` grows over time as ithy-opsx surface is migrated from `.claude/commands/*.md` (hand-authored, Claude-only) to `ithyno/skills/*/SKILL.md + manifest.yaml` (universal + rendered). Renderers pick up new sources automatically — no renderer-side code change is required when a new skill is ported.
 
 #### Scenario: init emits per-CLI files based on selection
 - **GIVEN** `openspec init` is invoked in a fresh directory
@@ -170,4 +170,10 @@ Migration for projects scaffolded before this change: those projects already hav
 - **GIVEN** a bare `bin/ithyno init <target>` invocation with no `managerCli` argument
 - **WHEN** `runInit` is called
 - **THEN** the claude renderer is invoked as the default (preserves single-user CLI workflow that predates the picker)
+
+#### Scenario: init emits every ported ithy-opsx skill per selected CLI
+- **GIVEN** `ithyno/skills/` contains `ithy-opsx-apply` and `ithy-opsx-dispatch` (baseline coverage as of this change)
+- **WHEN** `openspec init` is invoked and the user selects any CLI (e.g. `agy`)
+- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.antigravity/skills/ithy-opsx-apply/SKILL.md` AND `.antigravity/skills/ithy-opsx-dispatch/SKILL.md`)
+- **AND** the emitted files each carry the `GENERATED FILE — do not hand-edit` banner sourcing back to `ithyno/skills/<id>/`
 
