@@ -630,3 +630,222 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-dispatch.md"))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// migrate-legacy-agent-workflows-to-agents-on-init
+// Legacy .agent/workflows/ → .agents/workflows/ migration for the antigravity
+// (agy) CLI. openspec's own adapter is out of date and still writes to
+// .agent/; the migration rescues those files at install time.
+// ---------------------------------------------------------------------------
+
+describe("migrateLegacyAntigravityDir — unit", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(join(tmpdir(), "ithyno-agy-migrate-"));
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  async function migrate(opts?: { dryRun?: boolean }) {
+    const mod = await import("./skill-renderer/migrate-agy.js");
+    return mod.migrateLegacyAntigravityDir(projectRoot, opts ?? {});
+  }
+
+  function seedLegacy(basename: string, body = "legacy body\n") {
+    const dir = join(projectRoot, ".agent", "workflows");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, basename), body, "utf-8");
+  }
+
+  function seedTarget(basename: string, body = "target body\n") {
+    const dir = join(projectRoot, ".agents", "workflows");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, basename), body, "utf-8");
+  }
+
+  it("moves .agent/workflows/*.md → .agents/workflows/ and cleans empty parents", async () => {
+    seedLegacy("opsx-propose.md");
+    seedLegacy("opsx-apply.md");
+    const result = await migrate();
+    expect(result.moved.sort()).toEqual([
+      ".agent/workflows/opsx-apply.md",
+      ".agent/workflows/opsx-propose.md",
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-propose.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-apply.md"))).toBe(true);
+    // Legacy dir + parent cleaned.
+    expect(existsSync(join(projectRoot, ".agent/workflows"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".agent"))).toBe(false);
+  });
+
+  it("skips when target already exists (never clobbers renderer output)", async () => {
+    seedLegacy("opsx-apply.md", "STALE\n");
+    seedTarget("opsx-apply.md", "NEW\n");
+    const result = await migrate();
+    expect(result.moved).toEqual([]);
+    expect(result.skipped).toEqual([
+      { path: ".agent/workflows/opsx-apply.md", reason: "target exists" },
+    ]);
+    // Both files unchanged.
+    expect(readFileSync(join(projectRoot, ".agent/workflows/opsx-apply.md"), "utf-8")).toBe(
+      "STALE\n",
+    );
+    expect(readFileSync(join(projectRoot, ".agents/workflows/opsx-apply.md"), "utf-8")).toBe(
+      "NEW\n",
+    );
+    // .agent/ remains because it's non-empty (the skipped file is still there).
+    expect(existsSync(join(projectRoot, ".agent/workflows/opsx-apply.md"))).toBe(true);
+  });
+
+  it("is idempotent — second call finds nothing and returns empty", async () => {
+    seedLegacy("opsx-propose.md");
+    const first = await migrate();
+    expect(first.moved).toEqual([".agent/workflows/opsx-propose.md"]);
+    const second = await migrate();
+    expect(second.moved).toEqual([]);
+    expect(second.skipped).toEqual([]);
+  });
+
+  it("is a clean no-op when .agent/ does not exist", async () => {
+    const result = await migrate();
+    expect(result.moved).toEqual([]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("dry-run reports the plan without touching disk", async () => {
+    seedLegacy("opsx-propose.md");
+    const result = await migrate({ dryRun: true });
+    expect(result.moved).toEqual([".agent/workflows/opsx-propose.md"]);
+    expect(result.skipped).toEqual([]);
+    // Source untouched, target absent.
+    expect(existsSync(join(projectRoot, ".agent/workflows/opsx-propose.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-propose.md"))).toBe(false);
+  });
+
+  it("leaves non-.md files in .agent/ untouched (respects user files)", async () => {
+    // The migration cares about workflow .md files, not user artifacts
+    // that might live alongside them.
+    seedLegacy("opsx-apply.md");
+    const strayDir = join(projectRoot, ".agent");
+    writeFileSync(join(strayDir, "user-note.txt"), "keep me\n", "utf-8");
+    const result = await migrate();
+    expect(result.moved).toEqual([".agent/workflows/opsx-apply.md"]);
+    // .agent/ NOT rmdir'd because user-note.txt keeps it non-empty.
+    expect(existsSync(join(projectRoot, ".agent/user-note.txt"))).toBe(true);
+    // But the empty workflows/ subdir IS gone.
+    expect(existsSync(join(projectRoot, ".agent/workflows"))).toBe(false);
+  });
+});
+
+describe("installSkills — antigravity migration wire-up", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(join(tmpdir(), "ithyno-agy-install-"));
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  function seedLegacy(basename: string, body = "legacy body\n") {
+    const dir = join(projectRoot, ".agent", "workflows");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, basename), body, "utf-8");
+  }
+
+  it("installSkills invokes the migration when antigravity is selected", async () => {
+    seedLegacy("opsx-propose.md");
+    seedLegacy("opsx-apply.md");
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["antigravity"],
+      sourcesDir: SKILLS_DIR,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.migrations).toHaveLength(1);
+    expect(result.migrations[0].cli).toBe("antigravity");
+    expect(result.migrations[0].moved.sort()).toEqual([
+      ".agent/workflows/opsx-apply.md",
+      ".agent/workflows/opsx-propose.md",
+    ]);
+    // Files landed at .agents/workflows/.
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-propose.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-apply.md"))).toBe(true);
+    // Renderer's own ithy-opsx-* output landed alongside.
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+  });
+
+  it("emits an empty migration entry when antigravity is selected with nothing to migrate", async () => {
+    // No .agent/ seeded — helper finds nothing, but the entry is still
+    // present so callers can distinguish "ran, found nothing" from
+    // "not run for this CLI" (the latter has no entry at all).
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["antigravity"],
+      sourcesDir: SKILLS_DIR,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.migrations).toEqual([{ cli: "antigravity", moved: [], skipped: [] }]);
+  });
+
+  it("does NOT invoke the migration when antigravity is not selected", async () => {
+    seedLegacy("opsx-propose.md");
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["claude"],
+      sourcesDir: SKILLS_DIR,
+    });
+    expect(result.migrations).toEqual([]);
+    // Legacy .agent/ file untouched.
+    expect(existsSync(join(projectRoot, ".agent/workflows/opsx-propose.md"))).toBe(true);
+  });
+
+  it("migration + install respect target-conflict skip semantics", async () => {
+    // Seed .agent/workflows/ithy-opsx-apply.md — a stale name that
+    // COLLIDES with what the renderer will write itself. Migration
+    // must skip it so the renderer's own write is authoritative.
+    const dir = join(projectRoot, ".agent", "workflows");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "ithy-opsx-apply.md"), "STALE\n", "utf-8");
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["antigravity"],
+      sourcesDir: SKILLS_DIR,
+    });
+    // Renderer wrote ithy-opsx-apply.md to the target BEFORE we noticed —
+    // actually the renderer runs AFTER the migration. So at migration
+    // time, the target is absent, and the file IS moved. Then the
+    // renderer overwrites it with the correct content. Verify: file at
+    // target is the renderer's output (contains GENERATED banner),
+    // NOT the STALE body.
+    expect(result.errors).toEqual([]);
+    expect(result.migrations[0].moved).toContain(".agent/workflows/ithy-opsx-apply.md");
+    const finalContent = readFileSync(
+      join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"),
+      "utf-8",
+    );
+    expect(finalContent).toContain("GENERATED FILE");
+    expect(finalContent).not.toBe("STALE\n");
+  });
+
+  it("dry-run migration reports plan without touching disk", async () => {
+    seedLegacy("opsx-propose.md");
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["antigravity"],
+      sourcesDir: SKILLS_DIR,
+      dryRun: true,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.migrations[0].moved).toEqual([".agent/workflows/opsx-propose.md"]);
+    // Source untouched, target absent.
+    expect(existsSync(join(projectRoot, ".agent/workflows/opsx-propose.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/opsx-propose.md"))).toBe(false);
+  });
+});
