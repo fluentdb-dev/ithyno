@@ -139,7 +139,14 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the currently-ported ithy-opsx skills (baseline: `ithy-opsx-apply` and `ithy-opsx-dispatch` as of `port-ithy-opsx-dispatch-to-universal-source`) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
-> ⚠️ **PENDING MODIFIED** by [migrate-legacy-agent-workflows-to-agents-on-init](../../changes/migrate-legacy-agent-workflows-to-agents-on-init/): antigravity renderer gains a legacy `.agent/workflows/` → `.agents/workflows/` migration step invoked once per install; three new scenarios (migrate, skip-on-conflict, idempotent, dry-run).
+When the antigravity renderer is invoked (either directly with `cli: "antigravity"` or via the `agy → antigravity` alias resolved by `mapDoctorCliToRendererCli`), `installSkills` SHALL first invoke a one-shot legacy-directory migration that moves any `.agent/workflows/*.md` files (typically written by openspec's own antigravity adapter, which is on the outdated `.agent/` convention) into `.agents/workflows/`. The migration SHALL:
+- Skip any file whose target `.agents/workflows/<same-basename>` already exists, leaving the legacy file in place and reporting it in `InstallResult.migrations[].skipped[]` with reason `"target exists"` — the renderer's own subsequent write remains authoritative.
+- Move every non-conflicting file with `fs.rename` semantics (single atomic step where the platform supports it; fall back to copy+unlink otherwise).
+- After moving, `rmdir` the empty `.agent/workflows/` directory and its parent `.agent/` directory if either is empty (do NOT rmdir if non-empty — respect user files).
+- Be idempotent: a second invocation finds nothing and returns an empty `moved[]` and `skipped[]`.
+- Honor `opts.dryRun`: report the planned moves in `moved[]` without touching disk.
+
+The migration result SHALL be surfaced in `InstallResult.migrations` as a new top-level array so callers (init HTTP endpoint, CLI, tests) can log or display it. Migration failures (permission errors, EBUSY on rename) SHALL be routed to `InstallResult.errors` per file, NOT thrown — a partial migration must not block installing healthy skills.
 
 Migration for projects scaffolded before this change: those projects already have `.claude/commands/ithy-opsx/*` on disk even if their Manager isn't Claude. This change does NOT auto-migrate them. Recovery is to re-run `openspec init` on the same project directory (idempotent by design) OR manually remove stale `.claude/` entries and re-run.
 
@@ -152,7 +159,7 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **AND** `CLAUDE.md` is copied from `templates/CLAUDE.md` (CLI-neutral fixture)
 - **AND** no `templates/.claude/…` blind-copy occurs for CLI-specific skill files
 - **WHEN** the user instead selects `agy`
-- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.antigravity/…` per the renderer's declared output)
+- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.agents/…` per the renderer's declared output)
 - **AND** `.claude/commands/` is NOT populated by the renderer (Claude was not selected)
 - **AND** `agents.yaml` writes `manager.command: agy` (unchanged from existing behavior)
 
@@ -176,6 +183,37 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 #### Scenario: init emits every ported ithy-opsx skill per selected CLI
 - **GIVEN** `ithyno/skills/` contains `ithy-opsx-apply` and `ithy-opsx-dispatch` (baseline coverage as of this change)
 - **WHEN** `openspec init` is invoked and the user selects any CLI (e.g. `agy`)
-- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.antigravity/skills/ithy-opsx-apply/SKILL.md` AND `.antigravity/skills/ithy-opsx-dispatch/SKILL.md`)
+- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.agents/workflows/ithy-opsx-apply.md` AND `.agents/workflows/ithy-opsx-dispatch.md`)
 - **AND** the emitted files each carry the `GENERATED FILE — do not hand-edit` banner sourcing back to `ithyno/skills/<id>/`
+
+#### Scenario: agy init migrates legacy .agent/workflows/ output into .agents/workflows/
+- **GIVEN** a project that was previously scaffolded by `openspec init --tools antigravity` and has `.agent/workflows/opsx-propose.md`, `.agent/workflows/opsx-apply.md` on disk (openspec's own outdated-adapter output)
+- **AND** `.agents/workflows/` does not yet exist
+- **WHEN** the user re-runs init through openspec-ui with the antigravity renderer selected
+- **THEN** `installSkills` invokes the migration BEFORE the render loop
+- **AND** every `.agent/workflows/*.md` file is moved to `.agents/workflows/<same-name>` (renderer's own output at `.agents/workflows/ithy-opsx-*.md` then lands alongside them)
+- **AND** the empty `.agent/workflows/` directory is removed
+- **AND** the empty `.agent/` directory is removed (only if truly empty — user files under `.agent/` outside `workflows/` are respected)
+- **AND** `InstallResult.migrations` contains `{ cli: "antigravity", moved: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md"], skipped: [] }`
+
+#### Scenario: migration skips on target-file conflict rather than clobbering
+- **GIVEN** a project has BOTH `.agent/workflows/opsx-apply.md` (stale, from a prior openspec init) AND `.agents/workflows/opsx-apply.md` (newer, from a subsequent scaffold that already handled the migration once)
+- **WHEN** the antigravity migration runs
+- **THEN** the file at `.agent/workflows/opsx-apply.md` is NOT moved (it would overwrite the newer target)
+- **AND** the migration reports it in `InstallResult.migrations[].skipped[]` with reason `"target exists"`
+- **AND** the newer `.agents/workflows/opsx-apply.md` is untouched (byte-identical to before the migration ran)
+
+#### Scenario: migration is idempotent — second run is a clean no-op
+- **GIVEN** the migration has already run once against a project (all `.agent/workflows/*.md` have moved and `.agent/` was removed)
+- **WHEN** `installSkills` is re-invoked (e.g., the user re-runs init)
+- **THEN** the migration helper finds no `.agent/workflows/` directory
+- **AND** returns `{ moved: [], skipped: [] }` without error
+- **AND** `InstallResult.migrations[0]` still carries the antigravity entry (with the empty arrays), so callers can distinguish "ran and found nothing" from "was not invoked at all"
+
+#### Scenario: migration honors dry-run
+- **GIVEN** a project with `.agent/workflows/opsx-propose.md` present
+- **WHEN** `installSkills` is invoked with `dryRun: true` and antigravity selected
+- **THEN** the migration reports the planned move in `moved[]` (as if it had happened)
+- **AND** `.agent/workflows/opsx-propose.md` remains on disk unmodified
+- **AND** `.agents/workflows/opsx-propose.md` is NOT created
 
