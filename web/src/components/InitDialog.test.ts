@@ -109,15 +109,15 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
 // ---- Manager-candidate filter (this-merge Manager fix) ----
 describe("Manager picker candidate filter", () => {
   // Mirror of MANAGER_VERIFIED / MANAGER_UNVERIFIED in InitDialog.tsx.
-  const MANAGER_VERIFIED: readonly Cli[] = ["claude"];
-  const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode", "agy"];
+  const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy"];
+  const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode"];
   const MANAGER_CANDIDATES: readonly Cli[] = [
     ...MANAGER_VERIFIED,
     ...MANAGER_UNVERIFIED,
   ];
 
-  it("candidate list is exactly claude + opencode + agy", () => {
-    expect(MANAGER_CANDIDATES).toEqual(["claude", "opencode", "agy"]);
+  it("candidate list is exactly claude + agy + opencode", () => {
+    expect(MANAGER_CANDIDATES).toEqual(["claude", "agy", "opencode"]);
   });
 
   it("codex/copilot/gemini/cursor/antigravity are NOT Manager candidates", () => {
@@ -126,16 +126,12 @@ describe("Manager picker candidate filter", () => {
     }
   });
 
-  it("opencode and agy are marked unverified", () => {
-    for (const cli of MANAGER_UNVERIFIED) {
-      expect(MANAGER_UNVERIFIED.includes(cli)).toBe(true);
-      expect(MANAGER_VERIFIED.includes(cli)).toBe(false);
-    }
-  });
-
-  it("claude is verified (no unverified label)", () => {
+  it("opencode is unverified; claude and agy are verified", () => {
+    expect(MANAGER_UNVERIFIED).toEqual(["opencode"]);
     expect(MANAGER_VERIFIED).toContain("claude" as Cli);
+    expect(MANAGER_VERIFIED).toContain("agy" as Cli);
     expect(MANAGER_UNVERIFIED).not.toContain("claude" as Cli);
+    expect(MANAGER_UNVERIFIED).not.toContain("agy" as Cli);
   });
 
   it("picker filter: installed ∩ candidates — claude+copilot+gemini installed → picker shows only claude", () => {

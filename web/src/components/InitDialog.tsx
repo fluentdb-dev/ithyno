@@ -55,8 +55,8 @@ const CLI_LABELS: Record<Cli, string> = {
  *  See `server/sync/pty.ts` MANAGER_STARTUP_STRATEGIES: each CLI here
  *  needs a startup strategy AND its own dispatch skill surface to run
  *  the workflow. */
-const MANAGER_VERIFIED: readonly Cli[] = ["claude"];
-const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode", "agy"];
+const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy"];
+const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode"];
 const MANAGER_CANDIDATES: readonly Cli[] = [
   ...MANAGER_VERIFIED,
   ...MANAGER_UNVERIFIED,
