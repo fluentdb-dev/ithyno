@@ -63,6 +63,16 @@ describe("checkCommand", () => {
 // runDoctor — shape assertions (does not require real CLIs)
 // ---------------------------------------------------------------------------
 
+// Per-test timeout bump: runDoctor() checks 8 CLIs, and checkCommand()
+// resolves each one's path (where/which) BEFORE spawning its version
+// check — sequential by design, not parallel, so that a nonexistent
+// command can never be misreported as installed (see checkCommand's own
+// doc comment). That's a few hundred ms slower per report than the old
+// fire-and-forget-both-in-parallel version, which is invisible in real
+// usage but occasionally exceeds Vitest's 5s default under full-suite
+// parallel load (many other tests spawning subprocesses at once).
+const RUN_DOCTOR_TIMEOUT = 15_000;
+
 describe("runDoctor", () => {
   it("returns a DoctorReport with the expected top-level keys", async () => {
     const report: DoctorReport = await runDoctor();
@@ -71,7 +81,7 @@ describe("runDoctor", () => {
     expect(report).toHaveProperty("agmsg");
     expect(report).toHaveProperty("readyForManager");
     expect(report).toHaveProperty("checkedAt");
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("agents map contains all expected CLI keys", async () => {
     const report = await runDoctor();
@@ -89,18 +99,18 @@ describe("runDoctor", () => {
       expect(report.agents).toHaveProperty(key);
       expect(typeof report.agents[key].installed).toBe("boolean");
     }
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("checkedAt is an ISO timestamp string", async () => {
     const report = await runDoctor();
     expect(typeof report.checkedAt).toBe("string");
     expect(new Date(report.checkedAt).getTime()).toBeGreaterThan(0);
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("readyForManager is boolean", async () => {
     const report = await runDoctor();
     expect(typeof report.readyForManager).toBe("boolean");
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("each CliStatus has installed boolean and optional string fields", async () => {
     const report = await runDoctor();
@@ -115,18 +125,18 @@ describe("runDoctor", () => {
       if (s.path !== undefined) expect(typeof s.path).toBe("string");
       if (s.error !== undefined) expect(typeof s.error).toBe("string");
     }
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("tmux status has the expected shape", async () => {
     const report = await runDoctor();
     expect(typeof report.tmux.installed).toBe("boolean");
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("agmsg status reflects file-system presence (not a CLI call)", async () => {
     const report = await runDoctor();
     // We only assert the shape; actual installed value depends on the environment.
     expect(typeof report.agmsg.installed).toBe("boolean");
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 
   it("readyForManager reflects primary agent CLI keys (not antigravity alias)", async () => {
     // readyForManager uses a fixed key list that excludes "antigravity" (the
@@ -136,7 +146,7 @@ describe("runDoctor", () => {
     const PRIMARY_KEYS = ["claude", "codex", "agy", "copilot", "gemini", "opencode", "cursor"] as const;
     const anyPrimaryInstalled = PRIMARY_KEYS.some((k) => report.agents[k]?.installed === true);
     expect(report.readyForManager).toBe(anyPrimaryInstalled);
-  });
+  }, RUN_DOCTOR_TIMEOUT);
 });
 
 // ---------------------------------------------------------------------------

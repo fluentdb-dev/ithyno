@@ -6,12 +6,42 @@
  * enable-import-both-patterns) import { runDoctor } from "./doctor.js".
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { commandExistsOnPath } from "./sync/pty.js";
+
+/**
+ * Kill `pid` and, on Windows, its whole descendant tree. Plain
+ * `child.kill()` only signals the immediate process — when that
+ * process was spawned with `shell: true` (as checkCommand's version
+ * check is, on win32), the immediate process IS cmd.exe, and killing
+ * cmd.exe does NOT kill whatever it exec'd (the actual CLI). Confirmed
+ * live: checkCommand's 2s-timeout kill only ever killed the cmd.exe
+ * wrapper, leaving the real `agy` process running in the background on
+ * every check that didn't exit in time — repeated doctor runs across a
+ * dev/test session leaked dozens of orphaned processes. `taskkill /t`
+ * kills the full process tree; POSIX doesn't have this gap (no shell
+ * wrapper involved there) so a plain signal is enough.
+ */
+function killTree(pid: number | undefined): void {
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", timeout: 3000 });
+    } catch {
+      /* ignore */
+    }
+  } else {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types (exported — used by server/index.ts and external callers)
@@ -95,52 +125,76 @@ const AGENT_CLIS: CliDef[] = [
  * Parses the first version-like token from stdout. Resolves the absolute
  * path via `which <cmd>`.
  */
+/**
+ * Resolve `cmd`'s absolute path via `which` (POSIX) / `where` (Windows).
+ * Returns undefined if not found or the probe itself isn't on PATH.
+ */
+function resolveCommandPath(cmd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const proc = spawn(whichCmd, [cmd], { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    proc.stdout?.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    proc.on("error", () => resolve(undefined));
+    proc.on("close", (code) => {
+      // `where` can print multiple matches (one per line, e.g. both a
+      // .cmd shim and a .exe) — the first is its own preferred match.
+      resolve(code === 0 && out.trim() ? out.trim().split(/\r?\n/)[0] : undefined);
+    });
+  });
+}
+
 export async function checkCommand(
   cmd: string,
   versionArg: string,
 ): Promise<CliStatus> {
-  return new Promise((resolve) => {
-    const timeout = 2000;
+  const timeout = 2000;
 
-    // Resolve the path first (via `which`), then run the version command.
-    // Both operations share the same 2 s budget.
+  // Resolve the path FIRST and only spawn the version command if the
+  // probe actually found something. This has to happen sequentially,
+  // not just for the `path` field: on Windows the version command runs
+  // with shell: true (see below), and cmd.exe does NOT surface a
+  // nonexistent command as a spawn-level ENOENT the way a direct spawn
+  // does — it starts fine and just prints "... is not recognized as an
+  // internal or external command" to stderr with a nonzero exit code.
+  // The exit-code handling below treats "nonzero exit + any stderr
+  // content" as installed (some real CLIs, e.g. cursor, exit nonzero
+  // for --version but still print a version to stderr) — so without
+  // this upfront existence check, that same leniency turns cmd.exe's
+  // own "not found" message into a false "installed: true" for
+  // anything that doesn't exist (caught by this file's own test suite).
+  const resolvedPath = await resolveCommandPath(cmd);
+  if (!resolvedPath) {
+    return { installed: false };
+  }
+
+  return new Promise((resolve) => {
     let settled = false;
-    // whichProc is assigned just below; settle() references it via closure.
-    // Calling kill() after the process has already exited is a safe no-op.
-    let whichProc: ReturnType<typeof spawn> | undefined;
     const settle = (result: CliStatus) => {
       if (settled) return;
       settled = true;
-      // Kill the still-running `which` subprocess so it does not write to
-      // resolvedPath after this Promise has resolved (F1 fix).
-      try { whichProc?.kill(); } catch { /* ignore */ }
       resolve(result);
     };
 
-    // Spawn `which <cmd>` to get the path
-    let resolvedPath: string | undefined;
-
-    // Note: `which` is not available on Windows (the equivalent is `where`).
-    // The error handler below silently ignores ENOENT, so resolvedPath remains
-    // undefined on Windows — only the path field in the report is affected (F4).
-    whichProc = spawn("which", [cmd], { stdio: ["ignore", "pipe", "ignore"] });
-    let whichOut = "";
-    whichProc.stdout?.on("data", (d: Buffer) => {
-      whichOut += d.toString();
-    });
-    whichProc.on("error", () => {
-      // `which` not available (e.g., Windows) — skip path resolution
-    });
-    whichProc.on("close", (code) => {
-      if (code === 0 && whichOut.trim()) {
-        resolvedPath = whichOut.trim();
-      }
-    });
-
-    // Spawn the actual version command
+    // Spawn the actual version command. shell: true on win32 — these
+    // CLIs (claude, agy, codex, etc.) are npm-installed and exposed as
+    // .cmd shims on Windows, not .exe; spawn() without a shell doesn't
+    // resolve .cmd files and fails with ENOENT, which the error handler
+    // below (correctly, in isolation) reports as "not installed" — so
+    // an actually-installed CLI silently never showed up in the doctor
+    // report on Windows, even though it ran fine from a real prompt.
+    //
+    // No `timeout` option here (deliberately) — spawn()'s own built-in
+    // timeout kills via a plain child.kill(), which has the exact same
+    // tree-kill gap as described on killTree() above, and racing it
+    // against our own timer below only risks the native one firing
+    // first and marking this settled before killTree() ever runs. One
+    // timeout mechanism, with the tree-aware kill, below.
     const child = spawn(cmd, [versionArg], {
       stdio: ["ignore", "pipe", "pipe"],
-      timeout,
+      shell: process.platform === "win32",
     });
 
     let stdout = "";
@@ -153,11 +207,7 @@ export async function checkCommand(
     });
 
     const timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
+      killTree(child.pid);
       settle({ installed: false, error: "timeout" });
     }, timeout);
 

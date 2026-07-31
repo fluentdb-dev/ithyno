@@ -19,7 +19,7 @@
  */
 
 import { readdir, lstat } from "node:fs/promises";
-import { join, resolve, extname } from "node:path";
+import { join, resolve, extname, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
 // ---- Config -----------------------------------------------------------------
@@ -156,7 +156,7 @@ export async function preflight(
       targetPath: absRoot,
       estimatedContextBytes: totalBytes,
       scanCounts: { code: codeFiles.length, docs: docFiles.length },
-      filesToScan: allFiles.slice(0, 50).map((f) => f.replace(absRoot + "/", "")),
+      filesToScan: allFiles.slice(0, 50).map((f) => relative(absRoot, f).split(sep).join("/")),
     },
   };
 }

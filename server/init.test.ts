@@ -40,7 +40,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 describe("copyFile — file-action policy", () => {
@@ -351,7 +351,7 @@ describe("ithy-opsx scaffold reachability smoke", () => {
   });
 
   afterEach(async () => {
-    await rm(scaffoldDir, { recursive: true, force: true });
+    await rm(scaffoldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   it("runInit() copies every .claude/commands/ithy-opsx/*.md into the target", async () => {
@@ -434,8 +434,10 @@ describe("ithy-opsx package shape smoke", () => {
   // re-adds either would silently double-ship the dev-copy to
   // consumers.
   it("npm pack --dry-run ships ithy-opsx only under templates/", async () => {
-    // ~2-3s on typical hardware; can spike on cold caches. Vitest's
-    // default per-test timeout (5s) is tight — bump for safety.
+    // ~2-3s in isolation, but a real `npm pack` subprocess competing
+    // with the rest of the suite's own spawn-heavy tests under full
+    // parallel `npm test` load has been observed spiking well past
+    // 30s — bumped to 60s for headroom.
     // shell: true on win32 — bare "npm" is actually npm.cmd there, and
     // execFile (like spawn) doesn't resolve .cmd files without a shell,
     // failing with ENOENT (same class of bug fixed in
@@ -484,7 +486,7 @@ describe("ithy-opsx package shape smoke", () => {
         );
       }
     }
-  }, 30_000);
+  }, 60_000);
 });
 
 // ---- expand-init-to-scaffold-agents: doctor gate + agents.yaml write -------
@@ -589,7 +591,7 @@ describe("writeAgentsYaml (expand-init-to-scaffold-agents)", () => {
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   it("writes agents.yaml with {{MANAGER_COMMAND}} substituted", async () => {
@@ -623,7 +625,7 @@ describe("runInit + writeAgentsYaml integration (expand-init-to-scaffold-agents)
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   it("agents.yaml is written at <projectRoot>/agents.yaml with the correct command", async () => {

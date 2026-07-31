@@ -22,7 +22,7 @@
  */
 import { access, copyFile, mkdir, readdir, rename, rmdir } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 export interface MigrationResult {
   moved: string[];
@@ -88,7 +88,11 @@ export async function migrateLegacyAntigravityDir(
   for (const basename of mdFiles) {
     const from = join(legacyDir, basename);
     const to = join(targetDir, basename);
-    const relFrom = join(".agent", "workflows", basename);
+    // posix.join, not join — this path is returned for logs/tests to
+    // compare (per the doc comment above), so it must be forward-slash
+    // regardless of host OS. The real filesystem calls above use `join`
+    // (OS-native separators), which is correct for them.
+    const relFrom = posix.join(".agent", "workflows", basename);
 
     // Skip on any pre-existing target — the renderer's later write is
     // the source of truth. Never overwrite.
@@ -181,7 +185,9 @@ export async function copyClaudeIthyOpsxCommandsToAgents(
   for (const basename of mdFiles) {
     const from = join(sourceDir, basename);
     const to = join(targetDir, basename);
-    const relFrom = join(".claude", "commands", "ithy-opsx", basename);
+    // posix.join — see the identical comment in
+    // migrateLegacyAntigravityDir above.
+    const relFrom = posix.join(".claude", "commands", "ithy-opsx", basename);
 
     if (await pathExists(to)) {
       result.skipped.push({ path: relFrom, reason: "target exists" });
