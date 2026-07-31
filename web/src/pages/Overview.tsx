@@ -129,7 +129,7 @@ export function Overview() {
             role="tab"
             aria-selected={overviewLayout === "board"}
             aria-label="Phase — Kanban lanes by progress (todo / in-progress / done)"
-            title="Phase — lanes by progress (todo / in-progress / done)"
+            data-tooltip="Phase — lanes by progress (todo / in-progress / done)"
             className={overviewLayout === "board" ? "active" : ""}
             onClick={() => setOverviewLayout("board")}
           >
@@ -143,7 +143,7 @@ export function Overview() {
             role="tab"
             aria-selected={overviewLayout === "phase"}
             aria-label="Agent — active workers grouped by role"
-            title="Agent — active workers grouped by role"
+            data-tooltip="Agent — active workers grouped by role"
             className={overviewLayout === "phase" ? "active" : ""}
             onClick={() => setOverviewLayout("phase")}
           >
@@ -160,7 +160,7 @@ export function Overview() {
             role="tab"
             aria-selected={overviewLayout === "cards"}
             aria-label="All — every change as a card"
-            title="All — every change as a card"
+            data-tooltip="All — every change as a card"
             className={overviewLayout === "cards" ? "active" : ""}
             onClick={() => setOverviewLayout("cards")}
           >

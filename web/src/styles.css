@@ -909,6 +909,39 @@ a.modal-btn:hover {
   display: block;
 }
 
+/* Consistent custom tooltip. Native `title` bubbles fire only after a
+ * long OS-dependent delay (and inconsistently in Electron), so we roll
+ * our own hover/focus tooltip on `[data-tooltip]`. Positioned below the
+ * anchor with a small offset. Anchor needs `position: relative` — the
+ * .layout-toggle wrapper isn't a positioning ancestor for its children,
+ * so each button relies on its own relative context (declared here
+ * scoped to buttons so we don't leak it globally). */
+.layout-toggle button[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: var(--text);
+  color: var(--panel);
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-out 0.15s;
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+}
+
 /* Overview → Kanban filter (add-kanban-search-filter). Sits between the
    summary/progress cluster and the layout toggle. Session-only local state
    in Overview.tsx; Cmd+F / Ctrl+F focuses this input while the Overview
