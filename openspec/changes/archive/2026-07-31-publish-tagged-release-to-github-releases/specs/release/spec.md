@@ -16,7 +16,7 @@ Before any tag-triggered build step, the workflow SHALL fail loudly if the pushe
 - **AND** each job runs `npm ci` followed by `npm run release:build`
 - **AND** each job uploads its produced artifacts via `actions/upload-artifact@v4` under a name that includes the runner OS and the commit SHA
 
-#### Scenario: No personal / signing / notarization secrets referenced
+#### Scenario: No secrets referenced
 
 - **WHEN** a reviewer inspects `.github/workflows/release.yml`
 - **THEN** the file does NOT reference `secrets.VSCE_PAT`, `secrets.APPLE_ID_PASSWORD`, `secrets.CSC_LINK`, `secrets.CSC_KEY_PASSWORD`, or any similar signing / notarization / marketplace credentials
