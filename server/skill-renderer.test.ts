@@ -533,3 +533,66 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     expect(mod.mapDoctorCliToRendererCli("bogus")).toBeUndefined();
   });
 });
+
+// scaffold-ithy-opsx-skills-per-cli task 5 — end-to-end init smoke
+// coverage per non-Claude CLI. Each test picks one CLI, runs
+// installSkills against a fresh tmpdir, and asserts the CLI-declared
+// path landed. Shape-based assertions match the renderer-unit tests
+// above so per-CLI path polish stays decoupled from correctness.
+describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cli)", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(join(tmpdir(), "ithyno-percli-e2e-"));
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  const CASES: ReadonlyArray<{
+    cli: import("./skill-renderer/types.js").CliId;
+    expectedPathContains: string[];
+  }> = [
+    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx", "apply"] },
+    { cli: "antigravity", expectedPathContains: [".antigravity/", "ithy-opsx"] },
+    { cli: "cursor", expectedPathContains: [".cursor/rules/", ".mdc"] },
+    { cli: "gemini", expectedPathContains: [".gemini/", "ithy-opsx"] },
+    { cli: "copilot", expectedPathContains: [".github/", "ithy-opsx"] },
+    { cli: "opencode", expectedPathContains: [".opencode/", "ithy-opsx"] },
+  ];
+
+  for (const { cli, expectedPathContains } of CASES) {
+    it(`materializes the pilot skill on disk for ${cli}`, async () => {
+      const result = await installSkills({
+        projectRoot,
+        selectedClis: [cli],
+        sourcesDir: SKILLS_DIR,
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.written.length).toBeGreaterThan(0);
+      const emitted = result.written[0].path;
+      for (const fragment of expectedPathContains) {
+        expect(emitted).toContain(fragment);
+      }
+      expect(existsSync(join(projectRoot, emitted))).toBe(true);
+      const content = readFileSync(join(projectRoot, emitted), "utf-8");
+      expect(content).toContain("GENERATED FILE");
+      expect(content).toContain("ithyno/skills/ithy-opsx-apply");
+    });
+  }
+
+  it("selecting multiple CLIs in one call materializes all of them", async () => {
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["claude", "antigravity", "cursor"],
+      sourcesDir: SKILLS_DIR,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.written.length).toBeGreaterThanOrEqual(3);
+    expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".antigravity/skills/ithy-opsx-apply/SKILL.md"))).toBe(true);
+    // Cursor: exact filename is namespace-command.mdc
+    expect(existsSync(join(projectRoot, ".cursor/rules/ithy-opsx-apply.mdc"))).toBe(true);
+  });
+});
