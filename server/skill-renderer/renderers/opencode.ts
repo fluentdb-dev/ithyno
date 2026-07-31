@@ -2,12 +2,10 @@
 /**
  * opencode renderer for the cross-CLI skill installer.
  *
- * Emits `.opencode/prompts/<namespace>-<command>.md`. opencode
- * discovers prompts from a project-scoped `.opencode/` tree; the
- * `prompts/` subdirectory follows the same shape openspec's own
- * `--tools opencode` scaffold uses.
- *
- * MVP scope — path may need refinement as opencode's docs mature.
+ * Emits `.opencode/commands/<namespace>-<command>.md` — matches
+ * openspec's opencode adapter. The dir is `commands/`, NOT
+ * `prompts/`. Frontmatter shape (description only) mirrors
+ * openspec's adapter.
  */
 import { stringify as yamlStringify } from "yaml";
 import type { Renderer, RenderedFile, SkillSource } from "../types.js";
@@ -29,8 +27,8 @@ function fillPlaceholders(body: string, source: SkillSource): string {
 }
 
 function frontmatter(source: SkillSource): string {
+  // openspec's opencode adapter emits only `description:`.
   const doc: Record<string, unknown> = {
-    name: `${source.manifest.namespace}-${source.manifest.command}`,
     description: source.manifest.description.replace(/\s+/g, " ").trim(),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
@@ -50,7 +48,7 @@ function generatedBanner(source: SkillSource): string {
 export const opencodeRenderer: Renderer = {
   cli: "opencode",
   render(source: SkillSource): RenderedFile[] {
-    const path = `.opencode/prompts/${source.manifest.namespace}-${source.manifest.command}.md`;
+    const path = `.opencode/commands/${source.manifest.namespace}-${source.manifest.command}.md`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     return [{ path, content, mode: "create" }];

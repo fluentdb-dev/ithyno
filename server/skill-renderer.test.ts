@@ -491,16 +491,21 @@ describe("installSkills — end-to-end", () => {
 // tokens present in the emitted path, not exact-string) so per-CLI
 // path tweaks during MVP polish do not tank the whole test grid.
 describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
+  // Aligned with openspec's own per-CLI adapters
+  // (`node_modules/@fission-ai/openspec/dist/core/command-generation/
+  // adapters/*.js`) — each CLI reads only from its adapter's declared
+  // path. Deviations produce dead-code output that the CLI never
+  // discovers.
   const NON_CLAUDE: ReadonlyArray<{
     cli: import("./skill-renderer/types.js").CliId;
     pathContains: string[];
   }> = [
     { cli: "codex", pathContains: [".codex/", "ithy-opsx", "apply"] },
-    { cli: "antigravity", pathContains: [".antigravity/", "ithy-opsx", "apply"] },
-    { cli: "cursor", pathContains: [".cursor/rules/", "ithy-opsx", "apply", ".mdc"] },
-    { cli: "gemini", pathContains: [".gemini/", "ithy-opsx", "apply"] },
-    { cli: "copilot", pathContains: [".github/", "ithy-opsx", "apply"] },
-    { cli: "opencode", pathContains: [".opencode/", "ithy-opsx", "apply"] },
+    { cli: "antigravity", pathContains: [".agent/workflows/", "ithy-opsx-apply", ".md"] },
+    { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
+    { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
+    { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
+    { cli: "opencode", pathContains: [".opencode/commands/", "ithy-opsx-apply", ".md"] },
   ];
 
   for (const spec of NON_CLAUDE) {
@@ -517,9 +522,14 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
       for (const fragment of spec.pathContains) {
         expect(files[0].path).toContain(fragment);
       }
-      // Frontmatter fence present.
-      expect(files[0].content.startsWith("---")).toBe(true);
-      // Generated banner present.
+      // Gemini emits TOML (no `---` fence); everything else uses YAML frontmatter.
+      if (spec.cli === "gemini") {
+        expect(files[0].content).toContain("description =");
+        expect(files[0].content).toContain("prompt =");
+      } else {
+        expect(files[0].content.startsWith("---")).toBe(true);
+      }
+      // Generated banner present (HTML comment for markdown, `#` line for TOML).
       expect(files[0].content).toContain("GENERATED FILE");
       expect(files[0].content).toContain("ithyno/skills/ithy-opsx-apply");
     });
@@ -555,11 +565,11 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expectedPathContains: string[];
   }> = [
     { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx"] },
-    { cli: "antigravity", expectedPathContains: [".antigravity/", "ithy-opsx"] },
-    { cli: "cursor", expectedPathContains: [".cursor/rules/", ".mdc"] },
-    { cli: "gemini", expectedPathContains: [".gemini/", "ithy-opsx"] },
-    { cli: "copilot", expectedPathContains: [".github/", "ithy-opsx"] },
-    { cli: "opencode", expectedPathContains: [".opencode/", "ithy-opsx"] },
+    { cli: "antigravity", expectedPathContains: [".agent/workflows/", "ithy-opsx"] },
+    { cli: "cursor", expectedPathContains: [".cursor/commands/", ".md"] },
+    { cli: "gemini", expectedPathContains: [".gemini/commands/", ".toml"] },
+    { cli: "copilot", expectedPathContains: [".github/prompts/", ".prompt.md"] },
+    { cli: "opencode", expectedPathContains: [".opencode/commands/", "ithy-opsx"] },
   ];
 
   for (const { cli, expectedPathContains } of CASES) {
@@ -608,14 +618,14 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(result.errors).toEqual([]);
     // 2 skills × 3 CLIs.
     expect(result.written.length).toBeGreaterThanOrEqual(6);
-    // Claude: both skills.
+    // Claude: both skills at .claude/commands/<ns>/<cmd>.md.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    // Antigravity: both skills.
-    expect(existsSync(join(projectRoot, ".antigravity/skills/ithy-opsx-apply/SKILL.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".antigravity/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
-    // Cursor: namespace-command.mdc.
-    expect(existsSync(join(projectRoot, ".cursor/rules/ithy-opsx-apply.mdc"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".cursor/rules/ithy-opsx-dispatch.mdc"))).toBe(true);
+    // Antigravity (agy): flat .agent/workflows/<ns>-<cmd>.md — matches openspec adapter.
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Cursor: flat .cursor/commands/<ns>-<cmd>.md — matches openspec adapter.
+    expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-dispatch.md"))).toBe(true);
   });
 });

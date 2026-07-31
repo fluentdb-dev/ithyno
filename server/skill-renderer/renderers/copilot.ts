@@ -2,12 +2,11 @@
 /**
  * GitHub Copilot renderer for the cross-CLI skill installer.
  *
- * Emits `.github/prompts/<namespace>-<command>.md`. GitHub Copilot
- * for VS Code and JetBrains reads custom prompts from
- * `.github/prompts/` (per Copilot's project-scoped prompt docs);
- * some clients also honor `.github/copilot-instructions.md` as a
- * general instruction fragment, but per-command discovery lives in
- * `.github/prompts/*.md`.
+ * Emits `.github/prompts/<namespace>-<command>.prompt.md` — matches
+ * openspec's github-copilot adapter. Extension is `.prompt.md`,
+ * NOT plain `.md`, and Copilot discovers prompts by that exact
+ * suffix. Frontmatter shape (description only) mirrors openspec's
+ * adapter.
  *
  * For fragment-merge into `.github/copilot-instructions.md`
  * (deferred): the renderer contract's fragment support would be a
@@ -34,8 +33,8 @@ function fillPlaceholders(body: string, source: SkillSource): string {
 }
 
 function frontmatter(source: SkillSource): string {
+  // openspec's github-copilot adapter emits only `description:`.
   const doc: Record<string, unknown> = {
-    name: `${source.manifest.namespace}-${source.manifest.command}`,
     description: source.manifest.description.replace(/\s+/g, " ").trim(),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
@@ -55,7 +54,7 @@ function generatedBanner(source: SkillSource): string {
 export const copilotRenderer: Renderer = {
   cli: "copilot",
   render(source: SkillSource): RenderedFile[] {
-    const path = `.github/prompts/${source.manifest.namespace}-${source.manifest.command}.md`;
+    const path = `.github/prompts/${source.manifest.namespace}-${source.manifest.command}.prompt.md`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     return [{ path, content, mode: "create" }];

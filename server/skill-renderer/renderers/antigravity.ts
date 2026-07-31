@@ -2,22 +2,18 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.antigravity/skills/<namespace>-<command>/SKILL.md`.
- * Antigravity is Google's Gemini-based coding assistant; per
- * openspec's `--tools antigravity` scaffold, per-project skill
- * discovery lives under `.antigravity/`. The nested directory shape
- * (`<skill-id>/SKILL.md`) mirrors what Antigravity's onboarding docs
- * describe as its skill layout.
+ * Emits `.agent/workflows/<namespace>-<command>.md` — matches
+ * openspec's own antigravity adapter (`node_modules/@fission-ai/
+ * openspec/dist/core/command-generation/adapters/antigravity.js`
+ * → `getFilePath: .agent/workflows/opsx-<id>.md`). agy reads
+ * `.agent/`, NOT `.antigravity/` — the previous path was dead code
+ * that agy never discovered. Frontmatter shape (description only)
+ * also matches openspec's antigravity adapter.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
  * agents.yaml still writes `command: agy` — the alias only affects
  * renderer resolution.
- *
- * MVP scope — path may need adjustment when Antigravity's official
- * discovery convention is confirmed (docs are still evolving as of
- * 2026-07). The output format is portable markdown so the file is
- * readable regardless of exact discovery mechanism.
  */
 import { stringify as yamlStringify } from "yaml";
 import type { Renderer, RenderedFile, SkillSource } from "../types.js";
@@ -39,8 +35,8 @@ function fillPlaceholders(body: string, source: SkillSource): string {
 }
 
 function frontmatter(source: SkillSource): string {
+  // openspec's antigravity adapter emits only `description:` — mirror it.
   const doc: Record<string, unknown> = {
-    name: `${source.manifest.namespace}:${source.manifest.command}`,
     description: source.manifest.description.replace(/\s+/g, " ").trim(),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
@@ -60,8 +56,8 @@ function generatedBanner(source: SkillSource): string {
 export const antigravityRenderer: Renderer = {
   cli: "antigravity",
   render(source: SkillSource): RenderedFile[] {
-    const skillId = `${source.manifest.namespace}-${source.manifest.command}`;
-    const path = `.antigravity/skills/${skillId}/SKILL.md`;
+    const fileId = `${source.manifest.namespace}-${source.manifest.command}`;
+    const path = `.agent/workflows/${fileId}.md`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     return [{ path, content, mode: "create" }];

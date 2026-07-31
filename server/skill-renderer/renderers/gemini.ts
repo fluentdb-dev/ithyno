@@ -2,14 +2,13 @@
 /**
  * Gemini CLI renderer for the cross-CLI skill installer.
  *
- * Emits `.gemini/commands/<namespace>-<command>.md`. Gemini CLI
- * discovers project-scoped custom commands under `.gemini/commands/`.
- * The flat filename mirrors Gemini's convention.
- *
- * MVP scope — path is a reasonable convention match; refine as
- * Gemini CLI's docs settle.
+ * Emits `.gemini/commands/<namespace>/<command>.toml` — matches
+ * openspec's gemini adapter (`getFilePath: .gemini/commands/opsx/
+ * <id>.toml`). Gemini discovers commands as TOML files, NOT
+ * markdown. The file wraps our SKILL.md body in a TOML
+ * `prompt = """..."""` multiline string alongside a top-level
+ * `description = "..."`.
  */
-import { stringify as yamlStringify } from "yaml";
 import type { Renderer, RenderedFile, SkillSource } from "../types.js";
 
 function expandTokens(body: string): string {
@@ -28,31 +27,48 @@ function fillPlaceholders(body: string, source: SkillSource): string {
   return body.replace(/\{\{namespace\}\}/g, () => ns).replace(/\{\{command\}\}/g, () => cmd);
 }
 
-function frontmatter(source: SkillSource): string {
-  const doc: Record<string, unknown> = {
-    name: `${source.manifest.namespace}-${source.manifest.command}`,
-    description: source.manifest.description.replace(/\s+/g, " ").trim(),
-  };
-  const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
-  return `---\n${yaml}\n---`;
+function escapeTomlBasicString(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
 }
 
-function generatedBanner(source: SkillSource): string {
+function escapeTomlMultilineBasicString(value: string): string {
+  // TOML """..."""  strings allow raw newlines; escape any embedded
+  // triple-quote sequence and lone backslashes.
+  return value.replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"');
+}
+
+function generatedBannerToml(source: SkillSource): string {
   return [
-    "<!--",
-    `  GENERATED FILE — do not hand-edit.`,
-    `  Source: ithyno/skills/${source.id}/{SKILL.md, manifest.yaml}`,
-    `  Regenerate: openspec init --skills-only`,
-    "-->",
+    "# GENERATED FILE — do not hand-edit.",
+    `# Source: ithyno/skills/${source.id}/{SKILL.md, manifest.yaml}`,
+    "# Regenerate: openspec init --skills-only",
   ].join("\n");
 }
 
 export const geminiRenderer: Renderer = {
   cli: "gemini",
   render(source: SkillSource): RenderedFile[] {
-    const path = `.gemini/commands/${source.manifest.namespace}-${source.manifest.command}.md`;
+    // openspec's gemini adapter path shape: <ns>/<cmd>.toml. Preserve
+    // the nested-directory form so the namespace shows up as a Gemini
+    // command group.
+    const path = `.gemini/commands/${source.manifest.namespace}/${source.manifest.command}.toml`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
-    const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
+    const description = source.manifest.description.replace(/\s+/g, " ").trim();
+    const content = [
+      generatedBannerToml(source),
+      "",
+      `description = "${escapeTomlBasicString(description)}"`,
+      "",
+      "prompt = \"\"\"",
+      escapeTomlMultilineBasicString(body),
+      "\"\"\"",
+      "",
+    ].join("\n");
     return [{ path, content, mode: "create" }];
   },
 };
