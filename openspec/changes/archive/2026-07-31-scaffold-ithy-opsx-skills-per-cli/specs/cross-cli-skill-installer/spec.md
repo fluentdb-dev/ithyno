@@ -14,15 +14,9 @@ The `server/init.test.ts` template-drift guard SHALL be updated to compare again
 - **THEN** `.claude/commands/opsx/propose.md` (and every other skill's claude output) is materialized
 - **AND** the file matches the renderer's golden fixture for that source
 
-#### Scenario: templates directory shrunk — commands
+#### Scenario: templates directory shrunk
 - **GIVEN** the shipped ithy-opsx skills (`opsx:*`, `ithy-opsx:*`) have renderers
-- **WHEN** `templates/.claude/commands/opsx/` and `templates/.claude/commands/ithy-opsx/` are removed
-- **THEN** `bin/init.js walkTemplates` skips those paths and defers to the renderer
-- **AND** the init-scaffold-smoke-test still passes because the renderer emits equivalent files
-
-#### Scenario: templates directory shrunk — skills
-- **GIVEN** the shipped ithy-opsx skills (`opsx:*`, `ithy-opsx:*`) have renderers
-- **WHEN** `templates/.claude/skills/opsx-*` and `templates/.claude/skills/ithy-opsx-*` are removed
+- **WHEN** `templates/.claude/commands/opsx/`, `templates/.claude/commands/ithy-opsx/`, `templates/.claude/skills/opsx-*`, and `templates/.claude/skills/ithy-opsx-*` are removed
 - **THEN** `bin/init.js walkTemplates` skips those paths and defers to the renderer
 - **AND** the init-scaffold-smoke-test still passes because the renderer emits equivalent files
 
@@ -43,18 +37,15 @@ For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `
 
 Migration for projects scaffolded before this change: those projects already have `.claude/commands/ithy-opsx/*` on disk even if their Manager isn't Claude. This change does NOT auto-migrate them. Recovery is to re-run `openspec init` on the same project directory (idempotent by design) OR manually remove stale `.claude/` entries and re-run.
 
-#### Scenario: init emits per-CLI files based on selection — Claude
+#### Scenario: init emits per-CLI files based on selection
 - **GIVEN** `openspec init` is invoked in a fresh directory
 - **WHEN** the user selects `claude`
 - **THEN** `.claude/commands/opsx/*`, `.claude/commands/ithy-opsx/*`, `.claude/skills/ithy-opsx-*/` are populated by the claude renderer
 - **AND** `CLAUDE.md` is copied from `templates/CLAUDE.md` (CLI-neutral fixture)
-- **AND** no `templates/.claude/…` blind-copy occurs
-
-#### Scenario: init emits per-CLI files based on selection — Antigravity (agy)
-- **GIVEN** `openspec init` is invoked in a fresh directory
-- **WHEN** the user selects `agy`
-- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.antigravity/…` or the platform equivalent per the renderer's declared output)
-- **AND** `.claude/commands/` is NOT populated (Claude was not selected)
+- **AND** no `templates/.claude/…` blind-copy occurs for CLI-specific skill files
+- **WHEN** the user instead selects `agy`
+- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.antigravity/…` per the renderer's declared output)
+- **AND** `.claude/commands/` is NOT populated by the renderer (Claude was not selected)
 - **AND** `agents.yaml` writes `manager.command: agy` (unchanged from existing behavior)
 
 #### Scenario: init preserves CLI-neutral fixtures
