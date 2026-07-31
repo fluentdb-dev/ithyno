@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      # v-prefixed semver tags (e.g., v0.0.1-alpha.1, v1.2.3) fire the
+      # publish path — GitHub Release created, assets attached. Non-tag
+      # pushes / PRs / dispatches still run build for regression signal
+      # but skip publish.
+      - 'v*.*.*'
   pull_request:
   workflow_dispatch:
 
@@ -29,6 +35,28 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+
+      # Verify tag matches package.json.version BEFORE we spend the
+      # matrix minutes on a mismatched build. Only runs on tag refs.
+      # Portable node one-liner keeps the check off the shell-specific
+      # syntax minefield (bash vs pwsh).
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            const tag = process.env.GITHUB_REF_NAME || '';
+            const stripped = tag.replace(/^v/, '');
+            if (pkg.version !== stripped) {
+              console.error('Tag / version mismatch:');
+              console.error('  tag             = ' + tag);
+              console.error('  package.json    = ' + pkg.version);
+              console.error('  (stripped tag)  = ' + stripped);
+              console.error('Bump package.json (npm run release:version -- <version>) and re-tag.');
+              process.exit(1);
+            }
+            console.log('OK: tag ' + tag + ' matches package.json ' + pkg.version);
+          "
 
       # `npm ci` is the standard install path, but electron-builder's
       # app-builder-bin ships its platform-specific binary via optional
@@ -57,3 +85,56 @@ jobs:
             electron/dist/ithyno-*.exe
             electron/dist/ithyno-*.AppImage
           if-no-files-found: warn
+
+  # Tag-only: fan-in the three matrix outputs and attach them to a
+  # GitHub Release keyed by the pushed tag. Skipped for branch pushes,
+  # PRs, and manual dispatches.
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    # Least-privilege: only what softprops/action-gh-release needs to
+    # create the Release and upload assets. No packages: write, no
+    # actions: write, nothing else.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all matrix artifacts
+        # Omitting `name:` pulls every artifact this workflow uploaded
+        # (one per matrix OS). Each lands in its own subdirectory
+        # under `dist-artifacts/`.
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Create GitHub Release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          # Every asset filename shape release-build emits. Both `.exe`
+          # and `.AppImage` are called out explicitly (glob won't infer
+          # them from `ithyno-*`). `fail_on_unmatched_files: true`
+          # means: if one of these patterns didn't match anything
+          # across all downloaded artifacts, fail — catches silent
+          # matrix-build regressions.
+          files: |
+            dist-artifacts/**/ithyno-*.vsix
+            dist-artifacts/**/ithyno-*.dmg
+            dist-artifacts/**/ithyno-*.exe
+            dist-artifacts/**/ithyno-*.AppImage
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+          body: |
+            Built from tag `${{ github.ref_name }}` (commit ${{ github.sha }}).
+
+            Assets are attached below. Pick the one for your platform:
+            - `ithyno-*.dmg` — macOS
+            - `ithyno-*.exe` — Windows
+            - `ithyno-*.AppImage` — Linux
+            - `ithyno-*.vsix` — VS Code extension
+
+            Release notes: edit this Release description to add details.
