@@ -2,13 +2,19 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.agents/workflows/<namespace>-<command>.md` — agy's current
- * convention uses `.agents/` (with the `s`). NOTE: openspec's own
+ * Emits `.agents/workflows/<namespace>/<command>.md` — agy reads
+ * `.agents/workflows/` and derives the slash-command name from the
+ * file's path shape:
+ *   - flat `<name>.md`                → `/<name>`   (openspec's opsx-*)
+ *   - nested `<namespace>/<cmd>.md`   → `/<namespace>:<cmd>`
+ * ithy-opsx skills need the colon form (`/ithy-opsx:dispatch`), so
+ * they go under a `<namespace>/` subdirectory. NOTE: openspec's own
  * antigravity adapter is still on the legacy `.agent/workflows/`
- * (out of date as of openspec 0.x in this repo); anything openspec
- * init wrote there will be stale relative to what agy actually
- * discovers. Migrating that legacy output is tracked separately.
- * Frontmatter shape (description only) matches openspec's adapter.
+ * (out of date as of openspec 0.x in this repo) and emits flat
+ * `opsx-<id>.md`; that flat shape is what openspec chose for its
+ * own commands. Migrating that legacy `.agent/` output is tracked
+ * separately. Frontmatter shape (description only) matches openspec's
+ * adapter.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
@@ -56,8 +62,11 @@ function generatedBanner(source: SkillSource): string {
 export const antigravityRenderer: Renderer = {
   cli: "antigravity",
   render(source: SkillSource): RenderedFile[] {
-    const fileId = `${source.manifest.namespace}-${source.manifest.command}`;
-    const path = `.agents/workflows/${fileId}.md`;
+    // Nested `<namespace>/<command>.md` shape → agy exposes it as
+    // `/<namespace>:<command>` (colon-separated), which matches how
+    // the ithy-opsx skills are referenced everywhere else in this
+    // codebase (e.g. `/ithy-opsx:dispatch`).
+    const path = `.agents/workflows/${source.manifest.namespace}/${source.manifest.command}.md`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     return [{ path, content, mode: "create" }];

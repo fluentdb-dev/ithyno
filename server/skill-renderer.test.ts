@@ -501,7 +501,8 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     pathContains: string[];
   }> = [
     { cli: "codex", pathContains: [".codex/", "ithy-opsx", "apply"] },
-    { cli: "antigravity", pathContains: [".agents/workflows/", "ithy-opsx-apply", ".md"] },
+    // agy: nested `<ns>/<cmd>.md` so slash-command surface is `/ithy-opsx:apply`.
+    { cli: "antigravity", pathContains: [".agents/workflows/ithy-opsx/apply.md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
     { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
     { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
@@ -565,7 +566,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expectedPathContains: string[];
   }> = [
     { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx"] },
-    { cli: "antigravity", expectedPathContains: [".agents/workflows/", "ithy-opsx"] },
+    { cli: "antigravity", expectedPathContains: [".agents/workflows/ithy-opsx/"] },
     { cli: "cursor", expectedPathContains: [".cursor/commands/", ".md"] },
     { cli: "gemini", expectedPathContains: [".gemini/commands/", ".toml"] },
     { cli: "copilot", expectedPathContains: [".github/prompts/", ".prompt.md"] },
@@ -621,10 +622,12 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     // Claude: both skills at .claude/commands/<ns>/<cmd>.md.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    // Antigravity (agy): flat .agents/workflows/<ns>-<cmd>.md — agy's current
-    // convention. openspec adapter still writes to legacy .agent/ (out of date).
-    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Antigravity (agy): nested .agents/workflows/<ns>/<cmd>.md — this shape
+    // is what agy uses to surface the skill as `/<ns>:<cmd>` (colon form).
+    // Flat `<ns>-<cmd>.md` would produce `/<ns>-<cmd>` (hyphen), a
+    // different command name.
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx/apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx/dispatch.md"))).toBe(true);
     // Cursor: flat .cursor/commands/<ns>-<cmd>.md — matches openspec adapter.
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-dispatch.md"))).toBe(true);
@@ -776,9 +779,11 @@ describe("installSkills — antigravity migration wire-up", () => {
     // Files landed at .agents/workflows/.
     expect(existsSync(join(projectRoot, ".agents/workflows/opsx-propose.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".agents/workflows/opsx-apply.md"))).toBe(true);
-    // Renderer's own ithy-opsx-* output landed alongside.
-    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Renderer's own ithy-opsx-* output landed alongside, under the
+    // nested `<ns>/<cmd>.md` shape (openspec-flat vs renderer-nested
+    // don't collide because they use different filename shapes).
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx/apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx/dispatch.md"))).toBe(true);
   });
 
   it("emits an empty migration entry when antigravity is selected with nothing to migrate", async () => {
@@ -807,31 +812,33 @@ describe("installSkills — antigravity migration wire-up", () => {
   });
 
   it("migration + install respect target-conflict skip semantics", async () => {
-    // Seed .agent/workflows/ithy-opsx-apply.md — a stale name that
-    // COLLIDES with what the renderer will write itself. Migration
-    // must skip it so the renderer's own write is authoritative.
-    const dir = join(projectRoot, ".agent", "workflows");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "ithy-opsx-apply.md"), "STALE\n", "utf-8");
+    // Both source AND target already exist for the same basename —
+    // classic case where the user has an old .agent/workflows/opsx-apply.md
+    // (from a prior openspec init) AND already has a fresher
+    // .agents/workflows/opsx-apply.md (from some later step).
+    // Migration MUST skip: never clobber the newer target.
+    const legacyDir = join(projectRoot, ".agent", "workflows");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "opsx-apply.md"), "STALE\n", "utf-8");
+    const targetDir = join(projectRoot, ".agents", "workflows");
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(join(targetDir, "opsx-apply.md"), "NEW\n", "utf-8");
+
     const result = await installSkills({
       projectRoot,
       selectedClis: ["antigravity"],
       sourcesDir: SKILLS_DIR,
     });
-    // Renderer wrote ithy-opsx-apply.md to the target BEFORE we noticed —
-    // actually the renderer runs AFTER the migration. So at migration
-    // time, the target is absent, and the file IS moved. Then the
-    // renderer overwrites it with the correct content. Verify: file at
-    // target is the renderer's output (contains GENERATED banner),
-    // NOT the STALE body.
+
     expect(result.errors).toEqual([]);
-    expect(result.migrations[0].moved).toContain(".agent/workflows/ithy-opsx-apply.md");
-    const finalContent = readFileSync(
-      join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"),
-      "utf-8",
-    );
-    expect(finalContent).toContain("GENERATED FILE");
-    expect(finalContent).not.toBe("STALE\n");
+    // Legacy file untouched, reported as skipped.
+    expect(result.migrations[0].moved).toEqual([]);
+    expect(result.migrations[0].skipped).toEqual([
+      { path: ".agent/workflows/opsx-apply.md", reason: "target exists" },
+    ]);
+    expect(readFileSync(join(legacyDir, "opsx-apply.md"), "utf-8")).toBe("STALE\n");
+    // Target untouched.
+    expect(readFileSync(join(targetDir, "opsx-apply.md"), "utf-8")).toBe("NEW\n");
   });
 
   it("dry-run migration reports plan without touching disk", async () => {
