@@ -13,6 +13,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
+import { migrateLegacyAntigravityDir } from "./migrate-agy.js";
 import { getRenderer, knownRendererClis } from "./renderers/index.js";
 import type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
@@ -37,7 +38,26 @@ function utf8Bytes(s: string): number {
 }
 
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {
-  const result: InstallResult = { written: [], skipped: [], errors: [] };
+  const result: InstallResult = { written: [], skipped: [], errors: [], migrations: [] };
+
+  // Per-CLI legacy-path migrations run BEFORE the render loop so that
+  // any files rescued from the wrong dir land at the correct target
+  // before the renderer's own writes; conflict-detection in the
+  // migration then correctly sees "target absent" vs "target present."
+  // Currently only antigravity has a migration.
+  if (opts.selectedClis.includes("antigravity")) {
+    try {
+      const migration = await migrateLegacyAntigravityDir(opts.projectRoot, {
+        dryRun: opts.dryRun,
+      });
+      result.migrations.push({ cli: "antigravity", ...migration });
+    } catch (err) {
+      result.errors.push({
+        cli: "antigravity",
+        message: `migration failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
 
   // Discover with per-entry error routing (one bad skill directory
   // does NOT block installing every healthy one).

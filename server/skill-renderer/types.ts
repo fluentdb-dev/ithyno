@@ -114,4 +114,18 @@ export interface InstallResult {
   written: Array<{ cli: CliId; path: string; bytes: number; diff?: string }>;
   skipped: Array<{ cli: CliId; skill: string; reason: string }>;
   errors: Array<{ cli: CliId; skill?: string; message: string }>;
+  /**
+   * One entry per CLI whose install triggered a legacy-directory
+   * migration. Emitted regardless of whether files actually moved —
+   * an empty `moved`/`skipped` pair distinguishes "ran and found
+   * nothing" from "did not run for this CLI." Currently only the
+   * antigravity CLI has a migration (legacy `.agent/workflows/` →
+   * `.agents/workflows/` — openspec's own antigravity adapter still
+   * writes to the stale `.agent/`).
+   */
+  migrations: Array<{
+    cli: CliId;
+    moved: string[];
+    skipped: Array<{ path: string; reason: string }>;
+  }>;
 }
