@@ -80,8 +80,8 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
   });
 
   it("manager picker preselects defaultManager when it is installed", () => {
-    useStore.setState({ defaultManager: "codex" });
-    const report = makeReport(["claude", "codex"]);
+    useStore.setState({ defaultManager: "opencode" });
+    const report = makeReport(["claude", "opencode"]);
     const installed = CLI_PRIORITY.filter(
       (cli) => report.agents[cli].installed,
     );
@@ -89,12 +89,12 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
     // Simulate InitDialog's preselect logic:
     const preselected =
       defaultMgr && installed.includes(defaultMgr) ? defaultMgr : installed[0];
-    expect(preselected).toBe("codex");
+    expect(preselected).toBe("opencode");
   });
 
   it("manager picker falls back to first-by-priority when defaultManager is not installed", () => {
     useStore.setState({ defaultManager: "gemini" });
-    const report = makeReport(["claude", "codex"]);
+    const report = makeReport(["claude", "opencode"]);
     const installed = CLI_PRIORITY.filter(
       (cli) => report.agents[cli].installed,
     );
@@ -110,23 +110,23 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
 describe("Manager picker candidate filter", () => {
   // Mirror of MANAGER_VERIFIED / MANAGER_UNVERIFIED in InitDialog.tsx.
   const MANAGER_VERIFIED: readonly Cli[] = ["claude"];
-  const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "agy"];
+  const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode", "agy"];
   const MANAGER_CANDIDATES: readonly Cli[] = [
     ...MANAGER_VERIFIED,
     ...MANAGER_UNVERIFIED,
   ];
 
-  it("candidate list is exactly claude + codex + agy", () => {
-    expect(MANAGER_CANDIDATES).toEqual(["claude", "codex", "agy"]);
+  it("candidate list is exactly claude + opencode + agy", () => {
+    expect(MANAGER_CANDIDATES).toEqual(["claude", "opencode", "agy"]);
   });
 
-  it("copilot/gemini/opencode/cursor/antigravity are NOT Manager candidates", () => {
-    for (const cli of ["copilot", "gemini", "opencode", "cursor", "antigravity"] as Cli[]) {
+  it("codex/copilot/gemini/cursor/antigravity are NOT Manager candidates", () => {
+    for (const cli of ["codex", "copilot", "gemini", "cursor", "antigravity"] as Cli[]) {
       expect(MANAGER_CANDIDATES).not.toContain(cli);
     }
   });
 
-  it("codex and agy are marked unverified", () => {
+  it("opencode and agy are marked unverified", () => {
     for (const cli of MANAGER_UNVERIFIED) {
       expect(MANAGER_UNVERIFIED.includes(cli)).toBe(true);
       expect(MANAGER_VERIFIED.includes(cli)).toBe(false);
@@ -150,9 +150,17 @@ describe("Manager picker candidate filter", () => {
     expect(choices).toEqual([]);
   });
 
-  it("picker filter: claude+codex+agy installed → all three offered", () => {
-    const installed: Cli[] = ["claude", "codex", "agy"];
+  it("picker filter: claude+opencode+agy installed → all three offered", () => {
+    const installed: Cli[] = ["claude", "opencode", "agy"];
     const choices = installed.filter((c) => MANAGER_CANDIDATES.includes(c));
-    expect(choices).toEqual(["claude", "codex", "agy"]);
+    expect(choices).toEqual(["claude", "opencode", "agy"]);
+  });
+
+  it("picker filter: codex installed but not a Manager candidate → filtered out", () => {
+    // codex remains a valid Cli enum member (still a legitimate agmsg
+    // worker), but it's no longer offered as a Manager candidate.
+    const installed: Cli[] = ["claude", "codex"];
+    const choices = installed.filter((c) => MANAGER_CANDIDATES.includes(c));
+    expect(choices).toEqual(["claude"]);
   });
 });
