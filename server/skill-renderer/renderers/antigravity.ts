@@ -2,13 +2,13 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.agent/workflows/<namespace>-<command>.md` — matches
- * openspec's own antigravity adapter (`node_modules/@fission-ai/
- * openspec/dist/core/command-generation/adapters/antigravity.js`
- * → `getFilePath: .agent/workflows/opsx-<id>.md`). agy reads
- * `.agent/`, NOT `.antigravity/` — the previous path was dead code
- * that agy never discovered. Frontmatter shape (description only)
- * also matches openspec's antigravity adapter.
+ * Emits `.agents/workflows/<namespace>-<command>.md` — agy's current
+ * convention uses `.agents/` (with the `s`). NOTE: openspec's own
+ * antigravity adapter is still on the legacy `.agent/workflows/`
+ * (out of date as of openspec 0.x in this repo); anything openspec
+ * init wrote there will be stale relative to what agy actually
+ * discovers. Migrating that legacy output is tracked separately.
+ * Frontmatter shape (description only) matches openspec's adapter.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
@@ -57,7 +57,7 @@ export const antigravityRenderer: Renderer = {
   cli: "antigravity",
   render(source: SkillSource): RenderedFile[] {
     const fileId = `${source.manifest.namespace}-${source.manifest.command}`;
-    const path = `.agent/workflows/${fileId}.md`;
+    const path = `.agents/workflows/${fileId}.md`;
     const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     return [{ path, content, mode: "create" }];

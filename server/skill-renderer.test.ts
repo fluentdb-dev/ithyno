@@ -501,7 +501,7 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     pathContains: string[];
   }> = [
     { cli: "codex", pathContains: [".codex/", "ithy-opsx", "apply"] },
-    { cli: "antigravity", pathContains: [".agent/workflows/", "ithy-opsx-apply", ".md"] },
+    { cli: "antigravity", pathContains: [".agents/workflows/", "ithy-opsx-apply", ".md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
     { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
     { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
@@ -565,7 +565,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expectedPathContains: string[];
   }> = [
     { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx"] },
-    { cli: "antigravity", expectedPathContains: [".agent/workflows/", "ithy-opsx"] },
+    { cli: "antigravity", expectedPathContains: [".agents/workflows/", "ithy-opsx"] },
     { cli: "cursor", expectedPathContains: [".cursor/commands/", ".md"] },
     { cli: "gemini", expectedPathContains: [".gemini/commands/", ".toml"] },
     { cli: "copilot", expectedPathContains: [".github/prompts/", ".prompt.md"] },
@@ -621,9 +621,10 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     // Claude: both skills at .claude/commands/<ns>/<cmd>.md.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    // Antigravity (agy): flat .agent/workflows/<ns>-<cmd>.md — matches openspec adapter.
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Antigravity (agy): flat .agents/workflows/<ns>-<cmd>.md — agy's current
+    // convention. openspec adapter still writes to legacy .agent/ (out of date).
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agents/workflows/ithy-opsx-dispatch.md"))).toBe(true);
     // Cursor: flat .cursor/commands/<ns>-<cmd>.md — matches openspec adapter.
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-dispatch.md"))).toBe(true);
