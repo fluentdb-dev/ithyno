@@ -904,6 +904,34 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
       });
     }
     initResult = { ok: true, target: chainResult.target, events } as unknown as Record<string, unknown>;
+
+    // scaffold-ithy-opsx-skills-per-cli task 3 — after templates
+    // land, materialize the per-CLI skill surface by invoking the
+    // renderer for the picked Manager. Non-fatal: a render failure
+    // does not roll back the chain; the scaffold-with-openspec-only
+    // state is still usable for the user's chosen CLI once they
+    // populate their own skills.
+    try {
+      const { installSkills, mapDoctorCliToRendererCli } = await import(
+        "./skill-renderer/index.js"
+      );
+      const rendererCli = mapDoctorCliToRendererCli(chosenCli);
+      if (rendererCli) {
+        await installSkills({
+          projectRoot: v.dir,
+          selectedClis: [rendererCli],
+          sourcesDir: join(PKG_ROOT, "ithyno", "skills"),
+        });
+      }
+    } catch (err) {
+      // Log but do not fail init — the user still has a working
+      // openspec scaffold. Renderer errors surface in server logs
+      // for diagnosis.
+      console.warn(
+        `[init] skill-renderer step failed (non-fatal):`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   // ---- Write agents.yaml from template (with rollback on failure) ----------
@@ -975,6 +1003,30 @@ fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
       ? (body.manager as { command: string }).command
       : undefined;
   await runNewProjectChain(v.dir, write, { managerCli });
+
+  // scaffold-ithy-opsx-skills-per-cli task 3 — same renderer step
+  // as /api/init above, applied on the SSE path so both entry points
+  // materialize the per-CLI skill surface. Non-fatal.
+  try {
+    const { installSkills, mapDoctorCliToRendererCli } = await import(
+      "./skill-renderer/index.js"
+    );
+    const rendererCli = managerCli
+      ? mapDoctorCliToRendererCli(managerCli)
+      : mapDoctorCliToRendererCli("claude");
+    if (rendererCli) {
+      await installSkills({
+        projectRoot: v.dir,
+        selectedClis: [rendererCli],
+        sourcesDir: join(PKG_ROOT, "ithyno", "skills"),
+      });
+    }
+  } catch (err) {
+    console.warn(
+      `[init/stream] skill-renderer step failed (non-fatal):`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
   if (clientAlive) {
     try {

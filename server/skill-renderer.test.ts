@@ -121,10 +121,15 @@ describe("capability-token linter — ithyno/skills/**/SKILL.md", () => {
 // ---------------------------------------------------------------------------
 
 describe("claude renderer (v1)", () => {
-  it("is registered as the sole v1 renderer", () => {
-    expect(knownRendererClis()).toEqual(["claude"]);
+  it("is registered alongside the other 6 renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
+    // Post scaffold-ithy-opsx-skills-per-cli: all 7 CLIs are
+    // registered (claude + codex + antigravity + cursor + gemini +
+    // copilot + opencode). Sorted for stable comparison.
+    expect([...knownRendererClis()].sort()).toEqual(
+      ["antigravity", "claude", "codex", "copilot", "cursor", "gemini", "opencode"].sort(),
+    );
     expect(getRenderer("claude")).toBeDefined();
-    expect(getRenderer("codex")).toBeUndefined();
+    expect(getRenderer("codex")).toBeDefined();
   });
 
   it("renders ithy-opsx-apply into .claude/commands/ithy-opsx/apply.md with expected shape", async () => {
@@ -327,18 +332,26 @@ describe("installSkills — end-to-end", () => {
     expect(afterMtime).toBe(beforeMtime);
   });
 
-  it("errors when a selected CLI has no v1 renderer registered (message names available renderers)", async () => {
+  it("errors when a selected CLI has no renderer registered (message names available renderers)", async () => {
+    // Post scaffold-ithy-opsx-skills-per-cli: all 7 CliId values
+    // have renderers, so we can no longer test with a real Cli that
+    // has no registration. Cast a bogus string to CliId to hit the
+    // fail-loud path. The error message still enumerates the
+    // registered renderers via knownRendererClis().
     const result = await installSkills({
       projectRoot,
-      selectedClis: ["codex"],
+      selectedClis: ["bogus-cli" as unknown as import("./skill-renderer/types.js").CliId],
       sourcesDir: SKILLS_DIR,
     });
     expect(result.written).toEqual([]);
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0].cli).toBe("codex");
+    expect(result.errors[0].cli).toBe("bogus-cli" as unknown as import("./skill-renderer/types.js").CliId);
     expect(result.errors[0].message).toContain("no renderer registered");
     // #6: message enumerates from knownRendererClis(), not a hardcoded literal.
-    expect(result.errors[0].message).toContain("available: claude");
+    expect(result.errors[0].message).toContain("available: ");
+    // Sanity: message names at least the claude renderer (all 7 are
+    // present, listing them all is brittle — one is enough).
+    expect(result.errors[0].message).toContain("claude");
   });
 
   // #2: real skip-branch coverage. Build a synthetic sources dir with a
@@ -464,5 +477,59 @@ describe("installSkills — end-to-end", () => {
     const withDiff = result.written.filter((w) => w.diff);
     expect(withDiff.length).toBeGreaterThan(0);
     expect(withDiff[0].diff).toMatch(/would update: \d+ → \d+ bytes/);
+  });
+});
+
+// scaffold-ithy-opsx-skills-per-cli — smoke coverage for the 6 new
+// non-Claude renderers. Each renderer should:
+//  - be registered under its CliId key
+//  - render the pilot skill (ithy-opsx-apply, now `supports:` all 7 CLIs)
+//    to at least one file at a CLI-declared path
+//  - land the file with valid frontmatter + the generated-file banner
+//
+// Path assertions are intentionally shape-based (namespace / command
+// tokens present in the emitted path, not exact-string) so per-CLI
+// path tweaks during MVP polish do not tank the whole test grid.
+describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
+  const NON_CLAUDE: ReadonlyArray<{
+    cli: import("./skill-renderer/types.js").CliId;
+    pathContains: string[];
+  }> = [
+    { cli: "codex", pathContains: [".codex/", "ithy-opsx", "apply"] },
+    { cli: "antigravity", pathContains: [".antigravity/", "ithy-opsx", "apply"] },
+    { cli: "cursor", pathContains: [".cursor/rules/", "ithy-opsx", "apply", ".mdc"] },
+    { cli: "gemini", pathContains: [".gemini/", "ithy-opsx", "apply"] },
+    { cli: "copilot", pathContains: [".github/", "ithy-opsx", "apply"] },
+    { cli: "opencode", pathContains: [".opencode/", "ithy-opsx", "apply"] },
+  ];
+
+  for (const spec of NON_CLAUDE) {
+    it(`registers ${spec.cli} renderer`, () => {
+      expect(getRenderer(spec.cli)).toBeDefined();
+    });
+
+    it(`renders ithy-opsx-apply for ${spec.cli} at a CLI-declared path`, async () => {
+      const sources = await discoverSkillSources(SKILLS_DIR);
+      const apply = sources.find((s) => s.id === "ithy-opsx-apply")!;
+      const renderer = getRenderer(spec.cli)!;
+      const files = renderer.render(apply, { projectRoot: "/proj", cli: spec.cli });
+      expect(files.length).toBeGreaterThan(0);
+      for (const fragment of spec.pathContains) {
+        expect(files[0].path).toContain(fragment);
+      }
+      // Frontmatter fence present.
+      expect(files[0].content.startsWith("---")).toBe(true);
+      // Generated banner present.
+      expect(files[0].content).toContain("GENERATED FILE");
+      expect(files[0].content).toContain("ithyno/skills/ithy-opsx-apply");
+    });
+  }
+
+  it("mapDoctorCliToRendererCli maps agy → antigravity", async () => {
+    const mod = await import("./skill-renderer/renderers/index.js");
+    expect(mod.mapDoctorCliToRendererCli("agy")).toBe("antigravity");
+    expect(mod.mapDoctorCliToRendererCli("antigravity")).toBe("antigravity");
+    expect(mod.mapDoctorCliToRendererCli("claude")).toBe("claude");
+    expect(mod.mapDoctorCliToRendererCli("bogus")).toBeUndefined();
   });
 });

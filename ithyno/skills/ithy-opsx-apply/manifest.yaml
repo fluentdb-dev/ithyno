@@ -8,6 +8,12 @@ description: >-
   commit rather than a dirty tree.
 supports:
   - claude
+  - codex
+  - antigravity
+  - cursor
+  - gemini
+  - copilot
+  - opencode
 capabilities_required:
   - subagent_spawn
   - bash

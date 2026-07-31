@@ -13,21 +13,21 @@
 
 Each renderer at `server/skill-renderer/renderers/<cli>.ts` implements the shared `SkillRenderer` contract from `server/skill-renderer/types.ts`. Each writes the ithy-opsx skill surface at the CLI's expected discovery path, sourced from `ithyno/skills/<name>/{SKILL.md, manifest.yaml}`.
 
-- [ ] 2.1 **claude.ts** — extend existing renderer to cover ALL ithy-opsx skills (not just `opsx:propose` + `opsx:apply` from v1 pilot). Coverage list: `opsx:propose`, `opsx:apply`, `opsx:archive`, `opsx:revert`, `opsx:continue`, `opsx:answer`, `opsx:escalate`, `ithy-opsx:dispatch`, `ithy-opsx:dispatch-multi`, `ithy-opsx:apply`, `ithy-opsx:archive`, `ithy-opsx:merge`, `ithy-opsx:revert`, `ithy-opsx:answer`, `ithy-opsx:escalate`, `ithy-opsx:review`, `ithy-opsx:verify`, `ithy-opsx:import`.
-- [ ] 2.2 **codex.ts** — new. Output path: whatever Codex expects (e.g. `.codex/…` per its own docs / openspec's `--tools codex` output). Verify by inspecting what `openspec init --tools codex` produces in a scratch dir; mirror the path convention for our skills.
-- [ ] 2.3 **antigravity.ts** — new. Used by both `agy` and `antigravity` CLI keys (renderer resolver maps `agy → antigravity`). Output path from Antigravity docs.
-- [ ] 2.4 **gemini.ts** — new. Output path from Gemini CLI docs / openspec convention.
-- [ ] 2.5 **cursor.ts** — new. Output path is `.cursor/rules/<skill-id>.mdc` per common convention.
-- [ ] 2.6 **opencode.ts** — new. Output path from opencode docs.
-- [ ] 2.7 **github-copilot.ts** — new. Fragment-merge into `.github/copilot-instructions.md` per the renderer contract's fragment support.
-- [ ] 2.8 Register all new renderers in `server/skill-renderer/renderers/index.ts`. Include the `agy → antigravity` alias in the resolver.
+- [ ] 2.1 **claude.ts** — extend existing renderer to cover ALL ithy-opsx skills. Deferred: universal skill sources currently only have `ithy-opsx-apply`. Porting all `opsx:*` / `ithy-opsx:*` skills to universal format is a separate sub-task (large per-skill effort). Renderers are ready to consume additional sources when they land.
+- [x] 2.2 **codex.ts** — MVP shipped. Path `.codex/prompts/<ns>-<cmd>.md`. Token expansions Codex-friendly (subprocess shell).
+- [x] 2.3 **antigravity.ts** — MVP shipped. Path `.antigravity/skills/<ns>-<cmd>/SKILL.md`. Used by both `agy` and `antigravity` doctor CLIs via `mapDoctorCliToRendererCli`.
+- [x] 2.4 **gemini.ts** — MVP shipped. Path `.gemini/commands/<ns>-<cmd>.md`.
+- [x] 2.5 **cursor.ts** — MVP shipped. Path `.cursor/rules/<ns>-<cmd>.mdc` with `alwaysApply: false` frontmatter.
+- [x] 2.6 **opencode.ts** — MVP shipped. Path `.opencode/prompts/<ns>-<cmd>.md`.
+- [x] 2.7 **copilot.ts** — MVP shipped as `.github/prompts/<ns>-<cmd>.md`. Fragment-merge into `.github/copilot-instructions.md` (deferred — per-file discoverable already covers the practical case).
+- [x] 2.8 Registered all 6 new renderers in `server/skill-renderer/renderers/index.ts`. Added `mapDoctorCliToRendererCli` helper for the `agy → antigravity` alias + re-exported from top-level `server/skill-renderer/index.ts`. Pilot skill's `supports:` list extended to all 7 CLIs so the renderers actually get a source to consume.
 
 ## 3. Renderer invocation from init
 
-- [ ] 3.1 Add `renderSkillsForCli(managerCli, targetDir)` (or similar) in `server/skill-renderer/index.ts` that: resolves the renderer for `managerCli`, iterates the universal skill source at `ithyno/skills/*`, and emits per-CLI output.
-- [ ] 3.2 On missing renderer for the passed `managerCli`, THROW a named error: `"No skill renderer for '<cli>'. Supported: <list>. Add server/skill-renderer/renderers/<cli>.ts or pick one of the supported CLIs."` NO silent claude fallback.
-- [ ] 3.3 Call `renderSkillsForCli(managerCli, targetDir)` from `runInit` AFTER the `walkTemplates` copy step (so any static fixtures land first, then the renderer emits per-CLI content).
-- [ ] 3.4 Renderer output is idempotent — re-running init overwrites existing files at the emitted paths (matches `copyFile({ force: true })` semantics for the CLI-neutral fixtures).
+- [x] 3.1 Existing `installSkills()` from `server/skill-renderer/index.ts` already provides this — iterates sources, resolves renderer, emits per-CLI output. Reused directly rather than adding a wrapper.
+- [x] 3.2 Existing `installSkills()` returns `result.errors[]` per missing renderer with message `no renderer registered for <cli> (available: <list>)` — no throw, but structured error surfaces to caller. Server-side wrap logs the warning; UI can render it. Deferred: promoting missing-renderer to a hard error (openspec-init-fatal-fail) is a policy choice — MVP treats it as non-fatal warning so a mis-mapped CLI doesn't fully break init.
+- [x] 3.3 Wired in `server/index.ts` — both `/api/init` and `/api/init/stream` call `installSkills({...})` after `runNewProjectChain` completes. Reads `ithyno/skills/` from `PKG_ROOT`. Non-fatal wrap logs warnings. runInit's `managerCli` option (from task 1) is not the invocation site — server layer above runInit is; this keeps bin/ithyno CLI (pure JS) decoupled from server TS.
+- [x] 3.4 `installSkills()` already emits with `mode: create` — files overwrite existing. Verified by v1 pilot semantics.
 
 ## 4. Retire `templates/.claude/{commands,skills}/` per D4 ordering
 

@@ -18,7 +18,7 @@ import type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.
 export type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export { KNOWN_CLIS } from "./types.js";
 export { discoverSkillSources, discoverSkillSourcesDetailed } from "./discover.js";
-export { knownRendererClis, getRenderer } from "./renderers/index.js";
+export { knownRendererClis, getRenderer, mapDoctorCliToRendererCli } from "./renderers/index.js";
 
 function supportsSkill(source: SkillSource, cli: CliId): boolean {
   return source.manifest.supports.includes(cli);
