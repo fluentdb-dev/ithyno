@@ -554,7 +554,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     cli: import("./skill-renderer/types.js").CliId;
     expectedPathContains: string[];
   }> = [
-    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx", "apply"] },
+    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx"] },
     { cli: "antigravity", expectedPathContains: [".antigravity/", "ithy-opsx"] },
     { cli: "cursor", expectedPathContains: [".cursor/rules/", ".mdc"] },
     { cli: "gemini", expectedPathContains: [".gemini/", "ithy-opsx"] },
@@ -563,36 +563,59 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
   ];
 
   for (const { cli, expectedPathContains } of CASES) {
-    it(`materializes the pilot skill on disk for ${cli}`, async () => {
+    it(`materializes every ported ithy-opsx skill on disk for ${cli}`, async () => {
       const result = await installSkills({
         projectRoot,
         selectedClis: [cli],
         sourcesDir: SKILLS_DIR,
       });
       expect(result.errors).toEqual([]);
-      expect(result.written.length).toBeGreaterThan(0);
-      const emitted = result.written[0].path;
-      for (const fragment of expectedPathContains) {
-        expect(emitted).toContain(fragment);
+      // At minimum: apply + dispatch (port-ithy-opsx-dispatch-to-universal-source baseline).
+      expect(result.written.length).toBeGreaterThanOrEqual(2);
+
+      const paths = result.written.map((w) => w.path);
+      const applyPath = paths.find((p) => p.includes("apply"));
+      const dispatchPath = paths.find((p) => p.includes("dispatch"));
+      expect(applyPath, `apply skill missing from ${cli} output`).toBeDefined();
+      expect(dispatchPath, `dispatch skill missing from ${cli} output`).toBeDefined();
+
+      // Both files carry the expected shape.
+      for (const emitted of [applyPath!, dispatchPath!]) {
+        for (const fragment of expectedPathContains) {
+          expect(emitted).toContain(fragment);
+        }
+        expect(existsSync(join(projectRoot, emitted))).toBe(true);
+        const content = readFileSync(join(projectRoot, emitted), "utf-8");
+        expect(content).toContain("GENERATED FILE");
       }
-      expect(existsSync(join(projectRoot, emitted))).toBe(true);
-      const content = readFileSync(join(projectRoot, emitted), "utf-8");
-      expect(content).toContain("GENERATED FILE");
-      expect(content).toContain("ithyno/skills/ithy-opsx-apply");
+
+      // Content sources back to the correct universal source per skill.
+      expect(readFileSync(join(projectRoot, applyPath!), "utf-8")).toContain(
+        "ithyno/skills/ithy-opsx-apply",
+      );
+      expect(readFileSync(join(projectRoot, dispatchPath!), "utf-8")).toContain(
+        "ithyno/skills/ithy-opsx-dispatch",
+      );
     });
   }
 
-  it("selecting multiple CLIs in one call materializes all of them", async () => {
+  it("selecting multiple CLIs in one call materializes all of them (both skills each)", async () => {
     const result = await installSkills({
       projectRoot,
       selectedClis: ["claude", "antigravity", "cursor"],
       sourcesDir: SKILLS_DIR,
     });
     expect(result.errors).toEqual([]);
-    expect(result.written.length).toBeGreaterThanOrEqual(3);
+    // 2 skills × 3 CLIs.
+    expect(result.written.length).toBeGreaterThanOrEqual(6);
+    // Claude: both skills.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
+    // Antigravity: both skills.
     expect(existsSync(join(projectRoot, ".antigravity/skills/ithy-opsx-apply/SKILL.md"))).toBe(true);
-    // Cursor: exact filename is namespace-command.mdc
+    expect(existsSync(join(projectRoot, ".antigravity/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
+    // Cursor: namespace-command.mdc.
     expect(existsSync(join(projectRoot, ".cursor/rules/ithy-opsx-apply.mdc"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".cursor/rules/ithy-opsx-dispatch.mdc"))).toBe(true);
   });
 });
