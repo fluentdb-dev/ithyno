@@ -19,7 +19,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { resolve } from "node:path";
 
 /**
@@ -29,16 +29,17 @@ import { resolve } from "node:path";
  * the archived import-project-spec-generation reviews).
  */
 function isAuthorizedImportPath(absPath: string): boolean {
-  if (!absPath || !absPath.startsWith("/")) return false;
+  if (!absPath || !isAbsolute(absPath)) return false;
   const forbidden = [
     "/etc", "/sys", "/proc", "/dev", "/bin", "/sbin",
     "/usr/bin", "/usr/sbin", "/usr/local",
     "/Library", "/private", "/var", "/opt",
     "/root",
     "/System",
+    "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData",
   ];
   for (const f of forbidden) {
-    if (absPath === f || absPath.startsWith(f + "/")) return false;
+    if (absPath === f || absPath.startsWith(f + "/") || absPath.startsWith(f + "\\")) return false;
   }
   return true;
 }
@@ -56,7 +57,7 @@ function preflight(input: unknown): PreflightResult {
   if (typeof input !== "string" || input.length === 0) {
     return { ok: false, status: 400, reason: "`projectRoot` is required and must be a non-empty string" };
   }
-  if (!input.startsWith("/")) {
+  if (!isAbsolute(input)) {
     return { ok: false, status: 400, reason: "`projectRoot` must be an absolute path" };
   }
   if (!isAuthorizedImportPath(input)) {

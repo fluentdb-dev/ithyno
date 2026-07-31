@@ -314,6 +314,20 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Append the platform's "submit this line" sequence to a string being
+ *  written into a PTY. A bare `\r` reliably submits on macOS/Linux, but
+ *  on Windows the shells this project targets (PowerShell's PSReadLine,
+ *  and Claude Code's own input handling when running under ConPTY /
+ *  psmux-wrapped tmux) don't reliably treat a lone `\r` as Enter — the
+ *  text appears at the prompt but the line is never submitted. `\r\n`
+ *  works in both cases, so it's only worth branching to avoid changing
+ *  already-verified POSIX behavior. Used by every auto-launch / inject
+ *  site below — keep them all going through this helper rather than
+ *  re-adding a bare `"\r"` at a new call site later.*/
+function withEnter(s: string): string {
+  return process.platform === "win32" ? `${s}\r\n` : `${s}\r`;
+}
+
 type ClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number };
@@ -337,7 +351,7 @@ export function injectIntoActive(data: string, terminate: boolean):
   const entry = live[live.length - 1];
   if (!entry) return { ok: false, reason: "No embedded terminal is open. Open a change view to start one." };
   try {
-    entry.term.write(terminate ? data + "\r" : data);
+    entry.term.write(terminate ? withEnter(data) : data);
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
@@ -366,7 +380,7 @@ export function injectIntoManager(
     const entry = live[i];
     if (entry.cwd === managerCwd) {
       try {
-        entry.term.write(terminate ? data + "\r" : data);
+        entry.term.write(terminate ? withEnter(data) : data);
         return { ok: true };
       } catch (err) {
         return { ok: false, reason: err instanceof Error ? err.message : String(err) };
@@ -511,7 +525,7 @@ export async function attachPtyToSocket(
       setTimeout(() => {
         try {
           console.log(`[pty] auto-launching: ${startup}`);
-          term.write(`${startup}\r`);
+          term.write(withEnter(startup));
         } catch {
           /* term already dead */
         }
@@ -519,7 +533,7 @@ export async function attachPtyToSocket(
           setTimeout(() => {
             try {
               console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
-              term.write(`${initialInput}\r`);
+              term.write(withEnter(initialInput));
             } catch {
               /* term already dead */
             }

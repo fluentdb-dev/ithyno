@@ -15,8 +15,13 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const SPECS_ROOT = new URL("../openspec/specs/", import.meta.url).pathname;
+// fileURLToPath(), not `.pathname` — a file:// URL's .pathname on Windows
+// keeps a leading slash before the drive letter (e.g. "/D:/a/..."), which
+// is not a valid Windows path on its own and breaks fs calls downstream.
+// fileURLToPath() is the documented, cross-platform-correct conversion.
+const SPECS_ROOT = fileURLToPath(new URL("../openspec/specs/", import.meta.url));
 
 function findSpecMdFiles(root: string): string[] {
   const out: string[] = [];

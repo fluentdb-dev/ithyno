@@ -436,9 +436,14 @@ describe("ithy-opsx package shape smoke", () => {
   it("npm pack --dry-run ships ithy-opsx only under templates/", async () => {
     // ~2-3s on typical hardware; can spike on cold caches. Vitest's
     // default per-test timeout (5s) is tight — bump for safety.
+    // shell: true on win32 — bare "npm" is actually npm.cmd there, and
+    // execFile (like spawn) doesn't resolve .cmd files without a shell,
+    // failing with ENOENT (same class of bug fixed in
+    // bin/new-project-chain.js for the npx/npm install step).
     const { stdout } = await execFile("npm", ["pack", "--dry-run", "--json"], {
       cwd: REPO_ROOT,
       maxBuffer: 32 * 1024 * 1024,
+      shell: process.platform === "win32",
     });
     let parsed: unknown;
     try {

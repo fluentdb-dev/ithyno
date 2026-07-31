@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolveOpenspecDir, scanWorkspace, parseChange, changeIdForPath } from "./parser/workspace.js";
 import { parseSpec } from "./parser/spec.js";
 import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
@@ -829,7 +829,6 @@ async function validateInitBody(body: InitBody): Promise<
   if (typeof body.dir !== "string" || body.dir.length === 0) {
     return { ok: false, status: 400, reason: "`dir` is required and must be a string" };
   }
-  const { isAbsolute } = await import("node:path");
   if (!isAbsolute(body.dir)) {
     return { ok: false, status: 400, reason: "`dir` must be an absolute path" };
   }
@@ -1616,7 +1615,11 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
    * blocklist provides defense-in-depth for system paths.
    */
   function isAuthorizedImportPath(absPath: string): boolean {
-    if (!absPath || !absPath.startsWith("/")) return false;
+    // isAbsolute(), not a bare startsWith("/") — that rejects every
+    // Windows path (e.g. "C:\Users\me\project") outright, since none of
+    // them start with "/". isAbsolute() is Node's own platform-aware
+    // check (uses win32 semantics when running on Windows).
+    if (!absPath || !isAbsolute(absPath)) return false;
     const forbidden = [
       // Linux system dirs
       "/etc", "/sys", "/proc", "/dev", "/bin", "/sbin",
@@ -1627,9 +1630,11 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       "/root",
       // System frameworks (macOS)
       "/System",
+      // Windows system dirs
+      "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData",
     ];
     for (const f of forbidden) {
-      if (absPath === f || absPath.startsWith(f + "/")) return false;
+      if (absPath === f || absPath.startsWith(f + "/") || absPath.startsWith(f + "\\")) return false;
     }
     return true;
   }
@@ -1648,7 +1653,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     if (typeof next !== "string" || next.length === 0) {
       return reply.code(400).send({ error: "`projectRoot` is required and must be a non-empty string" });
     }
-    if (!next.startsWith("/")) {
+    if (!isAbsolute(next)) {
       return reply.code(400).send({ error: "`projectRoot` must be an absolute path" });
     }
     if (!isAuthorizedImportPath(next)) {
