@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
@@ -71,12 +71,30 @@ export function App() {
   //   2. Any mutating API call returns 401/403 → banner.
   const [authExpired, setAuthExpired] = useState<boolean>(() => getSessionToken() == null);
 
+  const handleReloadSession = useCallback(() => {
+    const w = window as any;
+    if (w.ithyno?.reloadSession) {
+      w.ithyno.reloadSession();
+      return;
+    }
+    if (isVsCodeShell()) {
+      window.postMessage({ type: "ithyno:reload-session" }, "*");
+      return;
+    }
+    window.location.reload();
+  }, []);
+
   useEffect(() => {
     onAuthExpiredHandler(() => {
       clearSessionToken();
-      setAuthExpired(true);
+      const w = window as any;
+      if (w.ithyno?.reloadSession || isVsCodeShell()) {
+        handleReloadSession();
+      } else {
+        setAuthExpired(true);
+      }
     });
-  }, []);
+  }, [handleReloadSession]);
 
   useEffect(() => {
     if (!isElectronShell()) return;
@@ -93,17 +111,21 @@ export function App() {
 
   // Detect a stale token at first mount (e.g. after a server restart) by
   // hitting the lightweight check endpoint. If the token is missing or no
-  // longer recognized, surface the banner immediately instead of waiting for
-  // a mutating action.
+  // longer recognized, surface the banner or auto-reload for desktop shells.
   useEffect(() => {
     if (authExpired) return;
     void checkAuth().then((ok) => {
       if (!ok) {
         clearSessionToken();
-        setAuthExpired(true);
+        const w = window as any;
+        if (w.ithyno?.reloadSession || isVsCodeShell()) {
+          handleReloadSession();
+        } else {
+          setAuthExpired(true);
+        }
       }
     });
-  }, [authExpired]);
+  }, [authExpired, handleReloadSession]);
 
   useEffect(() => {
     if (authExpired) return;
@@ -121,10 +143,9 @@ export function App() {
           setAuthExpired(false);
           connectWs();
           void load();
-        } else if (isElectronShell()) {
-          // In Electron shell, if auth fails on wake-up, attempt an automatic window reload
-          // so the main process can refresh/re-bootstrap the local server token
-          window.location.reload();
+        } else {
+          // Auth failed — attempt automatic reload via shell handler before showing banner
+          handleReloadSession();
         }
       });
     };
@@ -141,7 +162,7 @@ export function App() {
       window.removeEventListener("focus", handleAutoRecover);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [connectWs, load]);
+  }, [connectWs, load, handleReloadSession]);
 
   // Cmd/Ctrl+Shift+K — restart terminal, but only when focus is inside
   // `.terminal-host` or on the `.terminal-reconnect` button.
@@ -232,13 +253,6 @@ export function App() {
         : terminalSize === "half"
           ? " terminal-half"
           : "";
-
-  const handleReloadSession = () => {
-    if (isVsCodeShell()) {
-      window.postMessage({ type: "ithyno:reload-session" }, "*");
-    }
-    window.location.reload();
-  };
 
   if (authExpired) {
     return (

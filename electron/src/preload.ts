@@ -43,6 +43,10 @@ contextBridge.exposeInMainWorld('ithyno', {
     ipcRenderer.on('ithyno:open-about', listener);
     return () => ipcRenderer.off('ithyno:open-about', listener);
   },
+  /** Request main process to reload the active project or spawn URL with a fresh token. */
+  reloadSession: (): void => {
+    ipcRenderer.send('ithyno:reload-session');
+  },
 });
 
 /**

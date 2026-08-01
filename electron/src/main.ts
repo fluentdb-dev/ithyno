@@ -485,6 +485,13 @@ function registerWelcomeIpc(): void {
   ipcMain.on('welcome:quit', () => {
     app.quit();
   });
+  ipcMain.on('ithyno:reload-session', () => {
+    if (currentProjectRoot) {
+      void createWindowForProject(currentProjectRoot);
+    } else if (mainWindow && currentSpawn) {
+      void mainWindow.loadURL(currentSpawn.url);
+    }
+  });
 }
 
 let _aboutConfig: AboutConfig | null = null;
