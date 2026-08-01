@@ -230,35 +230,42 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (session === s) session = null;
     });
-
-    if (activeSidebarWebviewView) {
-      activeSidebarWebviewView.webview.html = renderWebviewHtml(server.url);
-    }
   });
-
-  let activeSidebarWebviewView: vscode.WebviewView | null = null;
 
   class SidebarDashboardViewProvider implements vscode.WebviewViewProvider {
     resolveWebviewView(webviewView: vscode.WebviewView): void {
-      activeSidebarWebviewView = webviewView;
       webviewView.webview.options = { enableScripts: true };
 
-      if (session) {
-        webviewView.webview.html = renderWebviewHtml(session.server.url);
-      } else {
-        void vscode.commands.executeCommand("ithyno.show");
+      webviewView.webview.html = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); text-align: center; }
+      button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 8px 16px; font-size: 13px; font-weight: 500; border-radius: 4px; cursor: pointer; margin-top: 12px; width: 100%; }
+      button:hover { background: var(--vscode-button-hoverBackground); }
+      p { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <p>ithyno OpenSpec Dashboard</p>
+    <button onclick="openDashboard()">Open Dashboard in Tab</button>
+    <script>
+      const vscode = acquireVsCodeApi();
+      function openDashboard() {
+        vscode.postMessage({ command: 'openDashboard' });
       }
+    </script>
+  </body>
+</html>`;
+
+      // Automatically open / reveal the main Editor Tab when clicking the Activity Bar icon
+      void vscode.commands.executeCommand("ithyno.show");
 
       webviewView.webview.onDidReceiveMessage((msg) => {
         if (!msg || typeof msg !== "object") return;
-        if (msg.type === "pty.inject" && typeof msg.data === "string" && session) {
-          const terminate = msg.terminate !== false;
-          const t = ensureTerminal(session);
-          t.sendText(msg.data, terminate);
-          t.show(true);
-        }
-        if (msg.type === "ithyno:reload-session" && session) {
-          webviewView.webview.html = renderWebviewHtml(session.server.url);
+        if (msg.command === "openDashboard") {
+          void vscode.commands.executeCommand("ithyno.show");
         }
       });
     }
