@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore, type ThemePreference } from "../store";
+import { isVsCodeShell } from "../runtime/shell";
 
 /**
  * Resolved theme actually applied to the DOM (`"light" | "dark"`), after
@@ -15,6 +16,7 @@ import { useStore, type ThemePreference } from "../store";
  *     the resolved value changes, which drives the CSS palette swap.
  *   - Subscribes to `matchMedia("(prefers-color-scheme: dark)")` when the
  *     preference is `"system"` so an OS-level swap flips the UI live.
+ *   - Subscribes to `vscode:theme-changed` postMessages when running in VS Code.
  *
  * Returns the applied theme so consumers (e.g. Terminal.tsx) can read a
  * palette rebuild on change without touching the DOM themselves.
@@ -40,6 +42,25 @@ export function useAppliedTheme(): AppliedTheme {
     if (typeof document !== "undefined") {
       document.documentElement.dataset.theme = next;
     }
+  }, [theme]);
+
+  // Subscribe to VS Code theme changes
+  useEffect(() => {
+    if (!isVsCodeShell() && theme !== "system") return;
+    const handleVsCodeTheme = (e: MessageEvent) => {
+      if (
+        e.data &&
+        e.data.type === "vscode:theme-changed" &&
+        (e.data.theme === "light" || e.data.theme === "dark")
+      ) {
+        setApplied(e.data.theme);
+        if (typeof document !== "undefined") {
+          document.documentElement.dataset.theme = e.data.theme;
+        }
+      }
+    };
+    window.addEventListener("message", handleVsCodeTheme);
+    return () => window.removeEventListener("message", handleVsCodeTheme);
   }, [theme]);
 
   // Follow OS changes only when the user picked "system". Manual "light" /
