@@ -201,18 +201,32 @@ export function App() {
           ? " terminal-half"
           : "";
 
+  const handleReloadSession = () => {
+    if (isVsCodeShell()) {
+      window.postMessage({ type: "ithyno:reload-session" }, "*");
+    }
+    window.location.reload();
+  };
+
   if (authExpired) {
     return (
       <div className="app">
         <div className="auth-expired">
           <h2>Session expired</h2>
           <p>
-            Open the launch URL printed by the ithyno server to reload with
-            a fresh token. The URL looks like{" "}
-            <code>http://localhost:&lt;port&gt;/?token=…</code>.
+            The session token is no longer valid (e.g. after PC sleep or server restart).
           </p>
+          <div className="auth-expired-actions">
+            <button
+              type="button"
+              className="action-btn primary auth-expired-btn"
+              onClick={handleReloadSession}
+            >
+              Reload Dashboard
+            </button>
+          </div>
           <p className="muted">
-            If you restarted the server, the previous token is no longer valid.
+            Or open the launch URL printed by the ithyno server (<code>http://localhost:&lt;port&gt;/?token=…</code>).
           </p>
         </div>
       </div>

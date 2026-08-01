@@ -3039,6 +3039,18 @@ a.modal-btn:hover {
   border-radius: 4px;
   font-size: 12px;
 }
+.auth-expired-actions {
+  margin: 20px 0;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+.auth-expired-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
 
 /* Toasts */
 .toasts {
