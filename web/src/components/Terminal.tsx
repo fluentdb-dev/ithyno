@@ -101,8 +101,8 @@ export function Terminal() {
         void navigator.clipboard
           .readText()
           .then((text) => {
-            if (text && ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify({ type: "input", data: text }));
+            if (text) {
+              term.paste(text);
             }
           })
           .catch(() => {});
