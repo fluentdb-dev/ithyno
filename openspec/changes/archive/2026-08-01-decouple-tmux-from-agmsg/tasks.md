@@ -19,14 +19,17 @@
 - [x] 3.1 `server/agents/registry.test.ts` — `tmux()` defaults to `false` when absent; parses `tmux: true`; throws (surfaces as `ok: false`) on a non-boolean value; `publicConfig()` includes it.
 - [x] 3.2 `server/sync/pty.test.ts` — `tmux: true` with no `agmsg` wraps in tmux; `tmux: false` (or absent) with `agmsg` configured still wraps (agmsg's implication is unconditional); neither set → direct spawn; both signals absent + tmux missing from PATH is unaffected (no wrap attempted, no fallback banner) since tmux isn't enabled.
 
-## 4. Docs
+## 4. UI & Cascading Config Writer
 
-- [x] 4.1 Checked `agents.yaml` (repo-root dogfood config) and templates — no inline comment documents the `agmsg:` block today, so there's nothing to extend. Left the file's config values untouched (it doesn't opt into `tmux: true`).
+- [x] 4.1 `server/agents/config-writer.ts` — add `writeTmux(projectRoot, value)`.
+- [x] 4.2 `server/index.ts` — expose `POST /api/config/tmux` endpoint and broadcast `agents-updated`.
+- [x] 4.3 `web/src/pages/Settings.tsx` — add "Wrap Manager terminal in tmux" checkbox UI under Execution.
+- [x] 4.4 Implement settings dependency cascade in `config-writer.ts` (`TMUX OFF => AGMSG OFF => LIVESHELL OFF` and `AGMSG ON => TMUX ON => LIVESHELL ON`).
 
 ## 5. Verification
 
 - [x] 5.1 `npx openspec validate decouple-tmux-from-agmsg --strict` passes.
-- [x] 5.2 `npm test` passes (696 passed, 1 pre-existing skip).
+- [x] 5.2 `npm test` passes (698 passed, 1 pre-existing skip).
 - [x] 5.3 `npm run typecheck` passes.
 - [x] 5.4 `npm run build` passes.
 - [x] 5.5 Write `openspec/changes/decouple-tmux-from-agmsg/outcome.md`.

@@ -15,23 +15,13 @@ fabricating an `agmsg:` block they don't otherwise need.
 
 ## What Changes
 
-- Add a new independent top-level `agents.yaml` toggle, `tmux: true`,
-  that enables tmux-wrapping of the Manager PTY startup regardless of
-  whether an `agmsg:` block is present.
-- `agmsg:` being configured continues to imply tmux ON (no behavior
-  change for existing agmsg users) — effective tmux enablement is
-  `tmux === true OR agmsg !== null`.
-- `AgentRegistry` gains a `tmux()` accessor mirroring the existing
-  `agmsg()` accessor, reading the new top-level field (default
-  `false` when omitted).
-- `ptyStartup()` in `server/sync/pty.ts` switches its tmux-wrap
-  decision from `agmsg !== null` to the new combined
-  `tmuxEnabled` boolean. The tmux-missing fallback banner and
-  `tmux new-session -A -s <session>` wrapping shape are unchanged;
-  only the condition that triggers them changes.
-- No UI changes — `agents.yaml` is hand-edited, consistent with every
-  other top-level toggle in this file today (`parallelExecution`,
-  `maxParallel`, `maxReworkRounds`).
+- Add a new top-level `agents.yaml` toggle, `tmux: true`, that enables tmux-wrapping of the Manager PTY startup.
+- `agmsg:` being configured continues to imply tmux ON (AGMSG requires tmux) — effective tmux enablement is `tmux === true OR agmsg !== null`.
+- Add a "Wrap Manager terminal in tmux" checkbox UI in `Settings.tsx` under Execution, backed by `POST /api/config/tmux`.
+- Implement cascading settings dependency in `server/agents/config-writer.ts`:
+  - **TMUX disabled** (`writeTmux(false)`): Disables `agmsg` and updates all worker agents in `agents.yaml` to `mode: single-prompt`.
+  - **AGMSG enabled** (`writeAgmsg(block)`): Sets `agmsg`, enables `tmux: true`, and updates all worker agents in `agents.yaml` to `mode: live-shell`.
+  - **AGMSG disabled** (`writeAgmsg(null)`): Removes `agmsg` and updates all worker agents in `agents.yaml` to `mode: single-prompt`.
 
 ## Capabilities
 
