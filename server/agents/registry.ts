@@ -174,6 +174,7 @@ function normalizeAgent(
   raw: unknown,
   index: number,
   warnings: string[],
+  agmsg?: AgmsgConfig | null,
 ): AgentDef {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`agents[${index}] must be an object`);
@@ -290,7 +291,9 @@ function normalizeAgent(
 
   // ---- mode (required after normalization) ----
   let mode: AgentMode;
-  if (o.mode !== undefined) {
+  if (agmsg !== undefined && agmsg !== null) {
+    mode = "live-shell";
+  } else if (o.mode !== undefined) {
     if (typeof o.mode !== "string" || !AGENT_MODES.includes(o.mode as AgentMode)) {
       throw new Error(`${label}.mode must be one of ${AGENT_MODES.join(", ")}`);
     }
@@ -298,9 +301,6 @@ function normalizeAgent(
   } else {
     // Synthesize: manager → live-shell, everything else → single-prompt.
     mode = roles.includes("manager") ? "live-shell" : "single-prompt";
-    warnings.push(
-      `${label}: no 'mode' declared; synthesized ${mode} from roles (deprecated shape)`,
-    );
   }
 
   // ---- Manager-mode gate: manager MUST be live-shell ----
@@ -345,12 +345,16 @@ function normalizeAgent(
  * pushed into it (one per deprecated-shape rewrite). When omitted,
  * warnings are silently dropped (the write path doesn't care).
  */
-export function validateAgents(raw: unknown, warningsOut?: string[]): AgentDef[] {
+export function validateAgents(
+  raw: unknown,
+  warningsOut?: string[],
+  agmsg?: AgmsgConfig | null,
+): AgentDef[] {
   if (!raw || typeof raw !== "object") throw new Error("agents.yaml must be an object");
   const list = (raw as { agents?: unknown }).agents;
   if (!Array.isArray(list)) throw new Error("agents.yaml: `agents` must be a list");
   const warnings = warningsOut ?? [];
-  const agents = list.map((a, i) => normalizeAgent(a, i, warnings));
+  const agents = list.map((a, i) => normalizeAgent(a, i, warnings, agmsg));
 
   // Manager singleton — at most one agent may include 'manager' in roles.
   const managerIndexes: number[] = [];
@@ -549,7 +553,6 @@ export class AgentRegistry {
       const raw = await readFile(path, "utf8");
       const parsed = parseYaml(raw);
       const warnings: string[] = [];
-      const agents = validateAgents(parsed, warnings);
       const parallelExecution = validateParallelExecution(
         parsed && typeof parsed === "object"
           ? (parsed as Record<string, unknown>).parallelExecution
@@ -570,6 +573,7 @@ export class AgentRegistry {
           ? (parsed as Record<string, unknown>).agmsg
           : undefined,
       );
+      const agents = validateAgents(parsed, warnings, agmsg);
       const tmux = validateTmux(
         parsed && typeof parsed === "object"
           ? (parsed as Record<string, unknown>).tmux

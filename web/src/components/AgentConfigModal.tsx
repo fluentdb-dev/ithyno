@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useMemo, useState } from "react";
+import { useStore } from "../store";
 import type {
   AgentConfigPayload,
   AgentMode,
@@ -61,6 +62,7 @@ export function AgentConfigModal({
   onCancel,
   onSubmit,
 }: Props) {
+  const agmsg = useStore((s) => s.agmsg);
   const isAdd = seed === "new";
   const initial = useMemo(() => {
     if (seed === "new" && addModePrefill) {
@@ -112,14 +114,6 @@ export function AgentConfigModal({
   );
 
   const includesManager = form.roles.includes("manager");
-  // Manager roles require live-shell mode. Force the toggle when manager
-  // is on.
-  const modeLockedToLiveShell = includesManager;
-  useEffect(() => {
-    if (includesManager && form.mode !== "live-shell") {
-      setForm((f) => ({ ...f, mode: "live-shell" }));
-    }
-  }, [includesManager, form.mode]);
 
   const toggleRole = (role: string) => {
     setForm((f) => {
@@ -164,10 +158,12 @@ export function AgentConfigModal({
       if (trimmed && form.roles.includes(role)) prompts[role] = trimmed;
     }
 
-    // Manager entries have hard-coded shape constraints (mode / roles).
+    // Manager entries and agmsg-enabled projects run live-shell mode.
+    // Mode is automatically derived from agmsg state so users don't have
+    // to manually toggle single-prompt vs live-shell.
     const managerLocked = includesManager;
     const effectiveRoles = managerLocked ? ["manager"] : form.roles;
-    const effectiveMode = managerLocked ? "live-shell" : form.mode;
+    const effectiveMode: AgentMode = (managerLocked || agmsg !== null) ? "live-shell" : "single-prompt";
     // Name resolution:
     //   - Edit mode: keep the seed's name (form.name is preloaded from it)
     //   - Add mode + Manager: force "manager" (singleton, no collision)
@@ -263,44 +259,7 @@ export function AgentConfigModal({
             </fieldset>
           )}
 
-          {!includesManager && (
-            <fieldset className="agent-config-field agent-config-mode">
-              <legend>Mode</legend>
-              <label>
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={form.mode === "single-prompt"}
-                  disabled={modeLockedToLiveShell}
-                  onChange={() => setForm({ ...form, mode: "single-prompt" })}
-                />
-                single-prompt{" "}
-                <span className="muted">
-                  (headless spawn; prompt appended to args as `-p
-                  &lt;prompt&gt;`. Best for Claude Code's print mode.)
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={form.mode === "live-shell"}
-                  onChange={() => setForm({ ...form, mode: "live-shell" })}
-                />
-                live-shell{" "}
-                <span className="muted">
-                  (headless spawn with stdin piped; prompt written to
-                  child.stdin — for CLIs that read stdin, e.g., aider.
-                  NOT suitable for Claude Code without `-p`.)
-                </span>
-              </label>
-              {modeLockedToLiveShell && (
-                <span className="agent-config-hint">
-                  Manager roles require live-shell mode.
-                </span>
-              )}
-            </fieldset>
-          )}
+
 
 
           <label className="agent-config-field">
