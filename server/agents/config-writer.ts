@@ -365,6 +365,24 @@ export async function writeAgmsg(
     doc.agmsg = nextBlock;
   }
 
+  // Update mode for worker agents in agents.yaml
+  const targetMode = block !== null ? "live-shell" : "single-prompt";
+  if (Array.isArray(doc.agents)) {
+    for (const agent of doc.agents) {
+      if (agent && typeof agent === "object") {
+        const a = agent as Record<string, unknown>;
+        const roles = Array.isArray(a.roles)
+          ? a.roles
+          : typeof a.role === "string"
+            ? [a.role]
+            : [];
+        if (!roles.includes("manager")) {
+          a.mode = targetMode;
+        }
+      }
+    }
+  }
+
   await atomicWrite(path, stringifyYaml(doc));
   return { ok: true };
 }

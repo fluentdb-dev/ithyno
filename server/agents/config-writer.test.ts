@@ -450,6 +450,7 @@ describe("writeAgmsg (add-agmsg-config-write)", () => {
     expect(doc.agmsg).toEqual({ team: "openspec-ui" });
     expect(Array.isArray(doc.agents)).toBe(true);
     expect((doc.agents as unknown[]).length).toBe(1);
+    expect((doc.agents as Record<string, unknown>[])[0].mode).toBe("live-shell");
   });
 
   it("upserts an agmsg block with team + storage", async () => {
