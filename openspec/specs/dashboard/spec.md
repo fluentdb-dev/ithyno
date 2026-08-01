@@ -2539,7 +2539,7 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
-The embedded PTY session SHALL wrap the resolved manager startup command in a `tmux new-session` invocation whenever `agents.yaml` includes a valid top-level `agmsg` block, and SHALL spawn the manager command directly (pre-P2 behavior) when the block is absent.
+The embedded PTY session SHALL wrap the resolved manager startup command in a `tmux new-session` invocation whenever tmux is *enabled*, and SHALL spawn the manager command directly (pre-P2 behavior) when it is not. Tmux is enabled when EITHER `agents.yaml` sets a top-level `tmux: true`, OR `agents.yaml` includes a valid top-level `agmsg` block (agmsg configuration continues to imply tmux ON unconditionally — there is no way to configure agmsg without tmux). Both signals are read via `AgentRegistry`: `tmux()` returns the raw parsed boolean (default `false` when the field is absent), `agmsg()` returns the parsed block or `null`. `tmux: false` (or omission) alongside a present `agmsg:` block does NOT disable tmux — agmsg's implication is unconditional, not an independent vote.
 
 The tmux-wrapped startup command SHALL take the shape:
 
@@ -2551,7 +2551,7 @@ The `-A` flag SHALL cause tmux to attach to an existing session with the given n
 
 The `initialInput` string (the Manager's declared first-message line from `agents.yaml`) SHALL continue to be written to the PTY's stdin after the startup command settles — tmux forwards stdin into pane 0's foreground command so no extra plumbing is added.
 
-When the `agmsg` block is present and the `tmux` binary is not on `PATH`, the PTY SHALL open a raw shell that prints a banner naming the missing dependency, the platform install hint, and a note that removing the `agmsg:` block reverts to the direct-spawn path. The WebSocket connection SHALL NOT close in this fallback — the user retains a usable shell.
+When tmux is enabled (by either signal) and the `tmux` binary is not on `PATH`, the PTY SHALL open a raw shell that prints a banner naming the missing dependency, the platform install hint, and a note that removing the `agmsg:` block / `tmux: true` reverts to the direct-spawn path. The WebSocket connection SHALL NOT close in this fallback — the user retains a usable shell.
 
 The manager startup command SHALL be resolved via a three-tier priority:
 
@@ -2569,42 +2569,56 @@ This requirement establishes tmux hosting only. It does NOT invoke any `agmsg` b
 
 Runtime project switch (`POST /api/project/switch` from `respawn-manager-pty-on-project-switch`) SHALL, in addition to terminating live PTYs, best-effort `tmux kill-session -t <old-session-name>` for the previous project's session so the pane does not linger and get re-attached by an unrelated future invocation. Failure to kill the session (session not found, tmux missing, etc.) SHALL be logged and swallowed — the switch itself proceeds.
 
-#### Scenario: agmsg block absent → direct spawn unchanged
-- **GIVEN** an `agents.yaml` without an `agmsg:` block and a `role: manager` agent declared
+#### Scenario: Neither tmux nor agmsg configured → direct spawn unchanged
+- **GIVEN** an `agents.yaml` without a `tmux: true` field and without an `agmsg:` block, and a `role: manager` agent declared
 - **WHEN** the Terminal panel opens a PTY
 - **THEN** the PTY spawns the manager command directly (no tmux wrap), matching pre-P2 behavior
 - **AND** the process tree does NOT contain `tmux`
 
-#### Scenario: agmsg block present with tmux installed → tmux wrap
-- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }` and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
+#### Scenario: tmux: true enables tmux without agmsg configured
+- **GIVEN** an `agents.yaml` containing `tmux: true`, no `agmsg:` block, and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
 - **AND** the `tmux` binary is on `PATH`
 - **AND** the project root resolves to `/path/to/project`
 - **WHEN** the Terminal panel opens a PTY
 - **THEN** the resolved startup line is `tmux new-session -A -s ithyno-<12-hex-of-sha256("/path/to/project")> -- claude --resume <id>`
 - **AND** the manager's `initialInput` is written to the PTY after the tmux session bootstraps
 
+#### Scenario: agmsg block present with tmux installed → tmux wrap regardless of the tmux field
+- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }`, no explicit `tmux` field, and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
+- **AND** the `tmux` binary is on `PATH`
+- **AND** the project root resolves to `/path/to/project`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the resolved startup line is `tmux new-session -A -s ithyno-<12-hex-of-sha256("/path/to/project")> -- claude --resume <id>`
+- **AND** the manager's `initialInput` is written to the PTY after the tmux session bootstraps
+
+#### Scenario: tmux: false does not defeat an agmsg-implied tmux wrap
+- **GIVEN** an `agents.yaml` containing both `tmux: false` and `agmsg: { team: alpha }`
+- **AND** the `tmux` binary is on `PATH`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the PTY still wraps the startup command in `tmux new-session -A -s ...` (agmsg's implication is unconditional)
+
 #### Scenario: Different project roots produce distinct tmux sessions
-- **GIVEN** two ithyno instances running against project roots `/path/A` and `/path/B` (both with valid `agmsg:` blocks and tmux installed)
+- **GIVEN** two ithyno instances running against project roots `/path/A` and `/path/B` (both with tmux enabled, via either signal, and tmux installed)
 - **WHEN** each opens its embedded PTY
 - **THEN** the two `tmux new-session -s ...` invocations use DIFFERENT session names (`ithyno-<hashA>` vs `ithyno-<hashB>`)
 - **AND** `tmux ls` shows two distinct sessions
 - **AND** each dashboard's Manager Claude sits at its own project's cwd
 
-#### Scenario: agmsg block present with tmux missing → fallback banner
-- **GIVEN** an `agents.yaml` containing an `agmsg:` block
+#### Scenario: tmux enabled with tmux missing → fallback banner
+- **GIVEN** an `agents.yaml` with tmux enabled (via `tmux: true` or an `agmsg:` block)
 - **AND** the `tmux` binary is NOT on `PATH`
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the PTY opens a raw shell that prints a banner including "tmux was not found on PATH", the platform install hint, and the "remove the agmsg: block to fall back" note
+- **THEN** the PTY opens a raw shell that prints a banner including "tmux was not found on PATH", the platform install hint, and the "remove the agmsg: block / tmux: true to fall back" note
 - **AND** the WS connection stays open (the user can Ctrl-C / type commands as normal)
 
 #### Scenario: ITHYNO_TMUX_SESSION overrides the session name
-- **GIVEN** `agents.yaml` contains an `agmsg:` block, `tmux` is installed, and the environment sets `ITHYNO_TMUX_SESSION=proj-a`
+- **GIVEN** `agents.yaml` has tmux enabled (via either signal), `tmux` is installed, and the environment sets `ITHYNO_TMUX_SESSION=proj-a`
 - **WHEN** the Terminal panel opens a PTY
 - **THEN** the resolved startup line uses `-s proj-a` (not the `ithyno-<hash>` default)
 - **AND** a second ithyno instance with the same env var and any project root shares the same session (opt-in cross-project sharing)
 
 #### Scenario: re-attach idempotence via `-A`
-- **GIVEN** an `agmsg:`-configured workspace whose tmux session `ithyno-<hash>` is already running (previous PTY closed but session was detached, not killed)
+- **GIVEN** a tmux-enabled workspace whose tmux session `ithyno-<hash>` is already running (previous PTY closed but session was detached, not killed)
 - **WHEN** the Terminal panel opens a new PTY for the same project
 - **THEN** `tmux new-session -A -s ithyno-<hash>` attaches to the existing session (does NOT error, does NOT create a duplicate); the user sees the same tmux state as before the disconnect
 
@@ -2620,7 +2634,7 @@ Runtime project switch (`POST /api/project/switch` from `respawn-manager-pty-on-
 - **AND** the environment has no `ITHYNO_TERMINAL_STARTUP`
 - **AND** `<project-root>/.ithyno/session-id` does NOT exist
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** ithyno mints a fresh UUID v4, creates `<project-root>/.ithyno/session-id` containing that UUID, and the resolved startup line is `claude --session-id <uuid>` (or the tmux-wrapped variant when agmsg is configured)
+- **THEN** ithyno mints a fresh UUID v4, creates `<project-root>/.ithyno/session-id` containing that UUID, and the resolved startup line is `claude --session-id <uuid>` (or the tmux-wrapped variant when tmux is enabled)
 - **AND** the terminal does NOT print "No conversation found" — Claude Code starts a fresh conversation bound to the newly-minted id
 
 #### Scenario: fallback subsequent launch resumes

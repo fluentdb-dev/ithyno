@@ -540,3 +540,66 @@ agents:
     if (!cfg.ok) expect(cfg.error).toMatch(/agmsg\.storage/);
   });
 });
+
+describe("AgentRegistry tmux toggle (decouple-tmux-from-agmsg)", () => {
+  it("defaults tmux to false when the field is absent", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.tmux).toBe(false);
+    expect(reg.tmux()).toBe(false);
+  });
+
+  it("parses tmux: true independently of agmsg", async () => {
+    const reg = await loadWith(
+      `tmux: true
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.tmux).toBe(true);
+    expect(reg.tmux()).toBe(true);
+    expect(cfg.agmsg).toBeNull();
+  });
+
+  it("tmux and agmsg coexist without interfering", async () => {
+    const reg = await loadWith(
+      `tmux: true
+agmsg:
+  team: alpha
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(true);
+    expect(cfg.tmux).toBe(true);
+    expect(cfg.agmsg).toEqual({ team: "alpha" });
+  });
+
+  it("rejects a non-boolean tmux value", async () => {
+    const reg = await loadWith(
+      `tmux: "yes"
+agents:
+  - name: claude
+    command: claude
+    args: []
+`,
+    );
+    const cfg = reg.publicConfig();
+    expect(cfg.ok).toBe(false);
+    if (!cfg.ok) expect(cfg.error).toMatch(/tmux must be a boolean/);
+  });
+});

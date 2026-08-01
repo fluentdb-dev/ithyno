@@ -127,15 +127,19 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  *
  * An empty `startup` string disables auto-launch (raw shell).
  *
- * When `registry.agmsg()` is non-null (workspace opted into the
- * PTY→tmux→agmsg flavor via `add-agmsg-config-block`), the resolved
+ * When tmux is *enabled* — `registry.tmux()` is `true`, OR
+ * `registry.agmsg()` is non-null (workspace opted into the
+ * PTY→tmux→agmsg flavor via `add-agmsg-config-block`) — the resolved
  * manager command is further wrapped in
  * `tmux new-session -A -s <name> -- <cmd> <args…>` where `<name>` is
- * `$ITHYNO_TMUX_SESSION` when set (non-empty) else `ithyno`. When
- * `tmux` is not on `PATH` the wrap is skipped and the startup line
- * becomes a `printf`-based fallback banner; `initialInput` is
- * suppressed in the fallback since the manager isn't running.
- * See wrap-embedded-pty-in-tmux.
+ * `$ITHYNO_TMUX_SESSION` when set (non-empty) else `ithyno`. `agmsg`
+ * being configured implies tmux unconditionally (there is no way to
+ * configure agmsg without tmux); the `tmux` toggle is independent and
+ * lets a project use tmux without agmsg. When `tmux` is not on `PATH`
+ * the wrap is skipped and the startup line becomes a `printf`-based
+ * fallback banner; `initialInput` is suppressed in the fallback since
+ * the manager isn't running. See wrap-embedded-pty-in-tmux and
+ * decouple-tmux-from-agmsg.
  */
 /**
  * Read `<projectRoot>/.ithyno/session-claude` and pick the
@@ -225,6 +229,9 @@ export function ptyStartup(
 } {
   const manager = registry?.managerAgent() ?? null;
   const agmsg = registry?.agmsg() ?? null;
+  // agmsg implies tmux unconditionally; `tmux: true` is an independent
+  // opt-in. See decouple-tmux-from-agmsg.
+  const tmuxEnabled = (registry?.tmux() ?? false) || agmsg !== null;
 
   let baseStartup: string;
   let initialInput: string | undefined;
@@ -252,13 +259,13 @@ export function ptyStartup(
     initialInput = undefined;
   }
 
-  if (agmsg === null) {
+  if (!tmuxEnabled) {
     return initialInput === undefined
       ? { startup: baseStartup }
       : { startup: baseStartup, initialInput };
   }
 
-  // agmsg configured — wrap in tmux (or fall back with a banner).
+  // tmux enabled (via agmsg or the tmux toggle) — wrap in tmux (or fall back with a banner).
   if (!hasTmux()) {
     return { startup: tmuxMissingFallback() };
   }
@@ -300,9 +307,9 @@ export function tmuxSessionName(projectRoot?: string): string {
 }
 
 function tmuxMissingFallback(): string {
-  const line1 = "\\n\\u26a0\\ufe0f  agmsg is configured in agents.yaml but tmux was not found on PATH.";
+  const line1 = "\\n\\u26a0\\ufe0f  tmux is enabled (agmsg or tmux: true in agents.yaml) but tmux was not found on PATH.";
   const line2 = "Install tmux (brew install tmux on macOS, apt/pacman/dnf on Linux) and reopen";
-  const line3 = "the Terminal panel, or remove the agmsg: block to fall back to direct spawn.\\n";
+  const line3 = "the Terminal panel, or remove the agmsg: block / tmux: true to fall back to direct spawn.\\n";
   return `printf '${line1}\\n${line2}\\n${line3}\\n'`;
 }
 

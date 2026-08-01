@@ -75,6 +75,9 @@ export type AgentConfig =
       maxParallel: number;
       maxReworkRounds: number;
       agmsg: AgmsgConfig | null;
+      /** Top-level `tmux: true` toggle. Independent of `agmsg` — see
+       *  {@link AgentRegistry.tmux}. Default `false` when absent. */
+      tmux: boolean;
       warnings: string[];
     }
   | {
@@ -84,6 +87,7 @@ export type AgentConfig =
       maxParallel: number; // last-known-good
       maxReworkRounds: number; // last-known-good
       agmsg: AgmsgConfig | null; // last-known-good
+      tmux: boolean; // last-known-good
       warnings: string[];
       error: string;
     };
@@ -374,6 +378,20 @@ function validateParallelExecution(raw: unknown): boolean {
 }
 
 /**
+ * Validate top-level `tmux` field. Absent → false (matches pre-toggle
+ * behavior: no tmux wrap unless `agmsg` implies it). Independent of the
+ * `agmsg` block — see {@link AgentRegistry.tmux}. Landed by
+ * decouple-tmux-from-agmsg.
+ */
+function validateTmux(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw !== "boolean") {
+    throw new Error("tmux must be a boolean");
+  }
+  return raw;
+}
+
+/**
  * Validate top-level `maxParallel` field. Absent → DEFAULT_MAX_PARALLEL.
  * Must be an integer in [MAX_PARALLEL_MIN, MAX_PARALLEL_MAX] when present.
  * Landed by add-multi-dispatch-orchestrator.
@@ -502,6 +520,7 @@ export class AgentRegistry {
     maxParallel: DEFAULT_MAX_PARALLEL,
     maxReworkRounds: DEFAULT_MAX_REWORK_ROUNDS,
     agmsg: null,
+    tmux: false,
     warnings: [],
   };
   private projectRoot: string;
@@ -521,6 +540,7 @@ export class AgentRegistry {
         maxParallel: DEFAULT_MAX_PARALLEL,
         maxReworkRounds: DEFAULT_MAX_REWORK_ROUNDS,
         agmsg: null,
+        tmux: false,
         warnings: [],
       };
       return;
@@ -550,6 +570,11 @@ export class AgentRegistry {
           ? (parsed as Record<string, unknown>).agmsg
           : undefined,
       );
+      const tmux = validateTmux(
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).tmux
+          : undefined,
+      );
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[registry] ${w}`);
       }
@@ -560,6 +585,7 @@ export class AgentRegistry {
         maxParallel,
         maxReworkRounds,
         agmsg,
+        tmux,
         warnings,
       };
     } catch (err) {
@@ -571,6 +597,7 @@ export class AgentRegistry {
         maxParallel: this.cache.maxParallel,
         maxReworkRounds: this.cache.maxReworkRounds,
         agmsg: this.cache.agmsg,
+        tmux: this.cache.tmux,
         warnings: this.cache.warnings,
         error: msg,
       };
@@ -621,6 +648,7 @@ export class AgentRegistry {
     maxParallel: number;
     maxReworkRounds: number;
     agmsg: AgmsgConfig | null;
+    tmux: boolean;
     warnings: string[];
   } {
     const sanitized = this.cache.agents.map(({ env, ...rest }) => ({
@@ -636,6 +664,7 @@ export class AgentRegistry {
         maxParallel: this.cache.maxParallel,
         maxReworkRounds: this.cache.maxReworkRounds,
         agmsg: this.cache.agmsg,
+        tmux: this.cache.tmux,
         warnings: this.cache.warnings,
       };
     }
@@ -646,6 +675,7 @@ export class AgentRegistry {
       maxParallel: this.cache.maxParallel,
       maxReworkRounds: this.cache.maxReworkRounds,
       agmsg: this.cache.agmsg,
+      tmux: this.cache.tmux,
       warnings: this.cache.warnings,
     };
   }
@@ -659,6 +689,17 @@ export class AgentRegistry {
    *  runtime pieces (in follow-up changes). */
   agmsg(): AgmsgConfig | null {
     return this.cache.agmsg;
+  }
+
+  /** The parsed top-level `tmux` toggle, default `false` when absent.
+   *  Independent of `agmsg()` — callers that want the *effective*
+   *  tmux-enabled state must OR this with `agmsg() !== null`
+   *  themselves (see `ptyStartup()` in `server/sync/pty.ts`), since
+   *  agmsg configuration implies tmux unconditionally while this
+   *  toggle only ever adds tmux, never removes it. Landed by
+   *  decouple-tmux-from-agmsg. */
+  tmux(): boolean {
+    return this.cache.tmux;
   }
 
   /**

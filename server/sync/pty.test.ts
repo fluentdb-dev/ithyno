@@ -350,7 +350,7 @@ agents:
     );
     const r = ptyStartup(reg);
     expect(r.startup).toMatch(/^printf '/);
-    expect(r.startup).toMatch(/agmsg is configured/);
+    expect(r.startup).toMatch(/tmux is enabled/);
     expect(r.startup).toMatch(/tmux was not found on PATH/);
     expect(r.startup).toMatch(/brew install tmux/);
     expect(r.initialInput).toBeUndefined();
@@ -408,6 +408,71 @@ agents:
       startup: "tmux new-session -A -s ithyno -- claude --continue",
       initialInput: "/ithy-opsx:dispatch",
     });
+  });
+});
+
+describe("ptyStartup — tmux toggle independent of agmsg (decouple-tmux-from-agmsg)", () => {
+  it("tmux: true + no agmsg + tmux available → wraps in tmux", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `tmux: true
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({
+      startup: "tmux new-session -A -s ithyno -- claude --continue",
+    });
+  });
+
+  it("tmux: false + agmsg present → still wraps (agmsg implication is unconditional)", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `tmux: false
+agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({
+      startup: "tmux new-session -A -s ithyno -- claude --continue",
+    });
+  });
+
+  it("tmux: true + tmux missing → fallback banner (same as agmsg's fallback)", async () => {
+    _setTmuxCacheForTest(false);
+    const reg = await loadWith(
+      `tmux: true
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    const r = ptyStartup(reg);
+    expect(r.startup).toMatch(/^printf '/);
+    expect(r.startup).toMatch(/tmux was not found on PATH/);
+  });
+
+  it("neither tmux nor agmsg set → direct spawn, no wrap attempted", async () => {
+    _setTmuxCacheForTest(false); // tmux missing shouldn't matter — never checked
+    const reg = await loadWith(
+      `agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({ startup: "claude --continue" });
   });
 });
 
