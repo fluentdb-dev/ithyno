@@ -282,6 +282,7 @@ export type AgentConfigResponse = {
    *  add-agents-max-rework-rounds-config. */
   maxReworkRounds: number;
   agmsg: AgmsgConfig | null;
+  tmux: boolean;
 };
 
 /** Top-level `agmsg` block from agents.yaml, mirrored via
@@ -447,6 +448,9 @@ export type DoctorReport = {
   agmsg: CliStatus;
   /** Windows only — see server/doctor.ts's DoctorReport doc comment. */
   gitBash?: CliStatus;
+  /** All platforms — see server/doctor.ts's DoctorReport doc comment. */
+  git: CliStatus;
+  node: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
 };

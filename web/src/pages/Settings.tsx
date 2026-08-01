@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setParallelExecution } from "../api";
+import { setParallelExecution, setTmux } from "../api";
 import type { CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
@@ -29,6 +29,7 @@ import type { AgmsgConfig, Cli, DoctorReport } from "../types";
  */
 export function Settings() {
   const parallelExecution = useStore((s) => s.parallelExecution);
+  const tmux = useStore((s) => s.tmux);
   const agmsg = useStore((s) => s.agmsg);
   const pushToast = useStore((s) => s.pushToast);
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
@@ -48,6 +49,21 @@ export function Settings() {
       pushToast(
         "info",
         next ? "Parallel execution enabled" : "Parallel execution disabled",
+      );
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggleTmux = async (next: boolean) => {
+    setBusy(true);
+    try {
+      await setTmux(next);
+      pushToast(
+        "info",
+        next ? "tmux terminal session wrapping enabled" : "tmux wrapping disabled",
       );
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : String(err));
@@ -106,6 +122,21 @@ export function Settings() {
               still injects <code>/ithy-opsx:dispatch &lt;change&gt;</code> into
               the embedded terminal. Per-change{" "}
               <code>proposal.execution</code> overrides always win.
+            </p>
+          </span>
+        </label>
+
+        <label className="settings-toggle" style={{ marginTop: 16 }}>
+          <input
+            type="checkbox"
+            checked={tmux}
+            disabled={busy}
+            onChange={(e) => void onToggleTmux(e.target.checked)}
+          />
+          <span>
+            <strong>Wrap Manager terminal in tmux</strong>
+            <p className="muted">
+              When enabled (or when <code>agmsg</code> is configured), the Manager's terminal process runs inside a persistent <code>tmux</code> session (<code>tmux new-session -A -s ithyno</code>). Enables session persistence across page reloads and disconnects.
             </p>
           </span>
         </label>
@@ -323,6 +354,22 @@ function PrerequisitesSection(props: {
                 </tr>
               </thead>
               <tbody>
+                {renderRow(
+                  "git",
+                  report.git,
+                  null,
+                  report.git.installed === false
+                    ? "Required for worktrees and commits. Install: https://git-scm.com/downloads"
+                    : undefined,
+                )}
+                {renderRow(
+                  "node",
+                  report.node,
+                  null,
+                  report.node.installed === false
+                    ? "Required for New Project / Import (npm, npx). Install: https://nodejs.org"
+                    : undefined,
+                )}
                 {AGENT_CLI_KEYS.map((key) =>
                   renderRow(key, report.agents[key], null),
                 )}

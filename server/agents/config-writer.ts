@@ -403,3 +403,38 @@ export async function writeParallelExecution(
   await atomicWrite(path, stringifyYaml(doc));
   return { ok: true };
 }
+
+/**
+ * Set the top-level `tmux` boolean in agents.yaml.
+ * Preserves other keys. Landed by decouple-tmux-from-agmsg UI integration.
+ */
+export async function writeTmux(
+  projectRoot: string,
+  value: boolean,
+): Promise<ApplyResult> {
+  const path = join(projectRoot, "agents.yaml");
+  let doc: Record<string, unknown>;
+  if (existsSync(path)) {
+    const raw = await readFile(path, "utf8");
+    try {
+      const parsed = parseYaml(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = parsed as Record<string, unknown>;
+      } else {
+        return { ok: false, status: 400, error: "agents.yaml is not a mapping — refusing to overwrite" };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        status: 400,
+        error: `agents.yaml is not valid YAML — refusing to overwrite: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  } else {
+    doc = { agents: [] };
+  }
+  doc.tmux = value;
+  await atomicWrite(path, stringifyYaml(doc));
+  return { ok: true };
+}
+

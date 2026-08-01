@@ -16,7 +16,7 @@ import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, active
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
-import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution } from "./agents/config-writer.js";
+import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
@@ -154,6 +154,7 @@ type ServerEvent =
       agents: Array<Omit<AgentDef, "env"> & { hasEnv: boolean }>;
       parallelExecution: boolean;
       agmsg: import("./agents/registry.js").AgmsgConfig | null;
+      tmux: boolean;
       warnings: string[];
     }
   | { type: "doctor-updated"; report: DoctorReport }
@@ -336,6 +337,7 @@ void agentRegistry.startWatching(() => {
       agents: cfg.agents,
       parallelExecution: cfg.parallelExecution,
       agmsg: cfg.agmsg,
+      tmux: cfg.tmux,
       warnings: cfg.warnings,
     });
   }, 100);
@@ -1297,6 +1299,22 @@ fastify.post<{ Body: { value?: unknown } }>("/api/config/parallel-execution", as
   if (!result.ok) return reply.code(result.status).send({ error: result.error });
   // Registry reload — same rationale as /api/agents/config's POST handler:
   // watcher is best-effort, race with client refetch.
+  await agentRegistry.load();
+  return { ok: true };
+});
+
+// Tmux config toggle (decouple-tmux-from-agmsg UI integration).
+// Writes the top-level `tmux: boolean` field in agents.yaml
+fastify.post<{ Body: { value?: unknown } }>("/api/config/tmux", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+    return reply.code(403).send({ error: "local only" });
+  }
+  const value = (req.body ?? {}).value;
+  if (typeof value !== "boolean") {
+    return reply.code(400).send({ error: "value must be a boolean" });
+  }
+  const result = await writeTmux(getProjectRoot(), value);
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
   await agentRegistry.load();
   return { ok: true };
 });

@@ -9,6 +9,7 @@ import {
   applyAgentConfigPayload,
   coercePayload,
   writeAgmsg,
+  writeTmux,
   type AgentConfigPayload,
 } from "./config-writer.js";
 
@@ -528,3 +529,21 @@ describe("writeAgmsg (add-agmsg-config-write)", () => {
     expect(doc.agmsg).toEqual({ team: "openspec-ui" });
   });
 });
+
+describe("writeTmux", () => {
+  it("creates agents.yaml with tmux: true when missing", async () => {
+    const res = await writeTmux(dir, true);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.tmux).toBe(true);
+  });
+
+  it("updates existing agents.yaml to set tmux: false", async () => {
+    await seed("tmux: true\nagents: []\n");
+    const res = await writeTmux(dir, false);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.tmux).toBe(false);
+  });
+});
+

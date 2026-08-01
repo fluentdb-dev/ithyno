@@ -71,7 +71,7 @@ describe("checkCommand", () => {
 // fire-and-forget-both-in-parallel version, which is invisible in real
 // usage but occasionally exceeds Vitest's 5s default under full-suite
 // parallel load (many other tests spawning subprocesses at once).
-const RUN_DOCTOR_TIMEOUT = 15_000;
+const RUN_DOCTOR_TIMEOUT = 45_000;
 
 describe("runDoctor", () => {
   it("returns a DoctorReport with the expected top-level keys", async () => {

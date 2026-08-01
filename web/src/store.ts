@@ -113,6 +113,8 @@ type Store = {
    *  (default). Landed by add-agmsg-config-block. Metadata-only in P1;
    *  consumers surface it only for future features. */
   agmsg: import("./types").AgmsgConfig | null;
+  /** Top-level `tmux` boolean from agents.yaml (default false). */
+  tmux: boolean;
   /** Resolved Manager status — declared entry, running fallback, or
    *  idle (no terminal, no declaration). Null before the first fetch.
    *  Landed by add-agents-tab-manager-section. */
@@ -325,6 +327,7 @@ export const useStore = create<Store>((set, get) => ({
   agentConfigError: null,
   parallelExecution: false,
   agmsg: null,
+  tmux: false,
   managerStatus: null,
   managerStatusError: null,
   managerActivity: {},
@@ -346,6 +349,7 @@ export const useStore = create<Store>((set, get) => ({
         agents: cfg.agents,
         parallelExecution: cfg.parallelExecution,
         agmsg: cfg.agmsg,
+        tmux: cfg.tmux,
         agentConfigError: cfg.ok ? null : cfg.error ?? "config error",
       });
     } catch (err) {
@@ -733,6 +737,7 @@ export const useStore = create<Store>((set, get) => ({
           agents: msg.agents,
           parallelExecution: msg.parallelExecution,
           agmsg: msg.agmsg,
+          tmux: msg.tmux,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
         // Manager section is driven by `managerStatus` (a separate

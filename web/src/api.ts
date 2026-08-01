@@ -289,6 +289,15 @@ export async function setParallelExecution(value: boolean): Promise<void> {
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Toggle top-level tmux flag in agents.yaml. */
+export async function setTmux(value: boolean): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/tmux",
+    { value },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 /** Enable/disable + upsert/remove the top-level `agmsg:` block in
  *  agents.yaml. Landed by add-agmsg-config-write. */
 export async function setAgmsgConfig(
