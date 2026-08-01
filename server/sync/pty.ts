@@ -229,10 +229,8 @@ export function ptyStartup(
 } {
   const manager = registry?.managerAgent() ?? null;
   const agmsg = registry?.agmsg() ?? null;
-  const tmuxConfig = registry?.tmux();
-  // Explicit tmux boolean (true/false) takes precedence over agmsg.
-  // Omitted (undefined) defaults to agmsg !== null.
-  const tmuxEnabled = tmuxConfig !== undefined ? tmuxConfig : agmsg !== null;
+  // agmsg implies tmux ON unconditionally (AGMSG requires tmux); `tmux: true` is an independent toggle.
+  const tmuxEnabled = (registry?.tmux() ?? false) || agmsg !== null;
 
   let baseStartup: string;
   let initialInput: string | undefined;

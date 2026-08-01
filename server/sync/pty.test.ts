@@ -428,7 +428,7 @@ agents:
     });
   });
 
-  it("tmux: false + agmsg present → explicit tmux: false overrides agmsg to disable wrap", async () => {
+  it("tmux: false + agmsg present → still wraps (agmsg implication is unconditional)", async () => {
     _setTmuxCacheForTest(true);
     const reg = await loadWith(
       `tmux: false
@@ -442,7 +442,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({
-      startup: "claude --continue",
+      startup: "tmux new-session -A -s ithyno -- claude --continue",
     });
   });
 

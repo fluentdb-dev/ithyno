@@ -88,6 +88,20 @@ export type DoctorReport = {
    *  Omitted on macOS/Linux (no equivalent ambiguity there). See
    *  add-doctor-and-installer §8 / add-windows-agmsg-support. */
   gitBash?: CliStatus;
+  /** All platforms. Required for worktree-based dispatch, `git init`,
+   *  and every commit the agent runner makes — not installable from
+   *  this panel, just surfaced so a missing Git fails loudly here
+   *  instead of opaquely deep inside a worktree operation. */
+  git: CliStatus;
+  /** All platforms. Checked because a packaged Electron build bundles
+   *  its OWN internal Node for running ithyno itself, but every
+   *  external subprocess ithyno spawns (`git`, `npm`, `npx` for the
+   *  New Project flow, etc.) relies on a SEPARATE system-wide Node/npm
+   *  install being on PATH — the bundled one isn't exposed for that.
+   *  A user who installs the packaged app without also having Node
+   *  installed would otherwise hit ENOENT deep inside New Project with
+   *  no indication why. */
+  node: CliStatus;
   /** true when at least one agent CLI has installed === true */
   readyForManager: boolean;
   /** ISO timestamp of when the check was performed */
@@ -307,10 +321,12 @@ function checkAgmsg(gitBash: CliStatus | undefined): CliStatus {
 export async function runDoctor(): Promise<DoctorReport> {
   const agentDefs = AGENT_CLIS;
 
-  // Run all agent CLI checks + tmux in parallel
-  const [agentResults, tmuxResult] = await Promise.all([
+  // Run all agent CLI checks + tmux + git + node in parallel
+  const [agentResults, tmuxResult, gitResult, nodeResult] = await Promise.all([
     Promise.all(agentDefs.map((def) => checkCommand(def.cmd, def.versionArg))),
     checkCommand("tmux", "-V"),
+    checkCommand("git", "--version"),
+    checkCommand("node", "--version"),
   ]);
 
   const agents: Record<Cli, CliStatus> = {} as Record<Cli, CliStatus>;
@@ -332,6 +348,8 @@ export async function runDoctor(): Promise<DoctorReport> {
     tmux: tmuxResult,
     agmsg: agmsgResult,
     ...(gitBashResult ? { gitBash: gitBashResult } : {}),
+    git: gitResult,
+    node: nodeResult,
     readyForManager,
     checkedAt: new Date().toISOString(),
   };

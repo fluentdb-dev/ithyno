@@ -510,6 +510,8 @@ function makeReport(overrides: Partial<Record<string, boolean>> = {}): DoctorRep
     ) as DoctorReport["agents"],
     tmux: { installed: false },
     agmsg: { installed: false },
+    git: { installed: true },
+    node: { installed: true },
     checkedAt: new Date().toISOString(),
   };
 }

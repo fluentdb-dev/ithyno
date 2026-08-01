@@ -36,6 +36,7 @@ function cfg(partial: Partial<AgentConfig> & { agents: AgentConfig["agents"] }):
     maxParallel: partial.maxParallel ?? 3,
     maxReworkRounds: (partial as { maxReworkRounds?: number }).maxReworkRounds ?? 5,
     agmsg: partial.agmsg ?? { team: "openspec-ui" },
+    tmux: partial.tmux ?? false,
     warnings: partial.warnings ?? [],
   };
 }
@@ -236,6 +237,7 @@ describe("syncSpawnOptions integration", () => {
       maxParallel: 3,
       maxReworkRounds: 5,
       agmsg: null,
+      tmux: false,
       warnings: [],
     };
     await syncSpawnOptions(c, optionsPath);

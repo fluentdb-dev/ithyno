@@ -76,3 +76,12 @@
 - [x] 8.7 Manual: verified via a direct `runDoctor()` call on this Windows machine — `gitBash.installed: true` (real path), `agmsg.installed: true`, `tmux.installed: true`, matching the machine's actual state (Git Bash + sqlite3 + the working agmsg install from `add-windows-agmsg-support`).
 - [ ] 8.8 Manual: with `sqlite3` temporarily removed from PATH — not tested (would require disturbing the only sqlite3 on this machine, which other tools may depend on); logic mirrors the already-proven `commandExistsOnPath` pattern used elsewhere.
 - [ ] 8.9 Manual: `POST /api/doctor/install { tool: "tmux" }` streaming guidance — not exercised end-to-end through the live HTTP endpoint this session (code path verified by reading + typecheck only).
+
+## 9. Git + Node prerequisite checks (all platforms, added on user request)
+
+- [x] 9.1 `server/doctor.ts` — `DoctorReport.git` / `.node` added (all platforms, not Windows-gated). Computed via `checkCommand("git", "--version")` / `checkCommand("node", "--version")`, run in the same `Promise.all` batch as the rest of `runDoctor()`.
+- [x] 9.2 `web/src/types.ts` — mirrored the two new required fields on the frontend `DoctorReport` type.
+- [x] 9.3 Settings UI — two new rows at the top of the Prerequisites table (`git`, `node`), `installable: null` (neither is auto-installable), with a hint linking to the official installer when missing (`https://git-scm.com/downloads`, `https://nodejs.org`).
+- [x] 9.4 Fixed stale `DoctorReport` mock fixtures in `server/init.test.ts` and `web/src/components/InitDialog.test.ts` to include the two new required fields (typecheck caught both).
+- [x] 9.5 `server/util/resolve-git-bash.ts`'s header comment fixed — it referenced `electron/src/resolve-git-bash.ts` "kept in sync by hand," but that file was deleted by `limit-agmsg-install-prompt-triggers`; comment now reflects there being only one copy.
+- [x] 9.6 Manual: `runDoctor()` + `doctor.test.ts` (47 tests across doctor/InitDialog/Settings) all green on this Windows machine, with `git.installed: true` and `node.installed: true` reflecting the machine's real state.

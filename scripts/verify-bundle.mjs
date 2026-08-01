@@ -123,10 +123,11 @@ function assertTarballShape() {
   log("check 1/3: npm tarball shape");
   const stagingDir = mkdtempSync(join(tmpdir(), "verify-bundle-tarball-"));
   try {
+    const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
     const stdout = execFileSync(
-      "npm",
+      npmCmd,
       ["pack", "--pack-destination", stagingDir],
-      { cwd: repoRoot, encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8", shell: true },
     );
     // `npm pack` prints one .tgz filename per package to stdout; ours is a
     // single-package pack so the last non-empty line is the produced file.

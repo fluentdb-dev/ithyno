@@ -553,7 +553,7 @@ describe("AgentRegistry tmux toggle (decouple-tmux-from-agmsg)", () => {
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(true);
     expect(cfg.tmux).toBe(false);
-    expect(reg.tmux()).toBeUndefined();
+    expect(reg.tmux()).toBe(false);
   });
 
   it("parses tmux: true independently of agmsg", async () => {

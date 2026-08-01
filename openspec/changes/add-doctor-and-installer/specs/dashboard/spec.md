@@ -6,12 +6,21 @@ The server SHALL expose `GET /api/doctor` that returns a snapshot of every prere
 
 On Windows, the report SHALL additionally include a `gitBash: CliStatus`-shaped field distinguishing a real Git Bash installation from the platform's WSL launcher stubs (`C:\Windows\System32\bash.exe`, the WindowsApps execution-alias `bash.exe`) — both of which satisfy a bare `command -v bash` check without being Git Bash, and silently launching WSL instead of Git Bash breaks the agmsg/tmux integration `add-windows-agmsg-support` built. On macOS/Linux this field is omitted (no equivalent ambiguity). The `agmsg` status SHALL also fail (with an explanatory `error`) on Windows when Git Bash cannot be resolved or `sqlite3` is not on `PATH`, even when the `~/.agents/skills/agmsg/scripts/send.sh` marker file is present — a prior file copy succeeding does not mean agmsg can actually run.
 
+On every platform, the report SHALL additionally include `git: CliStatus` and `node: CliStatus` fields. Neither is installable from this panel (no vendor-agnostic way to do so, same as the agent CLIs) — they are surfaced so a missing dependency fails loudly here, with a link to the official installer, instead of opaquely deep inside a worktree operation (git) or the New Project flow's `npm`/`npx` calls (node). `node` matters even though ithyno itself runs on Node, because a packaged Electron build bundles its own internal Node for running ithyno itself — that bundled runtime is not what external subprocesses ithyno spawns (`git`, `npm`, `npx`) resolve against; those need a separate, system-wide Node/npm install on `PATH`.
+
 #### Scenario: Doctor endpoint returns a report
 
 - **WHEN** an authorized client sends `GET /api/doctor`
-- **THEN** the response is a JSON object with keys `agents` (per-CLI map), `tmux`, `agmsg`, `readyForManager`, `checkedAt`
+- **THEN** the response is a JSON object with keys `agents` (per-CLI map), `tmux`, `agmsg`, `git`, `node`, `readyForManager`, `checkedAt`
 - **AND** each per-CLI entry has `{ installed, version?, path?, error? }`
 - **AND** `readyForManager` is `true` iff at least one agent CLI has `installed === true`
+
+#### Scenario: Git or Node missing surfaces install guidance, not a silent failure
+
+- **GIVEN** `git` (or `node`) is not resolvable on `PATH`
+- **WHEN** an authorized client sends `GET /api/doctor`
+- **THEN** the corresponding field has `installed: false`
+- **AND** Settings' Prerequisites table shows a red x with a hint pointing at the official installer (`https://git-scm.com/downloads` / `https://nodejs.org`) — no [Install] button, since neither is auto-installable
 
 #### Scenario: Doctor endpoint requires session token
 

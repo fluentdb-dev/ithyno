@@ -55,6 +55,8 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
       ) as DoctorReport["agents"],
       tmux: { installed: false },
       agmsg: { installed: false },
+      git: { installed: true },
+      node: { installed: true },
       checkedAt: new Date().toISOString(),
     };
   }

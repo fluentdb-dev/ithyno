@@ -9,11 +9,10 @@
 // thing. Deriving the path from `git`'s own self-reported install
 // layout avoids that ambiguity entirely.
 //
-// Kept in sync by hand with electron/src/resolve-git-bash.ts — the
-// electron/ and server/ workspaces communicate only via child-process
-// spawn + HTTP, not shared TS modules, so this ~15-line helper is
-// duplicated rather than factored into a new shared package. If you
-// fix a bug here, check the other copy too.
+// There used to be a second copy at electron/src/resolve-git-bash.ts
+// for the (now-deleted) Electron startup dialog — see
+// limit-agmsg-install-prompt-triggers. This is the only copy left;
+// no sync-by-hand concern anymore.
 //
 // Landed by add-doctor-and-installer (Windows support, §8).
 
