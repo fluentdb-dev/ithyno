@@ -12,12 +12,31 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
+    "onView:ithyno.sidebarDashboardView",
     "onCommand:ithyno.show",
     "onCommand:ithyno.newProject",
     "onCommand:ithyno.importProject",
     "onCommand:ithyno.about"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ithyno-activitybar",
+          "title": "ithyno",
+          "icon": "extension.png"
+        }
+      ]
+    },
+    "views": {
+      "ithyno-activitybar": [
+        {
+          "id": "ithyno.sidebarDashboardView",
+          "name": "ithyno Dashboard",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ithyno.show",

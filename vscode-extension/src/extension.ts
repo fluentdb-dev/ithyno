@@ -25,6 +25,43 @@ import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
  *
  * Landed by vscode-terminal-uses-project-session-id (2026-07-19).
  */
+function parseManagerCommand(workspaceRoot: string): { command: string; args?: string[] } | null {
+  const p = join(workspaceRoot, "agents.yaml");
+  if (!existsSync(p)) return null;
+  try {
+    const content = readFileSync(p, "utf8");
+    const lines = content.split(/\r?\n/);
+    let currentRoleIsManager = false;
+    let currentCommand = "";
+    let currentArgs: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ") || trimmed === "agents:" || trimmed === "manager:") {
+        if (currentRoleIsManager && currentCommand) {
+          return { command: currentCommand, args: currentArgs };
+        }
+        currentRoleIsManager = trimmed === "manager:";
+        currentCommand = "";
+        currentArgs = [];
+      }
+      if (/role:\s*manager/i.test(trimmed) || /roles:.*manager/i.test(trimmed)) {
+        currentRoleIsManager = true;
+      }
+      const cmdMatch = /^command:\s*(.+)$/i.exec(trimmed);
+      if (cmdMatch) {
+        currentCommand = cmdMatch[1].trim().replace(/^["']|["']$/g, "");
+      }
+    }
+    if (currentRoleIsManager && currentCommand) {
+      return { command: currentCommand, args: currentArgs };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 function resolveInjectedStartup(
   workspaceRoot: string,
   configValue: string | undefined,
@@ -32,6 +69,12 @@ function resolveInjectedStartup(
   if (configValue && configValue.trim().length > 0) {
     return configValue;
   }
+  const manager = parseManagerCommand(workspaceRoot);
+  if (manager && manager.command && manager.command !== "claude") {
+    const args = manager.args ?? [];
+    return [manager.command, ...args].join(" ");
+  }
+
   const idPath = join(workspaceRoot, ".ithyno", "session-id");
   let uuid = "";
   if (existsSync(idPath)) {
@@ -187,7 +230,44 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (session === s) session = null;
     });
+
+    if (activeSidebarWebviewView) {
+      activeSidebarWebviewView.webview.html = renderWebviewHtml(server.url);
+    }
   });
+
+  let activeSidebarWebviewView: vscode.WebviewView | null = null;
+
+  class SidebarDashboardViewProvider implements vscode.WebviewViewProvider {
+    resolveWebviewView(webviewView: vscode.WebviewView): void {
+      activeSidebarWebviewView = webviewView;
+      webviewView.webview.options = { enableScripts: true };
+
+      if (session) {
+        webviewView.webview.html = renderWebviewHtml(session.server.url);
+      } else {
+        void vscode.commands.executeCommand("ithyno.show");
+      }
+
+      webviewView.webview.onDidReceiveMessage((msg) => {
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "pty.inject" && typeof msg.data === "string" && session) {
+          const terminate = msg.terminate !== false;
+          const t = ensureTerminal(session);
+          t.sendText(msg.data, terminate);
+          t.show(true);
+        }
+        if (msg.type === "ithyno:reload-session" && session) {
+          webviewView.webview.html = renderWebviewHtml(session.server.url);
+        }
+      });
+    }
+  }
+
+  const sidebarProvider = vscode.window.registerWebviewViewProvider(
+    "ithyno.sidebarDashboardView",
+    new SidebarDashboardViewProvider(),
+  );
 
   const newProjectCmd = vscode.commands.registerCommand(
     "ithyno.newProject",
@@ -205,7 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
     openAboutPanel(context),
   );
 
-  context.subscriptions.push(cmd, newProjectCmd, importProjectCmd, aboutCmd);
+  context.subscriptions.push(cmd, sidebarProvider, newProjectCmd, importProjectCmd, aboutCmd);
 }
 
 /**
