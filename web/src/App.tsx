@@ -111,6 +111,38 @@ export function App() {
     connectWs();
   }, [load, connectWs, authExpired]);
 
+  // Automated wake-up / focus session recovery:
+  // When system wakes up from sleep or gains focus (visibilitychange → visible, or focus),
+  // automatically attempt checkAuth(), connectWs(), and load() to restore state seamlessly.
+  useEffect(() => {
+    const handleAutoRecover = () => {
+      void checkAuth().then((ok) => {
+        if (ok) {
+          setAuthExpired(false);
+          connectWs();
+          void load();
+        } else if (isElectronShell()) {
+          // In Electron shell, if auth fails on wake-up, attempt an automatic window reload
+          // so the main process can refresh/re-bootstrap the local server token
+          window.location.reload();
+        }
+      });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleAutoRecover();
+      }
+    };
+
+    window.addEventListener("focus", handleAutoRecover);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", handleAutoRecover);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [connectWs, load]);
+
   // Cmd/Ctrl+Shift+K — restart terminal, but only when focus is inside
   // `.terminal-host` or on the `.terminal-reconnect` button.
   useEffect(() => {

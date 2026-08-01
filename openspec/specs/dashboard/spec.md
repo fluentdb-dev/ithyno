@@ -233,13 +233,19 @@ call as the `X-Session-Token` header and on every WebSocket upgrade as a
 
 ### Requirement: Session Expired Recovery
 
-The dashboard SHALL surface authentication failures as a single full-page banner with a clear path back to a working session, including an explicit primary "Reload Dashboard" action button that restores access across Web, Electron, and VS Code extension shells.
+The dashboard SHALL surface authentication failures as a single full-page banner with a clear path back to a working session. Upon system wake-up or focus restoration (`visibilitychange` / `focus`), the dashboard SHALL automatically attempt session re-authorization (`checkAuth()`) and WebSocket reconnection before showing the fallback banner.
 
-#### Scenario: 401 or 403 from the server
+#### Scenario: System wake-up auto-recovery
 
-- **WHEN** a mutating call returns 401 or 403 with an auth-related reason
-- **THEN** the UI shows a "Session expired" banner with a primary "Reload Dashboard" action button
-- **AND** clicking "Reload Dashboard" reloads or refreshes the session for the current UI shell
+- **WHEN** the browser window recovers from sleep or gains focus (`visibilitychange` to visible or `focus`)
+- **THEN** the dashboard automatically runs `checkAuth()` and reconnects WebSocket connections
+- **AND** if auth check succeeds, the workspace state is reloaded without user intervention
+
+#### Scenario: Electron auto-reload on wake-up auth failure
+
+- **GIVEN** the dashboard is running inside an Electron shell
+- **WHEN** system wake-up occurs and auth check initially fails
+- **THEN** the shell automatically attempts a single window reload to re-evaluate the local server session before showing the fallback banner
 
 ### Requirement: Stale Token Detection on Load
 The dashboard SHALL validate the stored session token against the server on
