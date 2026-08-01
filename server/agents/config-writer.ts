@@ -363,6 +363,7 @@ export async function writeAgmsg(
       nextBlock.storage = block.storage;
     }
     doc.agmsg = nextBlock;
+    doc.tmux = true;
   }
 
   // Update mode for worker agents in agents.yaml
@@ -452,6 +453,25 @@ export async function writeTmux(
     doc = { agents: [] };
   }
   doc.tmux = value;
+  if (!value) {
+    // TMUX disabled → AGMSG disabled → worker mode = single-prompt
+    delete doc.agmsg;
+    if (Array.isArray(doc.agents)) {
+      for (const agent of doc.agents) {
+        if (agent && typeof agent === "object") {
+          const a = agent as Record<string, unknown>;
+          const roles = Array.isArray(a.roles)
+            ? a.roles
+            : typeof a.role === "string"
+              ? [a.role]
+              : [];
+          if (!roles.includes("manager")) {
+            a.mode = "single-prompt";
+          }
+        }
+      }
+    }
+  }
   await atomicWrite(path, stringifyYaml(doc));
   return { ok: true };
 }

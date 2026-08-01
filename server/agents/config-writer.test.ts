@@ -539,12 +539,16 @@ describe("writeTmux", () => {
     expect(doc.tmux).toBe(true);
   });
 
-  it("updates existing agents.yaml to set tmux: false", async () => {
-    await seed("tmux: true\nagents: []\n");
+  it("updates existing agents.yaml to set tmux: false and disables agmsg + sets mode single-prompt", async () => {
+    await seed(
+      ["tmux: true", "agmsg:", "  team: alpha", "agents:", "  - name: worker", "    mode: live-shell", "    roles: [code]", "    command: cmd", "    args: []", ""].join("\n"),
+    );
     const res = await writeTmux(dir, false);
     expect(res).toEqual({ ok: true });
     const doc = await readBack();
     expect(doc.tmux).toBe(false);
+    expect(doc.agmsg).toBeUndefined();
+    expect((doc.agents as Record<string, unknown>[])[0].mode).toBe("single-prompt");
   });
 });
 
