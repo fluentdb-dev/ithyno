@@ -176,7 +176,7 @@ export function activate(context: vscode.ExtensionContext): void {
         t.show(true);
       }
       if (msg.type === "ithyno:reload-session") {
-        panel.webview.html = renderWebviewHtml(s.server.url, s.server.port);
+        panel.webview.html = renderWebviewHtml(s.server.url);
       }
     });
 
