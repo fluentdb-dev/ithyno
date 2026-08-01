@@ -16,6 +16,7 @@ export interface AboutConfig {
 }
 
 export const IPC_TERMINAL_RESTART = 'ithyno:terminal-restart';
+export const IPC_OPEN_ABOUT = 'ithyno:open-about';
 
 export interface MenuHandlers {
   about: AboutConfig;
@@ -158,7 +159,13 @@ export function buildAppMenu(handlers: MenuHandlers): Menu {
           : [
               {
                 label: `About ${about.name}`,
-                click: () => app.showAboutPanel(),
+                click: () => {
+                  app.showAboutPanel();
+                  const win = handlers.getWindow();
+                  if (win && !win.isDestroyed()) {
+                    win.webContents.send(IPC_OPEN_ABOUT);
+                  }
+                },
               } as MenuItemConstructorOptions,
               { type: 'separator' as const },
             ]),

@@ -611,7 +611,11 @@ if (!gotLock) {
     app.setAboutPanelOptions({
       applicationName: aboutConfig.name,
       applicationVersion: aboutConfig.version,
+      version: aboutConfig.version,
       copyright: `License: ${aboutConfig.license}`,
+      website: aboutConfig.repositoryUrl,
+      comments: aboutConfig.description,
+      authors: ["ithyno contributors"],
     });
     refreshMenu(aboutConfig);
 

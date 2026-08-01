@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld('ithyno', {
   openProject: (path: string): void => {
     ipcRenderer.send(IPC_OPEN_PROJECT, path);
   },
+  /** Subscribe to open-about events sent by the Electron menu.
+   *  Returns an unsubscribe function. */
+  onOpenAbout: (cb: () => void): (() => void) => {
+    const listener = () => cb();
+    ipcRenderer.on('ithyno:open-about', listener);
+    return () => ipcRenderer.off('ithyno:open-about', listener);
+  },
 });
 
 /**

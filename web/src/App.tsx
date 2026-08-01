@@ -17,6 +17,7 @@ import { Terminal } from "./components/Terminal";
 import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
+import { AboutModal } from "./components/AboutModal";
 import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
 import { ImportProjectFlow } from "./components/ImportProjectFlow";
 import { ImportedProjectNotification } from "./components/ImportedProjectNotification";
@@ -145,6 +146,15 @@ export function App() {
       setImportFlowRoot(projectRoot || undefined);
       setImportFlowActive(true);
     });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, []);
+
+  // Electron IPC: menu "About ithyno" sends `ithyno:open-about` to the renderer.
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => {
+    const w = window as any;
+    if (!w.ithyno?.onOpenAbout) return;
+    const unsub = w.ithyno.onOpenAbout(() => setAboutOpen(true));
     return () => { if (typeof unsub === "function") unsub(); };
   }, []);
 
@@ -343,6 +353,8 @@ export function App() {
           </div>
         ))}
       </div>
+
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }
