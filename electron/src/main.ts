@@ -614,7 +614,6 @@ if (!gotLock) {
       version: aboutConfig.version,
       copyright: `License: ${aboutConfig.license}`,
       website: aboutConfig.repositoryUrl,
-      comments: aboutConfig.description,
       authors: ["ithyno contributors"],
     });
     refreshMenu(aboutConfig);
