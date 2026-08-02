@@ -17,6 +17,8 @@ function loadShellEnv(): void {
         const val = line.slice(idx + 1);
         if (
           key === "PATH" ||
+          key === "LANG" ||
+          key.startsWith("LC_") ||
           key.startsWith("RBENV") ||
           key.startsWith("NVM_") ||
           key.startsWith("NDENV") ||
