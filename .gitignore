@@ -8,6 +8,7 @@ web/dist/
 server-dist/
 electron/out/
 electron/dist/
+electron/host/
 vscode-extension/out/
 vscode-extension/ithyno.vsix
 vscode-extension/ithyno-*.vsix

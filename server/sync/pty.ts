@@ -74,7 +74,7 @@ export function defaultShell(): { cmd: string; args: string[] } {
     return { cmd, args: [] };
   }
   const sh = process.env.SHELL ?? "/bin/bash";
-  return { cmd: sh, args: [] };
+  return { cmd: sh, args: ["-l"] };
 }
 
 /**
@@ -306,7 +306,7 @@ export function tmuxSessionName(projectRoot?: string): string {
 }
 
 function tmuxMissingFallback(): string {
-  const line1 = "\\n\\u26a0\\ufe0f  tmux is enabled (agmsg or tmux: true in agents.yaml) but tmux was not found on PATH.";
+  const line1 = "\\n⚠️  tmux is enabled (agmsg or tmux: true in agents.yaml) but tmux was not found on PATH.";
   const line2 = "Install tmux (brew install tmux on macOS, apt/pacman/dnf on Linux) and reopen";
   const line3 = "the Terminal panel, or remove the agmsg: block / tmux: true to fall back to direct spawn.\\n";
   return `printf '${line1}\\n${line2}\\n${line3}\\n'`;

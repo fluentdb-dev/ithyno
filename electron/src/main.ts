@@ -10,6 +10,39 @@ import {
 } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
+
+function loadShellEnv(): void {
+  if (process.platform === 'win32') return;
+  try {
+    const shell = process.env.SHELL || '/bin/zsh';
+    const output = execSync(`"${shell}" -l -c 'printenv'`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    });
+    for (const line of output.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx);
+        const val = line.slice(idx + 1);
+        if (
+          key === 'PATH' ||
+          key.startsWith('RBENV') ||
+          key.startsWith('NVM_') ||
+          key.startsWith('NDENV') ||
+          key.startsWith('NODE_')
+        ) {
+          process.env[key] = val;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[main] failed to load shell env:', err);
+  }
+}
+
+loadShellEnv();
 
 const IPC_SET_TITLE_BAR_COLOR = 'openspec-ui:set-title-bar-color';
 const DEFAULT_CHROME_COLOR = '#0f1115';
