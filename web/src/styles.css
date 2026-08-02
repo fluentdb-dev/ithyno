@@ -3081,7 +3081,11 @@ a.modal-btn:hover {
 
 /* Settings page (add-parallel-execution-config) */
 .settings-page {
-  max-width: 720px;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 16px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .settings-page h2 {
   margin: 0 0 20px;
@@ -3842,7 +3846,9 @@ a.modal-btn:hover {
   border-radius: var(--radius);
   padding: 24px;
   width: min(640px, 90vw);
-  max-height: 80vh;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
