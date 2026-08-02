@@ -42,7 +42,11 @@ export function renderWebviewHtml(serverUrl: string): string {
       }
 
       if (app) {
-        app.addEventListener('load', sendTheme);
+        app.addEventListener('load', () => {
+          sendTheme();
+          const t1 = setInterval(sendTheme, 200);
+          setTimeout(() => clearInterval(t1), 3000);
+        });
       }
       const observer = new MutationObserver(sendTheme);
       observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
@@ -51,6 +55,10 @@ export function renderWebviewHtml(serverUrl: string): string {
         const data = event && event.data;
         if (!data || typeof data !== 'object') return;
         if (event.source === app.contentWindow) {
+          if (data.type === 'vscode:get-theme') {
+            sendTheme();
+            return;
+          }
           if (typeof data.type === 'string' && data.type.indexOf('pty.') === 0) {
             vscode.postMessage(data);
           }

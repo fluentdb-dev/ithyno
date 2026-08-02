@@ -33,35 +33,40 @@ function resolveApplied(pref: ThemePreference): AppliedTheme {
 
 export function useAppliedTheme(): AppliedTheme {
   const theme = useStore((s) => s.theme);
-  const [applied, setApplied] = useState<AppliedTheme>(() => resolveApplied(theme));
-
-  // Recompute + push to <html data-theme=…> whenever the preference changes.
-  useEffect(() => {
-    const next = resolveApplied(theme);
-    setApplied(next);
-    if (typeof document !== "undefined") {
-      document.documentElement.dataset.theme = next;
-    }
-  }, [theme]);
+  const [vsCodeTheme, setVsCodeTheme] = useState<AppliedTheme | null>(null);
+  const [systemOsTheme, setSystemOsTheme] = useState<AppliedTheme | null>(null);
 
   // Subscribe to VS Code theme changes
   useEffect(() => {
-    if (!isVsCodeShell() && theme !== "system") return;
+    if (!isVsCodeShell()) return;
     const handleVsCodeTheme = (e: MessageEvent) => {
       if (
         e.data &&
         e.data.type === "vscode:theme-changed" &&
         (e.data.theme === "light" || e.data.theme === "dark")
       ) {
-        setApplied(e.data.theme);
-        if (typeof document !== "undefined") {
-          document.documentElement.dataset.theme = e.data.theme;
-        }
+        setVsCodeTheme(e.data.theme);
       }
     };
     window.addEventListener("message", handleVsCodeTheme);
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "vscode:get-theme" }, "*");
+    }
     return () => window.removeEventListener("message", handleVsCodeTheme);
-  }, [theme]);
+  }, []);
+
+  const applied: AppliedTheme =
+    isVsCodeShell() && vsCodeTheme != null
+      ? vsCodeTheme
+      : theme === "system" && systemOsTheme != null
+        ? systemOsTheme
+        : resolveApplied(theme);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.theme = applied;
+    }
+  }, [applied]);
 
   // Follow OS changes only when the user picked "system". Manual "light" /
   // "dark" is a hard override — we deliberately do not subscribe then.
@@ -71,7 +76,7 @@ export function useAppliedTheme(): AppliedTheme {
     const mm = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = (e: MediaQueryListEvent) => {
       const next: AppliedTheme = e.matches ? "dark" : "light";
-      setApplied(next);
+      setSystemOsTheme(next);
       document.documentElement.dataset.theme = next;
     };
     // addEventListener is the modern API; addListener is the Safari <14

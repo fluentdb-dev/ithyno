@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderOnboardingHtml, renderWebviewHtml } from "./webview-html";
 import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
@@ -30,34 +31,28 @@ function parseManagerCommand(workspaceRoot: string): { command: string; args?: s
   if (!existsSync(p)) return null;
   try {
     const content = readFileSync(p, "utf8");
-    const lines = content.split(/\r?\n/);
-    let currentRoleIsManager = false;
-    let currentCommand = "";
-    let currentArgs: string[] = [];
+    const parsed = parseYaml(content);
+    if (!parsed || typeof parsed !== "object") return null;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("- ") || trimmed === "agents:" || trimmed === "manager:") {
-        if (currentRoleIsManager && currentCommand) {
-          return { command: currentCommand, args: currentArgs };
-        }
-        currentRoleIsManager = trimmed === "manager:";
-        currentCommand = "";
-        currentArgs = [];
-      }
-      if (/role:\s*manager/i.test(trimmed) || /roles:.*manager/i.test(trimmed)) {
-        currentRoleIsManager = true;
-      }
-      const cmdMatch = /^command:\s*(.+)$/i.exec(trimmed);
-      if (cmdMatch) {
-        currentCommand = cmdMatch[1].trim().replace(/^["']|["']$/g, "");
-      }
+    const agentsList: any[] = Array.isArray(parsed.agents)
+      ? parsed.agents
+      : Array.isArray(parsed.manager)
+        ? parsed.manager
+        : [];
+
+    const manager = agentsList.find((a: any) => {
+      if (!a || typeof a !== "object") return false;
+      if (a.role === "manager") return true;
+      if (Array.isArray(a.roles) && a.roles.includes("manager")) return true;
+      return false;
+    });
+
+    if (manager && typeof manager.command === "string" && manager.command.trim().length > 0) {
+      const args = Array.isArray(manager.args) ? manager.args.map(String) : [];
+      return { command: manager.command.trim(), args };
     }
-    if (currentRoleIsManager && currentCommand) {
-      return { command: currentCommand, args: currentArgs };
-    }
-  } catch {
-    /* ignore */
+  } catch (err) {
+    console.warn("[ithyno] failed to parse agents.yaml manager command:", err);
   }
   return null;
 }
@@ -70,9 +65,13 @@ function resolveInjectedStartup(
     return configValue;
   }
   const manager = parseManagerCommand(workspaceRoot);
-  if (manager && manager.command && manager.command !== "claude") {
+  if (manager && manager.command) {
     const args = manager.args ?? [];
-    return [manager.command, ...args].join(" ");
+    if (manager.command === "claude" && args.length === 0) {
+      // Fall through to claude session UUID mint / resume logic below
+    } else {
+      return [manager.command, ...args].join(" ");
+    }
   }
 
   const idPath = join(workspaceRoot, ".ithyno", "session-id");
@@ -259,13 +258,19 @@ export function activate(context: vscode.ExtensionContext): void {
   </body>
 </html>`;
 
-      // Automatically open / reveal the main Editor Tab when clicking the Activity Bar icon
-      void vscode.commands.executeCommand("ithyno.show");
-
       webviewView.webview.onDidReceiveMessage((msg) => {
         if (!msg || typeof msg !== "object") return;
         if (msg.command === "openDashboard") {
           void vscode.commands.executeCommand("ithyno.show");
+        }
+        if (msg.type === "pty.inject" && typeof msg.data === "string" && session) {
+          const terminate = msg.terminate !== false;
+          const t = ensureTerminal(session);
+          t.sendText(msg.data, terminate);
+          t.show(true);
+        }
+        if (msg.type === "ithyno:reload-session" && session) {
+          webviewView.webview.html = renderWebviewHtml(session.server.url);
         }
       });
     }

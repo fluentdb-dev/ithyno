@@ -76,8 +76,8 @@
     }
   },
   "scripts": {
-    "build": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
-    "watch": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json --watch",
+    "build": "node ../scripts/sync-about-config.mjs && esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js",
+    "watch": "node ../scripts/sync-about-config.mjs && esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js --watch",
     "prepack:host": "node scripts/prepack.mjs",
     "package": "npm run build && npm run prepack:host && node scripts/vsix-package.mjs"
   },
@@ -85,6 +85,7 @@
     "@types/node": "^22.13.5",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.0",
     "typescript": "^5.7.3"
   }
 }
