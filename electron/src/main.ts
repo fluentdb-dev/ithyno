@@ -19,7 +19,7 @@ function loadShellEnv(): void {
     const output = execSync(`"${shell}" -l -c 'printenv'`, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 2000,
+      timeout: 10000,
     });
     for (const line of output.split('\n')) {
       const idx = line.indexOf('=');
@@ -28,6 +28,8 @@ function loadShellEnv(): void {
         const val = line.slice(idx + 1);
         if (
           key === 'PATH' ||
+          key === 'LANG' ||
+          key.startsWith('LC_') ||
           key.startsWith('RBENV') ||
           key.startsWith('NVM_') ||
           key.startsWith('NDENV') ||

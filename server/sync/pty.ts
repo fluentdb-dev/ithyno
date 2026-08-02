@@ -485,6 +485,7 @@ export async function attachPtyToSocket(
     rows: opts.rows ?? 24,
     cwd: opts.cwd,
     env: {
+      LANG: process.env.LANG || "en_US.UTF-8",
       ...process.env,
       TERM: "xterm-256color",
       // The Manager (and any CLI it launches from this shell) needs the
