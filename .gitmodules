@@ -1,4 +1,4 @@
 [submodule "vendor/agmsg"]
 	path = vendor/agmsg
-	url = https://github.com/fujibee/agmsg.git
+	url = https://github.com/fluentdb-dev/agmsg.git
 	shallow = true

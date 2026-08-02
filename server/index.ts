@@ -1,4 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { execSync } from "node:child_process";
+
+function loadShellEnv(): void {
+  if (process.platform === "win32") return;
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const output = execSync(`"${shell}" -l -c 'printenv'`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    for (const line of output.split("\n")) {
+      const idx = line.indexOf("=");
+      if (idx > 0) {
+        const key = line.slice(0, idx);
+        const val = line.slice(idx + 1);
+        if (
+          key === "PATH" ||
+          key.startsWith("RBENV") ||
+          key.startsWith("NVM_") ||
+          key.startsWith("NDENV") ||
+          key.startsWith("NODE_")
+        ) {
+          process.env[key] = val;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[server] failed to load shell env:", err);
+  }
+}
+
+loadShellEnv();
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";

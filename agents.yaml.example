@@ -55,7 +55,7 @@
 #   For interactive-TTY workers (e.g. Claude Code with the full
 #   interactive UI so it can /agmsg peers), wrap the command via a
 #   tmux-spawning helper such as agmsg
-#   (https://github.com/fujibee/agmsg) — set `command:` to the wrapper
+#   (https://github.com/fluentdb-dev/agmsg) — set `command:` to the wrapper
 #   and let it allocate the PTY inside tmux. The ithyno runner itself
 #   never opens a PTY for workers.
 #

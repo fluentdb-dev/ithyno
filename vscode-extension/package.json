@@ -2,7 +2,7 @@
   "name": "ithyno-vscode",
   "displayName": "ithyno",
   "description": "ithyno dashboard for the OpenSpec workflow, embedded in VS Code as a webview panel.",
-  "version": "0.0.1-alpha.1",
+  "version": "0.0.1-alpha.2",
   "private": true,
   "license": "GPL-3.0-or-later",
   "publisher": "ithyno",

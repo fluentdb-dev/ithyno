@@ -1,6 +1,6 @@
 {
   "name": "ithyno-electron",
-  "version": "0.0.1-alpha.1",
+  "version": "0.0.1-alpha.2",
   "private": true,
   "description": "Electron desktop shell for ithyno",
   "author": "ithyno contributors",
@@ -9,10 +9,28 @@
   "scripts": {
     "build": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
     "dev": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json && node ../scripts/launch-electron.mjs",
-    "package:mac": "electron-builder --mac",
-    "package:win": "electron-builder --win",
-    "package:linux": "electron-builder --linux",
-    "package:all": "electron-builder --mac --win --linux"
+    "prepack:host": "node scripts/prepack.mjs",
+    "package:mac": "npm run prepack:host && electron-builder --mac",
+    "package:win": "npm run prepack:host && electron-builder --win",
+    "package:linux": "npm run prepack:host && electron-builder --linux",
+    "package:all": "npm run prepack:host && electron-builder --mac --win --linux"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.4",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0",
+    "chokidar": "^4.0.3",
+    "commander": "^13.1.0",
+    "fastify": "^5.2.1",
+    "gray-matter": "^4.0.3",
+    "mdast-util-to-string": "^4.0.0",
+    "open": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "tsx": "^4.19.2",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0",
+    "ws": "^8.18.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
@@ -38,36 +56,8 @@
     ],
     "extraResources": [
       {
-        "from": "../bin",
-        "to": "app/bin"
-      },
-      {
-        "from": "../server",
-        "to": "app/server"
-      },
-      {
-        "from": "../web/dist",
-        "to": "app/web/dist"
-      },
-      {
-        "from": "../templates",
-        "to": "app/templates"
-      },
-      {
-        "from": "../tsconfig.json",
-        "to": "app/tsconfig.json"
-      },
-      {
-        "from": "../package.json",
-        "to": "app/package.json"
-      },
-      {
-        "from": "../vendor/agmsg",
-        "to": "app/vendor/agmsg"
-      },
-      {
-        "from": "../LICENSE",
-        "to": "app/LICENSE"
+        "from": "host",
+        "to": "app"
       }
     ],
     "mac": {
