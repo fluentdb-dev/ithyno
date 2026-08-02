@@ -45,20 +45,44 @@ for (const rel of ["bin", "server", "web/dist", "templates"]) {
 // dashboard degrades gracefully.
 const rootPkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
 const { "@homebridge/node-pty-prebuilt-multiarch": _dropPty, ...depsMinusPty } = rootPkg.dependencies;
+
+// Read the actual installed esbuild version to keep it synced
+const esbuildPkgPath = resolve(repoRoot, "node_modules", "esbuild", "package.json");
+let esbuildVersion = "0.28.1"; // fallback
+try {
+  const esbuildPkg = JSON.parse(readFileSync(esbuildPkgPath, "utf8"));
+  esbuildVersion = esbuildPkg.version;
+} catch {
+  /* ignore */
+}
+
+// Add the platform-specific esbuild packages to dependencies so they are always installed
+// regardless of the packaging host platform.
+const platformEsbuilds = {
+  "@esbuild/darwin-arm64": esbuildVersion,
+  "@esbuild/darwin-x64": esbuildVersion,
+  "@esbuild/linux-x64": esbuildVersion,
+  "@esbuild/linux-arm64": esbuildVersion,
+  "@esbuild/win32-x64": esbuildVersion,
+};
+
 const stagedPkg = {
   name: rootPkg.name,
   version: rootPkg.version,
   license: rootPkg.license,
   type: rootPkg.type,
   bin: rootPkg.bin,
-  dependencies: depsMinusPty,
+  dependencies: {
+    ...depsMinusPty,
+    ...platformEsbuilds,
+  },
 };
 writeFileSync(resolve(stageDir, "package.json"), JSON.stringify(stagedPkg, null, 2));
 
 // Install production deps inside stageDir so require()/import resolution
 // works when the extension host launches the bin.
 console.log("[prepack] npm install --omit=dev (this can take a minute)…");
-execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts", {
+execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts --force", {
   cwd: stageDir,
   stdio: "inherit",
 });
