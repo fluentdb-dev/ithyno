@@ -1,6 +1,6 @@
 {
   "name": "ithyno-electron",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-alpha.1",
   "private": true,
   "description": "Electron desktop shell for ithyno",
   "author": "ithyno contributors",
@@ -8,7 +8,7 @@
   "main": "out/main.js",
   "scripts": {
     "build": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
-    "dev": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json && electron .",
+    "dev": "node ../scripts/check-preload-imports.mjs && node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json && node ../scripts/launch-electron.mjs",
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
@@ -32,6 +32,8 @@
     },
     "files": [
       "out/**/*",
+      "welcome.html",
+      "build/icon.png",
       "package.json"
     ],
     "extraResources": [

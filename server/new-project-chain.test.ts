@@ -16,29 +16,25 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
+  // maxRetries/retryDelay: cheap insurance against a transient Windows
+  // EBUSY right after a spawned child (openspec init / npm install)
+  // exits but hasn't fully released its file handles yet.
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+}, 30000);
 
-describe("runNewProjectChain — scaffold step", () => {
-  it("emits step-start / log / step-done for a fresh dir with autoGitInit", async () => {
-    // We use a subdirectory that doesn't exist so autoCreateDir kicks
-    // in. We stop the chain by ensuring openspec-init would fail —
-    // easier to inspect step 1 in isolation via events only for the
-    // scaffold branch.
-    // To keep the test fast, we intercept before step 2 runs by
-    // observing events; we still want to allow the full chain to
-    // complete or fail, so use a target that scaffold succeeds on.
-    const target = join(dir, "child");
-    const promise = runNewProjectChain(target, (e) => events.push(e));
-
-    // We can't stop the chain here — it will proceed to openspec-init.
-    // Since openspec-init needs network, the test would be slow; wait
-    // and just assert on the scaffold portion.
-    // Timeout protects against hanging tests when network is available.
-    await Promise.race([
-      promise,
-      new Promise((r) => setTimeout(r, 5000)),
-    ]);
+describe("runNewProjectChain — full run against a fresh dir", () => {
+  // Step 2+ (npm install of @fission-ai/openspec, then openspec init —
+  // see new-project-chain.js) hits the real network. A single shared
+  // run covers scaffold behavior, event shape, and target creation —
+  // splitting these into 3 separate tests each running the full real
+  // chain independently tripled the network/npm-install cost and
+  // caused hookTimeout/testTimeout flakiness under full-suite
+  // concurrency. Also: don't race the chain against a timeout and move
+  // on — an earlier version did that and left an orphaned background
+  // process holding a Windows file lock on `dir`, breaking cleanup.
+  it("scaffolds, streams well-shaped events, and completes for a fresh nested dir with autoGitInit", async () => {
+    const target = join(dir, "nested", "child");
+    await runNewProjectChain(target, (e) => events.push(e));
 
     const scaffoldStart = events.find(
       (e) => e.type === "step-start" && e.step === "scaffold",
@@ -55,7 +51,19 @@ describe("runNewProjectChain — scaffold step", () => {
     expect(scaffoldDone).toBeDefined();
     expect(existsSync(join(target, "CLAUDE.md"))).toBe(true);
     expect(existsSync(join(target, ".git"))).toBe(true);
-  }, 15000);
+
+    // autoCreateDir: the nested target dir didn't exist beforehand.
+    expect(existsSync(target)).toBe(true);
+
+    // Event shape: every log event carries a step, line, and stream.
+    for (const e of events) {
+      if (e.type === "log") {
+        expect(typeof e.step).toBe("string");
+        expect(typeof e.line).toBe("string");
+        expect(e.stream === "stdout" || e.stream === "stderr").toBe(true);
+      }
+    }
+  }, 120000);
 });
 
 describe("runNewProjectChain — scaffold failure", () => {
@@ -84,35 +92,4 @@ describe("runNewProjectChain — scaffold failure", () => {
       events.some((e) => e.type === "step-start" && e.step === "openspec-init"),
     ).toBe(false);
   });
-});
-
-describe("runNewProjectChain — event shape", () => {
-  it("each log event carries a step, line, and stream field", async () => {
-    // Same as first test — inspect log event shape, not completion.
-    const target = join(dir, "shape-check");
-    const promise = runNewProjectChain(target, (e) => events.push(e));
-    await Promise.race([
-      promise,
-      new Promise((r) => setTimeout(r, 5000)),
-    ]);
-    for (const e of events) {
-      if (e.type === "log") {
-        expect(typeof e.step).toBe("string");
-        expect(typeof e.line).toBe("string");
-        expect(e.stream === "stdout" || e.stream === "stderr").toBe(true);
-      }
-    }
-  }, 15000);
-});
-
-describe("runNewProjectChain — target file existence check", () => {
-  it("creates the target dir when autoCreateDir applies", async () => {
-    const target = join(dir, "nested", "created");
-    const promise = runNewProjectChain(target, (e) => events.push(e));
-    await Promise.race([
-      promise,
-      new Promise((r) => setTimeout(r, 5000)),
-    ]);
-    expect(existsSync(target)).toBe(true);
-  }, 15000);
 });

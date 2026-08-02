@@ -1,7 +1,7 @@
 {
   "name": "ithyno",
-  "version": "0.0.1-alpha.0",
-  "description": "ithyno — a local dashboard for the OpenSpec workflow. Markdown is the source of truth; the UI is the view.",
+  "version": "0.0.1-alpha.1",
+  "description": "Local dashboard for OpenSpec — dispatches propose / apply / review / verify skills to AI CLI agents.",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -46,7 +46,9 @@
     "electron:package:all": "npm run --workspace ithyno-electron package:all",
     "build:icons": "node scripts/build-icons.mjs",
     "release:build": "node scripts/release-build.mjs",
-    "release:version": "node scripts/release-version.mjs"
+    "release:verify-bundle": "node scripts/verify-bundle.mjs",
+    "release:version": "node scripts/release-version.mjs",
+    "e2e:skills": "E2E=1 node scripts/skill-e2e.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

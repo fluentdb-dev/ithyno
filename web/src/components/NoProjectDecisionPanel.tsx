@@ -3,14 +3,21 @@
  * Two-branch decision panel shown when the user opens a folder that has no
  * openspec/ directory. Landed by unify-open-project-3-branch;
  * narrowed to 2 branches (Cancel removed) per user feedback 2026-07-22.
+ * Second-branch semantics updated per simplify-browse-to-kanban 2026-07-24:
+ * "Browse read-only" (which mounted a markdown-tree viewer) is now
+ * "Open dashboard anyway" (renders the empty Kanban directly).
+ *
+ * Initialize button navigates to `/onboarding?target=<projectRoot>`,
+ * matching the same transition Settings > New Project uses. The Onboarding
+ * page drives the SSE-streamed runInit + `openspec init` chain and switches
+ * to the initialized project on completion.
  *
  * Actions:
- *   • Initialize openspec here → POST /api/init + refetch state
- *   • Browse read-only → setBrowseMode(true) → renders <ReadOnlyBrowse />
+ *   • Initialize openspec here → navigate to /onboarding?target=<projectRoot>
+ *   • Open dashboard anyway → setBrowseMode(true) → App.tsx renders the
+ *     normal chrome (topbar + Routes) with an empty Overview / Kanban
  */
-import { useState } from "react";
 import { useStore } from "../store";
-import { getSessionToken } from "../runtime";
 
 type Props = {
   projectRoot: string;
@@ -19,38 +26,14 @@ type Props = {
 
 export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
   const setBrowseMode = useStore((s) => s.setBrowseMode);
-  const load = useStore((s) => s.load);
-  const pushToast = useStore((s) => s.pushToast);
-
-  const [initializing, setInitializing] = useState(false);
-
-  async function handleInitialize() {
-    setInitializing(true);
-    try {
-      const token = getSessionToken();
-      const headers: Record<string, string> = { "content-type": "application/json" };
-      if (token) headers["X-Session-Token"] = token;
-      const res = await fetch("/api/init", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ dir: projectRoot }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { reason?: string; error?: string };
-        pushToast("error", body.reason ?? body.error ?? `Initialization failed (HTTP ${res.status})`);
-        return;
-      }
-      // Refetch state — the new openspec/ directory should now exist.
-      await load();
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : String(err));
-    } finally {
-      setInitializing(false);
-    }
-  }
 
   function handleBrowse() {
     setBrowseMode(true);
+  }
+
+  function handleInitialize() {
+    const q = new URLSearchParams({ target: projectRoot, channel: "browser" });
+    window.location.href = `/onboarding?${q.toString()}`;
   }
 
   return (
@@ -62,15 +45,11 @@ export function NoProjectDecisionPanel({ projectRoot, hasClaudeMd }: Props) {
       <p>Choose how you want to continue:</p>
 
       <div className="no-project-actions">
-        <button
-          className="btn-primary"
-          onClick={() => void handleInitialize()}
-          disabled={initializing}
-        >
-          {initializing ? "Initializing…" : "Initialize openspec here"}
+        <button className="btn-primary" onClick={handleInitialize}>
+          Initialize openspec here
         </button>
-        <button className="btn-secondary" onClick={handleBrowse} disabled={initializing}>
-          Browse read-only
+        <button className="btn-secondary" onClick={handleBrowse}>
+          Open dashboard anyway
         </button>
       </div>
 

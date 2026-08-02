@@ -363,7 +363,6 @@ function AgentRow({
     Array.isArray(agent.roles) && agent.roles.length > 0
       ? agent.roles.join(", ")
       : (agent.role ?? "code");
-  const modeDisplay = agent.mode ?? "single-prompt";
   const canDelete = Array.isArray(agent.roles)
     ? !agent.roles.includes("manager")
     : agent.role !== "manager";
@@ -371,7 +370,6 @@ function AgentRow({
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
       <span className="job-role-badge">{rolesDisplay}</span>
-      <span className="job-mode-badge muted">mode: {modeDisplay}</span>
       {agent.description && <span className="muted">— {agent.description}</span>}
       <span className="agent-row-actions">
         <button type="button" className="action-btn ghost" onClick={onEdit}>

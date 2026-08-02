@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { useStore } from "../store";
-import { ProgressBar } from "./ProgressBar";
-import { TagChipList } from "./TagChip";
-import { CommandModal } from "./CommandModal";
-import { injectPty } from "../api";
-import type { Change, JobSummary } from "../types";
-import { useStartFlow } from "../hooks/useStartFlow";
-import { hasNonVerifyWork } from "../util/changeState";
-import { ERR } from "../lib/errorMessages";
+import { useMemo } from "react";
+import type { Change } from "../types";
+import { KanbanCard } from "./KanbanCard";
+import { useKanbanActions } from "../hooks/useKanbanActions";
 
 /**
  * Kanban is a *state monitor* — it shows a classic three-column
  * TODO / IN-PROGRESS / DONE view of every change, driven by task
  * progress. Phase state (`change.phase`) is a Manager-internal
  * concern and is NOT rendered on the board (revert-kanban-ui-lanes:
- * the Kanban structure principle is "3 columns only").
+ * the Kanban structure principle is "3 columns only"). A user who
+ * WANTS the pipeline view opts in via the Overview layout toggle
+ * (add-phase-lane-view-toggle) which swaps this component for
+ * `<PhaseLaneBoard>`.
  *
  * User-facing affordances are limited to:
  *   - `+ New Change` (top toolbar) → proposal creation
@@ -37,41 +33,6 @@ type Buckets = {
   done: Change[];
 };
 
-function modalTitle(p: PendingDrag): string {
-  if (p.kind === "apply") return "Apply this change";
-  if (p.kind === "archive") return "Archive this change";
-  if (p.kind === "agent-merge") return `Merge agent branch for ${p.change.id}`;
-  return `Discard agent worktree for ${p.change.id}`;
-}
-
-function buildPendingCommand(p: PendingDrag, mode: string): string {
-  const id = p.change.id;
-  if (p.kind === "apply") return `/opsx:apply ${id}`;
-  if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : `/ithy-opsx:archive ${id}`;
-  if (p.kind === "agent-merge") {
-    // Claude mode delegates to the ithy-opsx-merge skill so the auto-stash /
-    // auto-pop dance handles a dirty main tree; CLI mode keeps the raw git
-    // invocation (users who chose CLI expect to handle stashing themselves).
-    return mode === "cli" ? `git merge --no-ff ${p.job.branch}` : `/ithy-opsx:merge ${id}`;
-  }
-  return `git worktree remove --force ${p.job.worktreePath} && git branch -D ${p.job.branch}`;
-}
-
-function modalSubmitLabel(p: PendingDrag, commandStyle: "claude" | "cli"): string {
-  if (p.kind === "apply") return "Send /opsx:apply";
-  if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive";
-  if (p.kind === "agent-merge") return commandStyle === "cli" ? "Send git merge" : "Send /ithy-opsx:merge";
-  return "Send cleanup";
-}
-
-/**
- * Progress-derived bucketing. A change is:
- *   - `done` if all tasks are ticked (progress complete),
- *   - `inprogress` if there is a live/orphaned/completed job attached, else
- *   - `todo` (no started work).
- *
- * `change.phase` is intentionally ignored — see the file-level comment.
- */
 /**
  * Folder-driven placement (post collapse-jobregistry-and-add-semaphore).
  * Uses filesystem state only — no consultation of an in-memory job
@@ -106,12 +67,6 @@ function bucketize(changes: Change[]): Buckets {
   return { todo, inprogress, done };
 }
 
-type PendingDrag =
-  | { kind: "apply"; change: Change }
-  | { kind: "archive"; change: Change }
-  | { kind: "agent-merge"; change: Change; job: JobSummary }
-  | { kind: "agent-discard"; change: Change; job: JobSummary };
-
 const COL_LABEL: Record<Slot, string> = {
   todo: "TODO",
   inprogress: "IN-PROGRESS",
@@ -131,65 +86,20 @@ export function KanbanBoard({
   changes: Change[];
   onNewChange: () => void;
 }) {
-  const commandStyle = useStore((s) => s.commandStyle);
-  const setCommandStyle = useStore((s) => s.setCommandStyle);
-  const pushToast = useStore((s) => s.pushToast);
-  const jobs = useStore((s) => s.jobs);
-  const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
-  const [pending, setPending] = useState<PendingDrag | null>(null);
-  const { startImplementation, startFlowModals } = useStartFlow();
-
-  const jobByChange = useMemo(() => {
-    const m = new Map<string, JobSummary>();
-    for (const j of Object.values(jobs)) {
-      const prev = m.get(j.changeId);
-      if (!prev || j.startedAt > prev.startedAt) m.set(j.changeId, j);
-    }
-    return m;
-  }, [jobs]);
+  const { jobByChange, onStart, onArchive, onMerge, onDiscard, modals } = useKanbanActions();
 
   const buckets = useMemo(() => bucketize(changes), [changes]);
 
-  const onArchiveClick = (change: Change) => {
-    setPending({ kind: "archive", change });
-  };
-
-  const onStartClick = (change: Change) => {
-    void startImplementation(change);
-  };
-
-  const onMergeClick = (change: Change, job: JobSummary) => {
-    setPending({ kind: "agent-merge", change, job });
-  };
-  const onDiscardClick = (change: Change, job: JobSummary) => {
-    setPending({ kind: "agent-discard", change, job });
-  };
-
-  const runInject = async (line: string) => {
-    const res = await injectPty(line, true);
-    if ((res as any).status === "ok") {
-      pushToast("info", "Sent to terminal");
-      if (pending && (pending.kind === "agent-merge" || pending.kind === "agent-discard")) {
-        clearWorktreeProgress(pending.change.id);
-      }
-      setPending(null);
-    } else if ((res as any).status === "no-terminal") {
-      pushToast("error", (res as any).reason ?? ERR.NO_TERMINAL);
-    } else {
-      pushToast("error", (res as any).error ?? ERR.INJECT_FAILED);
-    }
-  };
-
-  const renderCard = (c: Change, slot: Slot) => (
-    <ChangeCard
+  const renderCard = (c: Change) => (
+    <KanbanCard
       key={c.id}
       change={c}
-      slot={slot}
       job={jobByChange.get(c.id)}
-      onStart={() => onStartClick(c)}
-      onArchive={() => onArchiveClick(c)}
-      onMerge={(j) => onMergeClick(c, j)}
-      onDiscard={(j) => onDiscardClick(c, j)}
+      laneContext="board"
+      onStart={() => onStart(c)}
+      onArchive={() => onArchive(c)}
+      onMerge={(j) => onMerge(c, j)}
+      onDiscard={(j) => onDiscard(c, j)}
     />
   );
 
@@ -218,39 +128,13 @@ export function KanbanBoard({
               emptyText={COL_EMPTY[slot]}
               headerAction={headerAction}
             >
-              {buckets[slot].map((c) => renderCard(c, slot))}
+              {buckets[slot].map(renderCard)}
             </Column>
           );
         })}
       </div>
 
-      {pending && (
-        <CommandModal
-          title={modalTitle(pending)}
-          mode={pending.kind === "archive" || pending.kind === "agent-merge" ? commandStyle : undefined}
-          onModeChange={pending.kind === "archive" || pending.kind === "agent-merge" ? setCommandStyle : undefined}
-          build={(_input, m) => buildPendingCommand(pending, m ?? "claude")}
-          submitLabel={modalSubmitLabel(pending, commandStyle)}
-          onCancel={() => setPending(null)}
-          onSubmit={runInject}
-        >
-          {pending.kind === "archive" && !pending.change.hasOutcome && (
-            <div className="modal-warning">⚠ No outcome.md yet — write one before archiving.</div>
-          )}
-          {pending.kind === "apply" && commandStyle === "cli" && (
-            <div className="modal-warning">
-              Apply requires Claude Code in the terminal. Switch to Claude mode to send this.
-            </div>
-          )}
-          {pending.kind === "agent-discard" && (
-            <div className="modal-warning">
-              ⚠ This removes the worktree AND deletes branch <code>{pending.job.branch}</code>.
-            </div>
-          )}
-        </CommandModal>
-      )}
-
-      {startFlowModals}
+      {modals}
     </>
   );
 }
@@ -283,203 +167,6 @@ function Column({
   );
 }
 
-function ChangeCard({
-  change,
-  slot,
-  onArchive,
-  job,
-  onStart,
-  onMerge,
-  onDiscard,
-}: {
-  change: Change;
-  slot: Slot;
-  onArchive: () => void;
-  job?: JobSummary;
-  onStart: () => void;
-  onMerge: (job: JobSummary) => void;
-  onDiscard: (job: JobSummary) => void;
-}) {
-  // Priority: WS-driven (live watcher) → job snapshot → server-scanned
-  // filesystem state (`c.worktree.tasksProgress`). The last covers the
-  // case where a worktree exists WITHOUT a live/orphan job (manual
-  // `git worktree add`, mid-dispatch state), which bucketize already
-  // uses for DONE-lane placement. Without this fallback the card lands
-  // in DONE per bucketize but the progress bar shows main-tree 0/N.
-  const worktreeProgressFromWs = useStore((s) => s.worktreeProgress[change.id]);
-  const wtFsProgress = change.worktree?.tasksProgress;
-  const worktreeProgress =
-    worktreeProgressFromWs ?? job?.worktreeProgress ?? wtFsProgress;
-  const showWorktreeProgress =
-    !!worktreeProgress && (!job || job.status !== "cancelled");
-  const displayedProgress = showWorktreeProgress ? worktreeProgress : change.progress;
-
-  const showReadyDot = slot === "done";
-
-  // Archive button in the done column, but never while a job is still
-  // running — clicking Archive on a live worktree would try to merge
-  // uncommitted agent state.
-  const jobStillRunning = job?.status === "running";
-  const showArchiveInSlot = !jobStillRunning && slot === "done";
-
-  // Start button: any non-done slot with no live job. UI does NOT gate on
-  // `hasAgents` — when agents.yaml lacks a code role, the skill falls back
-  // to Manager (which has built-in defaults). Post
-  // wire-role-to-cli-in-manager-skill (Phase 1).
-  const showStartArea = perCardStartEligible(slot, !!job);
-
-  return (
-    <div className="kanban-card">
-      <Link
-        to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
-        className="kanban-card-link"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="kanban-card-head">
-          <h4>{change.id}</h4>
-          {showReadyDot && <span className="kanban-ready-dot" title="All tasks complete · ready to archive" />}
-          <AgentBadge job={job} />
-          {/* assignee badge slot (reserved for future add-task-assignment) */}
-          <span className="kanban-card-assignee-slot" />
-        </div>
-        {change.proposal?.intent && <p className="kanban-card-intent">{change.proposal.intent}</p>}
-        <ProgressBar progress={displayedProgress} />
-        {showWorktreeProgress && (
-          <span className="kanban-card-source-hint" title="Progress driven by the running agent's worktree tasks.md">
-            {displayedProgress.done}/{displayedProgress.total} (worktree)
-          </span>
-        )}
-      </Link>
-      {change.proposal?.tags && change.proposal.tags.length > 0 && (
-        <div className="kanban-card-tags">
-          <TagChipList tags={change.proposal.tags} small />
-        </div>
-      )}
-      <div className="kanban-card-actions">
-        {showArchiveInSlot && (
-          <button
-            className="action-btn ghost"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onArchive();
-            }}
-          >
-            Archive
-            {!change.hasOutcome && <span className="kanban-card-warn" title="No outcome.md yet">⚠</span>}
-          </button>
-        )}
-        {showStartArea &&
-          (hasNonVerifyWork(change.tasks) ? (
-            <button
-              className="action-btn"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onStart();
-              }}
-              title="Start — opens modal to inject /ithy-opsx:dispatch into the terminal"
-            >
-              Start
-            </button>
-          ) : (
-            <span
-              className="kanban-verify-only"
-              title="All remaining tasks are under a verification section — human review needed."
-            >
-              verify only
-            </span>
-          ))}
-        {job?.status === "orphaned" && (
-          <button
-            className="action-btn"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onArchive();
-            }}
-            title="Runs /ithy-opsx:archive — commits any pending worktree work, merges to main, archives, and offers cleanup."
-          >
-            Archive
-          </button>
-        )}
-        {job && job.status !== "running" && isMergeable(job) && (
-          <>
-            <Link
-              to={`/agents?job=${encodeURIComponent(job.id)}&tab=diff`}
-              className="action-btn ghost"
-              onClick={(e) => e.stopPropagation()}
-            >
-              View diff
-            </Link>
-            <button
-              className="action-btn ghost"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onMerge(job);
-              }}
-            >
-              Merge
-            </button>
-            <button
-              className="action-btn ghost"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onDiscard(job);
-              }}
-            >
-              Discard
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AgentBadge({ job }: { job?: JobSummary }) {
-  if (!job) return null;
-  if (job.status === "running") {
-    return (
-      <span className="agent-badge running" title={`Agent ${job.agentName} running`}>
-        <span className="agent-pulse" /> {job.agentName}
-      </span>
-    );
-  }
-  if (job.status === "completed") {
-    return (
-      <span className="agent-badge ok" title="Ready to merge">
-        ✓ ready
-      </span>
-    );
-  }
-  if (job.status === "cancelled") {
-    return <span className="agent-badge muted">cancelled</span>;
-  }
-  if (job.status === "orphaned") {
-    return (
-      <span
-        className="agent-badge orphaned"
-        title="Worktree adopted from disk (no process in this server lifetime) — Merge or Discard"
-      >
-        orphaned
-      </span>
-    );
-  }
-  return <span className="agent-badge fail" title={`exit ${job.exitCode ?? "?"}`}>✗ failed</span>;
-}
-
-function isMergeable(job: JobSummary): boolean {
-  return (
-    job.status === "completed" ||
-    job.status === "crashed" ||
-    job.status === "cancelled" ||
-    job.status === "orphaned"
-  );
-}
-
 /**
  * Returns the type of column-header action for a given slot.
  * Per hide-start-in-progress-column: the "Start ▾ (N)" bulk selector
@@ -494,14 +181,8 @@ export function columnHeaderActionType(slot: Slot): "new-change" | null {
   return null;
 }
 
-/**
- * Returns true when the per-card Start area should render for a given slot
- * and job state. This is the pure eligibility check (independent of
- * hasNonVerifyWork). Exported for tests.
- */
-export function perCardStartEligible(slot: Slot, hasJob: boolean): boolean {
-  const startEligibleSlot = slot === "todo" || slot === "inprogress";
-  return startEligibleSlot && !hasJob;
-}
+// `perCardStartEligible` moved to `./KanbanCard.tsx`; re-exported here for
+// backward-compat with existing tests / call sites.
+export { perCardStartEligible } from "./KanbanCard";
 
 export { bucketize };

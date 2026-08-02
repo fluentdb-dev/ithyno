@@ -162,7 +162,7 @@ Manager が動かない典型パターン:
 - **runtimes.claude が declared されていない (runtime-backed agent 使用時)** →
   registry が load error、error banner が Kanban 上部に出る
 - **Manager loop が convergence cap に到達** → user 対応、
-  `/opsx:answer <id> "..."` で resume
+  `/ithy-opsx:answer <id> "..."` で resume
 
 Manager の詳細ログは Ithyno server の stdout。Agents タブでも各 dispatch
 の job が個別に追える (Phase 5.1 で Live section が実装されると

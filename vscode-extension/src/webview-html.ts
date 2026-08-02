@@ -33,10 +33,32 @@ export function renderWebviewHtml(serverUrl: string): string {
       // the iframe.
       const vscode = acquireVsCodeApi();
       const app = document.getElementById('app');
+
+      function sendTheme() {
+        if (!app || !app.contentWindow) return;
+        const isLight = document.body.classList.contains('vscode-light');
+        const theme = isLight ? 'light' : 'dark';
+        app.contentWindow.postMessage({ type: 'vscode:theme-changed', theme }, '*');
+      }
+
+      if (app) {
+        app.addEventListener('load', () => {
+          sendTheme();
+          const t1 = setInterval(sendTheme, 200);
+          setTimeout(() => clearInterval(t1), 3000);
+        });
+      }
+      const observer = new MutationObserver(sendTheme);
+      observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
       window.addEventListener('message', (event) => {
         const data = event && event.data;
         if (!data || typeof data !== 'object') return;
         if (event.source === app.contentWindow) {
+          if (data.type === 'vscode:get-theme') {
+            sendTheme();
+            return;
+          }
           if (typeof data.type === 'string' && data.type.indexOf('pty.') === 0) {
             vscode.postMessage(data);
           }

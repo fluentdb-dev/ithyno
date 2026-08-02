@@ -1,9 +1,8 @@
 ## MODIFIED Requirements
 
 ### Requirement: Kanban Agent Badge and ChangeDetail Header Link to Agents Page
-The dashboard's Kanban card `AgentBadge` and the `ChangeDetail`
-header SHALL provide a direct navigation link to the Agents page's
-output tab for the associated job. The link uses the existing URL
+
+The dashboard SHALL provide a direct navigation link from the Kanban card's `AgentBadge` and the `ChangeDetail` header to the Agents page's output tab for the associated job. The link uses the existing URL
 contract `/agents?job=<jobId>&tab=output`. Both affordances SHALL
 appear whenever a job is associated with the change (any status:
 running, completed, crashed, cancelled, orphaned) and be omitted

@@ -9,30 +9,6 @@ Implement tasks from an OpenSpec change.
 
 **Input**: Optionally specify a change name (e.g., `/opsx:apply add-auth`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
-**Handling review findings**
-
-When invoked as a worker by the dispatcher (`/ithy-opsx:dispatch`),
-the initial prompt may include a `Prior review findings:` block
-appended after the change id:
-
-```
-/opsx:apply <change-id>
-Prior review findings to address:
-- high server/foo.ts:42 — Off-by-one at line 42; change <= to <
-- medium web/src/App.tsx:12 — Unused import
-```
-
-When findings are present, prioritize fixing them BEFORE tackling
-unchecked tasks. Address each finding by reading the referenced file,
-applying the fix, and re-verifying the surrounding context. Only
-then continue through remaining unchecked tasks in `tasks.md`.
-
-**Committing is the caller's responsibility.** `/opsx:apply` does not
-commit — the dispatcher (or the user in interactive use) decides when
-and how to commit. If you want a commit step included, use
-`/ithy-opsx:apply` which wraps this skill and adds a commit at the
-end.
-
 **Steps**
 
 1. **Select the change**

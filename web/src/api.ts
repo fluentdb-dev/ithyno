@@ -3,7 +3,9 @@ import type {
   AgentConfigPayload,
   AgentConfigResponse,
   Change,
+  Cli,
   DiffPayload,
+  DoctorReport,
   DocsFile,
   DocsTree,
   GitConfig,
@@ -11,6 +13,7 @@ import type {
   GitStatus,
   Job,
   JobSummary,
+  ManagerActivity,
   ManagerStatus,
   TagDetail,
   TagIndex,
@@ -247,6 +250,22 @@ export async function fetchManagerStatus(): Promise<ManagerStatus> {
   return res.json();
 }
 
+/**
+ * Bulk snapshot of per-change Manager activity (expose-manager-activity-per-change).
+ *
+ * Session-token gated (the endpoint is written only by the dispatch skill).
+ * The state is in-memory server-side, so this legitimately returns `{}` right
+ * after a server restart — callers must treat "empty" as normal, not an error.
+ */
+export async function fetchManagerActivities(): Promise<Record<string, ManagerActivity>> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Session-Token"] = token;
+  const res = await fetch("/api/manager/activity", { headers });
+  if (!res.ok) throw new Error(`GET /api/manager/activity failed: ${res.status}`);
+  return res.json();
+}
+
 export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void> {
   const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
     "/api/agents/config",
@@ -270,6 +289,15 @@ export async function setParallelExecution(value: boolean): Promise<void> {
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+/** Toggle top-level tmux flag in agents.yaml. */
+export async function setTmux(value: boolean): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>(
+    "/api/config/tmux",
+    { value },
+  );
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 /** Enable/disable + upsert/remove the top-level `agmsg:` block in
  *  agents.yaml. Landed by add-agmsg-config-write. */
 export async function setAgmsgConfig(
@@ -284,15 +312,36 @@ export async function setAgmsgConfig(
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+// ---- doctor endpoint (add-doctor-and-installer) ----------------------------
+// Note: the canonical fetcher is `fetchDoctorReport` below (session-token
+// gated). `fetchDoctor` is retained as a thin alias so existing callers
+// (InitDialog etc.) keep working after the doctor branch merged its real
+// impl. Prefer `fetchDoctorReport` for new code.
+export async function fetchDoctor(): Promise<DoctorReport> {
+  return fetchDoctorReport();
+}
+
 // add-init-http-endpoint: POST /api/init client. Scaffolds a new project at
 // an absolute path. autoCreateDir + autoGitInit default to true here because
 // the UI's "New Project" flow expects one-shot creation.
+//
+// Extended by expand-init-to-scaffold-agents: accepts optional manager field
+// (chosen CLI) and returns managerCommand in the result.
 export interface InitProjectPayload {
   dir: string;
   force?: boolean;
   skipGitignore?: boolean;
   autoCreateDir?: boolean;
   autoGitInit?: boolean;
+  manager?: { command: Cli };
+  defaultManager?: Cli;
+  /**
+   * When true, skip runInit and only run the doctor gate + writeAgentsYaml.
+   * Used by OnboardingProject's follow-up POST after the SSE chain has
+   * already scaffolded openspec/ — avoids re-running openspec init --force.
+   * (expand-init-to-scaffold-agents rework r2, F2 fix)
+   */
+  agentsYamlOnly?: boolean;
 }
 export interface InitProjectResult {
   ok: boolean;
@@ -304,6 +353,8 @@ export interface InitProjectResult {
   summary?: { created: number; overwritten: number; skipped: number };
   openspecMissing?: boolean;
   gitInitPerformed?: boolean;
+  /** Chosen Manager CLI (expand-init-to-scaffold-agents). */
+  managerCommand?: Cli;
 }
 export async function initProject(
   payload: InitProjectPayload,
@@ -377,6 +428,37 @@ export async function postGitInit(): Promise<GitStatus> {
   );
   if (status >= 400 || !data.gitStatus) throw new Error(data.error ?? `HTTP ${status}`);
   return data.gitStatus;
+}
+
+// ---- Doctor API (add-doctor-and-installer) ---------------------------------
+
+// Cli / CliStatus / DoctorReport live in ./types (single source of truth).
+// Re-export here for callers that import from ./api.
+export type { Cli, CliStatus, DoctorReport } from "./types";
+
+/** Fetch the current prerequisite report (session-token gated). */
+export async function fetchDoctorReport(): Promise<DoctorReport> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Session-Token"] = token;
+  const res = await fetch("/api/doctor", { headers });
+  if (!res.ok) throw new Error(`GET /api/doctor failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * POST /api/doctor/install to install tmux or agmsg.
+ * Returns a ReadableStream of SSE text, or throws on 400.
+ */
+export async function installPrereq(
+  tool: "tmux" | "agmsg",
+): Promise<Response> {
+  const res = await fetch("/api/doctor/install", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ tool }),
+  });
+  return res;
 }
 
 export async function cancelAgentJob(id: string): Promise<void> {

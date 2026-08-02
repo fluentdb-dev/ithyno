@@ -2,7 +2,7 @@
   "name": "ithyno-vscode",
   "displayName": "ithyno",
   "description": "ithyno dashboard for the OpenSpec workflow, embedded in VS Code as a webview panel.",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-alpha.1",
   "private": true,
   "license": "GPL-3.0-or-later",
   "publisher": "ithyno",
@@ -12,12 +12,31 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
+    "onView:ithyno.sidebarDashboardView",
     "onCommand:ithyno.show",
     "onCommand:ithyno.newProject",
     "onCommand:ithyno.importProject",
     "onCommand:ithyno.about"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ithyno-activitybar",
+          "title": "ithyno",
+          "icon": "extension.png"
+        }
+      ]
+    },
+    "views": {
+      "ithyno-activitybar": [
+        {
+          "id": "ithyno.sidebarDashboardView",
+          "name": "ithyno Dashboard",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ithyno.show",
@@ -57,8 +76,8 @@
     }
   },
   "scripts": {
-    "build": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json",
-    "watch": "node ../scripts/sync-about-config.mjs && tsc -p tsconfig.json --watch",
+    "build": "node ../scripts/sync-about-config.mjs && esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js",
+    "watch": "node ../scripts/sync-about-config.mjs && esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js --watch",
     "prepack:host": "node scripts/prepack.mjs",
     "package": "npm run build && npm run prepack:host && node scripts/vsix-package.mjs"
   },
@@ -66,6 +85,7 @@
     "@types/node": "^22.13.5",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.0",
     "typescript": "^5.7.3"
   }
 }

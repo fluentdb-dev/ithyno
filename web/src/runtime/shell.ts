@@ -22,7 +22,20 @@ declare global {
 function urlSaysVsCode(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return new URL(window.location.href).searchParams.get("vscode") === "1";
+    const hasParam = new URL(window.location.href).searchParams.get("vscode") === "1";
+    if (hasParam) {
+      try {
+        sessionStorage.setItem("ithyno_is_vscode", "1");
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    return sessionStorage.getItem("ithyno_is_vscode") === "1";
   } catch {
     return false;
   }

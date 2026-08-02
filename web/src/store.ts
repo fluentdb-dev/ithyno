@@ -8,21 +8,27 @@ import {
   fetchAgentConfig,
   fetchAgentJobs,
   fetchManagerStatus,
+  fetchManagerActivities,
   fetchGitConfig,
   fetchGitStatus,
+  fetchDoctorReport,
   checkAuth,
   triggerAuthExpired,
   toggleTask as apiToggle,
 } from "./api";
+import type { DoctorReport } from "./api";
 import { getSessionToken } from "./runtime";
 import type {
   AgentPublic,
   Change,
+  Cli,
   DocsFile,
   DocsTree,
   GitConfig,
+  ImportCompletedEvent,
   JobStatus,
   JobSummary,
+  ManagerActivity,
   ManagerStatus,
   OutputLine,
   Progress,
@@ -31,6 +37,8 @@ import type {
   Task,
   WorkspaceState,
 } from "./types";
+import { CLI_PRIORITY } from "./types";
+import { laneForPhase, type Phase } from "./phases";
 
 export function taskKey(t: Pick<Task, "filePath" | "id" | "text">): string {
   return `${t.filePath}::${t.id || t.text}`;
@@ -38,10 +46,28 @@ export function taskKey(t: Pick<Task, "filePath" | "id" | "text">): string {
 
 type Toast = { id: number; kind: "info" | "error"; message: string };
 
+/** A Pattern-A import completion notification (enable-import-both-patterns). */
+export type ImportedProjectNotification = {
+  id: string; // jobId
+  targetPath: string;
+  completedAt: number; // epoch ms
+};
+
 type Conflict = { newText: string; message: string };
 
 export type CommandStyle = "claude" | "cli";
-export type OverviewLayout = "board" | "cards";
+/**
+ * Overview layout toggle values (add-phase-lane-view-toggle):
+ *   - `"board"` — 3-column TODO / IN-PROGRESS / DONE (default).
+ *   - `"phase"` — 4 swim lanes proposed / coded / reviewed / done + Unphased fallback.
+ *   - `"cards"` — plain card grid (no columns).
+ *
+ * Persisted to `localStorage["ithyno.overviewLayout"]`. Legacy `"board"`
+ * and `"cards"` values continue to round-trip; unknown persisted strings
+ * fall back to `"board"` (see `readOverviewLayout`). The union is
+ * ADDITIVE — no persist-schema-version bump is needed.
+ */
+export type OverviewLayout = "board" | "phase" | "cards";
 /** Four exclusive terminal size options. Not persisted — resets to
  *  `"default"` on every page reload. Landed by add-terminal-size-toggle. */
 export type TerminalSize = "fullscreen" | "half" | "default" | "hidden";
@@ -87,13 +113,33 @@ type Store = {
    *  (default). Landed by add-agmsg-config-block. Metadata-only in P1;
    *  consumers surface it only for future features. */
   agmsg: import("./types").AgmsgConfig | null;
+  /** Top-level `tmux` boolean from agents.yaml (default false). */
+  tmux: boolean;
   /** Resolved Manager status — declared entry, running fallback, or
    *  idle (no terminal, no declaration). Null before the first fetch.
    *  Landed by add-agents-tab-manager-section. */
   managerStatus: ManagerStatus | null;
   managerStatusError: string | null;
+  /** Per-change Manager orchestration activity, keyed by changeId
+   *  (expose-manager-activity-per-change). Populated by the
+   *  `manager-activity-updated` WS event plus a bootstrap fetch on load.
+   *  Server-side state is in-memory only — after a server restart this
+   *  legitimately resets to `{}`. */
+  managerActivity: Record<string, ManagerActivity>;
   jobs: Record<string, JobSummary>;
   jobOutputs: Record<string, OutputLine[]>;
+  /** Pipeline stage (Phase lane) the change was sitting in at the moment
+   *  each job was observed finishing, keyed by job id. Written by
+   *  `setJobFinished`, dropped with the job on `agent-job-removed`.
+   *
+   *  `annotate-cards-with-worker-job-state`: the card's transient "done ✓"
+   *  belongs to the lane its worker finished in. Once the Manager advances
+   *  `change.phase`, the completion has been absorbed by that move and the
+   *  checkmark must go, even inside the 30 s grace window. A missing key
+   *  means "never observed finishing in this tab" (e.g. the job was already
+   *  `completed` when the page loaded) — the indicator then falls back to
+   *  the time window alone rather than guessing. */
+  jobStageAtFinish: Record<string, Phase>;
   /** Per-change live progress derived from the running job's worktree
    *  tasks.md. Preferred over `change.progress` while a job is active or
    *  awaiting merge/discard. Cleared on merge/discard. */
@@ -103,10 +149,24 @@ type Store = {
    *  by ChangeDetail's worktree view to keep tick state fresh across clients. */
   worktreeChangeById: Record<string, Change>;
   gitConfig: GitConfig | null;
-  /** True when the user clicked "Browse read-only" on the decision panel.
+  /** True when the user clicked "Open dashboard anyway" (formerly "Browse read-only") on the decision panel.
    *  Causes App.tsx to render <ReadOnlyBrowse /> instead of the normal
    *  chrome. Landed by unify-open-project-3-branch. */
   browseMode: boolean;
+  /** Latest DoctorReport from /api/doctor. Null before first fetch.
+   *  Landed by add-doctor-and-installer. */
+  doctorReport: DoctorReport | null;
+
+  /** User's preferred default Manager CLI. Persisted to
+   *  `localStorage["ithyno.defaultManager"]`. Null means unset; resolved
+   *  from priority order (claude > codex > …) on first use.
+   *  Landed by expand-init-to-scaffold-agents. */
+  defaultManager: Cli | null;
+
+  /** Active Pattern-A import completion notifications (enable-import-both-patterns).
+   *  Each entry is pushed by the `import-completed` WS event when `pattern === "A"`.
+   *  Dismissed independently by the user. */
+  importedProjectNotifications: ImportedProjectNotification[];
 
   load: () => Promise<void>;
   connectWs: () => void;
@@ -125,6 +185,8 @@ type Store = {
   loadTagIndex: () => Promise<void>;
   loadAgents: () => Promise<void>;
   loadManagerStatus: () => Promise<void>;
+  loadManagerActivities: () => Promise<void>;
+  setManagerActivity: (changeId: string, activity: ManagerActivity | null) => void;
   loadJobs: () => Promise<void>;
   appendJobOutput: (jobId: string, line: OutputLine) => void;
   upsertJob: (job: JobSummary) => void;
@@ -134,6 +196,10 @@ type Store = {
   refreshGitStatus: () => Promise<void>;
   clearWorktreeProgress: (changeId: string) => void;
   setBrowseMode: (v: boolean) => void;
+  loadDoctorReport: () => Promise<void>;
+  setDefaultManager: (cli: Cli) => void;
+  pushImportNotification: (n: ImportedProjectNotification) => void;
+  dismissImportNotification: (id: string) => void;
 };
 
 let toastSeq = 1;
@@ -169,10 +235,20 @@ function readCommandStyle(): CommandStyle {
 }
 
 const OVERVIEW_LAYOUT_KEY = "ithyno.overviewLayout";
+/**
+ * Defensive narrower: any value outside the 3-arm union falls back to
+ * `"board"`. Guards against future removals of a state (e.g. if we ever
+ * retire `"phase"` again, older users with `"phase"` persisted won't
+ * crash — they just see the default board). Exported for unit tests.
+ * Landed by add-phase-lane-view-toggle.
+ */
+export function narrowOverviewLayout(v: unknown): OverviewLayout {
+  if (v === "phase" || v === "cards" || v === "board") return v;
+  return "board";
+}
 function readOverviewLayout(): OverviewLayout {
   try {
-    const v = localStorage.getItem(OVERVIEW_LAYOUT_KEY);
-    return v === "cards" ? "cards" : "board";
+    return narrowOverviewLayout(localStorage.getItem(OVERVIEW_LAYOUT_KEY));
   } catch {
     return "board";
   }
@@ -192,12 +268,41 @@ function readTheme(): ThemePreference {
   }
 }
 
+/** Persisted default Manager CLI preference (expand-init-to-scaffold-agents). */
+const DEFAULT_MANAGER_KEY = "ithyno.defaultManager";
+function readDefaultManager(): Cli | null {
+  try {
+    const v = localStorage.getItem(DEFAULT_MANAGER_KEY);
+    if (v && (CLI_PRIORITY as string[]).includes(v)) return v as Cli;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function replaceChange(state: WorkspaceState, change: Change): WorkspaceState {
-  return { ...state, changes: state.changes.map((c) => (c.id === change.id ? change : c)) };
+  // Upsert semantics: the server fires `change-updated` for both create
+  // AND update (chokidar `add` on any file inside a change dir), so a
+  // freshly-created change reaches the client via this same code path.
+  // A pure `.map` would silently drop the new id (every element maps to
+  // itself when no id matches), leaving the Kanban blind to new changes
+  // until a full reload. Append when the id is not already present.
+  const idx = state.changes.findIndex((c) => c.id === change.id);
+  const changes = idx >= 0
+    ? state.changes.map((c, i) => (i === idx ? change : c))
+    : [...state.changes, change];
+  return { ...state, changes };
 }
 
 function replaceSpec(state: WorkspaceState, domain: string, spec: SpecDomain): WorkspaceState {
-  return { ...state, specs: state.specs.map((s) => (s.domain === domain ? spec : s)) };
+  // Same upsert as replaceChange — `spec-updated` also fires on new
+  // capability creation (e.g. an ADDED spec delta landing during
+  // archive). A pure .map would silently drop the new domain.
+  const idx = state.specs.findIndex((s) => s.domain === domain);
+  const specs = idx >= 0
+    ? state.specs.map((s, i) => (i === idx ? spec : s))
+    : [...state.specs, spec];
+  return { ...state, specs };
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -222,14 +327,20 @@ export const useStore = create<Store>((set, get) => ({
   agentConfigError: null,
   parallelExecution: false,
   agmsg: null,
+  tmux: false,
   managerStatus: null,
   managerStatusError: null,
+  managerActivity: {},
   jobs: {},
   jobOutputs: {},
+  jobStageAtFinish: {},
   worktreeProgress: {},
   worktreeChangeById: {},
   gitConfig: null,
   browseMode: false,
+  doctorReport: null,
+  defaultManager: readDefaultManager(),
+  importedProjectNotifications: [],
 
   loadAgents: async () => {
     try {
@@ -238,6 +349,7 @@ export const useStore = create<Store>((set, get) => ({
         agents: cfg.agents,
         parallelExecution: cfg.parallelExecution,
         agmsg: cfg.agmsg,
+        tmux: cfg.tmux,
         agentConfigError: cfg.ok ? null : cfg.error ?? "config error",
       });
     } catch (err) {
@@ -252,6 +364,29 @@ export const useStore = create<Store>((set, get) => ({
       set({ managerStatusError: err instanceof Error ? err.message : String(err) });
     }
   },
+  /** Bootstrap the Manager-activity record (expose-manager-activity-per-change).
+   *  Called from `load()` and after a WS reconnect so a dashboard opened
+   *  mid-dispatch shows the badges without waiting for the next boundary post. */
+  loadManagerActivities: async () => {
+    try {
+      const managerActivity = await fetchManagerActivities();
+      set({ managerActivity });
+    } catch {
+      // Non-fatal (401 on a stale token, server restarting) — the WS event
+      // stream repopulates the record at the next boundary post.
+    }
+  },
+  /** Upsert or clear one change's Manager activity. `null` clears the entry —
+   *  that is how the server reports an `idle` post. */
+  setManagerActivity: (changeId, activity) =>
+    set((s) => {
+      if (activity === null) {
+        if (!(changeId in s.managerActivity)) return {};
+        const { [changeId]: _drop, ...rest } = s.managerActivity;
+        return { managerActivity: rest };
+      }
+      return { managerActivity: { ...s.managerActivity, [changeId]: activity } };
+    }),
   loadJobs: async () => {
     try {
       const r = await fetchAgentJobs();
@@ -281,11 +416,18 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => {
       const j = s.jobs[jobId];
       if (!j) return {};
+      // Snapshot the stage the change is in right now: the "done ✓" the card
+      // is about to show belongs to THIS lane, and stops belonging to it the
+      // moment the Manager advances the phase.
+      const change = s.state?.changes.find((c) => c.id === j.changeId);
       return {
         jobs: {
           ...s.jobs,
           [jobId]: { ...j, status, exitCode: exitCode ?? null, finishedAt: Date.now() },
         },
+        jobStageAtFinish: change
+          ? { ...s.jobStageAtFinish, [jobId]: laneForPhase(change.phase, change.priorPhase) }
+          : s.jobStageAtFinish,
       };
     }),
   loadGitConfig: async () => {
@@ -318,6 +460,34 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
   setBrowseMode: (v) => set({ browseMode: v }),
+  setDefaultManager: (cli) => {
+    try {
+      localStorage.setItem(DEFAULT_MANAGER_KEY, cli);
+    } catch {
+      /* ignore quota / private-mode errors */
+    }
+    set({ defaultManager: cli });
+  },
+
+  loadDoctorReport: async () => {
+    try {
+      const report = await fetchDoctorReport();
+      set({ doctorReport: report });
+    } catch {
+      // Non-fatal — keep whatever we had before
+    }
+  },
+
+  pushImportNotification: (n) =>
+    set((s) =>
+      s.importedProjectNotifications.some((x) => x.id === n.id)
+        ? s
+        : { importedProjectNotifications: [...s.importedProjectNotifications, n] },
+    ),
+  dismissImportNotification: (id) =>
+    set((s) => ({
+      importedProjectNotifications: s.importedProjectNotifications.filter((n) => n.id !== id),
+    })),
 
   loadTagIndex: async () => {
     try {
@@ -408,6 +578,9 @@ export const useStore = create<Store>((set, get) => ({
       // Best-effort agents bootstrap.
       void get().loadAgents();
       void get().loadJobs();
+      // Manager-activity bootstrap (expose-manager-activity-per-change) —
+      // a dashboard opened mid-dispatch should show the badges immediately.
+      void get().loadManagerActivities();
       // Best-effort git-identity bootstrap so the chip is populated on load,
       // not only after opening the modal for the first time.
       if (state.gitStatus.isRepo) void get().loadGitConfig();
@@ -439,6 +612,20 @@ export const useStore = create<Store>((set, get) => ({
     ws.onopen = () => {
       openedOnce = true;
       set({ connected: true });
+      // Resync ALL workspace state on every (re)connect. `change-updated`
+      // / `spec-updated` broadcasts that landed while the socket was down
+      // are otherwise lost — the events are fire-and-forget with no
+      // per-client replay. Without this, a WS drop during a new-change
+      // creation (Electron backgrounding, network hiccup, server restart)
+      // leaves the Kanban frozen on pre-drop state until a full page
+      // reload; new changes appear on disk and in `/api/state` but never
+      // in the UI. `load()` refetches `/api/state` — the same call the
+      // initial mount uses.
+      void get().load();
+      // Same rationale for Manager activity (landed by
+      // expose-manager-activity-per-change): boundary posts fired during
+      // the socket outage never redeliver.
+      void get().loadManagerActivities();
     };
     ws.onclose = () => {
       if (currentWs === ws) currentWs = null;
@@ -526,9 +713,11 @@ export const useStore = create<Store>((set, get) => ({
           delete jobs[msg.jobId];
           const jobOutputs = { ...s.jobOutputs };
           delete jobOutputs[msg.jobId];
+          const jobStageAtFinish = { ...s.jobStageAtFinish };
+          delete jobStageAtFinish[msg.jobId];
           const worktreeProgress = { ...s.worktreeProgress };
           delete worktreeProgress[msg.changeId];
-          return { jobs, jobOutputs, worktreeProgress };
+          return { jobs, jobOutputs, jobStageAtFinish, worktreeProgress };
         });
       } else if (msg.type === "worktree-progress-updated") {
         set((s) => ({
@@ -548,6 +737,7 @@ export const useStore = create<Store>((set, get) => ({
           agents: msg.agents,
           parallelExecution: msg.parallelExecution,
           agmsg: msg.agmsg,
+          tmux: msg.tmux,
           agentConfigError: msg.ok ? null : msg.error ?? "config error",
         });
         // Manager section is driven by `managerStatus` (a separate
@@ -556,6 +746,33 @@ export const useStore = create<Store>((set, get) => ({
         // entry is declared and its command/args — the Manager section
         // must reflect that too. Fire-and-forget refetch.
         void get().loadManagerStatus();
+      } else if (msg.type === "manager-activity-updated") {
+        // expose-manager-activity-per-change: `activity: null` is a clear
+        // (the Manager posted `idle` for that change).
+        get().setManagerActivity(msg.changeId, msg.activity ?? null);
+      } else if (msg.type === "doctor-updated") {
+        // add-doctor-and-installer: server broadcasts this after an install
+        // completes. Update the cached report so Settings refreshes.
+        set({ doctorReport: msg.report });
+      } else if (msg.type === "import-completed") {
+        // enable-import-both-patterns: route by pattern.
+        const ev = msg as ImportCompletedEvent;
+        if (ev.pattern === "B") {
+          // Pattern B (in-place): same folder as the running project.
+          // Existing ImportProgress detects generatedMarkerPresent via
+          // state-replaced; trigger the usual load() so state reflects
+          // the new openspec/.
+          void get().load().then(() => {
+            if (get().state?.exists) get().setBrowseMode(false);
+          });
+        } else {
+          // Pattern A (external target): push a persistent notification card.
+          get().pushImportNotification({
+            id: ev.jobId,
+            targetPath: ev.targetPath,
+            completedAt: Date.now(),
+          });
+        }
       }
     };
   },
@@ -678,4 +895,13 @@ function findTask(state: WorkspaceState, target: Task): Task | null {
     }
   }
   return null;
+}
+
+// Dev-only exposure: makes `useStore` reachable from the DevTools Console
+// as `window.__ithyno`. Read-only usage recommended
+// (e.g. `__ithyno.getState().state?.changes.map(c=>c.id)`), but writes
+// via `__ithyno.setState({...})` also work if you're forcing a state for
+// debugging. Guarded on `typeof window` so SSR / test envs don't break.
+if (typeof window !== "undefined") {
+  (window as unknown as { __ithyno: typeof useStore }).__ithyno = useStore;
 }

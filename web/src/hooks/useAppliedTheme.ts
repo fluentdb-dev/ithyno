@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore, type ThemePreference } from "../store";
+import { isVsCodeShell } from "../runtime/shell";
 
 /**
  * Resolved theme actually applied to the DOM (`"light" | "dark"`), after
@@ -15,6 +16,7 @@ import { useStore, type ThemePreference } from "../store";
  *     the resolved value changes, which drives the CSS palette swap.
  *   - Subscribes to `matchMedia("(prefers-color-scheme: dark)")` when the
  *     preference is `"system"` so an OS-level swap flips the UI live.
+ *   - Subscribes to `vscode:theme-changed` postMessages when running in VS Code.
  *
  * Returns the applied theme so consumers (e.g. Terminal.tsx) can read a
  * palette rebuild on change without touching the DOM themselves.
@@ -31,16 +33,40 @@ function resolveApplied(pref: ThemePreference): AppliedTheme {
 
 export function useAppliedTheme(): AppliedTheme {
   const theme = useStore((s) => s.theme);
-  const [applied, setApplied] = useState<AppliedTheme>(() => resolveApplied(theme));
+  const [vsCodeTheme, setVsCodeTheme] = useState<AppliedTheme | null>(null);
+  const [systemOsTheme, setSystemOsTheme] = useState<AppliedTheme | null>(null);
 
-  // Recompute + push to <html data-theme=…> whenever the preference changes.
+  // Subscribe to VS Code theme changes
   useEffect(() => {
-    const next = resolveApplied(theme);
-    setApplied(next);
-    if (typeof document !== "undefined") {
-      document.documentElement.dataset.theme = next;
+    if (!isVsCodeShell()) return;
+    const handleVsCodeTheme = (e: MessageEvent) => {
+      if (
+        e.data &&
+        e.data.type === "vscode:theme-changed" &&
+        (e.data.theme === "light" || e.data.theme === "dark")
+      ) {
+        setVsCodeTheme(e.data.theme);
+      }
+    };
+    window.addEventListener("message", handleVsCodeTheme);
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "vscode:get-theme" }, "*");
     }
-  }, [theme]);
+    return () => window.removeEventListener("message", handleVsCodeTheme);
+  }, []);
+
+  const applied: AppliedTheme =
+    isVsCodeShell() && vsCodeTheme != null
+      ? vsCodeTheme
+      : theme === "system" && systemOsTheme != null
+        ? systemOsTheme
+        : resolveApplied(theme);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.theme = applied;
+    }
+  }, [applied]);
 
   // Follow OS changes only when the user picked "system". Manual "light" /
   // "dark" is a hard override — we deliberately do not subscribe then.
@@ -50,7 +76,7 @@ export function useAppliedTheme(): AppliedTheme {
     const mm = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = (e: MediaQueryListEvent) => {
       const next: AppliedTheme = e.matches ? "dark" : "light";
-      setApplied(next);
+      setSystemOsTheme(next);
       document.documentElement.dataset.theme = next;
     };
     // addEventListener is the modern API; addListener is the Safari <14

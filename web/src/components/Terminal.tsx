@@ -81,6 +81,36 @@ export function Terminal() {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
+    // Ctrl+Shift+C/V copy-paste. Plain Ctrl+C/Ctrl+V are left completely
+    // untouched — they're legitimate terminal control characters (ETX /
+    // interrupt, and "literal next" in readline) and xterm.js already
+    // forwards them to the pty correctly. macOS's Cmd+C/Cmd+V sets
+    // metaKey rather than ctrlKey, so it never went through xterm's key
+    // handling to begin with and the browser's native copy/paste
+    // already worked there — Windows/Linux have no such Cmd-equivalent,
+    // hence the separate shortcut (shown as a hint in the terminal UI).
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== "keydown" || !ev.ctrlKey || !ev.shiftKey || ev.altKey) return true;
+      if (ev.key === "C" || ev.code === "KeyC") {
+        if (!term.hasSelection()) return true;
+        void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+      if (ev.key === "V" || ev.code === "KeyV") {
+        ev.preventDefault();
+        void navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (text) {
+              term.paste(text);
+            }
+          })
+          .catch(() => {});
+        return false;
+      }
+      return true;
+    });
+
     const ro = new ResizeObserver(() => fitNow());
     ro.observe(host);
     window.addEventListener("resize", fitNow);
@@ -113,16 +143,26 @@ export function Terminal() {
     term.options.theme = buildXtermTheme(appliedTheme);
   }, [appliedTheme]);
 
+  // macOS's Cmd+C/Cmd+V already copy/paste natively (Cmd sets metaKey,
+  // never touching xterm's key handling), so the Ctrl+Shift+C/V hint
+  // below is only useful — and only shown — on Windows/Linux.
+  const isMac = /Mac/i.test(navigator.platform);
+
   return (
     <div ref={hostRef} className="terminal-host">
       <button
         className={`terminal-reconnect${connected ? "" : " terminal-reconnect-warn"}`}
-        title={/Mac/i.test(navigator.platform) ? "Restart terminal (⇧⌘K)" : "Restart terminal (Ctrl+Shift+K)"}
+        title={isMac ? "Restart terminal (⇧⌘K)" : "Restart terminal (Ctrl+Shift+K)"}
         aria-label="Restart terminal"
         onClick={() => useStore.getState().restartTerminal()}
       >
         &#x21BB;
       </button>
+      {!isMac && (
+        <div className="terminal-copypaste-hint">
+          Copy: Ctrl+Shift+C · Paste: Ctrl+Shift+V
+        </div>
+      )}
     </div>
   );
 }

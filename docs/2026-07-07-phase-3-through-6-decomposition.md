@@ -137,7 +137,7 @@ Kanban 側は phase 変化を反映するのみ (自動 dispatch はまだ入ら
   - Verdict `needs-rework` なら prompt_suffix に findings を入れて code 再 dispatch
   - Verdict `pass` なら verify に進む
   - `verify` 通ったら phase: done へ更新して exit
-  - 途中で判断不能なら `/opsx:escalate` (これも新設) で `phase: needs-human` に
+  - 途中で判断不能なら `/ithy-opsx:escalate` (これも新設) で `phase: needs-human` に
 
 - **`.claude/commands/opsx/review.md`** (新規) — Review worker slash command
   - Worker 側で prompt を組み、diff を読み、`review.md` を書く

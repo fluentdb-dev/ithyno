@@ -22,6 +22,12 @@ export type WorkspaceState = {
    *  this to render a hint when auto-launch is suppressed.
    *  Landed by guard-terminal-autolaunch-on-agents-yaml. */
   hasAgentsYaml: boolean;
+  /** True when `openspec/GENERATED.md` exists at the project root. The
+   *  dashboard uses this to render the LLM-generated banner after import.
+   *  Also used by ImportProgress to detect import completion via the
+   *  workspace file-watch WS broadcast. Non-breaking additive field.
+   *  Landed by refactor-import-to-task-tool-subagent. */
+  generatedMarkerPresent: boolean;
 };
 
 export type WorktreeLock = {
@@ -276,6 +282,7 @@ export type AgentConfigResponse = {
    *  add-agents-max-rework-rounds-config. */
   maxReworkRounds: number;
   agmsg: AgmsgConfig | null;
+  tmux: boolean;
 };
 
 /** Top-level `agmsg` block from agents.yaml, mirrored via
@@ -295,6 +302,13 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  /** Dispatch role — set at spawn time by Manager (or the /api/agents/run
+   *  caller). Standard values: "propose" | "code" | "review" | "verify".
+   *  Custom / non-standard values are accepted but the Phase view filters
+   *  them out of role-based bucketing. Undefined on legacy records from
+   *  before reshape-phase-view-to-active-agent-state — Phase view treats
+   *  those as "no role signal" and falls back to DONE lane. */
+  role?: string;
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
@@ -332,6 +346,56 @@ export type DiffPayload = {
   files: DiffFile[];
 };
 
+// ---- Manager activity (expose-manager-activity-per-change,
+//      reshape-phase-view-to-active-agent-state renamed stage → role) ------
+
+/** The workflow role the Manager is currently executing. Unified with
+ *  `JobSummary.role` — Manager IS always playing one of these roles at any
+ *  active moment (fallback verify = Manager playing verify role). Mirrors
+ *  `server/manager-activity.ts` `ManagerRole`. */
+export type ManagerRole = "propose" | "code" | "review" | "verify";
+
+/** What the Manager is doing within that role. `idle` is never stored —
+ *  posting it clears the entry — so a `ManagerActivity` in the store is
+ *  always one of the five renderable values. */
+export type ManagerActivityKind =
+  | "dispatching"
+  | "waiting"
+  | "judging"
+  | "cleanup"
+  | "transitioning"
+  | "idle";
+
+/** Per-change Manager orchestration state. In-memory server-side: a server
+ *  restart clears every entry (there is deliberately no persistence). */
+export type ManagerActivity = {
+  changeId: string;
+  role: ManagerRole;
+  activity: ManagerActivityKind;
+  /** epoch ms — when this activity became current. Drives the elapsed suffix. */
+  startedAt: number;
+  /** Short hint: worker name for `waiting`, step name for `cleanup`, … */
+  detail?: string;
+};
+
+/** Payload for the `manager-activity-updated` server WS event.
+ *  `activity: null` means the entry was cleared. */
+export type ManagerActivityUpdatedEvent = {
+  type: "manager-activity-updated";
+  changeId: string;
+  activity: ManagerActivity | null;
+};
+
+// ---- import-completed WS event (enable-import-both-patterns) ---------------
+
+/** Payload for the `import-completed` server WS event. */
+export type ImportCompletedEvent = {
+  type: "import-completed";
+  jobId: string;
+  targetPath: string;
+  pattern: "A" | "B";
+};
+
 // Toggle endpoint response.
 export type ToggleResponse = {
   status: "ok" | "conflict" | "invalid";
@@ -340,6 +404,55 @@ export type ToggleResponse = {
   editedLine?: number;
   newLineText?: string;
   change: Change | null;
+};
+
+// ---- agent CLI identifiers (expand-init-to-scaffold-agents) ----------------
+/** Union of known agent CLI identifiers. Mirrors server/doctor.ts Cli type
+ *  and web/src/api.ts (kept in sync manually — small union, low churn). */
+export type Cli =
+  | "claude"
+  | "codex"
+  | "agy"
+  | "copilot"
+  | "gemini"
+  | "opencode"
+  | "cursor"
+  | "antigravity";
+
+/** Priority order for default Manager selection (highest priority first).
+ *  `antigravity` is excluded from the priority list — the server's
+ *  readyForManager gating also treats it as an "extra" not required for
+ *  base ithyno operation. */
+export const CLI_PRIORITY: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+];
+
+/** Status of a single CLI as reported by /api/doctor. */
+export type CliStatus = {
+  installed: boolean;
+  version?: string;
+  path?: string;
+  error?: string;
+};
+
+/** Response from GET /api/doctor (add-doctor-and-installer). */
+export type DoctorReport = {
+  agents: Record<Cli, CliStatus>;
+  tmux: CliStatus;
+  agmsg: CliStatus;
+  /** Windows only — see server/doctor.ts's DoctorReport doc comment. */
+  gitBash?: CliStatus;
+  /** All platforms — see server/doctor.ts's DoctorReport doc comment. */
+  git: CliStatus;
+  node: CliStatus;
+  readyForManager: boolean;
+  checkedAt: string;
 };
 
 // ---- browse mode (unify-open-project-3-branch) -----------------------------

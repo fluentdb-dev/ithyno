@@ -34,4 +34,11 @@ export function runInit(opts?: {
   autoCreateDir?: boolean;
   autoGitInit?: boolean;
   log?: (msg: string) => void;
+  /** Manager CLI the user picked (e.g. `"claude"`, `"agy"`, `"codex"`).
+   *  Undefined defaults to `"claude"` at the renderer invocation site
+   *  when it lands (scaffold-ithy-opsx-skills-per-cli task 3). Threaded
+   *  through here so all callers (server /api/init, /api/init/stream,
+   *  runNewProjectChain) can pass the picker's choice without further
+   *  signature churn. */
+  managerCli?: string;
 }): Promise<RunInitResult>;

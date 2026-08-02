@@ -1,8 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setAgmsgConfig, setParallelExecution } from "../api";
+import { setParallelExecution, setTmux } from "../api";
+import type { CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { PrereqInstallModal } from "../components/PrereqInstallModal";
+import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
+import { isAbsolutePath } from "../lib/paths";
+import type { AgmsgConfig, Cli, DoctorReport } from "../types";
+// Note: the `defaultManager` store slice + localStorage persistence remain
+// in place. The Settings-side radio group was removed by
+// `remove-default-manager-settings-ui` because it duplicated the Agents
+// tab's Manager section with a non-obvious scope difference. InitDialog
+// still consults the slice for preselect; a future implicit-set path
+// (e.g., remember the last-Init CLI) can wire `setDefaultManager` without
+// re-introducing a Settings UI.
 
 /**
  * Settings tab. Landed by add-parallel-execution-config; updated for
@@ -17,10 +29,18 @@ import { ThemeToggle } from "../components/ThemeToggle";
  */
 export function Settings() {
   const parallelExecution = useStore((s) => s.parallelExecution);
+  const tmux = useStore((s) => s.tmux);
   const agmsg = useStore((s) => s.agmsg);
   const pushToast = useStore((s) => s.pushToast);
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
+  const doctorReport = useStore((s) => s.doctorReport);
+  const loadDoctorReport = useStore((s) => s.loadDoctorReport);
   const [busy, setBusy] = useState(false);
+
+  // Fetch the doctor report on mount
+  useEffect(() => {
+    void loadDoctorReport();
+  }, [loadDoctorReport]);
 
   const onToggleParallel = async (next: boolean) => {
     setBusy(true);
@@ -29,6 +49,21 @@ export function Settings() {
       pushToast(
         "info",
         next ? "Parallel execution enabled" : "Parallel execution disabled",
+      );
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggleTmux = async (next: boolean) => {
+    setBusy(true);
+    try {
+      await setTmux(next);
+      pushToast(
+        "info",
+        next ? "tmux terminal session wrapping enabled" : "tmux wrapping disabled",
       );
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : String(err));
@@ -48,6 +83,8 @@ export function Settings() {
           agent dispatch and the ithyno terminal panel.
         </div>
       )}
+
+      <PrerequisitesSection report={doctorReport} onRefresh={loadDoctorReport} />
 
       <section className="settings-section">
         <h3>Appearance</h3>
@@ -88,9 +125,24 @@ export function Settings() {
             </p>
           </span>
         </label>
+
+        <label className="settings-toggle" style={{ marginTop: 16 }}>
+          <input
+            type="checkbox"
+            checked={tmux}
+            disabled={busy}
+            onChange={(e) => void onToggleTmux(e.target.checked)}
+          />
+          <span>
+            <strong>Wrap Manager terminal in tmux</strong>
+            <p className="muted">
+              When enabled (or when <code>agmsg</code> is configured), the Manager's terminal process runs inside a persistent <code>tmux</code> session (<code>tmux new-session -A -s ithyno</code>). Enables session persistence across page reloads and disconnects.
+            </p>
+          </span>
+        </label>
       </section>
 
-      <AgmsgSection storeAgmsg={agmsg} disabled={busy} pushToast={pushToast} />
+      <AgmsgSummarySection agmsg={agmsg} disabled={busy} />
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
@@ -113,12 +165,14 @@ function NewProjectSection(props: {
   const canSubmit =
     !disabled &&
     parent.trim().length > 0 &&
-    parent.trim().startsWith("/") &&
+    isAbsolutePath(parent.trim()) &&
     name.trim().length > 0;
 
   const onSubmit = () => {
     if (!canSubmit) return;
-    const dir = `${parent.trim().replace(/\/$/, "")}/${name.trim()}`;
+    const trimmedParent = parent.trim();
+    const sep = trimmedParent.includes("\\") ? "\\" : "/";
+    const dir = `${trimmedParent.replace(/[/\\]$/, "")}${sep}${name.trim()}`;
     try {
       const q = new URLSearchParams({ target: dir, channel: "browser" });
       window.location.href = `/onboarding?${q.toString()}`;
@@ -182,122 +236,182 @@ function NewProjectSection(props: {
   );
 }
 
-type AgmsgConfig = { team: string; storage?: string };
-
-function AgmsgSection(props: {
-  storeAgmsg: AgmsgConfig | null;
-  disabled: boolean;
-  pushToast: (kind: "info" | "error", msg: string) => void;
-}) {
-  const { storeAgmsg, disabled, pushToast } = props;
-
-  const [enabled, setEnabled] = useState<boolean>(storeAgmsg !== null);
-  const [team, setTeam] = useState<string>(storeAgmsg?.team ?? "");
-  const [storage, setStorage] = useState<string>(storeAgmsg?.storage ?? "");
-  const [busy, setBusy] = useState(false);
-
-  // Sync from store when the WS broadcast lands (after a save, or an
-  // external agents.yaml edit).
-  useEffect(() => {
-    setEnabled(storeAgmsg !== null);
-    setTeam(storeAgmsg?.team ?? "");
-    setStorage(storeAgmsg?.storage ?? "");
-  }, [storeAgmsg]);
-
-  const dirty =
-    enabled !== (storeAgmsg !== null) ||
-    (enabled && team !== (storeAgmsg?.team ?? "")) ||
-    (enabled && (storage || "") !== (storeAgmsg?.storage ?? ""));
-
-  const canSave =
-    dirty && !disabled && !busy && (!enabled || team.trim().length > 0);
-
-  const onSave = async () => {
-    setBusy(true);
-    try {
-      if (enabled) {
-        await setAgmsgConfig({
-          enabled: true,
-          team: team.trim(),
-          ...(storage.trim() ? { storage: storage.trim() } : {}),
-        });
-        pushToast("info", "agmsg block saved");
-      } else {
-        await setAgmsgConfig({ enabled: false });
-        pushToast("info", "agmsg block removed");
-      }
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+/**
+ * Summary + "Configure" button that opens the shared `AgmsgConfigModal`.
+ * The form itself (Enable/Team/Storage/Save) lives entirely in that
+ * modal now — Settings just references it, so New Project's onboarding
+ * flow can open the exact same dialog instead of a second copy.
+ * (limit-agmsg-install-prompt-triggers)
+ */
+function AgmsgSummarySection(props: { agmsg: AgmsgConfig | null; disabled: boolean }) {
+  const { agmsg, disabled } = props;
+  const [open, setOpen] = useState(false);
 
   return (
     <section className="settings-section">
       <h3>Agmsg (multi-agent messaging)</h3>
-      <label className="settings-toggle">
-        <input
-          type="checkbox"
-          checked={enabled}
-          disabled={disabled || busy}
-          onChange={(e) => setEnabled(e.target.checked)}
-        />
-        <span>
-          <strong>Enable</strong>
-          <p className="muted">
-            When on, the embedded Terminal panel wraps its startup in{" "}
-            <code>tmux new-session</code> and the dispatcher routes{" "}
-            <code>mode: live-shell</code> workers through{" "}
-            <code>/agmsg spawn</code> instead of{" "}
-            <code>-p</code> subprocess / Task tool. Requires the agmsg plugin
-            installed locally (
-            <code>/plugin marketplace add fujibee/agmsg</code>).
-          </p>
-        </span>
-      </label>
-
-      <div className="settings-field">
-        <label>
-          <span>
-            <strong>Team name</strong>
-            <p className="muted">Required when enabled. Names the agmsg team room.</p>
-          </span>
-          <input
-            type="text"
-            value={team}
-            placeholder="openspec-ui"
-            disabled={disabled || busy || !enabled}
-            onChange={(e) => setTeam(e.target.value)}
-          />
-        </label>
-      </div>
-
-      <div className="settings-field">
-        <label>
-          <span>
-            <strong>Storage path</strong>
-            <p className="muted">
-              Optional. Path to the SQLite messages DB. When empty, agmsg's
-              default (<code>~/.agents/skills/agmsg/db/messages.db</code>) is
-              used.
-            </p>
-          </span>
-          <input
-            type="text"
-            value={storage}
-            placeholder=".worktrees/.agmsg.sqlite"
-            disabled={disabled || busy || !enabled}
-            onChange={(e) => setStorage(e.target.value)}
-          />
-        </label>
-      </div>
-
+      <p className="muted">
+        {agmsg ? (
+          <>
+            Enabled — team <code>{agmsg.team}</code>
+          </>
+        ) : (
+          "Disabled"
+        )}
+      </p>
       <div className="settings-actions">
-        <button type="button" disabled={!canSave} onClick={() => void onSave()}>
-          {busy ? "Saving…" : "Save agmsg config"}
+        <button type="button" disabled={disabled} onClick={() => setOpen(true)}>
+          Configure
         </button>
       </div>
+      {open && <AgmsgConfigModal onClose={() => setOpen(false)} />}
     </section>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Prerequisites section (add-doctor-and-installer)
+// ---------------------------------------------------------------------------
+
+const AGENT_CLI_KEYS: Cli[] = [
+  "claude",
+  "codex",
+  "agy",
+  "copilot",
+  "gemini",
+  "opencode",
+  "cursor",
+];
+
+function PrerequisitesSection(props: {
+  report: DoctorReport | null;
+  onRefresh: () => Promise<void>;
+}) {
+  const { report, onRefresh } = props;
+  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+
+  const renderRow = (
+    name: string,
+    status: CliStatus | undefined,
+    installable: "tmux" | "agmsg" | null,
+    hint?: string,
+  ) => {
+    if (!status) {
+      return (
+        <tr key={name} className="prereq-row">
+          <td className="prereq-name">{name}</td>
+          <td className="prereq-status prereq-missing">—</td>
+          <td className="prereq-version"></td>
+          <td className="prereq-path"></td>
+          <td className="prereq-action"></td>
+        </tr>
+      );
+    }
+    return (
+      <tr key={name} className="prereq-row">
+        <td className="prereq-name">{name}</td>
+        <td className={`prereq-status ${status.installed ? "prereq-ok" : "prereq-missing"}`}>
+          {status.installed ? "✓" : "✗"}
+          {!status.installed && hint && <div className="prereq-hint muted">{hint}</div>}
+        </td>
+        <td className="prereq-version">{status.version ?? ""}</td>
+        <td className="prereq-path">{status.path ?? ""}</td>
+        <td className="prereq-action">
+          {installable && !status.installed && (
+            <button
+              type="button"
+              className="prereq-install-btn"
+              onClick={() => setInstallTool(installable)}
+            >
+              Install
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <>
+      <section className="settings-section prereq-section">
+        <h3>Prerequisites</h3>
+        <p className="muted">
+          Required CLIs and tools. Agent CLIs must be installed manually (auth is
+          vendor-specific). tmux and agmsg can be installed from this panel.
+        </p>
+        {!report ? (
+          <p className="muted">Checking prerequisites…</p>
+        ) : (
+          <>
+            <table className="prereq-table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Status</th>
+                  <th>Version</th>
+                  <th>Path</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {renderRow(
+                  "git",
+                  report.git,
+                  null,
+                  report.git.installed === false
+                    ? "Required for worktrees and commits. Install: https://git-scm.com/downloads"
+                    : undefined,
+                )}
+                {renderRow(
+                  "node",
+                  report.node,
+                  null,
+                  report.node.installed === false
+                    ? "Required for New Project / Import (npm, npx). Install: https://nodejs.org"
+                    : undefined,
+                )}
+                {AGENT_CLI_KEYS.map((key) =>
+                  renderRow(key, report.agents[key], null),
+                )}
+                {renderRow("tmux", report.tmux, "tmux")}
+                {renderRow(
+                  "agmsg",
+                  report.agmsg,
+                  "agmsg",
+                  report.gitBash?.installed === false ? report.gitBash.error : undefined,
+                )}
+              </tbody>
+            </table>
+            <p className="muted prereq-ready">
+              <strong>Ready for Manager:</strong>{" "}
+              <span className={report.readyForManager ? "prereq-ok" : "prereq-missing"}>
+                {report.readyForManager ? "yes" : "no"}
+              </span>
+            </p>
+            <div className="settings-actions">
+              <button type="button" onClick={() => void onRefresh()}>
+                Refresh
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      {installTool && (
+        <PrereqInstallModal
+          tool={installTool}
+          onClose={(didInstall) => {
+            setInstallTool(null);
+            if (didInstall) void onRefresh();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+// DefaultManagerSection was removed by `remove-default-manager-settings-ui`.
+// The Agents tab's Manager section is the sole UI for viewing / editing the
+// current project's Manager entry. The `defaultManager` store slice + its
+// localStorage persistence remain intact for InitDialog preselect and any
+// future implicit-set path.

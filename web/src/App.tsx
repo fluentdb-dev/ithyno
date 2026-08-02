@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
@@ -17,9 +17,10 @@ import { Terminal } from "./components/Terminal";
 import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
 import { GitIdentityChip } from "./components/GitIdentityChip";
 import { AboutButton } from "./components/AboutButton";
+import { AboutModal } from "./components/AboutModal";
 import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
-import { ReadOnlyBrowse } from "./components/ReadOnlyBrowse";
 import { ImportProjectFlow } from "./components/ImportProjectFlow";
+import { ImportedProjectNotification } from "./components/ImportedProjectNotification";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
 import { isVsCodeShell } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
@@ -40,6 +41,8 @@ export function App() {
   const state = useStore((s) => s.state);
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
+  const importedProjectNotifications = useStore((s) => s.importedProjectNotifications);
+  const dismissImportNotification = useStore((s) => s.dismissImportNotification);
 
   // import-project-spec-generation: import flow state
   const [importFlowActive, setImportFlowActive] = useState(false);
@@ -68,12 +71,30 @@ export function App() {
   //   2. Any mutating API call returns 401/403 → banner.
   const [authExpired, setAuthExpired] = useState<boolean>(() => getSessionToken() == null);
 
+  const handleReloadSession = useCallback(() => {
+    const w = window as any;
+    if (w.ithyno?.reloadSession) {
+      w.ithyno.reloadSession();
+      return;
+    }
+    if (isVsCodeShell()) {
+      window.postMessage({ type: "ithyno:reload-session" }, "*");
+      return;
+    }
+    window.location.reload();
+  }, []);
+
   useEffect(() => {
     onAuthExpiredHandler(() => {
       clearSessionToken();
-      setAuthExpired(true);
+      const w = window as any;
+      if (w.ithyno?.reloadSession || isVsCodeShell()) {
+        handleReloadSession();
+      } else {
+        setAuthExpired(true);
+      }
     });
-  }, []);
+  }, [handleReloadSession]);
 
   useEffect(() => {
     if (!isElectronShell()) return;
@@ -90,23 +111,58 @@ export function App() {
 
   // Detect a stale token at first mount (e.g. after a server restart) by
   // hitting the lightweight check endpoint. If the token is missing or no
-  // longer recognized, surface the banner immediately instead of waiting for
-  // a mutating action.
+  // longer recognized, surface the banner or auto-reload for desktop shells.
   useEffect(() => {
     if (authExpired) return;
     void checkAuth().then((ok) => {
       if (!ok) {
         clearSessionToken();
-        setAuthExpired(true);
+        const w = window as any;
+        if (w.ithyno?.reloadSession || isVsCodeShell()) {
+          handleReloadSession();
+        } else {
+          setAuthExpired(true);
+        }
       }
     });
-  }, [authExpired]);
+  }, [authExpired, handleReloadSession]);
 
   useEffect(() => {
     if (authExpired) return;
     void load();
     connectWs();
   }, [load, connectWs, authExpired]);
+
+  // Automated wake-up / focus session recovery:
+  // When system wakes up from sleep or gains focus (visibilitychange → visible, or focus),
+  // automatically attempt checkAuth(), connectWs(), and load() to restore state seamlessly.
+  useEffect(() => {
+    const handleAutoRecover = () => {
+      void checkAuth().then((ok) => {
+        if (ok) {
+          setAuthExpired(false);
+          connectWs();
+          void load();
+        } else {
+          // Auth failed — attempt automatic reload via shell handler before showing banner
+          handleReloadSession();
+        }
+      });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleAutoRecover();
+      }
+    };
+
+    window.addEventListener("focus", handleAutoRecover);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", handleAutoRecover);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [connectWs, load, handleReloadSession]);
 
   // Cmd/Ctrl+Shift+K — restart terminal, but only when focus is inside
   // `.terminal-host` or on the `.terminal-reconnect` button.
@@ -143,6 +199,15 @@ export function App() {
       setImportFlowRoot(projectRoot || undefined);
       setImportFlowActive(true);
     });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, []);
+
+  // Electron IPC: menu "About ithyno" sends `ithyno:open-about` to the renderer.
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => {
+    const w = window as any;
+    if (!w.ithyno?.onOpenAbout) return;
+    const unsub = w.ithyno.onOpenAbout(() => setAboutOpen(true));
     return () => { if (typeof unsub === "function") unsub(); };
   }, []);
 
@@ -189,27 +254,25 @@ export function App() {
           ? " terminal-half"
           : "";
 
-  // Browse mode: render ONLY the ReadOnlyBrowse UI, no chrome.
-  if (browseMode && !authExpired) {
-    return (
-      <div className="app">
-        <ReadOnlyBrowse />
-      </div>
-    );
-  }
-
   if (authExpired) {
     return (
       <div className="app">
         <div className="auth-expired">
           <h2>Session expired</h2>
           <p>
-            Open the launch URL printed by the ithyno server to reload with
-            a fresh token. The URL looks like{" "}
-            <code>http://localhost:&lt;port&gt;/?token=…</code>.
+            The session token is no longer valid (e.g. after PC sleep or server restart).
           </p>
+          <div className="auth-expired-actions">
+            <button
+              type="button"
+              className="action-btn primary auth-expired-btn"
+              onClick={handleReloadSession}
+            >
+              Reload Dashboard
+            </button>
+          </div>
           <p className="muted">
-            If you restarted the server, the previous token is no longer valid.
+            Or open the launch URL printed by the ithyno server (<code>http://localhost:&lt;port&gt;/?token=…</code>).
           </p>
         </div>
       </div>
@@ -261,13 +324,13 @@ export function App() {
 
         {loading && <p className="empty">Loading…</p>}
         {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
-        {!loading && state && !state.exists && !importFlowActive && (
+        {!loading && state && !state.exists && !importFlowActive && !browseMode && (
           <NoProjectDecisionPanel
             projectRoot={state.root || ""}
             hasClaudeMd={state.hasClaudeMd ?? false}
           />
         )}
-        {!loading && state && !state.exists && importFlowActive && (
+        {importFlowActive && (
           <ImportProjectFlow
             projectRoot={importFlowRoot}
             onComplete={() => {
@@ -281,7 +344,7 @@ export function App() {
             }}
           />
         )}
-        {!loading && state?.exists && (
+        {!loading && (state?.exists || browseMode) && (
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/change/:id" element={<ChangeDetail />} />
@@ -329,6 +392,20 @@ export function App() {
         </aside>
       )}
 
+      {/* Pattern-A import completion notifications (enable-import-both-patterns).
+          Stacked top-right; each card dismisses independently. */}
+      {importedProjectNotifications.length > 0 && (
+        <div className="import-notifications-region">
+          {importedProjectNotifications.map((n) => (
+            <ImportedProjectNotification
+              key={n.id}
+              notification={n}
+              onDismiss={dismissImportNotification}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`} onClick={() => dismissToast(t.id)}>
@@ -336,6 +413,8 @@ export function App() {
           </div>
         ))}
       </div>
+
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }

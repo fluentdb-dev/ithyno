@@ -13,7 +13,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false,
-    "types": ["node"]
+    "types": ["node"],
+    "noEmit": true
   },
   "include": ["server", "web/src", "bin"]
 }

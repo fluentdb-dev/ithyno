@@ -17,7 +17,6 @@ const DEFAULT_CHROME_COLOR = '#0f1115';
 import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu, type AboutConfig } from './menu';
-import { ensureAgmsgInstalled } from './agmsg-installer';
 import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
 
 /**
@@ -129,13 +128,52 @@ function validateWindowState(ws: WindowState): WindowState {
   return ws;
 }
 
-async function ensureProject(): Promise<string | null> {
-  const saved = store.getLastProject();
-  if (saved && isDirectory(saved)) return saved;
-  if (saved && !isDirectory(saved)) {
-    store.removeFromRecent(saved);
+/**
+ * Resolve the packaged / dev path to welcome.html. The welcome page is
+ * loaded into the SAME BrowserWindow that becomes the main window after
+ * the user picks a project (same-window swap) — its preload is the
+ * standard main preload (electron/src/preload.ts), so no separate
+ * welcome-preload path is needed. (add-electron-welcome-window.)
+ */
+function resolveWelcomeHtml(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'app', 'electron', 'welcome.html');
   }
-  return pickProjectDialog() ?? null;
+  // Dev: app.getAppPath() is the electron/ directory (where package.json
+  // lives); welcome.html sits at its root.
+  return resolve(app.getAppPath(), 'welcome.html');
+}
+
+/**
+ * Read the app icon (electron/build/icon.png, same file bundled as the
+ * dock/taskbar icon) and return it as a base64 data URL. Injecting via
+ * data URL avoids any file:// / CSP / packaging-path resolution
+ * concerns in welcome.html; the icon is small enough (~few KB) that
+ * inlining is cheap.
+ *
+ * Returns null when the icon file is missing — welcome.html degrades
+ * gracefully to no icon.
+ */
+let _iconDataUrlCache: string | null | undefined = undefined;
+function readAppIconDataUrl(): string | null {
+  if (_iconDataUrlCache !== undefined) return _iconDataUrlCache;
+  // In dev, app.getAppPath() IS the electron/ directory (that's where
+  // its package.json lives), so the icon sits at
+  // <appPath>/build/icon.png — NO leading `..`. An earlier version had
+  // `..` and resolved to <repo-root>/build/icon.png, which doesn't
+  // exist; that made readFileSync throw and the welcome page fell back
+  // to `display:none` (icon invisible).
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'app', 'electron', 'build', 'icon.png')
+    : resolve(app.getAppPath(), 'build', 'icon.png');
+  try {
+    const buf = readFileSync(iconPath);
+    _iconDataUrlCache = `data:image/png;base64,${buf.toString('base64')}`;
+  } catch (err) {
+    console.warn('[welcome] failed to read icon at', iconPath, err);
+    _iconDataUrlCache = null;
+  }
+  return _iconDataUrlCache;
 }
 
 async function tearDownServer(): Promise<void> {
@@ -178,56 +216,79 @@ function saveWindowState(win: BrowserWindow): void {
   });
 }
 
-async function createWindowForProject(projectRoot: string): Promise<void> {
+/**
+ * Create (or reuse) the single main BrowserWindow.
+ *
+ * - `projectRoot` non-null → spawn the server pinned to that root and load
+ *   its URL. This is the standard "open a project" path.
+ * - `projectRoot` null → skip server spawn and load welcome.html. Same
+ *   BrowserWindow instance; when the user picks a folder from welcome, we
+ *   call this function again with the picked path and the SAME window's
+ *   URL swaps to localhost. That's the "same-window swap" contract — the
+ *   welcome page and the main app share one window, one preload, and one
+ *   set of window bounds.
+ *
+ * When `mainWindow` already exists (either a running project or a running
+ * welcome view), we reuse it via loadURL / loadFile — no BrowserWindow
+ * teardown, no bounds reset, no flicker.
+ * (add-electron-welcome-window, same-window swap pivot.)
+ */
+async function createWindowForProject(projectRoot: string | null): Promise<void> {
   await tearDownServer();
 
-  const binPath = resolveBinPath();
-  if (!existsSync(binPath)) {
-    dialog.showErrorBox(
-      'ithyno',
-      `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
-    );
-    app.quit();
-    return;
-  }
-
-  let spawn: SpawnResult;
-  try {
-    spawn = await spawnServer({
-      binPath,
-      projectRoot,
-      onLog: (line, stream) => {
-        if (stream === 'stderr') process.stderr.write(line);
-        else process.stdout.write(line);
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const choice = dialog.showMessageBoxSync({
-      type: 'error',
-      title: 'ithyno',
-      message: 'Failed to start the ithyno server',
-      detail: message,
-      buttons: ['Retry', 'Quit'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (choice === 0) {
-      await createWindowForProject(projectRoot);
-    } else {
+  let spawn: SpawnResult | null = null;
+  if (projectRoot !== null) {
+    const binPath = resolveBinPath();
+    if (!existsSync(binPath)) {
+      dialog.showErrorBox(
+        'ithyno',
+        `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
+      );
       app.quit();
+      return;
     }
-    return;
+
+    try {
+      spawn = await spawnServer({
+        binPath,
+        projectRoot,
+        onLog: (line, stream) => {
+          if (stream === 'stderr') process.stderr.write(line);
+          else process.stdout.write(line);
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const choice = dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'ithyno',
+        message: 'Failed to start the ithyno server',
+        detail: message,
+        buttons: ['Retry', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice === 0) {
+        await createWindowForProject(projectRoot);
+      } else {
+        app.quit();
+      }
+      return;
+    }
+    currentSpawn = spawn;
+    currentProjectRoot = resolve(projectRoot);
+    store.setProject(projectRoot);
+    refreshMenu();
   }
-  currentSpawn = spawn;
-  currentProjectRoot = resolve(projectRoot);
-  store.setProject(projectRoot);
-  refreshMenu();
 
   const savedWs = validateWindowState(store.getWindowState());
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.loadURL(spawn.url);
+    if (spawn) {
+      void mainWindow.loadURL(spawn.url);
+    } else {
+      void mainWindow.loadFile(resolveWelcomeHtml());
+    }
     mainWindow.focus();
     return;
   }
@@ -267,7 +328,11 @@ async function createWindowForProject(projectRoot: string): Promise<void> {
     if (mainWindow === win) mainWindow = null;
   });
 
-  await win.loadURL(spawn.url);
+  if (spawn) {
+    await win.loadURL(spawn.url);
+  } else {
+    await win.loadFile(resolveWelcomeHtml());
+  }
 }
 
 async function switchProject(projectRoot: string): Promise<void> {
@@ -275,10 +340,15 @@ async function switchProject(projectRoot: string): Promise<void> {
 }
 
 /**
- * File → New Project… handler. Follows the agmsg-installer pattern:
- * native OS dialog + direct `runInit` import + switch to the new
- * project on success. No HTTP round-trip through the local server.
- * (add-electron-new-project-flow.)
+ * File → New Project… handler: native OS directory-picker dialog, then
+ * opens the same shared `/onboarding` window used by every other New
+ * Project entry point (Settings' New Project form, and "No OpenSpec
+ * project found" → "Initialize openspec here") — see
+ * `openOnboardingWindow` below. All three converge on the same
+ * `InitDialog` + `POST /api/init/stream` flow; this handler's only
+ * Electron-specific part is picking the target directory natively
+ * instead of via a text field. (add-electron-new-project-flow,
+ * superseded by add-new-project-onboarding-window.)
  */
 async function onNewProject(): Promise<void> {
   try {
@@ -360,11 +430,68 @@ function openOnboardingWindow(target: string, serverUrl: string): void {
 }
 
 function resolveOnboardingPreload(): string {
-  // Same layout resolution as resolveBinPath / agmsg-installer.
+  // Same layout resolution as resolveBinPath.
   if (app.isPackaged) {
     return join(process.resourcesPath, 'app', 'electron', 'out', 'onboarding-preload.js');
   }
   return resolve(app.getAppPath(), 'out', 'onboarding-preload.js');
+}
+
+/**
+ * IPC channels used by welcome.html (loaded into the main BrowserWindow
+ * when no project is open). All handlers target `mainWindow` — the same
+ * window instance whose URL will swap to localhost:<port> as soon as the
+ * user picks a folder (same-window swap; see `createWindowForProject`).
+ * (add-electron-welcome-window.)
+ */
+function registerWelcomeIpc(): void {
+  ipcMain.handle('welcome:get-about', () => {
+    // Extend the About payload with an inline icon data URL so
+    // welcome.html can render the same asset that the About panel /
+    // dock uses, without depending on file:// paths that differ
+    // between dev and packaged layouts.
+    return { ...readAboutConfig(), iconDataUrl: readAppIconDataUrl() };
+  });
+  ipcMain.handle('welcome:get-recent', () => store.getRecent());
+  ipcMain.on('welcome:open-folder', () => {
+    const picked = pickProjectDialog(mainWindow ?? undefined);
+    if (!picked) return; // cancel — welcome stays visible in the same window
+    void createWindowForProject(picked);
+  });
+  ipcMain.on('welcome:open-recent', (_e, path: unknown) => {
+    if (typeof path !== 'string' || !path) return;
+    if (!isDirectory(path)) {
+      store.removeFromRecent(path);
+      const w = mainWindow;
+      if (w && !w.isDestroyed()) {
+        w.webContents.send('welcome:recent-updated', store.getRecent());
+      }
+      return;
+    }
+    void createWindowForProject(path);
+  });
+  ipcMain.on('welcome:open-external', (_e, url: unknown) => {
+    if (typeof url !== 'string' || !url) return;
+    const about = readAboutConfig();
+    const allowed =
+      (about.licenseUrl && url === about.licenseUrl) ||
+      (about.repositoryUrl && url.startsWith(about.repositoryUrl));
+    if (!allowed) {
+      console.warn('[welcome] refused external URL not in allowlist:', url);
+      return;
+    }
+    void shell.openExternal(url);
+  });
+  ipcMain.on('welcome:quit', () => {
+    app.quit();
+  });
+  ipcMain.on('ithyno:reload-session', () => {
+    if (currentProjectRoot) {
+      void createWindowForProject(currentProjectRoot);
+    } else if (mainWindow && currentSpawn) {
+      void mainWindow.loadURL(currentSpawn.url);
+    }
+  });
 }
 
 let _aboutConfig: AboutConfig | null = null;
@@ -477,21 +604,37 @@ if (!gotLock) {
     },
   );
 
+  // enable-import-both-patterns: open an imported Pattern-A project as the
+  // active project when the renderer calls window.ithyno.openProject(path).
+  ipcMain.on('ithyno:open-project', (_event, path: unknown) => {
+    if (typeof path !== 'string' || !path) return;
+    void switchProject(path);
+  });
+
+  registerWelcomeIpc();
+
   void app.whenReady().then(async () => {
     const aboutConfig = readAboutConfig();
     app.setAboutPanelOptions({
       applicationName: aboutConfig.name,
       applicationVersion: aboutConfig.version,
+      version: aboutConfig.version,
       copyright: `License: ${aboutConfig.license}`,
+      website: aboutConfig.repositoryUrl,
+      authors: ["ithyno contributors"],
     });
     refreshMenu(aboutConfig);
-    await ensureAgmsgInstalled();
-    const project = await ensureProject();
-    if (!project) {
-      app.quit();
-      return;
+
+    // First-launch flow (add-electron-welcome-window, same-window swap):
+    //   - Valid saved project → open with project (daily-driver: zero
+    //     friction, no welcome flicker).
+    //   - No / stale saved → open the SAME main window on welcome.html;
+    //     Open Folder swaps its URL to localhost:<port> in place.
+    const saved = store.getLastProject();
+    if (saved && !isDirectory(saved)) {
+      store.removeFromRecent(saved);
     }
-    await createWindowForProject(project);
+    await createWindowForProject(saved && isDirectory(saved) ? saved : null);
   });
 
   app.on('window-all-closed', () => {
@@ -508,11 +651,13 @@ if (!gotLock) {
   });
 
   app.on('activate', () => {
-    if (!mainWindow && !quitting) {
-      void app.whenReady().then(async () => {
-        const project = await ensureProject();
-        if (project) await createWindowForProject(project);
-      });
-    }
+    if (mainWindow || quitting) return;
+    void app.whenReady().then(async () => {
+      const saved = store.getLastProject();
+      if (saved && !isDirectory(saved)) {
+        store.removeFromRecent(saved);
+      }
+      await createWindowForProject(saved && isDirectory(saved) ? saved : null);
+    });
   });
 }

@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import { ProgressBar } from "../components/ProgressBar";
 import { CommandModal, kebabCaseValid } from "../components/CommandModal";
 import { KanbanBoard } from "../components/Kanban";
+import { PhaseLaneBoard } from "../components/PhaseLaneBoard";
 import { TagChipList } from "../components/TagChip";
 import { injectPty } from "../api";
 import { ERR } from "../lib/errorMessages";
@@ -127,8 +128,8 @@ export function Overview() {
           <button
             role="tab"
             aria-selected={overviewLayout === "board"}
-            aria-label="Board layout"
-            title="Board"
+            aria-label="Phase — Kanban lanes by progress (todo / in-progress / done)"
+            data-tooltip="Phase — lanes by progress (todo / in-progress / done)"
             className={overviewLayout === "board" ? "active" : ""}
             onClick={() => setOverviewLayout("board")}
           >
@@ -140,9 +141,26 @@ export function Overview() {
           </button>
           <button
             role="tab"
+            aria-selected={overviewLayout === "phase"}
+            aria-label="Agent — active workers grouped by role"
+            data-tooltip="Agent — active workers grouped by role"
+            className={overviewLayout === "phase" ? "active" : ""}
+            onClick={() => setOverviewLayout("phase")}
+          >
+            {/* Icon: 4 vertical bars of equal height — suggests pipeline lanes,
+                distinct from the 3-bar Board icon and the 4-square Cards icon. */}
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="1.5" y="2.5" width="2.4" height="11" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="5.2" y="2.5" width="2.4" height="11" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="8.9" y="2.5" width="2.4" height="11" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="12.6" y="2.5" width="2.4" height="11" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          </button>
+          <button
+            role="tab"
             aria-selected={overviewLayout === "cards"}
-            aria-label="Cards layout"
-            title="Cards"
+            aria-label="All — every change as a card"
+            data-tooltip="All — every change as a card"
             className={overviewLayout === "cards" ? "active" : ""}
             onClick={() => setOverviewLayout("cards")}
           >
@@ -158,6 +176,8 @@ export function Overview() {
 
       {overviewLayout === "board" ? (
         <KanbanBoard changes={visibleChanges} onNewChange={() => setProposeOpen(true)} />
+      ) : overviewLayout === "phase" ? (
+        <PhaseLaneBoard changes={visibleChanges} />
       ) : (
         <>
           {visibleChanges.length === 0 && (

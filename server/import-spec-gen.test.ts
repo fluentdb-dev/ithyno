@@ -4,9 +4,11 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// We test the preflight function in isolation — the subprocess spawn is
-// tested at integration level in 7.3 (manual).
-import { preflight, subscribeToJob, startGenerationJob } from "./import-spec-gen.js";
+// Tests for preflight and inject-to-Manager logic.
+// The SSE / subprocess-spawn tests from the archived predecessor
+// (import-project-spec-generation) have been removed; the subprocess
+// transport no longer exists. See refactor-import-to-task-tool-subagent.
+import { preflight, injectImportCommand } from "./import-spec-gen.js";
 
 const ALWAYS_AUTHORIZED = (_path: string) => true;
 
@@ -22,7 +24,6 @@ describe("import-spec-gen preflight", () => {
   });
 
   it("returns ok: true for a valid project root", async () => {
-    // Create a minimal project structure
     await writeFile(join(tmpDir, "README.md"), "# Test Project\n");
     await writeFile(join(tmpDir, "index.ts"), "export default {};\n");
 
@@ -30,22 +31,21 @@ describe("import-spec-gen preflight", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.result.jobId).toBeTruthy();
+    expect(result.result.targetPath).toBe(tmpDir);
     expect(typeof result.result.estimatedContextBytes).toBe("number");
     expect(result.result.scanCounts.code).toBeGreaterThanOrEqual(1);
     expect(result.result.scanCounts.docs).toBeGreaterThanOrEqual(1);
   });
 
-  it("rejects 409 when openspec/ exists and force is false", async () => {
+  it("allows import when openspec/ exists (Pattern B / re-import)", async () => {
     await mkdir(join(tmpDir, "openspec"), { recursive: true });
+    await writeFile(join(tmpDir, "README.md"), "# Test\n");
 
     const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.status).toBe(409);
-    expect(result.reason).toMatch(/openspec\//);
+    expect(result.ok).toBe(true);
   });
 
-  it("allows when openspec/ exists but force is true", async () => {
+  it("still allows when openspec/ exists and force is true", async () => {
     await mkdir(join(tmpDir, "openspec"), { recursive: true });
     await writeFile(join(tmpDir, "README.md"), "# Test\n");
 
@@ -61,9 +61,6 @@ describe("import-spec-gen preflight", () => {
   });
 
   it("rejects 403 when authorization callback returns false", async () => {
-    // This test verifies the 403 path using a custom authorization callback.
-    // The actual server uses isAuthorizedImportPath which blocks /etc etc;
-    // here we demonstrate that the preflight respects whatever callback is passed.
     const DENY_ALL = (_path: string) => false;
     const result = await preflight(tmpDir, false, DENY_ALL);
     expect(result.ok).toBe(false);
@@ -72,7 +69,6 @@ describe("import-spec-gen preflight", () => {
   });
 
   it("returns filesToScan with relative paths (max 50)", async () => {
-    // Create 60 source files
     for (let i = 0; i < 60; i++) {
       await writeFile(join(tmpDir, `file${i}.ts`), `export const x${i} = ${i};\n`);
     }
@@ -81,7 +77,6 @@ describe("import-spec-gen preflight", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.result.filesToScan.length).toBeLessThanOrEqual(50);
-    // All entries should be relative paths (not starting with /)
     for (const f of result.result.filesToScan) {
       expect(f).not.toMatch(/^\//);
     }
@@ -116,23 +111,40 @@ describe("import-spec-gen preflight", () => {
   // F6 regression: symlinks inside the project root must not be followed.
   it("does not follow symlinks during walkDir (F6)", async () => {
     await writeFile(join(tmpDir, "real.ts"), "const x = 1;\n");
-    // Create a symlink pointing outside the project root.
     const symlinkPath = join(tmpDir, "outside.ts");
     try {
       await symlink("/etc/hosts", symlinkPath);
     } catch {
-      // Symlink creation may fail in certain sandboxed envs — skip gracefully.
       return;
     }
 
     const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // The symlink target (/etc/hosts) must not appear in scanned files.
     for (const f of result.result.filesToScan) {
       expect(f).not.toMatch(/etc\/hosts/);
       expect(f).not.toBe("outside.ts");
     }
+  });
+
+  // F2: preflight must reject projects whose total code+docs size exceeds the
+  // 50 MB cap with HTTP 400. We use a sparse file (truncate to 51 MB) so
+  // lstat reports a large apparent size without writing 51 MB to disk.
+  it("rejects 400 when total file size exceeds 50 MB cap", async () => {
+    const { truncate } = await import("node:fs/promises");
+    const FIFTY_ONE_MB = 51 * 1024 * 1024;
+
+    // A sparse .ts file: lstat reports its apparent size as 51 MB.
+    const sparsePath = join(tmpDir, "sparse.ts");
+    await writeFile(sparsePath, "");
+    await truncate(sparsePath, FIFTY_ONE_MB);
+
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(400);
+    expect(result.reason).toMatch(/exceeds/);
+    expect(result.reason).toMatch(/50 MB/);
   });
 
   // F7 regression: docs/ must not be counted twice.
@@ -144,89 +156,149 @@ describe("import-spec-gen preflight", () => {
     const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // docs/guide.md should appear exactly once.
     const docsCount = result.result.filesToScan.filter((f) => f.includes("docs/guide.md")).length;
     expect(docsCount).toBe(1);
   });
 });
 
-// ---- subscribeToJob / listener cleanup (F1 regression) ---------------------
-describe("subscribeToJob — listener cleanup (F1)", () => {
-  let tmpDir: string;
+// ---- injectImportCommand tests ----------------------------------------------
+describe("injectImportCommand", () => {
+  it("injects the correct command string to the PTY relay", () => {
+    const injected: Array<{ data: string; terminate: boolean }> = [];
+    const mockInject = (data: string, terminate: boolean) => {
+      injected.push({ data, terminate });
+      return { ok: true as const };
+    };
 
-  beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "import-spec-gen-sub-test-"));
-    process.env.CLAUDE_BINARY = "stub";
+    const result = injectImportCommand("/path/to/target", mockInject);
+    expect(result.ok).toBe(true);
+    expect(injected).toHaveLength(1);
+    expect(injected[0].data).toBe("/ithy-opsx:import /path/to/target");
+    expect(injected[0].terminate).toBe(true);
   });
 
-  afterEach(async () => {
-    delete process.env.CLAUDE_BINARY;
-    await rm(tmpDir, { recursive: true, force: true });
+  it("propagates failure when PTY relay is not running", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({
+      ok: false as const,
+      reason: "No embedded terminal is open. Open a change view to start one.",
+    });
+
+    const result = injectImportCommand("/path/to/target", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/No embedded terminal/);
   });
 
-  it("subscribeToJob returns an unsub function that removes the listener", async () => {
-    // Run a stub job so we have a jobId in the registry.
-    const prefRes = await preflight(tmpDir, false, (_) => true);
-    expect(prefRes.ok).toBe(true);
-    if (!prefRes.ok) return;
-    const { jobId } = prefRes.result;
+  it("includes the target path verbatim in the injected string", () => {
+    const injected: string[] = [];
+    const mockInject = (data: string, _terminate: boolean) => {
+      injected.push(data);
+      return { ok: true as const };
+    };
 
-    // startGenerationJob registers the job in the Map synchronously (before
-    // any async work), so we can subscribe immediately after awaiting it.
-    await startGenerationJob(jobId, tmpDir, tmpDir);
-
-    const received: string[] = [];
-    // At this point the stub may already be "done" — subscribeToJob should
-    // still return a (no-op) unsub for finished jobs.
-    const unsub = subscribeToJob(jobId, (line) => received.push(line));
-    // subscribeToJob returns null only for unknown jobIds, not finished jobs.
-    expect(unsub).not.toBeNull();
-
-    // Call unsub — must not throw.
-    unsub!();
-    expect(typeof unsub).toBe("function");
+    injectImportCommand("/Users/foo/my-project", mockInject);
+    expect(injected[0]).toBe("/ithy-opsx:import /Users/foo/my-project");
   });
 
-  it("subscribeToJob returns null for unknown jobId", () => {
-    const unsub = subscribeToJob("nonexistent-job-id", () => {});
-    expect(unsub).toBeNull();
+  // F4: targetPath containing control characters must be rejected before
+  // reaching the PTY, preventing shell injection.
+  it("rejects 400 when targetPath contains a newline (\\n)", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\ncommand", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+    expect(result.reason).toMatch(/control characters/);
+  });
+
+  it("rejects 400 when targetPath contains a carriage return (\\r)", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\rcommand", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+  });
+
+  it("rejects 400 when targetPath contains a NUL byte", () => {
+    const mockInject = (_data: string, _terminate: boolean) => ({ ok: true as const });
+    const result = injectImportCommand("/path/evil\x00command", mockInject);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result as { status?: number }).status).toBe(400);
+  });
+
+  it("does not call inject when control chars are present", () => {
+    let called = false;
+    const mockInject = (_data: string, _terminate: boolean) => {
+      called = true;
+      return { ok: true as const };
+    };
+    injectImportCommand("/path/\nevil", mockInject);
+    expect(called).toBe(false);
   });
 });
 
-// ---- F2 regression: subprocess timeout (unit-level) -------------------------
-describe("startGenerationJob — timeout config (F2)", () => {
-  it("SUBPROCESS_TIMEOUT_MS is configurable via IMPORT_TIMEOUT_MS env var", async () => {
-    // This test verifies the module reads the env var. We do this indirectly
-    // by checking that the env var is documented and the module exports the job.
-    // Full timeout integration is too slow for a unit test (10 min default).
-    // We just assert the stub path completes without hanging.
-    const tmpRoot = await mkdtemp(join(tmpdir(), "import-timeout-test-"));
-    process.env.CLAUDE_BINARY = "stub";
-    try {
-      const prefRes = await preflight(tmpRoot, false, (_) => true);
-      expect(prefRes.ok).toBe(true);
-      if (!prefRes.ok) return;
-      const { jobId } = prefRes.result;
+// ---- 503 scenario: Manager PTY not running (unit-level) --------------------
+// The HTTP 503 path is exercised in server/index.ts when injectImportCommand
+// returns ok: false. The unit test above covers that return shape. Full
+// integration (HTTP 503 response) is verified manually in task 8.6.
 
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("stub job timed out")), 5000);
-        void startGenerationJob(jobId, tmpRoot, tmpRoot).then(() => {
-          // Wait for the stub to emit done
-          const sub = subscribeToJob(jobId, (_line, event) => {
-            if (event === "done" || event === "error") {
-              clearTimeout(timeout);
-              resolve();
-            }
-          });
-          if (!sub) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        });
-      });
-    } finally {
-      delete process.env.CLAUDE_BINARY;
-      await rm(tmpRoot, { recursive: true, force: true });
-    }
+// ---- Doctor gate (enable-import-both-patterns task 9.3) --------------------
+// The 409 doctor gate lives in server/index.ts, NOT in preflight() itself.
+// Preflight has no knowledge of doctor. These tests document the HTTP-layer
+// behavior via the contract: when doctor returns readyForManager: false, the
+// endpoint should 409 before running preflight. We test the preflight function
+// directly here — endpoint-level behavior is manual (task 10.7).
+
+describe("preflight — doctor independence", () => {
+  // Preflight itself does not call runDoctor(). The gate in server/index.ts
+  // runs the doctor check first. These tests simply confirm that preflight
+  // still returns ok: true for a valid root, independent of whether a doctor
+  // check would pass or fail — the two concerns are separated.
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "preflight-doctor-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("preflight ok: true for a project root (doctor check is orthogonal)", async () => {
+    await writeFile(join(tmpDir, "main.ts"), "export {};\n");
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(true);
+  });
+
+  it("preflight ok even when openspec/ exists (409 gate removed)", async () => {
+    await mkdir(join(tmpDir, "openspec"), { recursive: true });
+    await writeFile(join(tmpDir, "main.ts"), "export {};\n");
+    const result = await preflight(tmpDir, false, ALWAYS_AUTHORIZED);
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ---- Pattern hint (enable-import-both-patterns task 3.2) -------------------
+// The pattern: "A" | "B" derivation (`targetPath === PROJECT_ROOT`) lives in
+// server/index.ts around the preflight result. The computation is simple and
+// tied to a runtime-constant (PROJECT_ROOT). We test the discrimination logic
+// in isolation below.
+
+describe("pattern classification logic", () => {
+  function classifyPattern(targetPath: string, projectRoot: string): "A" | "B" {
+    return targetPath === projectRoot ? "B" : "A";
+  }
+
+  it("Pattern B when targetPath equals PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/project", "/home/user/project")).toBe("B");
+  });
+
+  it("Pattern A when targetPath differs from PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/other", "/home/user/project")).toBe("A");
+  });
+
+  it("Pattern A when targetPath is a subdirectory of PROJECT_ROOT", () => {
+    expect(classifyPattern("/home/user/project/subdir", "/home/user/project")).toBe("A");
   });
 });

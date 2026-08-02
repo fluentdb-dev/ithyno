@@ -7,7 +7,11 @@
 //   - `walkTemplates`, `copyFile`, `updateGitignore` are individually testable
 //
 // Templates ship under <package_root>/templates/ and are resolved relative
-// to this file via import.meta.url.
+// to this file via import.meta.url. Notable scaffold targets: `openspec-flow`
+// (the project's spec-driven workflow skill) and every `ithy-opsx-*` skill +
+// `commands/ithy-opsx/*` command backing the `/ithy-opsx:*` slash surface —
+// ithyno's own commands travel with Init rather than being installed globally
+// (see distribute-ithy-opsx-via-init-templates).
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -114,7 +118,21 @@ export async function runInit({
   autoCreateDir = false,
   autoGitInit = false,
   log = console.log,
+  // Manager CLI the user picked in the onboarding picker. Reserved
+  // for wiring the per-CLI skill renderer (task 3 in
+  // scaffold-ithy-opsx-skills-per-cli). Undefined → renderer step
+  // defaults to `"claude"` at the invocation site so the bare
+  // `bin/ithyno init <target>` CLI workflow keeps working without a
+  // --manager flag. Accepted here so the option flows through all
+  // callers (server /api/init, /api/init/stream, runNewProjectChain)
+  // without further signature churn when the renderer step lands.
+  managerCli = undefined,
 } = {}) {
+  // Currently unused at the walkTemplates level — task 3 will invoke
+  // `renderSkillsForCli(managerCli, target)` after the copy step.
+  // Reference the arg so lint doesn't flag it as unused; the renderer
+  // wiring in task 3 replaces this with a real call.
+  void managerCli;
   const target = resolve(targetDir ?? process.cwd());
 
   // Preflight: target exists? (with optional autoCreateDir recovery)

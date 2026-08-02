@@ -9,6 +9,7 @@ import {
   applyAgentConfigPayload,
   coercePayload,
   writeAgmsg,
+  writeTmux,
   type AgentConfigPayload,
 } from "./config-writer.js";
 
@@ -449,6 +450,7 @@ describe("writeAgmsg (add-agmsg-config-write)", () => {
     expect(doc.agmsg).toEqual({ team: "openspec-ui" });
     expect(Array.isArray(doc.agents)).toBe(true);
     expect((doc.agents as unknown[]).length).toBe(1);
+    expect((doc.agents as Record<string, unknown>[])[0].mode).toBe("live-shell");
   });
 
   it("upserts an agmsg block with team + storage", async () => {
@@ -528,3 +530,25 @@ describe("writeAgmsg (add-agmsg-config-write)", () => {
     expect(doc.agmsg).toEqual({ team: "openspec-ui" });
   });
 });
+
+describe("writeTmux", () => {
+  it("creates agents.yaml with tmux: true when missing", async () => {
+    const res = await writeTmux(dir, true);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.tmux).toBe(true);
+  });
+
+  it("updates existing agents.yaml to set tmux: false and disables agmsg + sets mode single-prompt", async () => {
+    await seed(
+      ["tmux: true", "agmsg:", "  team: alpha", "agents:", "  - name: worker", "    mode: live-shell", "    roles: [code]", "    command: cmd", "    args: []", ""].join("\n"),
+    );
+    const res = await writeTmux(dir, false);
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect(doc.tmux).toBe(false);
+    expect(doc.agmsg).toBeUndefined();
+    expect((doc.agents as Record<string, unknown>[])[0].mode).toBe("single-prompt");
+  });
+});
+

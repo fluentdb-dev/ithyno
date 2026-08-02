@@ -232,12 +232,20 @@ call as the `X-Session-Token` header and on every WebSocket upgrade as a
 - **THEN** the URL includes `?token=<token>`
 
 ### Requirement: Session Expired Recovery
-The dashboard SHALL surface authentication failures as a single full-page
-banner with a clear path back to a working session.
 
-#### Scenario: 401 or 403 from the server
-- **WHEN** a mutating call returns 401 or 403 with an auth-related reason
-- **THEN** the UI shows a "Session expired — reload the dashboard" banner that points at the freshly-printed launch URL
+The dashboard SHALL surface authentication failures as a single full-page banner with a clear path back to a working session. Upon system wake-up or focus restoration (`visibilitychange` / `focus`), the dashboard SHALL automatically attempt session re-authorization (`checkAuth()`) and WebSocket reconnection before showing the fallback banner.
+
+#### Scenario: System wake-up auto-recovery
+
+- **WHEN** the browser window recovers from sleep or gains focus (`visibilitychange` to visible or `focus`)
+- **THEN** the dashboard automatically runs `checkAuth()` and reconnects WebSocket connections
+- **AND** if auth check succeeds, the workspace state is reloaded without user intervention
+
+#### Scenario: Electron auto-reload on wake-up auth failure
+
+- **GIVEN** the dashboard is running inside an Electron shell
+- **WHEN** system wake-up occurs and auth check initially fails
+- **THEN** the shell automatically attempts a single window reload to re-evaluate the local server session before showing the fallback banner
 
 ### Requirement: Stale Token Detection on Load
 The dashboard SHALL validate the stored session token against the server on
@@ -972,6 +980,8 @@ The `/opsx:verify <change-id>` slash command SHALL exist as a prompt template th
 
 The `/opsx:escalate <change-id> "<question>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to construct a JSON body containing the question and a context string assembled from the change's current state (phase, recent diff summary, prior review verdict) and to invoke `POST /api/changes/<change-id>/needs-human` via a Bash + curl call to `http://localhost:4321`. On HTTP 2xx the template SHALL report success to the caller; on non-2xx it SHALL surface the error body for further handling.
 
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:escalate` → `/ithy-opsx:escalate` (file moves from `.claude/commands/opsx/escalate.md` → `.claude/commands/ithy-opsx/escalate.md`) as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
+
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/escalate.md`
 - **WHEN** a Claude Code session evaluates the slash command
@@ -990,6 +1000,8 @@ The `/opsx:escalate <change-id> "<question>"` slash command SHALL exist as a pro
 ### Requirement: Answer Command Wrapper
 
 The `/opsx:answer <change-id> "<answer>"` slash command SHALL exist as a prompt template that instructs a Claude Code session to invoke `POST /api/changes/<change-id>/needs-human/answer` via Bash + curl to `http://localhost:4321` with the answer text as the JSON body, and to report the endpoint's response back to the caller. The template SHALL be safe to invoke only when the change is currently in `needs-human` state; the endpoint's 409 return is the safety net.
+
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:answer` → `/ithy-opsx:answer` (file moves from `.claude/commands/opsx/answer.md` → `.claude/commands/ithy-opsx/answer.md`) as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
 
 #### Scenario: template exists in commands directory
 - **GIVEN** the repository at `.claude/commands/opsx/answer.md`
@@ -2535,10 +2547,7 @@ follow-up changes.
 
 ### Requirement: Embedded PTY Uses tmux When Agmsg Is Configured
 
-The embedded PTY session SHALL wrap the resolved manager startup
-command in a `tmux new-session` invocation whenever `agents.yaml`
-includes a valid top-level `agmsg` block, and SHALL spawn the manager
-command directly (pre-P2 behavior) when the block is absent.
+The embedded PTY session SHALL wrap the resolved manager startup command in a `tmux new-session` invocation whenever tmux is *enabled*, and SHALL spawn the manager command directly (pre-P2 behavior) when it is not. Tmux is enabled when EITHER `agents.yaml` sets a top-level `tmux: true`, OR `agents.yaml` includes a valid top-level `agmsg` block (agmsg configuration continues to imply tmux ON unconditionally — there is no way to configure agmsg without tmux). Both signals are read via `AgentRegistry`: `tmux()` returns the raw parsed boolean (default `false` when the field is absent), `agmsg()` returns the parsed block or `null`. `tmux: false` (or omission) alongside a present `agmsg:` block does NOT disable tmux — agmsg's implication is unconditional, not an independent vote.
 
 The tmux-wrapped startup command SHALL take the shape:
 
@@ -2546,97 +2555,94 @@ The tmux-wrapped startup command SHALL take the shape:
 tmux new-session -A -s <session-name> -- <managerCommand> <managerArgs...>
 ```
 
-The `-A` flag SHALL cause tmux to attach to an existing session with
-the given name if one is running (idempotent re-attach on WS
-reconnect / dev reload). The session name SHALL default to `ithyno`;
-when `ITHYNO_TMUX_SESSION` is set to a non-empty string in the
-environment, that value SHALL be used instead. The `--` separator
-SHALL be emitted between tmux's own flags and the wrapped command so
-manager flags (`--resume`, `--session-id`, etc.) are not
-misinterpreted as tmux options.
+The `-A` flag SHALL cause tmux to attach to an existing session with the given name if one is running (idempotent re-attach on WS reconnect / dev reload). The session name SHALL default to `ithyno-<hash>` where `<hash>` is a stable, project-scoped digest — SHA-256 of the resolved project root path, first 12 hex characters. When `ITHYNO_TMUX_SESSION` is set to a non-empty string in the environment, that literal value SHALL be used instead (backward compat; opt-in cross-project sharing). The `--` separator SHALL be emitted between tmux's own flags and the wrapped command so manager flags (`--resume`, `--session-id`, etc.) are not misinterpreted as tmux options.
 
-The `initialInput` string (the Manager's declared first-message line
-from `agents.yaml`) SHALL continue to be written to the PTY's stdin
-after the startup command settles — tmux forwards stdin into pane 0's
-foreground command so no extra plumbing is added.
+The `initialInput` string (the Manager's declared first-message line from `agents.yaml`) SHALL continue to be written to the PTY's stdin after the startup command settles — tmux forwards stdin into pane 0's foreground command so no extra plumbing is added.
 
-When the `agmsg` block is present and the `tmux` binary is not on
-`PATH`, the PTY SHALL open a raw shell that prints a banner naming
-the missing dependency, the platform install hint, and a note that
-removing the `agmsg:` block reverts to the direct-spawn path. The
-WebSocket connection SHALL NOT close in this fallback — the user
-retains a usable shell.
+When tmux is enabled (by either signal) and the `tmux` binary is not on `PATH`, the PTY SHALL open a raw shell that prints a banner naming the missing dependency, the platform install hint, and a note that removing the `agmsg:` block / `tmux: true` reverts to the direct-spawn path. The WebSocket connection SHALL NOT close in this fallback — the user retains a usable shell.
 
-The manager startup command SHALL be resolved via a three-tier
-priority:
+The manager startup command SHALL be resolved via a three-tier priority:
 
-1. `registry.managerAgent()` — the first `agents.yaml` entry whose
-   `roles` array contains `manager`. Its `command` + `args` form the
-   startup line; its `initialInput` (if set) is auto-injected after.
-2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell
-   string. Backward compat with the pre-manager-config setup.
-3. **Fallback: per-project Claude Code session id**. When neither
-   priority 1 nor 2 supplies a command, ithyno SHALL manage a
-   persistent UUID at `<project-root>/.ithyno/session-id` and
-   choose between `claude --session-id <uuid>` (first launch) and
-   `claude --resume <uuid>` (subsequent launches):
+1. `registry.managerAgent()` — the first `agents.yaml` entry whose `roles` array contains `manager`. Its `command` + `args` form the startup line; its `initialInput` (if set) is auto-injected after.
+2. `ITHYNO_TERMINAL_STARTUP` env var — treated as a single shell string. Backward compat with the pre-manager-config setup.
+3. **Fallback: per-project Claude Code session id**. When neither priority 1 nor 2 supplies a command, ithyno SHALL manage a persistent UUID at `<project-root>/.ithyno/session-id` and choose between `claude --session-id <uuid>` (first launch) and `claude --resume <uuid>` (subsequent launches):
 
    - Read `<project-root>/.ithyno/session-id`. Trim whitespace.
-   - **File missing OR empty** → mint a new UUID v4, ensure
-     `<project-root>/.ithyno/` exists (`mkdir -p`), write
-     `<uuid>\n` to the file, then set the startup command to
-     `claude --session-id <uuid>` (Claude Code creates a fresh
-     conversation with that specific id).
-   - **File present, non-empty** → set the startup command to
-     `claude --resume <uuid>` (Claude Code resumes the previously-
-     minted session).
+   - **File missing OR empty** → mint a new UUID v4, ensure `<project-root>/.ithyno/` exists (`mkdir -p`), write `<uuid>\n` to the file, then set the startup command to `claude --session-id <uuid>` (Claude Code creates a fresh conversation with that specific id).
+   - **File present, non-empty** → set the startup command to `claude --resume <uuid>` (Claude Code resumes the previously-minted session).
 
-   `--continue` MUST NOT be used at this tier — its "most recent"
-   picking is opaque and it errors on a truly fresh project. Users
-   who want a different startup command declare a manager entry
-   (tier 1) or set `ITHYNO_TERMINAL_STARTUP` (tier 2).
+   `--continue` MUST NOT be used at this tier — its "most recent" picking is opaque and it errors on a truly fresh project. Users who want a different startup command declare a manager entry (tier 1) or set `ITHYNO_TERMINAL_STARTUP` (tier 2).
 
-This requirement establishes tmux hosting only. It does NOT invoke
-any `agmsg` binary, does NOT change dispatcher routing, and does NOT
-open additional tmux panes for workers — those are landed by
-follow-up changes P2b and P2c.
+This requirement establishes tmux hosting only. It does NOT invoke any `agmsg` binary, does NOT change dispatcher routing, and does NOT open additional tmux panes for workers — those are landed by follow-up changes P2b and P2c.
 
-#### Scenario: agmsg block absent → direct spawn unchanged
-- **GIVEN** an `agents.yaml` without an `agmsg:` block and a `role: manager` agent declared
+Runtime project switch (`POST /api/project/switch` from `respawn-manager-pty-on-project-switch`) SHALL, in addition to terminating live PTYs, best-effort `tmux kill-session -t <old-session-name>` for the previous project's session so the pane does not linger and get re-attached by an unrelated future invocation. Failure to kill the session (session not found, tmux missing, etc.) SHALL be logged and swallowed — the switch itself proceeds.
+
+#### Scenario: Neither tmux nor agmsg configured → direct spawn unchanged
+- **GIVEN** an `agents.yaml` without a `tmux: true` field and without an `agmsg:` block, and a `role: manager` agent declared
 - **WHEN** the Terminal panel opens a PTY
 - **THEN** the PTY spawns the manager command directly (no tmux wrap), matching pre-P2 behavior
 - **AND** the process tree does NOT contain `tmux`
 
-#### Scenario: agmsg block present with tmux installed → tmux wrap
-- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }` and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
+#### Scenario: tmux: true enables tmux without agmsg configured
+- **GIVEN** an `agents.yaml` containing `tmux: true`, no `agmsg:` block, and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
 - **AND** the `tmux` binary is on `PATH`
+- **AND** the project root resolves to `/path/to/project`
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the resolved startup line is `tmux new-session -A -s ithyno -- claude --resume <id>`
+- **THEN** the resolved startup line is `tmux new-session -A -s ithyno-<12-hex-of-sha256("/path/to/project")> -- claude --resume <id>`
 - **AND** the manager's `initialInput` is written to the PTY after the tmux session bootstraps
 
-#### Scenario: agmsg block present with tmux missing → fallback banner
-- **GIVEN** an `agents.yaml` containing an `agmsg:` block
+#### Scenario: agmsg block present with tmux installed → tmux wrap regardless of the tmux field
+- **GIVEN** an `agents.yaml` containing `agmsg: { team: alpha }`, no explicit `tmux` field, and a `role: manager` agent whose command is `claude` and args are `[--resume, <id>]`
+- **AND** the `tmux` binary is on `PATH`
+- **AND** the project root resolves to `/path/to/project`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the resolved startup line is `tmux new-session -A -s ithyno-<12-hex-of-sha256("/path/to/project")> -- claude --resume <id>`
+- **AND** the manager's `initialInput` is written to the PTY after the tmux session bootstraps
+
+#### Scenario: tmux: false does not defeat an agmsg-implied tmux wrap
+- **GIVEN** an `agents.yaml` containing both `tmux: false` and `agmsg: { team: alpha }`
+- **AND** the `tmux` binary is on `PATH`
+- **WHEN** the Terminal panel opens a PTY
+- **THEN** the PTY still wraps the startup command in `tmux new-session -A -s ...` (agmsg's implication is unconditional)
+
+#### Scenario: Different project roots produce distinct tmux sessions
+- **GIVEN** two ithyno instances running against project roots `/path/A` and `/path/B` (both with tmux enabled, via either signal, and tmux installed)
+- **WHEN** each opens its embedded PTY
+- **THEN** the two `tmux new-session -s ...` invocations use DIFFERENT session names (`ithyno-<hashA>` vs `ithyno-<hashB>`)
+- **AND** `tmux ls` shows two distinct sessions
+- **AND** each dashboard's Manager Claude sits at its own project's cwd
+
+#### Scenario: tmux enabled with tmux missing → fallback banner
+- **GIVEN** an `agents.yaml` with tmux enabled (via `tmux: true` or an `agmsg:` block)
 - **AND** the `tmux` binary is NOT on `PATH`
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the PTY opens a raw shell that prints a banner including "tmux was not found on PATH", the platform install hint, and the "remove the agmsg: block to fall back" note
+- **THEN** the PTY opens a raw shell that prints a banner including "tmux was not found on PATH", the platform install hint, and the "remove the agmsg: block / tmux: true to fall back" note
 - **AND** the WS connection stays open (the user can Ctrl-C / type commands as normal)
 
 #### Scenario: ITHYNO_TMUX_SESSION overrides the session name
-- **GIVEN** `agents.yaml` contains an `agmsg:` block, `tmux` is installed, and the environment sets `ITHYNO_TMUX_SESSION=proj-a`
+- **GIVEN** `agents.yaml` has tmux enabled (via either signal), `tmux` is installed, and the environment sets `ITHYNO_TMUX_SESSION=proj-a`
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** the resolved startup line uses `-s proj-a` (not `-s ithyno`)
+- **THEN** the resolved startup line uses `-s proj-a` (not the `ithyno-<hash>` default)
+- **AND** a second ithyno instance with the same env var and any project root shares the same session (opt-in cross-project sharing)
 
 #### Scenario: re-attach idempotence via `-A`
-- **GIVEN** an `agmsg:`-configured workspace whose tmux session `ithyno` is already running (previous PTY closed but session was detached, not killed)
-- **WHEN** the Terminal panel opens a new PTY
-- **THEN** `tmux new-session -A -s ithyno` attaches to the existing session (does NOT error, does NOT create a duplicate); the user sees the same tmux state as before the disconnect
+- **GIVEN** a tmux-enabled workspace whose tmux session `ithyno-<hash>` is already running (previous PTY closed but session was detached, not killed)
+- **WHEN** the Terminal panel opens a new PTY for the same project
+- **THEN** `tmux new-session -A -s ithyno-<hash>` attaches to the existing session (does NOT error, does NOT create a duplicate); the user sees the same tmux state as before the disconnect
+
+#### Scenario: Runtime project switch kills the old project's tmux session
+- **GIVEN** ithyno is running at project A with its tmux session `ithyno-<hashA>` alive
+- **WHEN** a client sends `POST /api/project/switch` with `{ projectRoot: "/path/to/B" }`
+- **THEN** `terminateAllLivePtys()` closes the live WS
+- **AND** the server best-effort invokes `tmux kill-session -t ithyno-<hashA>` before returning 200
+- **AND** the next `/pty` reconnect creates a fresh `ithyno-<hashB>` at cwd=B (no attach to the old A pane)
 
 #### Scenario: fallback first launch mints a session id
 - **GIVEN** a project whose `agents.yaml` has NO entry with `roles: [manager]`
 - **AND** the environment has no `ITHYNO_TERMINAL_STARTUP`
 - **AND** `<project-root>/.ithyno/session-id` does NOT exist
 - **WHEN** the Terminal panel opens a PTY
-- **THEN** ithyno mints a fresh UUID v4, creates `<project-root>/.ithyno/session-id` containing that UUID, and the resolved startup line is `claude --session-id <uuid>` (or the tmux-wrapped variant when agmsg is configured)
+- **THEN** ithyno mints a fresh UUID v4, creates `<project-root>/.ithyno/session-id` containing that UUID, and the resolved startup line is `claude --session-id <uuid>` (or the tmux-wrapped variant when tmux is enabled)
 - **AND** the terminal does NOT print "No conversation found" — Claude Code starts a fresh conversation bound to the newly-minted id
 
 #### Scenario: fallback subsequent launch resumes
@@ -2671,6 +2677,10 @@ directory into `resources/app/vendor/agmsg/` via
 `electron-builder`'s `extraResources`. On each launch, before the
 main window is created, the shell SHALL run an `ensureAgmsgInstalled()`
 step that checks for `$HOME/.agents/skills/agmsg/scripts/send.sh`.
+
+> ⚠️ **PENDING MODIFIED** by [add-windows-agmsg-support](../../changes/add-windows-agmsg-support/): the "Windows launch skips the install step" scenario is replaced — Windows gets the same install-prompt flow as macOS/Linux, gated on Git Bash + sqlite3 detection instead of an unconditional platform skip.
+
+> ⚠️ **PENDING REMOVED** by [limit-agmsg-install-prompt-triggers](../../changes/limit-agmsg-install-prompt-triggers/): this whole requirement is removed — no automatic install prompt on launch. Replaced by "Agmsg Install Is Explicitly Triggered (Settings Or New Project Onboarding)" and "Agmsg Team Config Is A Shared Dialog (Settings And New Project Onboarding)".
 
 When the file is absent AND the "never ask" marker
 `$HOME/.ithyno-config/skip-agmsg-install` does NOT exist, the shell
@@ -3078,66 +3088,41 @@ case by name comparison, not by role alone.
 
 ### Requirement: Manager Entry Drives Fresh PTY Startup
 
-The server SHALL resolve the embedded PTY session's startup
-command via a three-tier priority chain whenever a fresh child is
-about to be spawned (initial connection or reconnect that spawns
-a new process). This resolution is independent of any tmux
-wrapping applied later:
+The server SHALL resolve the embedded PTY session's startup command via a three-tier priority chain whenever a fresh child is about to be spawned (initial connection or reconnect that spawns a new process). This resolution is independent of any tmux wrapping applied later:
 
-1. **`registry.managerAgent()`** — the first `agents.yaml` entry
-   whose `roles` array contains `manager`. Its `command` + `args`
-   form the startup line. If the entry defines `initialInput`
-   (either as a top-level field pre-reshape or as
-   `prompts.manager` post-reshape), that string SHALL be written
-   to the child's stdin after the startup command settles.
-2. **`ITHYNO_TERMINAL_STARTUP` env var** — treated as a single
-   shell string, tokenised on whitespace with standard shell
-   quoting.
-3. **Per-project Claude Code session id fallback** — see
-   `Embedded PTY Uses tmux When Agmsg Is Configured` for the
-   canonical `<project-root>/.ithyno/session-id` mint-or-resume
-   contract. `--continue` MUST NOT be used at this tier.
+1. **`registry.managerAgent()`** — the first `agents.yaml` entry whose `roles` array contains `manager`. Its `command` + `args` form the startup line. When `args` is EMPTY, the server SHALL defer to the per-CLI Manager-startup dispatch (see the "Manager PTY startup dispatches per CLI when args are empty" requirement); when `args` is non-empty, those args are used verbatim (explicit override). If the entry defines `initialInput` (either as a top-level field pre-reshape or as `prompts.manager` post-reshape), that string SHALL be written to the child's stdin after the startup command settles.
+2. **`ITHYNO_TERMINAL_STARTUP` env var** — treated as a single shell string, tokenised on whitespace with standard shell quoting.
+3. **Per-project Claude Code session file fallback** — the server SHALL read / mint a UUID at `<projectRoot>/.ithyno/session-claude` and pick `claude --session-id <uuid>` on first launch (file missing or empty), `claude --resume <uuid>` on subsequent launches. The legacy path `<projectRoot>/.ithyno/session-id` SHALL be read as a fallback for existing dev environments but MUST NOT be written (fresh mints go to `session-claude`). `--continue` MUST NOT be used at this tier.
 
-The chain SHALL be evaluated identically whether or not `agents.yaml`
-declares an `agmsg:` block. When the block is present, the resolved
-command is subsequently wrapped in `tmux new-session -A -s <name> --`
-(see `Embedded PTY Uses tmux When Agmsg Is Configured`); when absent,
-the resolved command is spawned directly.
+The chain SHALL be evaluated identically whether or not `agents.yaml` declares an `agmsg:` block.
 
-Live PTY sessions SHALL NOT be restarted on `agents.yaml` reload —
-only the NEXT fresh spawn picks up a changed manager entry.
+Live PTY sessions SHALL NOT be restarted on `agents.yaml` reload — only the NEXT fresh spawn picks up a changed manager entry.
 
-#### Scenario: Manager entry takes precedence over env var and session-id
-
-- **GIVEN** `agents.yaml` has a manager entry `command: aider, args: [--yolo]` AND `ITHYNO_TERMINAL_STARTUP=claude` is set AND `.ithyno/session-id` exists with a UUID
-- **WHEN** a fresh PTY session opens (no agmsg block)
-- **THEN** the child process is `aider --yolo`
-- **AND** neither the env var nor the session-id path is consulted
-
-#### Scenario: Env var fallback when no manager entry
-
-- **GIVEN** `agents.yaml` has no manager entry AND `ITHYNO_TERMINAL_STARTUP=aider` is set
+#### Scenario: Manager entry with explicit non-empty args wins over dispatch
+- **GIVEN** `agents.yaml` has a manager entry `command: claude, args: [--dangerously-skip-permissions]`
 - **WHEN** a fresh PTY session opens
-- **THEN** the child process is `aider`
+- **THEN** the child startup line is `claude --dangerously-skip-permissions`
+- **AND** the per-CLI dispatch is NOT consulted
 
-#### Scenario: Session-id fallback when neither manager entry nor env var
+#### Scenario: Manager entry with empty args defers to per-CLI dispatch
+- **GIVEN** `agents.yaml` has a manager entry `command: claude, args: []`
+- **WHEN** a fresh PTY session opens with a `projectRoot` known
+- **THEN** the startup line matches `claude --session-id <uuid>` on first launch (mints `<projectRoot>/.ithyno/session-claude`)
+- **OR** matches `claude --resume <uuid>` on subsequent launches (reads that file)
+- **AND** the value is NOT `claude --continue`
 
-- **GIVEN** `agents.yaml` has no manager entry AND `ITHYNO_TERMINAL_STARTUP` is unset AND `.ithyno/session-id` is absent
+#### Scenario: Legacy `.ithyno/session-id` is honored as fallback read
+- **GIVEN** an existing dev environment where `<projectRoot>/.ithyno/session-id` contains a UUID and `session-claude` does NOT exist
+- **WHEN** a fresh PTY session opens for a Claude manager with empty args (or no manager entry at all — priority 3)
+- **THEN** the startup line is `claude --resume <legacy-uuid>` (legacy file read)
+- **AND** no rewrite of the legacy file occurs (it stays as-is)
+- **AND** subsequent runs continue to read the legacy file until a fresh mint writes to `session-claude`
+
+#### Scenario: Env var priority preserved
+- **GIVEN** no manager entry AND `ITHYNO_TERMINAL_STARTUP=claude` is set AND `.ithyno/session-claude` exists with a UUID
 - **WHEN** a fresh PTY session opens
-- **THEN** the server mints a new UUID, writes it to `.ithyno/session-id`, and spawns `claude --session-id <uuid>`
-
-#### Scenario: initialInput auto-injected after manager startup
-
-- **GIVEN** the resolved manager entry has `prompts.manager: /opsx:manage` (or pre-reshape `initialInput: /opsx:manage`)
-- **WHEN** the PTY spawns
-- **THEN** after the child starts, the string `/opsx:manage\n` SHALL be written to its stdin
-
-#### Scenario: Reload does not restart live sessions
-
-- **GIVEN** an open PTY session running `claude --resume <uuid>` AND a user edits `agents.yaml` to change the manager command
-- **WHEN** the file watcher reloads the registry
-- **THEN** the running session continues unchanged
-- **AND** the NEXT fresh spawn picks up the new manager command
+- **THEN** the child startup line is `claude` (from env var)
+- **AND** the session-claude file is NOT consulted
 
 ### Requirement: Agents Config Delete Confirmation And Add Button
 
@@ -3322,6 +3307,8 @@ revert change under the naming convention `revert-<scope>`. The
 command SHALL enforce the PENDING annotation and (Case α only)
 REVERTED annotation conventions documented in `CLAUDE.md` and
 `.claude/skills/openspec-flow/SKILL.md`.
+
+> ⚠️ **PENDING MODIFIED** by [unify-ithyno-slash-command-surface](../../changes/unify-ithyno-slash-command-surface/): the slash command is renamed `/opsx:revert` → `/ithy-opsx:revert` and the skill id `opsx-revert` → `ithy-opsx-revert` as part of consolidating ithyno's slash-command surface under `/ithy-opsx:*`.
 
 Concretely, when invoked, the command SHALL:
 
@@ -3770,14 +3757,14 @@ The Kanban `Start ▼ (N)` column-header bulk selector SHALL render only in the 
 
 ### Requirement: 2-branch decision on Open Project of a non-openspec folder
 
-When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing two clear next actions: Initialize openspec here, Browse read-only. A separate Cancel action is intentionally NOT present — the user can pick a different folder from the shell's normal Open Project entry point.
+When the user opens a folder that does NOT contain an `openspec/` directory, the dashboard SHALL replace the current dead-end "No OpenSpec project found" copy with a decision panel exposing two clear next actions: **Initialize openspec here** and **Open dashboard anyway** (the second action was previously "Browse read-only" and mounted a markdown-tree viewer; it now opens the empty dashboard directly).
 
 #### Scenario: Decision panel renders for non-openspec folder
 
 - **GIVEN** the user opens a folder that has no `openspec/` subdirectory
 - **WHEN** the dashboard loads
 - **THEN** a decision panel is shown, headed with the folder path
-- **AND** it presents two buttons: `Initialize openspec here`, `Browse read-only`
+- **AND** it presents two buttons: `Initialize openspec here`, `Open dashboard anyway`
 
 #### Scenario: Initialize action creates openspec and reloads
 
@@ -3786,14 +3773,14 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **AND** on success it refetches `/api/state`
 - **AND** the dashboard transitions to the standard Kanban view for the newly-initialized project
 
-#### Scenario: Browse read-only mode
+#### Scenario: Open dashboard anyway renders empty Kanban
 
-- **WHEN** the user clicks `Browse read-only`
-- **THEN** the dashboard mounts a read-only browse view
-- **AND** the browse view enumerates markdown files under the project root (`README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/**/*.md`)
-- **AND** the browse view does NOT show the Kanban, Specs, Archive, Agents, Docs, or Settings tabs
-- **AND** the browse view does NOT auto-launch the embedded terminal
-- **AND** no mutating request (init, change, dispatch, task-toggle, etc.) can be triggered from any control within the browse view
+- **WHEN** the user clicks `Open dashboard anyway`
+- **THEN** the dashboard sets a client-side `browseMode = true` flag
+- **AND** the app renders its normal chrome (topbar + Routes) as if `state.exists === true`
+- **AND** the Overview page (Kanban) renders with zero changes; the standard "no changes" empty-state copy is shown
+- **AND** the dedicated `<ReadOnlyBrowse />` markdown-tree component is NOT mounted
+- **AND** the dashboard does NOT auto-launch the embedded terminal unless `agents.yaml` is present (guard from `guard-terminal-autolaunch-on-agents-yaml` still applies)
 
 #### Scenario: Openspec-present folder is unaffected
 
@@ -3807,6 +3794,16 @@ When the user opens a folder that does NOT contain an `openspec/` directory, the
 - **WHEN** the decision panel renders
 - **THEN** a short informational line appears beneath the buttons noting that CLAUDE.md was detected and will be picked up as agent-facing context once openspec is initialized
 - **AND** when `CLAUDE.md` is absent, no such hint appears
+
+<!--
+  Originally we planned to REMOVED the "Browse endpoints for markdown"
+  requirement, but the openspec archive validator rejects a bare REMOVED
+  section without a valid replacement body. Since the endpoint code
+  itself stays in place (as inert), we leave the requirement in the
+  main spec for now and rely on ReadOnlyBrowse's file-level UNUSED
+  header to signal the inert status. A future cleanup change can do a
+  proper propose to remove the requirement AND the code together.
+-->
 
 ### Requirement: Browse endpoints for markdown
 
@@ -3839,7 +3836,9 @@ The server SHALL expose two read-only endpoints — `GET /api/browse/markdown-tr
 
 ### Requirement: Import endpoint generates openspec specs from code and docs
 
-The system SHALL expose `POST /api/import/spec-generation` that, given a project root, dispatches an LLM-driven subagent to read the project's code and docs and produce a first-draft `openspec/specs/` set. The endpoint SHALL run preflight checks and stream progress via SSE.
+The system SHALL expose `POST /api/import/spec-generation` that, given a project root, dispatches a Claude Code sub-agent (via the Task tool inside the ithyno-side Manager session) to read the project's code and docs and produce a first-draft `openspec/specs/` set. The endpoint SHALL run preflight checks and hand the job off to Manager for execution. Completion is signaled via the existing workspace file-watch WS broadcast (not a subprocess SSE stream).
+
+> ⚠️ **PENDING MODIFIED** by [enable-import-both-patterns](../../changes/enable-import-both-patterns/): Adds doctor preflight (409 when no agent CLI installed) + pattern classification (A/B) in the response + Pattern-A external-target watcher.
 
 #### Scenario: Preflight blocks existing openspec/
 
@@ -3854,13 +3853,22 @@ The system SHALL expose `POST /api/import/spec-generation` that, given a project
 - **THEN** the endpoint returns 400 with the actual size and the cap
 - **AND** no generation job is dispatched
 
-#### Scenario: Successful generation
+#### Scenario: Successful dispatch
 
 - **GIVEN** a projectRoot without `openspec/` under the size cap
 - **WHEN** the endpoint accepts a `POST /api/import/spec-generation` request
-- **THEN** it returns 202 with `{ jobId, estimatedContextBytes, scanCounts, filesToScan }`
-- **AND** an LLM subagent is dispatched to read the project and write `openspec/specs/`
-- **AND** progress is streamable via `GET /api/import/spec-generation/:jobId/events` (SSE)
+- **THEN** it returns 202 with `{ jobId, targetPath }`
+- **AND** the server injects `/ithy-opsx:import <targetPath>` into the ithyno-side Manager's PTY (using the same inject mechanism the Kanban Start button uses)
+- **AND** the server does NOT spawn a `claude -p` subprocess
+- **AND** no SSE endpoint is exposed for subprocess stdout — progress is observed via the workspace file-watch WS broadcast
+
+#### Scenario: Completion is observed via workspace file watch
+
+- **GIVEN** the Manager's Task-tool sub-agent has written `openspec/GENERATED.md` in the target project
+- **WHEN** the server's workspace file watcher detects the write
+- **THEN** the server broadcasts a `state-replaced` WS event as it does for any workspace change
+- **AND** the dashboard reacts to that event: refetches state, exits the ImportProjectFlow overlay, transitions to the Kanban view of the newly-initialized project
+- **AND** the dashboard renders the LLM-generated banner (unchanged from prior spec)
 
 ### Requirement: Generated specs validate cleanly
 
@@ -3892,22 +3900,764 @@ The dashboard SHALL surface a persistent, dismissible banner after import comple
 
 ### Requirement: Import does not auto-commit
 
-The import subagent SHALL leave the project's git working tree with the openspec/ files untracked or added (not committed). The user reviews and commits manually.
+The import sub-agent SHALL leave the project's git working tree with the openspec/ files untracked or added (not committed). The user reviews and commits manually.
 
 #### Scenario: No auto-commit
 
 - **GIVEN** the import job has completed on a git-repo projectRoot
 - **WHEN** the user inspects `git status` in that projectRoot
 - **THEN** the `openspec/` tree and `openspec/GENERATED.md` appear as untracked files (or as `A`-marked staged files if the user pre-staged), and no new commit exists on the current branch attributable to the import
+- **AND** the Task-tool sub-agent's boot prompt includes an explicit "DO NOT commit" instruction
 
 ### Requirement: Import uses the ithyno tool's own agents.yaml
 
-The import subagent SHALL be dispatched using the ithyno tool's own `agents.yaml` — NOT the target project's (which by definition doesn't have one). The generation runs on the ithyno-side Claude Code session, not on the target project's session.
+The import sub-agent SHALL be spawned via the Task tool inside the ithyno-side Manager's Claude Code session — the Manager itself is configured by ithyno's own `agents.yaml`. The target project (which by definition has no `agents.yaml`) is only the sub-agent's working directory, not its dispatch context.
 
 #### Scenario: Target agents.yaml is not required
 
-- **GIVEN** the target project has no `agents.yaml` (which is the common case for import)
-- **WHEN** the import subagent is dispatched
-- **THEN** the dispatch uses the ithyno installation's own `agents.yaml` code role
+- **GIVEN** the target project has no `agents.yaml` (the common case for import)
+- **WHEN** the import sub-agent is spawned
+- **THEN** the spawn happens via Task tool inside Manager, using Manager's configured role (from ithyno's `agents.yaml`)
 - **AND** no error is raised for the target's missing `agents.yaml`
+
+#### Scenario: Manager session is required
+
+- **GIVEN** ithyno's own Manager PTY is not running (e.g., ithyno's own `agents.yaml` is absent or terminal auto-launch was disabled)
+- **WHEN** the client hits `POST /api/import/spec-generation`
+- **THEN** the endpoint returns 503 with a message pointing at the missing Manager, and no dispatch is attempted
+
+### Requirement: `/ithy-opsx:import <target-path>` skill
+
+The Manager's slash-command surface SHALL include a new skill `/ithy-opsx:import <target-path>` that, when invoked, uses the Task tool to spawn a code sub-agent whose boot prompt encodes the import task (target path + no-commit rule + capability-discovery guidance + `openspec init` + `openspec/specs/` write instructions + `openspec/GENERATED.md` marker write instruction).
+
+#### Scenario: Skill invocation spawns a Task-tool sub-agent
+
+- **GIVEN** Manager receives the string `/ithy-opsx:import /path/to/target` on its PTY
+- **WHEN** Manager executes the skill
+- **THEN** Manager calls Task tool with `subagent_type: "claude"` and a boot prompt tailored for the import task
+- **AND** the sub-agent's `cwd` is `/path/to/target`
+- **AND** the sub-agent's boot prompt includes the target path, the no-commit invariant, the capability-discovery guidance, and the `openspec/GENERATED.md` write instruction
+- **AND** Manager's context is NOT flooded with the sub-agent's discovery Read/Grep/Bash calls — only the sub-agent's returned summary reaches Manager's context
+
+#### Scenario: Sub-agent is autonomous
+
+- **GIVEN** the import sub-agent has been spawned
+- **WHEN** it needs to decide which docs / code files to sample for capability discovery
+- **THEN** it uses its own Read / Grep / Bash tools to explore the target project autonomously
+- **AND** the parent Manager does not receive per-file progress signals — Manager sees only the final summary
+
+### Requirement: Phase-lane view derives lanes from agents.yaml roles
+
+The Overview page's Phase view (rendered when `overviewLayout === "phase"`) SHALL derive its lane list dynamically from the current `agents.yaml.agents[].roles` declaration, rather than rendering a fixed 4-lane set.
+
+The lane set SHALL be built in workflow order: `[propose?, code, review?, verify?, done]` where:
+- `code` SHALL always be included (Manager can substitute for a missing code-role agent via Task-tool self-dispatch, per the dispatch skill's Manager-fallback contract).
+- `done` SHALL always be included (terminal state).
+- `propose`, `review`, `verify` SHALL be included only when at least one agent's `roles` array contains that identifier.
+
+The lane labels SHALL be present-continuous English words matching the role: `PROPOSING`, `CODING`, `REVIEWING`, `VERIFYING`, `DONE`.
+
+When `agents.yaml` changes at runtime (server broadcasts `agents-updated` WS event), the lane list SHALL re-derive without requiring a page reload.
+
+#### Scenario: Minimal agents.yaml (only code) renders 2 lanes
+- **GIVEN** `agents.yaml` declares one agent with `roles: [code]` (and manager-only agents)
+- **WHEN** the user opens the Phase view
+- **THEN** exactly 2 lanes render: `CODING` and `DONE`
+
+#### Scenario: Two-role agents.yaml renders 3 lanes
+- **GIVEN** `agents.yaml` declares agents with roles `[code, review]` between them
+- **WHEN** the user opens the Phase view
+- **THEN** exactly 3 lanes render: `CODING`, `REVIEWING`, `DONE`
+
+#### Scenario: Full agents.yaml renders 5 lanes
+- **GIVEN** `agents.yaml` declares at least one agent with each of `propose`, `code`, `review`, `verify`
+- **WHEN** the user opens the Phase view
+- **THEN** 5 lanes render in workflow order: `PROPOSING`, `CODING`, `REVIEWING`, `VERIFYING`, `DONE`
+
+#### Scenario: agents.yaml live update re-derives lanes
+- **GIVEN** the Phase view is open with `CODING` + `DONE` visible
+- **WHEN** the user (or another client) updates `agents.yaml` to add a `review` role and the server broadcasts `agents-updated`
+- **THEN** the Phase view re-renders with `CODING`, `REVIEWING`, `DONE` without a full page reload
+
+### Requirement: Phase-lane bucketization routes changes to next-stage lane
+
+When rendering the Phase view, each change SHALL be routed to the lane representing the **next workflow stage** it awaits, not the last stage it completed. The routing rules are:
+
+- `phase` undefined or unknown → the `propose` lane if present, otherwise the first lane in the derived list.
+- `phase === "proposed"` → the `code` lane.
+- `phase === "coded"` → the `review` lane if present, otherwise `done`.
+- `phase === "reviewed"` → the `verify` lane if present, otherwise `done`.
+- `phase === "done"` → the `done` lane.
+- `phase === "needs-human"` → route by `priorPhase` under the same rules; if `priorPhase` is also unresolvable, fall through to the first lane.
+
+No change SHALL be dropped from view. When a phase would map to a lane that is not in the current derived list, it SHALL fall through to the next available lane (in most cases `done`).
+
+#### Scenario: coded change with no review role falls through to done
+- **GIVEN** `agents.yaml` has roles `[code]` only AND a change has `phase === "coded"`
+- **WHEN** the Phase view renders
+- **THEN** the change appears in the `DONE` lane (no `REVIEWING` lane exists to receive it)
+
+#### Scenario: reviewed change with verify role appears in verifying
+- **GIVEN** `agents.yaml` has roles `[code, review, verify]` AND a change has `phase === "reviewed"`
+- **WHEN** the Phase view renders
+- **THEN** the change appears in the `VERIFYING` lane
+
+#### Scenario: needs-human resolves via priorPhase
+- **GIVEN** a change has `phase === "needs-human"` and `priorPhase === "coded"` AND `review` role is declared
+- **WHEN** the Phase view renders
+- **THEN** the change appears in the `REVIEWING` lane (next-stage of `coded`)
+
+#### Scenario: no change dropped when its target lane is absent
+- **GIVEN** `agents.yaml` has roles `[code]` only AND a change has `phase === "reviewed"`
+- **WHEN** the Phase view renders
+- **THEN** the change appears in the `DONE` lane
+- **AND** no change from the input list is missing from the rendered output
+
+### Requirement: Manager activity is tracked per change
+
+The ithyno server SHALL maintain an in-memory per-change record of Manager's current orchestration activity, of shape:
+
+```
+{
+  changeId: string,
+  stage: "code" | "review" | "verify",
+  activity: "dispatching" | "waiting" | "judging" | "cleanup" | "transitioning" | "idle",
+  startedAt: number,          // epoch ms
+  detail?: string             // short human-readable hint
+}
+```
+
+The record SHALL be:
+- **In-memory only** (no sidecar persistence, no restart survival).
+- **Set / cleared** via `POST /api/manager/activity` (session-token gated). Setting `activity: "idle"` SHALL clear the entry.
+- **Retrievable in bulk** via `GET /api/manager/activity` (returns `Record<changeId, ManagerActivity>`).
+- **Broadcast** on every set/clear via WS event `manager-activity-updated` with payload `{ changeId, activity: ManagerActivity | null }`.
+
+Server restarts SHALL clear all Manager-activity state. The dispatch skill is responsible for re-posting current state as it re-enters its loop.
+
+#### Scenario: Set activity broadcasts and persists in memory
+- **GIVEN** the server is running with an empty Manager-activity map
+- **WHEN** a client POSTs `{ changeId: "x", stage: "code", activity: "waiting", detail: "claude" }` with a valid session token
+- **THEN** the endpoint responds 200 OK
+- **AND** `GET /api/manager/activity` returns `{ x: { changeId: "x", stage: "code", activity: "waiting", detail: "claude", startedAt: <ts> } }`
+- **AND** a WS `manager-activity-updated` event fires with the same payload
+
+#### Scenario: Idle activity clears the entry
+- **GIVEN** activity is set for change `x`
+- **WHEN** a client POSTs `{ changeId: "x", activity: "idle" }`
+- **THEN** the entry for `x` is removed from the map
+- **AND** the WS broadcast payload has `activity: null`
+
+#### Scenario: Server restart clears all activities
+- **GIVEN** activities are set for multiple changes
+- **WHEN** the server restarts
+- **THEN** `GET /api/manager/activity` returns `{}` immediately after restart
+
+#### Scenario: Unauthorized POST rejected
+- **GIVEN** the server is running
+- **WHEN** a client POSTs without a session token (or with an invalid one)
+- **THEN** the endpoint responds 401
+- **AND** no WS broadcast fires
+- **AND** the in-memory map is unchanged
+
+### Requirement: Dispatch skill publishes Manager activity at every phase boundary
+
+The `/ithy-opsx:dispatch` and `/ithy-opsx:dispatch-multi` skills (files `.claude/commands/ithy-opsx/dispatch.md` and `.claude/commands/ithy-opsx/dispatch-multi.md`) SHALL invoke `POST /api/manager/activity` at each orchestration boundary so the dashboard has near-real-time visibility into Manager's current activity per change.
+
+Boundaries SHALL be published in this sequence for each `(change, stage)` combination:
+
+1. Before spawning the worker (Task tool call, agmsg spawn, or subprocess): `activity: "dispatching"`.
+2. Immediately after spawn returns (worker running, poll loop starts): `activity: "waiting"`, `detail: "<worker-agent-name>"`.
+3. When a worker report arrives and Manager begins inspection: `activity: "judging"`.
+4. During Manager cleanup (despawn, worktree state, artifact commit): `activity: "cleanup"`, `detail: "<step>"`.
+5. When Manager writes the phase-update to sidecar: `activity: "transitioning"`.
+6. When dispatch returns control (success, escalation, or timeout for that change): `activity: "idle"` (clears the entry).
+
+For `dispatch-multi`, publications SHALL carry the correct `changeId` per activity update so multiple parallel dispatches remain distinguishable.
+
+#### Scenario: Full dispatch lifecycle publishes the expected sequence
+- **GIVEN** a Manager PTY runs `/ithy-opsx:dispatch add-example` on a fresh change
+- **WHEN** the dispatch proceeds through code stage
+- **THEN** the following POSTs fire in order (approximately):
+  1. `{ changeId: "add-example", stage: "code", activity: "dispatching" }`
+  2. `{ changeId: "add-example", stage: "code", activity: "waiting", detail: "claude" }`
+  3. `{ changeId: "add-example", stage: "code", activity: "judging" }`
+  4. `{ changeId: "add-example", stage: "code", activity: "cleanup", detail: "despawn" }`
+  5. `{ changeId: "add-example", stage: "code", activity: "transitioning" }`
+- **AND** the same sequence repeats for `stage: "review"` and `stage: "verify"` as those stages run.
+- **AND** at end of dispatch, a final `{ changeId: "add-example", activity: "idle" }` fires.
+
+#### Scenario: Parallel dispatch keeps per-change activity separate
+- **GIVEN** Manager runs `/ithy-opsx:dispatch-multi X Y`
+- **WHEN** both dispatches are mid-flight (X in `waiting` for code, Y in `judging` for review)
+- **THEN** `GET /api/manager/activity` returns entries for both `X` and `Y` with their respective distinct states
+- **AND** each subsequent WS broadcast is scoped to a single `changeId`
+
+### Requirement: Dashboard displays Manager activity on Kanban cards
+
+The dashboard SHALL render a per-card Manager-activity badge when `managerActivity[changeId]` is defined. The badge SHALL be secondary to (and coexist with) the Job worker-state indicator introduced by `annotate-cards-with-worker-job-state`.
+
+Rendering rules per activity value:
+
+- `dispatching` — spinner (animated) + "dispatching" label.
+- `waiting` — hourglass icon + "waiting" + `detail` when present.
+- `judging` — brain / thinking icon + "judging".
+- `cleanup` — broom / trash icon + `"cleanup: ${detail ?? ''}"`.
+- `transitioning` — arrow icon + "transitioning".
+- `idle` — badge SHALL NOT render (state is equivalent to absent).
+
+The badge SHALL also render elapsed time since `startedAt` in a small muted suffix.
+
+#### Scenario: Waiting badge renders with agent detail and elapsed
+- **GIVEN** `managerActivity["x"] = { activity: "waiting", detail: "claude", startedAt: <2 minutes ago> }`
+- **WHEN** card `x` renders
+- **THEN** the Manager badge shows an hourglass icon + "waiting: claude" + "2m" elapsed suffix
+
+#### Scenario: Cleanup badge shows step detail
+- **GIVEN** `managerActivity["y"] = { activity: "cleanup", detail: "worktree-remove", startedAt: <15s ago> }`
+- **WHEN** card `y` renders
+- **THEN** the badge shows a cleanup icon + "cleanup: worktree-remove" + "15s"
+
+#### Scenario: Both worker-state and Manager badges coexist
+- **GIVEN** change `z` has `job.status = "running"` AND `managerActivity["z"] = { activity: "waiting" }`
+- **WHEN** card `z` renders
+- **THEN** both the worker-state indicator (pulse dot + agent name) AND the Manager activity badge (hourglass + waiting) are visible on the card
+- **AND** the two indicators are visually distinguishable
+
+#### Scenario: Idle change shows no Manager badge
+- **GIVEN** a change with no `managerActivity` entry
+- **WHEN** the card renders
+- **THEN** no Manager activity badge appears on the card
+
+### Requirement: Kanban card annotates worker job state
+
+Every Kanban card (rendered by the shared `<KanbanCard>` component in both Board and Phase views) SHALL display a per-change worker-state indicator derived from the Job registry. The indicator SHALL reflect the current or most-recently-completed Job's status for that change:
+
+- `running` — animated pulse dot (accent color) + agent name + elapsed time (`formatElapsed(now - job.startedAt)`), refreshed every 30 seconds.
+- `completed` — static gray checkmark + "done" label, shown only while BOTH conditions hold: (a) the card renders within 30 seconds of `finishedAt`, AND (b) the change still sits in the pipeline stage its worker finished in. When either fails the indicator SHALL fall back to its idle branch.
+- `cancelled` — muted gray dot + "cancelled" label.
+- `crashed` — red dot + "crashed" label; hover tooltip shows the exit code.
+- `orphaned` — red dot + "orphaned" label; hover tooltip shows the worktree path.
+- No job (idle) — behavior depends on `laneContext`:
+  - `laneContext === "phase"` → muted queued dot + "queued" label
+  - `laneContext === "board"` → indicator SHALL render nothing (no annotation)
+
+The indicator SHALL be visible in both view modes without duplicating logic — it lives inside the shared `<KanbanCard>` and receives `laneContext` as a prop from its parent.
+
+The `completed` state is transient in the workflow sense, not only the clock sense: the "done ✓" reports "a worker finished and the Manager has not yet acted". The Manager's act is the phase advance, so the indicator SHALL receive a stage signal — the change's current pipeline stage plus the stage it occupied when that job finished — and SHALL suppress `completed` as soon as the two differ, regardless of remaining grace time. A card that has already moved to its next lane SHALL NOT keep reporting `done`. This rule applies in both view modes (it is derived from `change.phase`, not from the board slot). When the at-finish stage is unknown (the job was already `completed` when the client loaded, so no transition was observed), the 30-second window alone governs.
+
+Finished-job data (status `completed`/`cancelled`/`crashed`/`orphaned` with a `finishedAt` timestamp) SHALL be retained in the client's `jobByChange` map for at least the 30-second grace window post-finish so the indicator can render the just-finished state. The transience of the `completed` annotation SHALL be enforced at render time (grace window + stage signal) rather than by evicting the map entry — the same entry drives the Merge / View diff / Discard affordances, which must outlive the annotation.
+
+No new server endpoints or WS events are introduced; the indicator derives entirely from the existing `JobSummary` data flow.
+
+#### Scenario: Running worker shows pulse + elapsed
+- **GIVEN** a `code`-role worker is running on change `X` with `job.startedAt` 45 seconds ago
+- **WHEN** the Kanban view renders
+- **THEN** card `X` shows an animated pulse dot (accent color) + agent name + `"45s"` elapsed
+- **AND** the elapsed value updates roughly every 30 seconds
+
+#### Scenario: Successful completion shows transient checkmark
+- **GIVEN** a worker on change `Y` has just transitioned from `running` to `completed`
+- **AND** change `Y` is still in the pipeline stage its worker finished in (the Manager has not advanced `phase` yet)
+- **WHEN** the card renders within 30 seconds of `finishedAt`
+- **THEN** card `Y` shows a gray checkmark + "done" label
+- **AND** after 30 seconds the indicator reverts to base (no annotation in Board view, "queued" in Phase view)
+
+#### Scenario: Phase advance retires the checkmark early
+- **GIVEN** a worker on change `Y` completed 5 seconds ago and its card shows the "done" checkmark
+- **WHEN** the Manager advances change `Y`'s phase (e.g. `proposed` → `coded`) and the card re-renders
+- **THEN** card `Y` SHALL no longer show the checkmark, even though the 30-second window has not lapsed
+- **AND** the card reverts to base (no annotation in Board view, "queued" in Phase view) in its new lane
+- **AND** the Merge / View diff / Discard affordances, which are driven by the job rather than by this indicator, remain available
+
+#### Scenario: Crash renders red badge with tooltip
+- **GIVEN** a worker on change `Z` has status `crashed` with `exitCode: 137`
+- **WHEN** the card renders
+- **THEN** card `Z` shows a red dot + "crashed" label
+- **AND** the hover tooltip shows `"exit code: 137"`
+
+#### Scenario: Idle change in Phase view shows queued
+- **GIVEN** a change has no annotatable Job state (never dispatched, finished > 30 s ago, or finished in a stage the change has since left) AND the Phase view is active
+- **WHEN** the card renders
+- **THEN** the card shows a muted queued dot + "queued" label
+
+#### Scenario: Idle change in Board view shows nothing
+- **GIVEN** a change has no Job entry AND the Board view is active
+- **WHEN** the card renders
+- **THEN** the card renders no worker-state indicator (empty slot)
+
+#### Scenario: Card render identity between views
+- **GIVEN** the same change `W` appears in both the Board view and the Phase view (via toggle switching)
+- **WHEN** each view renders `W`
+- **THEN** the same `<KanbanCard>` component instance renders in both contexts
+- **AND** the only difference in output is the `laneContext`-driven idle branch
+
+### Requirement: Phase view displays only active-role work, bucketed by role
+
+The Phase view SHALL display **only** changes with an active role in
+play — a change with no active worker Job and no active Manager
+activity SHALL NOT appear, EXCEPT for `phase === "done"` changes which
+appear in the DONE lane as historical record.
+
+Bucketization key SHALL be the role currently in play:
+
+- Worker Job (status: "running") → `Job.role` (must be one of the 4
+  standard values: `"propose" | "code" | "review" | "verify"`; other
+  values → change filtered out of Phase view).
+- Manager activity (activity ≠ "idle") → `ManagerActivity.role`
+  (same 4-standard-value enum).
+- `phase === "done"` → DONE lane, regardless of activity.
+
+Manager between-role activity (`dispatching / cleanup /
+transitioning`) SHALL keep the change in the role lane matching the
+most recent role the Manager was executing (B2 policy: `role` on
+`ManagerActivity` is never cleared once set within a dispatch
+session, only overwritten by the next role).
+
+This supersedes the "Phase-lane bucketization routes changes to
+next-stage lane" requirement proposed by
+`dynamic-phase-lanes-from-agents-roles` on the same feature branch.
+
+**Empty lane placeholder**: `"No agent is currently on this role."`
+
+**Rationale**: user's intent is "Kanban does not display everything;
+it displays agent state" (verbatim). The Board view remains the
+place to see all changes bucketed by phase state.
+
+#### Scenario: change with running code worker appears in CODING lane
+- **GIVEN** change `X` has `Job { role: "code", status: "running" }`
+- **AND** `agents.yaml` declares `code` role (CODING lane exists)
+- **WHEN** Phase view renders
+- **THEN** `X` appears in CODING lane
+- **AND** the card's `WorkerStateIndicator` shows a `running` dot
+
+#### Scenario: change with running review worker appears in REVIEWING lane
+- **GIVEN** change `Y` has `Job { role: "review", status: "running" }`
+- **AND** REVIEWING lane exists in the derived lane list
+- **WHEN** Phase view renders
+- **THEN** `Y` appears in REVIEWING lane regardless of `Y.phase` (the change's persisted phase does NOT influence bucketing)
+
+#### Scenario: Manager fallback verify surfaces in VERIFYING lane
+- **GIVEN** `agents.yaml` declares no `verify` role
+- **AND** Manager is actively judging verify for change `Z`: `ManagerActivity { changeId: Z, role: "verify", activity: "judging" }`
+- **AND** VERIFYING lane exists (Manager-fallback reserves it)
+- **WHEN** Phase view renders
+- **THEN** `Z` appears in VERIFYING lane
+- **AND** the card does NOT render a Manager badge (deprecated per this change)
+
+#### Scenario: Manager cleanup after code keeps change in CODING lane (B2)
+- **GIVEN** Manager was dispatching code for change `W`; the code worker just finished
+- **AND** Manager is now in `activity: "cleanup"` state; `role` is still `"code"` (not cleared)
+- **WHEN** Phase view renders during that cleanup window
+- **THEN** `W` remains in CODING lane
+- **AND** transitions to REVIEWING lane only when Manager updates `role` to `"review"` in a subsequent activity
+
+#### Scenario: idle change at coded phase does NOT appear in Phase view
+- **GIVEN** change `V` at `phase === "coded"`, no active `Job`, no active `ManagerActivity`
+- **WHEN** Phase view renders
+- **THEN** `V` does NOT appear in any lane
+- **AND** `V` DOES appear in Board view (unchanged)
+
+#### Scenario: proposed change with no active worker does NOT appear in Phase view
+- **GIVEN** change `U` at `phase === "proposed"`, no worker, no Manager activity
+- **WHEN** Phase view renders
+- **THEN** `U` does NOT appear (was: appeared in CODING under P1's shift-by-one)
+
+#### Scenario: done change appears in DONE lane regardless of activity
+- **GIVEN** change `T` at `phase === "done"`
+- **WHEN** Phase view renders
+- **THEN** `T` appears in DONE lane (terminal history)
+
+#### Scenario: worker Job with non-standard role is filtered out
+- **GIVEN** change `S` has `Job { role: "other", status: "running" }` (custom role, A1 policy)
+- **WHEN** Phase view renders
+- **THEN** `S` does NOT appear in any lane
+- **AND** `S` DOES appear in Board view
+
+#### Scenario: multi-role agent — Job.role is authoritative
+- **GIVEN** an agent with `roles: [code, review]` currently running a Job dispatched as `review`
+- **AND** `Job.role === "review"` (set by Manager at dispatch time)
+- **WHEN** Phase view renders
+- **THEN** the change is bucketed into REVIEWING (Job.role wins over agent's roles[] array)
+
+#### Scenario: empty lane placeholder reflects role focus
+- **GIVEN** CODING lane has zero changes with active code-role work
+- **WHEN** Phase view renders the CODING lane
+- **THEN** the lane body shows `"No agent is currently on this role."`
+
+### Requirement: JobSummary carries the dispatch role
+
+`JobSummary` (server + web/src/types.ts mirror) SHALL include a `role: string` field, populated at dispatch time. The Manager (or the code path that spawned the Job) knows the role and MUST write it.
+
+Standard values consumed by Phase view: `"propose" | "code" | "review" | "verify"`. Any other value is accepted at the type level (`string`) but filtered out by Phase view rendering (A1 policy). Board view and other consumers may use the raw value as-is.
+
+#### Scenario: dispatch sets JobSummary.role
+- **GIVEN** dispatch spawns a code worker for change `X`
+- **WHEN** the JobSummary is written to the registry
+- **THEN** `JobSummary.role === "code"`
+
+#### Scenario: legacy JobSummary without role degrades to DONE lane
+- **GIVEN** a JobSummary from before this change was applied (no `role` field)
+- **WHEN** Phase view renders that Job's change
+- **THEN** the change is bucketed into DONE lane as fallback (not silently dropped)
+- **AND** a one-time console warning names the Job id
+
+### Requirement: Manager activity uses `role` (renamed from `stage`)
+
+`ManagerActivity` (server-side + web/src/types.ts mirror) SHALL use a `role: "propose" | "code" | "review" | "verify"` field instead of `stage`. The rename unifies the vocabulary with `JobSummary.role` — Manager IS always executing one of the 4 roles at any active moment (even fallback verify = Manager playing verify role).
+
+`POST /api/manager/activity` SHALL accept either `role` (new, preferred) or `stage` (deprecated alias, one release cycle) in the request body. When both are present, `role` wins. When only `stage` is present, log a one-line deprecation warning naming the request path and continue.
+
+`role` SHALL be persistent across between-role Manager activities within a dispatch session: once set to (e.g.) `"code"`, it stays `"code"` through `dispatching / waiting / judging / cleanup / transitioning` states, and is overwritten only when Manager moves to a new role (B2 policy). This is what lets the Phase view keep the change in the last-role lane during Manager between-role work.
+
+#### Scenario: POST /api/manager/activity accepts role
+- **GIVEN** a POST body `{ changeId, role: "code", activity: "dispatching" }`
+- **WHEN** the server processes it
+- **THEN** the resulting `ManagerActivity.role === "code"`
+
+#### Scenario: POST /api/manager/activity accepts stage as deprecated alias
+- **GIVEN** a POST body `{ changeId, stage: "verify", activity: "judging" }`
+- **WHEN** the server processes it
+- **THEN** the resulting `ManagerActivity.role === "verify"`
+- **AND** the server logs a deprecation warning
+
+#### Scenario: role persists across cleanup transition
+- **GIVEN** Manager was on `role: "code", activity: "dispatching"` for change `Q`
+- **WHEN** the code worker finishes and Manager updates to `activity: "cleanup"` without changing `role`
+- **THEN** the stored `ManagerActivity.role` remains `"code"`
+- **AND** Phase view keeps `Q` in CODING lane during the cleanup window
+
+### Requirement: Manager activity badge on card is removed
+
+The dashboard SHALL NOT render a Manager activity badge on any Kanban card. Manager orchestration state is observable via the Terminal (embedded PTY) — a card-level badge is redundant.
+
+`web/src/components/ManagerActivityBadge.tsx` SHALL be removed. `KanbanCard.tsx` SHALL not import or render it. Server-side `ManagerActivity` tracking + WebSocket broadcast SHALL remain (needed for the Phase view bucketize logic).
+
+#### Scenario: KanbanCard has no Manager badge
+- **GIVEN** a change with active `ManagerActivity`
+- **WHEN** the Kanban card renders (in any view)
+- **THEN** no Manager activity badge appears on the card
+- **AND** the WorkerStateIndicator (P2) may still appear if the change has an active Job
+
+#### Scenario: Server-side ManagerActivity API is unchanged
+- **GIVEN** a client POSTs to `/api/manager/activity`
+- **WHEN** the server processes the request
+- **THEN** the endpoint accepts, stores, and broadcasts the activity as before
+- **AND** the Phase view reads `managerActivity` state slice from the store to drive bucketization
+
+### Requirement: PENDING annotation position for parser compatibility
+
+Every `> ⚠️ **PENDING` annotation blockquote inserted into an existing requirement in `openspec/specs/<capability>/spec.md` SHALL appear **after** the requirement's SHALL/MUST body paragraph, not before it. The annotation SHALL still sit inside the requirement block (before any `#### Scenario:` header), so it remains visually attached to the requirement it annotates.
+
+**Rationale**: openspec CLI (`parseRequirements` in `@fission-ai/openspec/dist/core/parsers/markdown-parser.js`) captures each requirement's `text` field as the FIRST non-empty line after the `### Requirement:` header. `RequirementSchema` then refuses `text` that lacks `SHALL` or `MUST`. If the annotation blockquote lands on that first line, the check rejects every requirement carrying an in-flight annotation — which cascades into unrelated `openspec archive <id>` calls, since the rebuild re-parses the whole capability spec after applying the delta.
+
+CI SHALL enforce this position via a spec-lint test that walks `openspec/specs/**/spec.md`, extracts each requirement's first non-empty content line, and asserts the line contains `SHALL` or `MUST`. The test SHALL name the offending file, line, and requirement title when it fails.
+
+#### Scenario: annotation after SHALL/MUST line passes rebuild validation
+- **GIVEN** a requirement in `openspec/specs/dashboard/spec.md` whose body is `"The system SHALL do X."` followed by a `> ⚠️ **PENDING MODIFIED** by [change-id](path/): reason.` blockquote
+- **WHEN** any unrelated change is archived via `openspec archive <id>`
+- **THEN** the rebuild-validation step accepts the requirement
+- **AND** `--no-validate` is NOT required
+
+#### Scenario: annotation before SHALL/MUST line fails CI lint
+- **GIVEN** a requirement whose first non-empty line is a `> ⚠️ **PENDING` blockquote (i.e., annotation precedes the SHALL/MUST body)
+- **WHEN** the spec-lint test suite runs
+- **THEN** the test fails with a message naming the offending file and requirement title
+- **AND** the failure message includes the corrective action ("move the annotation to sit after the SHALL/MUST body paragraph")
+
+#### Scenario: skill that inserts annotations uses the correct position
+- **GIVEN** `/opsx:revert` (or any skill that inserts a PENDING annotation) generates a spec.md edit
+- **WHEN** the annotation is inserted into an existing requirement
+- **THEN** the annotation is placed after the last SHALL/MUST-containing paragraph, before any `#### Scenario:` header
+- **AND** the CLAUDE.md hard-rule section references this position rather than the pre-body position
+
+#### Scenario: no annotation at all — no-op
+- **GIVEN** a requirement with no PENDING annotation
+- **WHEN** the spec-lint test runs
+- **THEN** the requirement passes trivially (first non-empty line IS the SHALL/MUST body)
+
+### Requirement: Ithyno Init scaffolds `/ithy-opsx:*` into the target project
+
+Ithyno's Init flow SHALL scaffold every ithyno-authored `/ithy-opsx:*` command file and every backing `ithy-opsx-*` skill directory into the target project's `.claude/` tree, alongside the upstream `/opsx:*` output that `openspec init` produces.
+
+> ⚠️ **PENDING MODIFIED** by [revert-skill-e2e-live-mode](../../changes/revert-skill-e2e-live-mode/): reshapes the skill-e2e harness paragraph and scenarios from "exercises every skill end-to-end" to "structural coverage only". Live semantic verification is documented as a manual procedure via `docs/skill-e2e-manual-verification.md` (Electron + VSCode paths). Rationale: `claude -p` non-determinism + interactive commit-approval traps in `/ithy-opsx:apply` and `:archive` make live-mode automation unreliable.
+
+The scaffold SHALL be delivered via the existing `templates/` mechanism used for `agents.yaml.tmpl`, `CLAUDE.md`, and `templates/.claude/skills/openspec-flow/` — that is, files placed under `templates/.claude/commands/ithy-opsx/` and `templates/.claude/skills/ithy-opsx-*/` in the ithyno distribution. `bin/init.js`'s existing `walkTemplates` picks them up without dedicated copy logic.
+
+Distribution SHALL NOT include any user-global install step. The ithyno server SHALL NOT write into `~/.claude/` on startup, and no `/api/doctor/install/ithy-opsx` / `/api/doctor/uninstall/ithy-opsx` endpoints SHALL exist. The ithyno CLI SHALL NOT expose `install-skills` / `uninstall-skills` subcommands. The Doctor report SHALL NOT include an `ithyOpsx` field. Settings › Prerequisites SHALL NOT render an ithy-opsx install row.
+
+The ithyno-ui repo itself is the development environment and does NOT run Init on itself; its `.claude/commands/ithy-opsx/` and `.claude/skills/ithy-opsx-*/` are the dev-copy that the templates mirror. A drift-guard test enforces byte-identity between the dev-copy and the template so an edit to one that misses the other fails CI, not review.
+
+The Vitest suite SHALL additionally include two smoke assertions guarding the invariants above end-to-end (added by `add-init-scaffold-smoke-test`):
+
+- **Scaffold reachability**: `runInit()` invoked against a `mkdtemp()` target with `autoGitInit: true` SHALL leave every file present under the repo's `.claude/commands/ithy-opsx/` and every file under each `.claude/skills/ithy-opsx-*/` present at the matching `<target>/.claude/…` path, byte-identical. This is orthogonal to the drift guard: drift compares dev-copy to `templates/`; scaffold reachability compares dev-copy to what actually lands post-Init in a target. An edit to `bin/init.js` or `walkTemplates` that stops copying the ithy-opsx trees fails this test even if the drift guard still passes.
+- **Package shape**: `npm pack --dry-run --json` SHALL be parsed and every ithy-opsx entry in the tarball's file list SHALL live under `templates/.claude/…`. No entry SHALL match `^\.claude/commands/ithy-opsx` or `^\.claude/skills/ithy-opsx-`. A future edit that re-adds bare `.claude/…` entries to `package.json` `files` fails this test.
+
+The project SHALL additionally ship a scaffolded-target skill-e2e harness (added by `add-skill-e2e-harness`) that exercises every `/ithy-opsx:*` skill end-to-end in a `mkdtemp()` scaffolded target. The harness SHALL be invoked via `npm run e2e:skills`, SHALL be gated behind `E2E=1` (not part of `npm test`), and SHALL exit non-zero if any covered skill fails to resolve or fails to produce its documented success artifact / phase transition. The harness SHALL cover — at minimum — every skill named in Phase D of `docs/ideas/2026-07-26-comprehensive-skill-test-plan.md`: `apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`. Coverage SHALL be one representative flow per skill, not a permutation matrix — the harness is a smoke, not a certification suite.
+
+#### Scenario: Fresh target through Init has ithy-opsx alongside opsx
+- **GIVEN** a project directory with no `openspec/`, no `.claude/`, no `agents.yaml`
+- **WHEN** `POST /api/init` runs on it (with a valid manager choice)
+- **THEN** the target ends up with `.claude/commands/opsx/*.md` (from `openspec init`) AND `.claude/commands/ithy-opsx/*.md` (from ithyno template scaffold)
+- **AND** the target ends up with `.claude/skills/openspec-flow/`, `.claude/skills/openspec-*/`, AND every `.claude/skills/ithy-opsx-*/` present under `templates/`
+- **AND** every scaffolded file appears in the target's `git status` output as untracked (visible, editable, git-tracked once committed)
+
+#### Scenario: A Manager PTY started in a scaffolded target resolves `/ithy-opsx:*`
+- **GIVEN** a target project that ran ithyno Init, so its `.claude/commands/ithy-opsx/` exists
+- **WHEN** a Claude Code Manager PTY starts with that target as its cwd, and the user types `/ithy-opsx:import` (or any other command in the family)
+- **THEN** the command resolves from the target's own `.claude/`, with no dependency on `~/.claude/`
+- **AND** the same resolution path serves `/opsx:apply` — the `code` role's prompt — from the target's `.claude/commands/opsx/`
+
+#### Scenario: A non-Init'd project has no `/ithy-opsx:*`
+- **GIVEN** a project with `openspec init` output but no ithyno Init
+- **WHEN** a Claude Code session opens that project's cwd and the user types `/ithy-opsx:dispatch <id>`
+- **THEN** the command does not resolve (Claude Code reports "Unknown command")
+- **AND** `/opsx:*` commands still resolve normally, because those came from `openspec init` and are independent of ithyno
+
+#### Scenario: Server startup does not touch `~/.claude/`
+- **GIVEN** the ithyno server about to start
+- **WHEN** it completes startup and begins accepting HTTP requests
+- **THEN** no read or write occurred against `~/.claude/`
+- **AND** the server logs contain no `[install-skills]` line
+
+#### Scenario: `GET /api/doctor` has no ithy-opsx field
+- **GIVEN** the ithyno server is running
+- **WHEN** an authorized client requests `GET /api/doctor`
+- **THEN** the response body has no `ithyOpsx` field
+- **AND** neither `agents`, `tmux`, `agmsg`, `readyForManager`, nor `checkedAt` are affected
+
+#### Scenario: Scaffold reachability smoke — every ithy-opsx surface file lands in the target
+- **GIVEN** a fresh `mkdtemp()` target directory
+- **WHEN** `runInit({ targetDir, autoGitInit: true, quiet: true })` completes with `ok: true`
+- **THEN** for every file `f` under the repo's `.claude/commands/ithy-opsx/`, `<target>/.claude/commands/ithy-opsx/<f>` exists and is byte-identical to `f`
+- **AND** for every skill `s` under the repo's `.claude/skills/ithy-opsx-*/`, `<target>/.claude/skills/<s>/` contains every file from the source skill, byte-identical
+- **AND** the test iterates the dev-copy tree rather than hard-coding counts, so adding a new command or skill file in a future change does not require test updates
+
+#### Scenario: Scaffold reachability smoke fails when Init copy path stops picking up ithy-opsx
+- **GIVEN** a hypothetical edit to `bin/init.js` that filters `walkTemplates` output to exclude `.claude/skills/ithy-opsx-*` (regression)
+- **WHEN** `npm test` runs
+- **THEN** the scaffold-reachability test fails and names at least one specific `<target>/.claude/skills/ithy-opsx-*/SKILL.md` path that failed to land
+- **AND** the drift-guard test still passes (dev-copy ≡ templates is unchanged), demonstrating the two tests catch distinct regressions
+
+#### Scenario: Package shape smoke — npm pack ships ithy-opsx only via templates
+- **GIVEN** the repo at a clean HEAD
+- **WHEN** `npm pack --dry-run --json` is run and its `files` array is parsed
+- **THEN** every entry whose path contains `ithy-opsx` sits under `templates/.claude/…`
+- **AND** no entry matches the pattern `^\.claude/commands/ithy-opsx` or `^\.claude/skills/ithy-opsx-`
+- **AND** the test fails loudly if either invariant is violated
+
+#### Scenario: Package shape smoke fails when files re-add bare `.claude/` entry
+- **GIVEN** a hypothetical edit to root `package.json` that re-adds `.claude/commands/ithy-opsx` to the `files` array (regression, matching what `distribute-ithy-opsx-via-init-templates` removed)
+- **WHEN** `npm test` runs
+- **THEN** the package-shape test fails and names the offending tarball entry path
+- **AND** the message points the reader at both this scenario and the distribute-ithy-opsx contract so the fix is obvious
+
+#### Scenario: Skill-e2e harness runs every `/ithy-opsx:*` skill in a scaffolded target
+- **GIVEN** the developer invokes `npm run e2e:skills` on a clean HEAD
+- **WHEN** the harness creates a `mkdtemp()` scaffolded target via `runInit()` and boots an ithyno server against it
+- **THEN** the harness exercises every skill named in Phase D of the idea-doc (`apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`) at least once
+- **AND** each skill's success signal is asserted: `apply` produces an `agent/<change-id>` branch with an `impl:` commit; `review` / `verify` write `review.md` at the absolute `$REVIEW_MD_PATH` with parseable `verdict:` frontmatter; `merge` produces a merge commit on the target's default branch; `archive` moves the change into `openspec/changes/archive/<date>-<id>/` and updates the spec; `escalate` transitions the phase to `needs-human` and writes `needs-human.md`; `answer` transitions out of `needs-human`; `revert` produces a `revert-<scope>` change dir with valid `proposal.md` / `design.md` / `specs/<capability>/spec.md` / `tasks.md` and PENDING annotations in the current spec; `import` produces a first-draft `openspec/specs/` set plus `openspec/GENERATED.md`; `dispatch-multi` advances two in-flight changes concurrently with correct `change:<id>` message routing
+- **AND** the harness completes in under 3 minutes wall-clock on a reasonable developer machine
+- **AND** the harness exits 0 on full success, non-zero with a per-skill pass / fail summary otherwise
+
+#### Scenario: Skill-e2e harness fails when a scaffolded skill is missing or non-resolving
+- **GIVEN** a hypothetical regression that removes `templates/.claude/commands/ithy-opsx/apply.md` (or breaks `runInit`'s walk of it)
+- **WHEN** `npm run e2e:skills` runs
+- **THEN** Flow A (happy-path dispatch chain) fails at the first `/ithy-opsx:apply` invocation with a "command not found" / "skill not resolved" error naming the specific missing surface
+- **AND** the harness prints the scaffolded target's `.claude/commands/ithy-opsx/` listing in the failure block so the diagnosis is one glance, not a bisection
+
+#### Scenario: Skill-e2e harness fails when an artifact contract is broken
+- **GIVEN** a hypothetical regression that changes the `review.md` frontmatter key from `verdict:` to `result:`
+- **WHEN** `npm run e2e:skills` runs
+- **THEN** Flow A fails at the `/ithy-opsx:review` step with a "parseable-frontmatter" error naming the absolute `$REVIEW_MD_PATH` and the offending frontmatter block
+- **AND** the drift-guard and scaffold-reachability smoke tests (from `add-init-scaffold-smoke-test`) still pass, demonstrating the e2e harness catches contract regressions that byte-identity checks cannot
+
+#### Scenario: Skill-e2e harness is not part of `npm test`
+- **GIVEN** a developer runs `npm test` without setting `E2E=1`
+- **WHEN** the test suite completes
+- **THEN** the skill-e2e harness did NOT run (no server was booted, no `mkdtemp()` target was created)
+- **AND** the harness is invoked only when `E2E=1 node scripts/skill-e2e.mjs` (or the equivalent `npm run e2e:skills`) is called explicitly
+- **AND** the harness's runtime cost does not creep into the standard PR / CI test budget
+
+#### Scenario: Skill-e2e harness cleans up on success and on failure
+- **GIVEN** the harness has created scaffolded targets and spawned an ithyno server
+- **WHEN** the harness completes (whether all flows pass, some fail, or the harness itself crashes)
+- **THEN** every scaffolded `mkdtemp()` target directory is removed (unless `--keep-tmp` was passed for diagnosis)
+- **AND** every spawned ithyno server subprocess is killed
+- **AND** no port allocated by the harness remains bound after exit
+
+### Requirement: Drift-guard test keeps the dev copy and the template in sync
+
+The Vitest suite SHALL include a drift guard that iterates every file under `.claude/commands/ithy-opsx/` and every file under each `.claude/skills/ithy-opsx-*/` in the dev repo, and asserts a byte-identical file exists at the matching `templates/.claude/…` path. The guard SHALL name the specific pair that diverged in its failure message so a reader can fix it in one grep. This mirrors the existing `templates/.claude/skills/openspec-flow/` drift guard in `server/init.test.ts`.
+
+The guard SHALL run as part of `npm test`, so a PR that edits the dev copy without updating the template (or vice versa) fails before review, not after.
+
+#### Scenario: Dev-copy edit without template update fails the guard
+- **GIVEN** a developer edits `.claude/commands/ithy-opsx/dispatch.md` in the dev repo
+- **AND** does NOT make the same edit to `templates/.claude/commands/ithy-opsx/dispatch.md`
+- **WHEN** `npm test` runs
+- **THEN** the drift guard fails with a message naming `dispatch.md` as the diverged pair
+
+#### Scenario: Template edit without dev-copy update fails the guard
+- **GIVEN** a developer edits `templates/.claude/skills/ithy-opsx-import/SKILL.md`
+- **AND** does NOT make the same edit to `.claude/skills/ithy-opsx-import/SKILL.md`
+- **WHEN** `npm test` runs
+- **THEN** the drift guard fails with a message naming `ithy-opsx-import/SKILL.md` as the diverged pair
+
+#### Scenario: Byte-identical trees pass silently
+- **GIVEN** every dev-copy file has a byte-identical counterpart under `templates/.claude/…`
+- **WHEN** `npm test` runs
+- **THEN** the drift guard passes without output beyond the standard test summary
+- **AND** the working tree is unchanged (the guard is read-only)
+
+### Requirement: Manager PTY startup dispatches per CLI when args are empty
+
+The server SHALL expose a per-CLI Manager-startup dispatch table (`MANAGER_STARTUP_STRATEGIES` in `server/sync/pty.ts`) mapping each Manager-eligible CLI id to a strategy function `(projectRoot: string | undefined) => string`. When a Manager entry in `agents.yaml` has an empty `args` array, the server SHALL invoke the strategy registered for `manager.command`; when no strategy is registered for the command, the server SHALL emit the command as-is (plain `<cli>` — safe first-launch default).
+
+The `claude` strategy SHALL implement the session-file mint/resume contract described in `Manager Entry Drives Fresh PTY Startup` priority 3, using `<projectRoot>/.ithyno/session-claude` as the canonical location. New CLI strategies SHALL be added to the table as their per-CLI resume semantics are researched and implemented; each addition is its own follow-up change.
+
+The dispatch function `resolveManagerStartup(command, projectRoot)` SHALL be exported for direct testing.
+
+#### Scenario: claude strategy mints session file on fresh project
+- **GIVEN** a fresh project directory with no `.ithyno/session-claude` and no `.ithyno/session-id`
+- **WHEN** `resolveManagerStartup("claude", projectRoot)` is called
+- **THEN** the return value matches `claude --session-id <uuid>` where `<uuid>` is a fresh UUID
+- **AND** `.ithyno/session-claude` is created containing that UUID
+
+#### Scenario: unregistered CLI falls back to plain command
+- **GIVEN** the dispatch table has no entry for `codex`
+- **WHEN** `resolveManagerStartup("codex", "/any/path")` is called
+- **THEN** the return value is exactly `"codex"` (no args, no `--continue`, no other flag)
+
+#### Scenario: registered strategy without projectRoot returns plain command
+- **GIVEN** the claude strategy is registered
+- **WHEN** `resolveManagerStartup("claude", undefined)` is called (no projectRoot for session file lookup)
+- **THEN** the return value is exactly `"claude"`
+
+#### Scenario: template default (empty args) triggers dispatch, not `--continue`
+- **GIVEN** a fresh project initialized by `openspec init` with `agents.yaml.tmpl`'s default (empty `args: []`)
+- **WHEN** the first PTY session opens
+- **THEN** the startup line does NOT contain `--continue`
+- **AND** if the manager command is `claude`, the startup line uses the session-file mint/resume dispatch
+
+### Requirement: Manager picker filters to Manager-eligible CLIs with unverified label
+
+The Init flow's Manager-CLI picker (`web/src/components/InitDialog.tsx`) SHALL offer only Manager-eligible CLIs. The eligibility set is the union of two constants: `MANAGER_VERIFIED` (currently `["claude"]`) and `MANAGER_UNVERIFIED` (currently `["codex", "agy"]`).
+
+Non-eligible CLIs (`copilot`, `gemini`, `opencode`, `cursor`, `antigravity`) SHALL be hidden from the Manager picker. They MAY still appear in the Prerequisites list and MAY still be spawned as agmsg workers — the filter applies only to the Manager role.
+
+Entries in `MANAGER_UNVERIFIED` SHALL render with a trailing `(unverified)` label. A CLI SHALL be moved from `MANAGER_UNVERIFIED` to `MANAGER_VERIFIED` (removing the label) once both: (a) it has a startup strategy registered in `MANAGER_STARTUP_STRATEGIES`, AND (b) its dispatch skill resolves in that CLI's command surface (currently blocked pending `generalize-skills-cross-cli` renderer follow-ups for non-Claude CLIs).
+
+`readyForManager` SHALL be derived from `managerChoices.length > 0` (installed ∩ candidates), not from the raw doctor report's field — a project with only non-eligible CLIs installed correctly reports "no Manager-eligible CLI" and blocks Init.
+
+The preselect logic SHALL respect the candidate filter: the stored `defaultManager` is preselected only if it is both installed AND Manager-eligible; otherwise the picker preselects the first eligible-installed CLI by `CLI_PRIORITY`.
+
+#### Scenario: picker shows only Manager candidates
+- **GIVEN** doctor reports `claude`, `copilot`, `gemini` as installed
+- **WHEN** the Init dialog renders
+- **THEN** the Manager picker shows exactly `claude` (the only eligible CLI in the installed set)
+- **AND** `copilot` and `gemini` appear in the Prerequisites list but NOT in the Manager picker
+
+#### Scenario: unverified CLIs get the unverified label
+- **GIVEN** doctor reports `claude`, `codex`, `agy` as installed
+- **WHEN** the Init dialog renders
+- **THEN** the Manager picker shows all three
+- **AND** the `codex` and `agy` entries render with a `(unverified)` suffix
+- **AND** the `claude` entry renders without the suffix
+
+#### Scenario: no eligible CLI installed blocks Init
+- **GIVEN** doctor reports only `copilot` and `gemini` as installed
+- **WHEN** the Init dialog renders
+- **THEN** the Manager picker section is not shown
+- **AND** `readyForManager` is false
+- **AND** the "No agent CLI installed" (or equivalent) blocking message appears
+
+#### Scenario: defaultManager honored only if eligible
+- **GIVEN** the store's `defaultManager` is `gemini` (which is not Manager-eligible) AND doctor reports `claude` and `gemini` installed
+- **WHEN** the Init dialog renders
+- **THEN** the picker preselects `claude` (first eligible-installed by priority)
+- **AND** does NOT preselect `gemini`
+
+#### Scenario: agmsg worker path unaffected
+- **GIVEN** the Manager picker filter has hidden `copilot` from the Init dialog
+- **WHEN** the dispatch flow spawns a Copilot worker via agmsg (an unrelated concern)
+- **THEN** the worker still spawns successfully
+- **AND** the picker filter has NO effect on worker CLI selection or spawn
+
+### Requirement: Settings page does not offer a Default Manager selector
+
+The Settings page (`web/src/pages/Settings.tsx`) SHALL NOT render a `Default Manager` section or any radio-group for selecting the cross-project default Manager CLI. The Agents tab's Manager section is the sole UI for viewing or editing the current project's Manager entry.
+
+The `defaultManager` store slice and its `localStorage["ithyno.defaultManager"]` persistence layer SHALL remain intact. InitDialog SHALL continue to consult `defaultManager` when preselecting the Manager CLI at Init time (honored only when both installed and Manager-eligible). The `setDefaultManager` setter SHALL remain exported from the store so future implicit-set paths (e.g., auto-remember the CLI picked at the most recent Init) can wire it without a UI addition.
+
+**Rationale**: The Settings picker duplicated the Agents tab's Manager UI with a non-obvious scope difference (cross-project preference vs current-project entry), and the two pickers filtered differently after `fix-manager-startup-per-cli-dispatch` — a user could set `gemini` as default in Settings, then discover Init did not offer it. Removing the Settings UI eliminates the contradiction while preserving preference persistence for existing users.
+
+#### Scenario: Settings page renders without Default Manager section
+- **WHEN** the user opens the Settings page
+- **THEN** the page renders Prerequisites, Appearance, Execution, Agmsg, and New Project sections
+- **AND** no `Default Manager` section or radio group is rendered
+
+#### Scenario: Existing localStorage preference is honored at Init
+- **GIVEN** a user has `localStorage["ithyno.defaultManager"] = "claude"` from before this change
+- **WHEN** the Init dialog opens
+- **THEN** the picker preselects `claude` (assuming it is installed and Manager-eligible)
+- **AND** no user action in Settings is required (the section no longer exists)
+
+#### Scenario: Fresh user with no preference gets sensible preselect
+- **GIVEN** a user with no `localStorage["ithyno.defaultManager"]` value AND `claude` + `codex` installed
+- **WHEN** the Init dialog opens
+- **THEN** the picker preselects `claude` (first Manager-eligible installed by priority)
+- **AND** the Settings page does NOT prompt the user to configure a default
+
+#### Scenario: setDefaultManager stays available for future implicit wiring
+- **GIVEN** the `setDefaultManager` action exported from the store
+- **WHEN** code (this change or a future one) invokes it programmatically
+- **THEN** the store slice updates and the value persists to `localStorage["ithyno.defaultManager"]`
+- **AND** the next Init dialog opening honors the new preference
+
+#### Scenario: Agents tab Manager section is unaffected
+- **GIVEN** a project with a manager entry in `agents.yaml`
+- **WHEN** the user opens the Agents tab
+- **THEN** the Manager section renders the current entry, resolved startup line, and Edit button as before
+- **AND** editing writes to `agents.yaml` (per-project) with no dependency on `defaultManager` state
+
+### Requirement: Manager PTY exposes ithyno server contact vars
+
+The Manager PTY (spawned by `server/sync/pty.ts:spawnLive`) SHALL export the following environment variables into the child shell, in addition to the existing shell environment inherited from `process.env`:
+
+- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session token. Required by every token-gated endpoint including `POST /api/manager/activity`. The PTY is local-only and already origin/token-gated at the WebSocket upgrade, so exporting the token into the shell environment adds no new exposure surface.
+- `ITHYNO_PORT` — the port the ithyno server is listening on, as a bare decimal string (e.g. `"57703"`). Sourced from `process.env.PORT` (which the Electron shell and VSCode extension both set at server spawn time via `pickFreePort()`), with a fallback to `"4321"` for the CLI dev workflow where `PORT` is not set.
+- `ITHYNO_BASE` — the ithyno server's base URL, as `http://localhost:<port>` (e.g. `"http://localhost:57703"`). Provided so consumers do not need to concatenate — the skill's `curl "$ITHYNO_BASE/api/..."` pattern must work verbatim.
+
+These vars SHALL be set on every PTY spawn (`spawnLive`), NOT just at server startup — a project switch that respawns the PTY MUST re-export them with the current server's port so the fresh Manager reaches the fresh server.
+
+Consumers (skills, tools, user commands run inside the PTY) MAY rely on `ITHYNO_BASE` being set. The `/ithy-opsx:dispatch` and `/ithy-opsx:dispatch-multi` skills SHALL NOT hardcode `http://localhost:4321` — hardcoded 4321 will connection-refuse under Electron and VSCode.
+
+`TERM` SHALL be `xterm-256color` as it is today; no change to terminal capabilities.
+
+#### Scenario: PTY spawned under Electron gets the ephemeral server port
+- **GIVEN** the Electron shell spawns the ithyno server on port `57703` (chosen by `pickFreePort()`), then opens a PTY
+- **WHEN** the child shell reads its environment
+- **THEN** `ITHYNO_PORT == "57703"`
+- **AND** `ITHYNO_BASE == "http://localhost:57703"`
+- **AND** `ITHYNO_SESSION_TOKEN` matches the server's `SESSION_TOKEN`
+- **AND** `curl "$ITHYNO_BASE/api/changes/<some-id>/phase"` returns 200 (not connection-refused)
+
+#### Scenario: PTY spawned under the CLI dev workflow defaults to 4321
+- **GIVEN** the server is launched by `npm run dev` with no explicit `PORT` env
+- **WHEN** the PTY spawns
+- **THEN** `ITHYNO_PORT == "4321"`
+- **AND** `ITHYNO_BASE == "http://localhost:4321"`
+- **AND** the previously-working dev workflow is unchanged
+
+#### Scenario: Dispatch skill uses the exported base URL
+- **GIVEN** the Manager PTY is running under Electron on ephemeral port `57703`
+- **WHEN** `/ithy-opsx:dispatch <change-id>` invokes `curl "$ITHYNO_BASE/api/changes/<change-id>/phase"`
+- **THEN** the request is routed to `http://localhost:57703/...` (the actual server)
+- **AND** the response body is parsed successfully — no connection-refused, no fall-through to 4321
+
+#### Scenario: PTY re-spawned on project switch gets the fresh port
+- **GIVEN** ithyno is running at project A on port `57703`, and a `POST /api/project/switch` respawns onto project B on port `57811`
+- **WHEN** the new PTY spawns
+- **THEN** the fresh Manager's `ITHYNO_PORT == "57811"` (matches the new server, NOT the stale `57703`)
 

@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { spawnServer, SpawnedServer } from "./server-spawner";
 import { renderOnboardingHtml, renderWebviewHtml } from "./webview-html";
 import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
@@ -25,6 +26,37 @@ import { buildAboutInfo, LICENSE_URL, ROOT_DESCRIPTION } from "./about-config";
  *
  * Landed by vscode-terminal-uses-project-session-id (2026-07-19).
  */
+function parseManagerCommand(workspaceRoot: string): { command: string; args?: string[] } | null {
+  const p = join(workspaceRoot, "agents.yaml");
+  if (!existsSync(p)) return null;
+  try {
+    const content = readFileSync(p, "utf8");
+    const parsed = parseYaml(content);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const agentsList: any[] = Array.isArray(parsed.agents)
+      ? parsed.agents
+      : Array.isArray(parsed.manager)
+        ? parsed.manager
+        : [];
+
+    const manager = agentsList.find((a: any) => {
+      if (!a || typeof a !== "object") return false;
+      if (a.role === "manager") return true;
+      if (Array.isArray(a.roles) && a.roles.includes("manager")) return true;
+      return false;
+    });
+
+    if (manager && typeof manager.command === "string" && manager.command.trim().length > 0) {
+      const args = Array.isArray(manager.args) ? manager.args.map(String) : [];
+      return { command: manager.command.trim(), args };
+    }
+  } catch (err) {
+    console.warn("[ithyno] failed to parse agents.yaml manager command:", err);
+  }
+  return null;
+}
+
 function resolveInjectedStartup(
   workspaceRoot: string,
   configValue: string | undefined,
@@ -32,6 +64,16 @@ function resolveInjectedStartup(
   if (configValue && configValue.trim().length > 0) {
     return configValue;
   }
+  const manager = parseManagerCommand(workspaceRoot);
+  if (manager && manager.command) {
+    const args = manager.args ?? [];
+    if (manager.command === "claude" && args.length === 0) {
+      // Fall through to claude session UUID mint / resume logic below
+    } else {
+      return [manager.command, ...args].join(" ");
+    }
+  }
+
   const idPath = join(workspaceRoot, ".ithyno", "session-id");
   let uuid = "";
   if (existsSync(idPath)) {
@@ -175,6 +217,9 @@ export function activate(context: vscode.ExtensionContext): void {
         t.sendText(msg.data, terminate);
         t.show(true);
       }
+      if (msg.type === "ithyno:reload-session") {
+        panel.webview.html = renderWebviewHtml(s.server.url);
+      }
     });
 
     panel.onDidDispose(() => {
@@ -185,6 +230,56 @@ export function activate(context: vscode.ExtensionContext): void {
       if (session === s) session = null;
     });
   });
+
+  class SidebarDashboardViewProvider implements vscode.WebviewViewProvider {
+    resolveWebviewView(webviewView: vscode.WebviewView): void {
+      webviewView.webview.options = { enableScripts: true };
+
+      webviewView.webview.html = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); text-align: center; }
+      button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 8px 16px; font-size: 13px; font-weight: 500; border-radius: 4px; cursor: pointer; margin-top: 12px; width: 100%; }
+      button:hover { background: var(--vscode-button-hoverBackground); }
+      p { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <p>ithyno OpenSpec Dashboard</p>
+    <button onclick="openDashboard()">Open Dashboard in Tab</button>
+    <script>
+      const vscode = acquireVsCodeApi();
+      function openDashboard() {
+        vscode.postMessage({ command: 'openDashboard' });
+      }
+    </script>
+  </body>
+</html>`;
+
+      webviewView.webview.onDidReceiveMessage((msg) => {
+        if (!msg || typeof msg !== "object") return;
+        if (msg.command === "openDashboard") {
+          void vscode.commands.executeCommand("ithyno.show");
+        }
+        if (msg.type === "pty.inject" && typeof msg.data === "string" && session) {
+          const terminate = msg.terminate !== false;
+          const t = ensureTerminal(session);
+          t.sendText(msg.data, terminate);
+          t.show(true);
+        }
+        if (msg.type === "ithyno:reload-session" && session) {
+          webviewView.webview.html = renderWebviewHtml(session.server.url);
+        }
+      });
+    }
+  }
+
+  const sidebarProvider = vscode.window.registerWebviewViewProvider(
+    "ithyno.sidebarDashboardView",
+    new SidebarDashboardViewProvider(),
+  );
 
   const newProjectCmd = vscode.commands.registerCommand(
     "ithyno.newProject",
@@ -202,7 +297,7 @@ export function activate(context: vscode.ExtensionContext): void {
     openAboutPanel(context),
   );
 
-  context.subscriptions.push(cmd, newProjectCmd, importProjectCmd, aboutCmd);
+  context.subscriptions.push(cmd, sidebarProvider, newProjectCmd, importProjectCmd, aboutCmd);
 }
 
 /**
