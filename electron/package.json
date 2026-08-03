@@ -60,8 +60,15 @@
         "to": "app"
       }
     ],
+    "nsis": {
+      "artifactName": "${productName}-${version}-win-${arch}-installer.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
     "mac": {
       "icon": "build/icon.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -79,18 +86,28 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64",
+            "arm64"
           ]
         }
       ]
     },
     "linux": {
       "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "target": [
         {
           "target": "AppImage",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         }
       ],

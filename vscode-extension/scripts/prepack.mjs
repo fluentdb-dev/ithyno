@@ -64,6 +64,7 @@ const platformEsbuilds = {
   "@esbuild/linux-x64": esbuildVersion,
   "@esbuild/linux-arm64": esbuildVersion,
   "@esbuild/win32-x64": esbuildVersion,
+  "@esbuild/win32-arm64": esbuildVersion,
 };
 
 const stagedPkg = {

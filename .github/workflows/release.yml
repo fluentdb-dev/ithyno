@@ -135,9 +135,10 @@ jobs:
             Built from tag `${{ github.ref_name }}` (commit ${{ github.sha }}).
 
             Assets are attached below. Pick the one for your platform:
-            - `ithyno-*.dmg` — macOS
-            - `ithyno-*.exe` — Windows
-            - `ithyno-*.AppImage` — Linux
+            - `ithyno-*-mac-x64.dmg` / `ithyno-*-mac-arm64.dmg` — macOS
+            - `ithyno-*-win-x64-installer.exe` / `ithyno-*-win-arm64-installer.exe` — Windows (Installer)
+            - `ithyno-*-win-x64.exe` / `ithyno-*-win-arm64.exe` — Windows (Portable / Non-installer)
+            - `ithyno-*-linux-x64.AppImage` / `ithyno-*-linux-arm64.AppImage` — Linux
             - `ithyno-*.vsix` — VS Code extension
 
             Release notes: edit this Release description to add details.
