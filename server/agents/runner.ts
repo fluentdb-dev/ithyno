@@ -350,7 +350,11 @@ export class AgentRunner {
     // otherwise it stays "ignore" (the reverted PTY chain's decision).
     const child = spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
-      env: { ...process.env, ...resolved.env },
+      env: {
+        ...process.env,
+        ...resolved.env,
+        ...(resolved.command === "codex" ? { CODEX_HOME: join(this.projectRoot, ".codex") } : {}),
+      },
       stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });
     this.processes.set(id, child);

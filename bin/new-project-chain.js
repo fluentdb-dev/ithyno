@@ -10,6 +10,8 @@
 // Landed by add-new-project-onboarding-window (2026-07-19).
 
 import { spawn } from "node:child_process";
+import { readdir, rename } from "node:fs/promises";
+import { join } from "node:path";
 import { runInit } from "./init.js";
 
 /**
@@ -58,14 +60,14 @@ function splitLines(chunk, tail) {
  * @param {(e: ChainEvent) => void} onEvent
  * @returns {Promise<{ ok: boolean, code: number, message: string }>}
  */
-function spawnStreamed(cmd, args, cwd, step, onEvent) {
+function spawnStreamed(cmd, args, cwd, step, onEvent, extraEnv = {}) {
   return new Promise((resolve) => {
     const winCmd = process.platform === "win32" ? `${cmd}.cmd` : cmd;
     let child;
     try {
       child = spawn(winCmd, args, {
         cwd,
-        env: process.env,
+        env: { ...process.env, ...extraEnv },
         shell: process.platform === "win32",
       });
     } catch (err) {
@@ -107,6 +109,27 @@ function spawnStreamed(cmd, args, cwd, step, onEvent) {
       });
     });
   });
+}
+
+async function normalizeCodexPromptNames(projectRoot) {
+  const prompts = join(projectRoot, ".codex", "prompts");
+  let entries;
+  try {
+    entries = await readdir(prompts);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const match = /^opsx-([a-z0-9-]+)\.md$/i.exec(name);
+    if (!match) continue;
+    const target = join(prompts, `openspec-${match[1]}.md`);
+    try {
+      await rename(join(prompts, name), target);
+    } catch {
+      // A user-created target wins; retain the upstream file rather than
+      // overwriting it. The project remains usable via the original prompt.
+    }
+  }
 }
 
 /**
@@ -232,6 +255,7 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
     finalTarget,
     "openspec-init",
     onEvent,
+    options.managerCli === "codex" ? { CODEX_HOME: join(finalTarget, ".codex") } : {},
   );
   if (!result.ok) {
     onEvent({
@@ -240,6 +264,10 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
       message: result.message,
     });
     return { ok: false, target: finalTarget };
+  }
+
+  if (options.managerCli === "codex") {
+    await normalizeCodexPromptNames(finalTarget);
   }
 
   onEvent({ type: "step-done", step: "openspec-init" });

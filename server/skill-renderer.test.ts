@@ -500,7 +500,7 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     cli: import("./skill-renderer/types.js").CliId;
     pathContains: string[];
   }> = [
-    { cli: "codex", pathContains: [".codex/", "ithy-opsx", "apply"] },
+    { cli: "codex", pathContains: [".codex/", "ithy-opsx-apply", ".md"] },
     // agy: nested `<ns>/<cmd>.md` so slash-command surface is `/ithy-opsx:apply`.
     { cli: "antigravity", pathContains: [".agents/workflows/ithy-opsx/apply.md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
@@ -565,7 +565,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     cli: import("./skill-renderer/types.js").CliId;
     expectedPathContains: string[];
   }> = [
-    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx"] },
+    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx-"] },
     { cli: "antigravity", expectedPathContains: [".agents/workflows/ithy-opsx/"] },
     { cli: "cursor", expectedPathContains: [".cursor/commands/", ".md"] },
     { cli: "gemini", expectedPathContains: [".gemini/commands/", ".toml"] },
@@ -609,6 +609,39 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       );
     });
   }
+
+  it("converts Claude commands to prompts and mirrors only Claude skills", async () => {
+    const commands = join(projectRoot, ".claude", "commands", "ithy-opsx");
+    mkdirSync(commands, { recursive: true });
+    writeFileSync(join(commands, "review.md"), [
+      "---", "description: Review a change", "---", "", "/ithy-opsx:verify ${change_id}", "",
+    ].join("\n"));
+    writeFileSync(join(commands, "verify.md"), [
+      "---", "description: Verify a change", "---", "", "/opsx:apply ${change_id}", "",
+    ].join("\n"));
+    const claudeArchiveSkill = join(projectRoot, ".claude", "skills", "ithy-opsx-archive");
+    mkdirSync(claudeArchiveSkill, { recursive: true });
+    writeFileSync(join(claudeArchiveSkill, "SKILL.md"), "/ithy-opsx:archive ${change_id}\n");
+
+    const result = await installSkills({
+      projectRoot,
+      selectedClis: ["codex"],
+      sourcesDir: SKILLS_DIR,
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(existsSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"))).toBe(true);
+    expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"), "utf8"))
+      .toContain("ithy-opsx-verify ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"), "utf8"))
+      .toContain("openspec-apply ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"), "utf8"))
+      .toContain("ithy-opsx-archive ${change_id}");
+  });
 
   it("selecting multiple CLIs in one call materializes all of them (both skills each)", async () => {
     const result = await installSkills({

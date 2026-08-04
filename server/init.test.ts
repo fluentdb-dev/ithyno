@@ -151,6 +151,29 @@ describe("updateGitignore — append-only-if-missing (both .worktrees/ and .ithy
 });
 
 describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () => {
+  it("scaffolds the CLI-neutral AGENTS.md contract", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({ targetDir: dir, quiet: true });
+    expect(res.ok).toBe(true);
+    const agents = await readFile(join(dir, "AGENTS.md"), "utf8");
+    expect(agents).toContain("Before implementing any spec-level change, propose first.");
+    expect(agents).toContain("npx openspec validate <id>");
+  });
+
+  it("preserves an existing AGENTS.md unless force is requested", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    await writeFile(join(dir, "AGENTS.md"), "user instructions\n");
+    const skipped = await runInit({ targetDir: dir, quiet: true });
+    expect(skipped.ok).toBe(true);
+    expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toBe("user instructions\n");
+
+    const forced = await runInit({ targetDir: dir, force: true, quiet: true });
+    expect(forced.ok).toBe(true);
+    expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toContain(
+      "Project instructions for AGENTS.md-compatible assistants",
+    );
+  });
+
   it("autoCreateDir: true creates the missing target dir recursively before scaffolding", async () => {
     const nested = join(dir, "nested", "child");
     const res = await runInit({
@@ -630,15 +653,15 @@ describe("runInit + writeAgentsYaml integration (expand-init-to-scaffold-agents)
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  it("agents.yaml is written at <projectRoot>/agents.yaml with the correct command", async () => {
+  it("Codex selection is written to the new project's Manager entry", async () => {
     const initResult = await runInit({ targetDir: dir, quiet: true });
     expect(initResult.ok).toBe(true);
 
     const pkgRoot = process.cwd();
-    await writeAgentsYaml(dir, "claude", pkgRoot);
+    await writeAgentsYaml(dir, "codex", pkgRoot);
 
     const agentsYaml = await readFile(join(dir, "agents.yaml"), "utf8");
-    expect(agentsYaml).toContain("command: claude");
+    expect(agentsYaml).toContain("command: codex");
     expect(agentsYaml).toContain("roles: [manager]");
     expect(agentsYaml).toContain("mode: live-shell");
   });

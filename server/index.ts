@@ -1802,6 +1802,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     const injectResult = injectImportCommand(
       targetPath,
       (data, terminate) => injectIntoManager(managerCwd, data, terminate),
+      agentRegistry.managerAgent()?.command,
     );
     if (!injectResult.ok) {
       // Roll back the registered job — inject failed before dispatch.

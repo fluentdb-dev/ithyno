@@ -50,13 +50,13 @@ const CLI_LABELS: Record<Cli, string> = {
 };
 
 /** Manager-eligible CLIs — the picker offers only these. The rest
- *  (codex/copilot/gemini/cursor/antigravity) are still valid as
+ *  (copilot/gemini/cursor/antigravity) are still valid as
  *  agmsg-spawned WORKERS but have not been validated as Manager.
  *  See `server/sync/pty.ts` MANAGER_STARTUP_STRATEGIES: each CLI here
  *  needs a startup strategy AND its own dispatch skill surface to run
  *  the workflow. */
 const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy"];
-const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode"];
+const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "opencode"];
 const MANAGER_CANDIDATES: readonly Cli[] = [
   ...MANAGER_VERIFIED,
   ...MANAGER_UNVERIFIED,
@@ -122,7 +122,7 @@ export function InitDialog({
   const installedClis = report
     ? CLI_PRIORITY.filter((cli) => report.agents[cli].installed)
     : [];
-  /** Manager picker: only claude / codex / agy show up (of those,
+  /** Manager picker: only Manager candidates show up (of those,
    *  only ones actually installed on the host). Non-candidates still
    *  appear in the Prerequisites list as reachable CLIs — they're just
    *  not usable as Manager yet. */

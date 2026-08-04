@@ -479,6 +479,7 @@ export async function attachPtyToSocket(
   if (!pty.available) return { ok: false, reason: pty.reason };
 
   const { cmd, args } = defaultShell();
+  const manager = opts.registry?.managerAgent() ?? null;
   const term = pty.module.spawn(cmd, args, {
     name: "xterm-256color",
     cols: opts.cols ?? 80,
@@ -506,6 +507,9 @@ export async function attachPtyToSocket(
       // Falls back to 4321 when PORT isn't set (CLI dev workflow).
       ITHYNO_PORT: process.env.PORT ?? "4321",
       ITHYNO_BASE: `http://localhost:${process.env.PORT ?? "4321"}`,
+      // Codex custom prompts are project-scoped during ithyno init. Give the
+      // interactive Manager the same prompt home that initialization wrote.
+      ...(manager?.command === "codex" ? { CODEX_HOME: join(opts.cwd, ".codex") } : {}),
     },
   });
 

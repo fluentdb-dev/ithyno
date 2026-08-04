@@ -9,6 +9,7 @@ import { PhaseLaneBoard } from "../components/PhaseLaneBoard";
 import { TagChipList } from "../components/TagChip";
 import { injectPty } from "../api";
 import { ERR } from "../lib/errorMessages";
+import { commandForManager } from "../lib/managerCommand";
 import type { Change } from "../types";
 
 function quoteForShell(s: string): string {
@@ -46,6 +47,7 @@ export function Overview() {
   const pushToast = useStore((s) => s.pushToast);
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
+  const agents = useStore((s) => s.agents);
   const overviewLayout = useStore((s) => s.overviewLayout);
   const setOverviewLayout = useStore((s) => s.setOverviewLayout);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -232,7 +234,7 @@ export function Overview() {
             const v = input.trim();
             if (!v) return "";
             if (m === "cli") return `npx openspec new change ${v}`;
-            return `/opsx:propose ${quoteForShell(v)}`;
+            return commandForManager(agents, "opsx", "propose", quoteForShell(v));
           }}
           onCancel={() => setProposeOpen(false)}
           onSubmit={runInject}

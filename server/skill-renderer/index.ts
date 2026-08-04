@@ -14,6 +14,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
 import { copyClaudeIthyOpsxCommandsToAgents, migrateLegacyAntigravityDir } from "./migrate-agy.js";
+import { copyClaudeIthyOpsxCommandsToCodex } from "./migrate-codex.js";
 import { getRenderer, knownRendererClis } from "./renderers/index.js";
 import type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
 export type { CliId, InstallOptions, InstallResult, SkillSource } from "./types.js";
@@ -158,6 +159,24 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
         await writeFile(abs, file.content, "utf-8");
         result.written.push({ cli, path: file.path, bytes: contentBytes });
       }
+    }
+  }
+
+  // Claude commands are the source of truth for the ithy-opsx command
+  // bodies. Codex cannot discover `.claude/commands`, so convert that surface
+  // after renderer output; this also intentionally wins over any same-named
+  // portable pilot skill.
+  if (opts.selectedClis.includes("codex")) {
+    try {
+      const copy = await copyClaudeIthyOpsxCommandsToCodex(opts.projectRoot, {
+        dryRun: opts.dryRun,
+      });
+      result.migrations.push({ cli: "codex", kind: "copy", ...copy });
+    } catch (err) {
+      result.errors.push({
+        cli: "codex",
+        message: `claude-command conversion failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }
 

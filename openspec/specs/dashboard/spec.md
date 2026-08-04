@@ -4548,6 +4548,8 @@ Non-eligible CLIs (`copilot`, `gemini`, `opencode`, `cursor`, `antigravity`) SHA
 
 Entries in `MANAGER_UNVERIFIED` SHALL render with a trailing `(unverified)` label. A CLI SHALL be moved from `MANAGER_UNVERIFIED` to `MANAGER_VERIFIED` (removing the label) once both: (a) it has a startup strategy registered in `MANAGER_STARTUP_STRATEGIES`, AND (b) its dispatch skill resolves in that CLI's command surface (currently blocked pending `generalize-skills-cross-cli` renderer follow-ups for non-Claude CLIs).
 
+> ⚠️ **PENDING MODIFIED** by [align-codex-init-instructions](../../changes/align-codex-init-instructions/): expose detected Codex as an unverified New Project Manager.
+
 `readyForManager` SHALL be derived from `managerChoices.length > 0` (installed ∩ candidates), not from the raw doctor report's field — a project with only non-eligible CLIs installed correctly reports "no Manager-eligible CLI" and blocks Init.
 
 The preselect logic SHALL respect the candidate filter: the stored `defaultManager` is preselected only if it is both installed AND Manager-eligible; otherwise the picker preselects the first eligible-installed CLI by `CLI_PRIORITY`.
@@ -4660,4 +4662,3 @@ Consumers (skills, tools, user commands run inside the PTY) MAY rely on `ITHYNO_
 - **GIVEN** ithyno is running at project A on port `57703`, and a `POST /api/project/switch` respawns onto project B on port `57811`
 - **WHEN** the new PTY spawns
 - **THEN** the fresh Manager's `ITHYNO_PORT == "57811"` (matches the new server, NOT the stale `57703`)
-
