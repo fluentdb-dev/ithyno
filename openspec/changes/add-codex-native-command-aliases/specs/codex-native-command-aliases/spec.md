@@ -10,8 +10,10 @@ support the operator-facing form `openspec-propose <arguments>` and preserve
 the command's arguments unchanged.
 
 Initialization SHALL NOT create, rename, or remove prompts in the user's
-global Codex home. The Codex Manager process SHALL receive the initialized
-project's absolute `CODEX_HOME` path so it resolves the same prompt set.
+global Codex home. The initialization-only `CODEX_HOME` override SHALL NOT be
+passed to the Codex Manager or workers, so their existing authentication and
+configuration remain available. Codex SHALL remain marked unverified until
+the executable compatibility harness proves the user-facing invocation.
 
 Initialization SHALL also mirror every project-local
 `.claude/skills/ithy-opsx-*/SKILL.md` into the corresponding
@@ -23,7 +25,7 @@ SHALL NOT promote command definitions into Codex skills.
 - **GIVEN** a user selects Codex as the New Project Manager
 - **WHEN** initialization completes
 - **THEN** the project contains the Codex prompt for `openspec-propose`
-- **AND** the Codex Manager resolves prompts from that project-local home
+- **AND** the Codex Manager keeps its normal authenticated runtime home
 - **AND** no global Codex prompt file is changed by ithyno
 
 #### Scenario: propose arguments are preserved

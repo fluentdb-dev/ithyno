@@ -10,7 +10,7 @@
 // Landed by add-new-project-onboarding-window (2026-07-19).
 
 import { spawn } from "node:child_process";
-import { readdir, rename } from "node:fs/promises";
+import { access, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runInit } from "./init.js";
 
@@ -111,7 +111,7 @@ function spawnStreamed(cmd, args, cwd, step, onEvent, extraEnv = {}) {
   });
 }
 
-async function normalizeCodexPromptNames(projectRoot) {
+export async function normalizeCodexPromptNames(projectRoot) {
   const prompts = join(projectRoot, ".codex", "prompts");
   let entries;
   try {
@@ -124,10 +124,11 @@ async function normalizeCodexPromptNames(projectRoot) {
     if (!match) continue;
     const target = join(prompts, `openspec-${match[1]}.md`);
     try {
+      await access(target);
+      await unlink(join(prompts, name));
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code !== "ENOENT") throw err;
       await rename(join(prompts, name), target);
-    } catch {
-      // A user-created target wins; retain the upstream file rather than
-      // overwriting it. The project remains usable via the original prompt.
     }
   }
 }
@@ -168,10 +169,11 @@ export function openspecToolForCli(cli) {
 /**
  * @param {string} target
  * @param {(e: ChainEvent) => void} onEvent
- * @param {{ managerCli?: string }} [options]
+ * @param {{ managerCli?: string, spawnImpl?: typeof spawnStreamed }} [options]
  * @returns {Promise<{ ok: boolean, target: string }>}
  */
 export async function runNewProjectChain(target, onEvent, options = {}) {
+  const runSpawn = options.spawnImpl ?? spawnStreamed;
   // Step 1 — scaffold via runInit. quiet: false so per-file
   // create/skip/overwrite lines flow through the log callback; the
   // trailing "Next steps" hints are ignored by the onboarding UI
@@ -225,7 +227,7 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   // package.json if one doesn't exist yet.
   onEvent({ type: "step-start", step: "openspec-init" });
   const finalTarget = initResult.target ?? target;
-  const npmResult = await spawnStreamed(
+  const npmResult = await runSpawn(
     "npm",
     ["install", "--save-dev", "@fission-ai/openspec@latest"],
     finalTarget,
@@ -249,7 +251,11 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   // "claude" — an agy / codex / etc pick still got a Claude scaffold
   // and the picked CLI had no AGENTS.md to read.
   const openspecTool = openspecToolForCli(options.managerCli);
-  const result = await spawnStreamed(
+  let agentsContract;
+  if (options.managerCli === "codex") {
+    try { agentsContract = await readFile(join(finalTarget, "AGENTS.md"), "utf8"); } catch { /* optional */ }
+  }
+  const result = await runSpawn(
     "npx",
     ["openspec", "init", finalTarget, "--tools", openspecTool],
     finalTarget,
@@ -267,6 +273,7 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   }
 
   if (options.managerCli === "codex") {
+    if (agentsContract !== undefined) await writeFile(join(finalTarget, "AGENTS.md"), agentsContract, "utf8");
     await normalizeCodexPromptNames(finalTarget);
   }
 

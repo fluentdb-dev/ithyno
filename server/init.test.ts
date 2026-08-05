@@ -452,11 +452,10 @@ describe("ithy-opsx package shape smoke", () => {
   // (distribute-ithy-opsx-via-init-templates) removed bare
   // .claude/commands/ithy-opsx and .claude/skills/ithy-opsx-*/**
   // from package.json `files`. This test locks that in: `npm pack
-  // --dry-run --json` MUST show ithy-opsx only under templates/, and
-  // MUST NOT show it under a bare .claude/ prefix. A regression that
-  // re-adds either would silently double-ship the dev-copy to
-  // consumers.
-  it("npm pack --dry-run ships ithy-opsx only under templates/", async () => {
+  // --dry-run --json` MUST show generated Claude assets only under templates/
+  // and portable renderer input under ithyno/skills/. It MUST NOT show a bare
+  // .claude/ prefix, which would silently double-ship the dev copy.
+  it("npm pack --dry-run ships templates plus universal ithyno skill sources", async () => {
     // ~2-3s in isolation, but a real `npm pack` subprocess competing
     // with the rest of the suite's own spawn-heavy tests under full
     // parallel `npm test` load has been observed spiking well past
@@ -492,10 +491,17 @@ describe("ithy-opsx package shape smoke", () => {
     const ithyOpsxEntries = entries.filter((f) => /ithy-opsx/.test(f.path));
     expect(ithyOpsxEntries.length).toBeGreaterThan(0);
 
+    expect(entries.some((entry) =>
+      entry.path === "ithyno/skills/ithy-opsx-test-probe/manifest.yaml"
+    )).toBe(true);
+
     for (const entry of ithyOpsxEntries) {
-      if (!entry.path.startsWith("templates/.claude/")) {
+      if (
+        !entry.path.startsWith("templates/.claude/") &&
+        !entry.path.startsWith("ithyno/skills/")
+      ) {
         throw new Error(
-          `package shape regression: '${entry.path}' does not sit under 'templates/.claude/'. distribute-ithy-opsx-via-init-templates removed bare .claude/ shipping; something re-added it. Check root package.json 'files' array.`,
+          `package shape regression: '${entry.path}' is neither a generated template nor a universal ithyno skill source.`,
         );
       }
       if (/^\.claude\/commands\/ithy-opsx/.test(entry.path)) {

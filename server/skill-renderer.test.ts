@@ -58,6 +58,18 @@ function mkSynthSkill(
 // ---------------------------------------------------------------------------
 
 describe("ithyno/skills/*/manifest.yaml schema conformance", () => {
+  it("keeps the portable test probe body derived from the Claude-authoritative skill", () => {
+    const claude = readFileSync(
+      join(REPO, ".claude", "skills", "ithy-opsx-test-probe", "SKILL.md"),
+      "utf8",
+    ).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+    const portable = readFileSync(
+      join(SKILLS_DIR, "ithy-opsx-test-probe", "SKILL.md"),
+      "utf8",
+    );
+    expect(portable.trim()).toBe(claude.trim());
+  });
+
   it("schema file is valid JSON with the expected fields", async () => {
     const schema = JSON.parse(await readFile(SCHEMA_PATH, "utf-8"));
     expect(schema.$id).toContain("skill-manifest.schema.json");
@@ -564,16 +576,46 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
   const CASES: ReadonlyArray<{
     cli: import("./skill-renderer/types.js").CliId;
     expectedPathContains: string[];
+    probeCommandPath: string;
   }> = [
-    { cli: "codex", expectedPathContains: [".codex/", "ithy-opsx-"] },
-    { cli: "antigravity", expectedPathContains: [".agents/workflows/ithy-opsx/"] },
-    { cli: "cursor", expectedPathContains: [".cursor/commands/", ".md"] },
-    { cli: "gemini", expectedPathContains: [".gemini/commands/", ".toml"] },
-    { cli: "copilot", expectedPathContains: [".github/prompts/", ".prompt.md"] },
-    { cli: "opencode", expectedPathContains: [".opencode/commands/", "ithy-opsx"] },
+    {
+      cli: "claude",
+      expectedPathContains: [".claude/commands/ithy-opsx/"],
+      probeCommandPath: ".claude/commands/ithy-opsx/test-probe.md",
+    },
+    {
+      cli: "codex",
+      expectedPathContains: [".codex/", "ithy-opsx-"],
+      probeCommandPath: ".codex/prompts/ithy-opsx-test-probe.md",
+    },
+    {
+      cli: "antigravity",
+      expectedPathContains: [".agents/workflows/ithy-opsx/"],
+      probeCommandPath: ".agents/workflows/ithy-opsx/test-probe.md",
+    },
+    {
+      cli: "cursor",
+      expectedPathContains: [".cursor/commands/", ".md"],
+      probeCommandPath: ".cursor/commands/ithy-opsx-test-probe.md",
+    },
+    {
+      cli: "gemini",
+      expectedPathContains: [".gemini/commands/", ".toml"],
+      probeCommandPath: ".gemini/commands/ithy-opsx/test-probe.toml",
+    },
+    {
+      cli: "copilot",
+      expectedPathContains: [".github/prompts/", ".prompt.md"],
+      probeCommandPath: ".github/prompts/ithy-opsx-test-probe.prompt.md",
+    },
+    {
+      cli: "opencode",
+      expectedPathContains: [".opencode/commands/", "ithy-opsx"],
+      probeCommandPath: ".opencode/commands/ithy-opsx-test-probe.md",
+    },
   ];
 
-  for (const { cli, expectedPathContains } of CASES) {
+  for (const { cli, expectedPathContains, probeCommandPath } of CASES) {
     it(`materializes every ported ithy-opsx skill on disk for ${cli}`, async () => {
       const result = await installSkills({
         projectRoot,
@@ -607,6 +649,15 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(readFileSync(join(projectRoot, dispatchPath!), "utf-8")).toContain(
         "ithyno/skills/ithy-opsx-dispatch",
       );
+
+      // The test probe is a universal source for every supported CLI. This
+      // verifies that ithyno/skills does not silently privilege Claude/Codex;
+      // each renderer must materialize its own native command/prompt path.
+      expect(paths).toContain(probeCommandPath);
+      expect(existsSync(join(projectRoot, probeCommandPath))).toBe(true);
+      expect(readFileSync(join(projectRoot, probeCommandPath), "utf-8")).toContain(
+        "ithyno/skills/ithy-opsx-test-probe",
+      );
     });
   }
 
@@ -614,7 +665,11 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     const commands = join(projectRoot, ".claude", "commands", "ithy-opsx");
     mkdirSync(commands, { recursive: true });
     writeFileSync(join(commands, "review.md"), [
-      "---", "description: Review a change", "---", "", "/ithy-opsx:verify ${change_id}", "",
+      "---", "description: Review a change", "---", "",
+      "/ithy-opsx:verify ${change_id}",
+      "<!-- codex-preserve-start -->",
+      "codex=ithy-opsx-review legacy=/ithy-opsx:review",
+      "<!-- codex-preserve-end -->", "",
     ].join("\n"));
     writeFileSync(join(commands, "verify.md"), [
       "---", "description: Verify a change", "---", "", "/opsx:apply ${change_id}", "",
@@ -622,6 +677,12 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     const claudeArchiveSkill = join(projectRoot, ".claude", "skills", "ithy-opsx-archive");
     mkdirSync(claudeArchiveSkill, { recursive: true });
     writeFileSync(join(claudeArchiveSkill, "SKILL.md"), "/ithy-opsx:archive ${change_id}\n");
+    const claudeProbeSkill = join(projectRoot, ".claude", "skills", "ithy-opsx-test-probe");
+    mkdirSync(claudeProbeSkill, { recursive: true });
+    writeFileSync(
+      join(claudeProbeSkill, "SKILL.md"),
+      readFileSync(join(REPO, ".claude", "skills", "ithy-opsx-test-probe", "SKILL.md"), "utf8"),
+    );
 
     const result = await installSkills({
       projectRoot,
@@ -635,12 +696,17 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"))).toBe(false);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"))).toBe(false);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-test-probe/SKILL.md"))).toBe(true);
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"), "utf8"))
       .toContain("ithy-opsx-verify ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"), "utf8"))
+      .toContain("codex=ithy-opsx-review legacy=/ithy-opsx:review");
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"), "utf8"))
       .toContain("openspec-apply ${change_id}");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"), "utf8"))
       .toContain("ithy-opsx-archive ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-test-probe/SKILL.md"), "utf8"))
+      .toContain('"probe": "ithy-opsx-test-probe"');
   });
 
   it("selecting multiple CLIs in one call materializes all of them (both skills each)", async () => {

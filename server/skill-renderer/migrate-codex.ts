@@ -15,15 +15,23 @@ function codexPromptContent(raw: string, command: string): string {
   const description = typeof sourceMeta.description === "string"
     ? sourceMeta.description
     : `ithy-opsx ${command} command`;
-  const body = raw.slice(match?.[0].length ?? 0)
-    .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
-    .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1");
+  const body = translateCommandBody(raw.slice(match?.[0].length ?? 0));
   const frontmatter = stringifyYaml({
     name: `ithy-opsx-${command}`,
     description,
     "argument-hint": "command arguments",
   }, { lineWidth: 0 }).trimEnd();
   return `---\n${frontmatter}\n---\n\n${body.trimStart()}`;
+}
+
+function translateCommandBody(raw: string): string {
+  return raw.split(/(<!-- codex-preserve-start -->[\s\S]*?<!-- codex-preserve-end -->)/g)
+    .map((part) => part.startsWith("<!-- codex-preserve-start -->")
+      ? part.replace("<!-- codex-preserve-start -->", "").replace("<!-- codex-preserve-end -->", "")
+      : part
+        .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
+        .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1"))
+    .join("");
 }
 
 function translateSkillBody(raw: string): string {

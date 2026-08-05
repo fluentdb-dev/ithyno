@@ -31,6 +31,10 @@ Claude skill surface. The smoke harness SHALL rely on the normal
 initialization/rendering path to materialize the selected Agent CLI's skill and
 SHALL NOT maintain an independently authored target-CLI probe body.
 
+The portable renderer derivative SHALL support every CLI supported by the
+ithyno skill renderer and SHALL remain body-equivalent to the
+Claude-authoritative probe through deterministic drift coverage.
+
 This requirement SHALL NOT promote an existing command or prompt into a skill
 and SHALL NOT modify the command/prompt/skill source-of-truth policy.
 
@@ -39,6 +43,12 @@ and SHALL NOT modify the command/prompt/skill source-of-truth policy.
 - **WHEN** the isolated project is initialized
 - **THEN** the Codex probe skill is derived from the Claude-authoritative probe
 - **AND** the harness does not write a separate hand-authored Codex skill body
+
+#### Scenario: Every supported CLI receives its native probe entrypoint
+- **GIVEN** one of the seven supported skill renderers is selected
+- **WHEN** project-local ithyno skills are initialized
+- **THEN** the probe command or prompt is rendered at that CLI's native path
+- **AND** its instructions remain derived from the Claude-authoritative body
 
 ### Requirement: Artifact-based success contract
 

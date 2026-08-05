@@ -293,7 +293,7 @@ export class AgentRunner {
           worktree_path: worktreePath,
           branch,
         },
-        def.roles[0],
+        role ?? def.roles[0],
       );
     } catch (err) {
       // Clean up before returning — otherwise a misconfigured runtime
@@ -353,7 +353,6 @@ export class AgentRunner {
       env: {
         ...process.env,
         ...resolved.env,
-        ...(resolved.command === "codex" ? { CODEX_HOME: join(this.projectRoot, ".codex") } : {}),
       },
       stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });

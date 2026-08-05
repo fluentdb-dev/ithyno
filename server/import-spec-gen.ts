@@ -21,6 +21,7 @@
 import { readdir, lstat } from "node:fs/promises";
 import { join, resolve, extname, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { commandForManagerCommand } from "./manager-command.js";
 
 // ---- Config -----------------------------------------------------------------
 const SIZE_CAP_BYTES = 50 * 1024 * 1024; // 50 MB default
@@ -188,6 +189,6 @@ export function injectImportCommand(
       status: 400,
     };
   }
-  const cmd = `${managerCommand === "codex" ? "ithy-opsx-import" : "/ithy-opsx:import"} ${targetPath}`;
+  const cmd = commandForManagerCommand(managerCommand, "ithy-opsx", "import", targetPath);
   return inject(cmd, true);
 }

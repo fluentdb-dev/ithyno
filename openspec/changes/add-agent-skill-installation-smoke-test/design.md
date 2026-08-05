@@ -38,9 +38,12 @@ the canonical source.
 
 The canonical probe lives at
 `.claude/skills/ithy-opsx-test-probe/SKILL.md` and the corresponding template
-location. The test invokes normal initialization for the selected Agent CLI;
-it does not hand-create a target CLI copy. This means the smoke test also
-covers the real installation path.
+location. A portable derivative at
+`ithyno/skills/ithy-opsx-test-probe/SKILL.md` is mechanically drift-tested
+against that Claude body and declares all seven supported renderers. The test
+invokes normal initialization for the selected Agent CLI; it does not
+hand-create a target CLI copy. This means the smoke test also covers the real
+installation path without changing which source is authoritative.
 
 ### D2 — Agent selection uses `agents.yaml`
 
@@ -119,5 +122,6 @@ runner, prompt, or model-behavior failures.
   and exclude the live path from `npm test`.
 - **Stale persistent sessions:** use a new subprocess per live probe so skill
   discovery occurs after initialization.
-- **Source-of-truth drift:** test fixtures reference the Claude-authored probe;
-  no independent Codex probe body is maintained.
+- **Source-of-truth drift:** deterministic coverage compares the portable
+  renderer body with the Claude-authored probe; no independent target-CLI
+  probe body is maintained.

@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import chokidar, { type FSWatcher } from "chokidar";
+import { commandForAgentRole } from "../manager-command.js";
 
 /**
  * Agent registry — loads `agents.yaml`, validates+normalizes shapes, and
@@ -138,6 +139,15 @@ export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
   verify: "/ithy-opsx:verify ${change_id}",
   manager: "/ithy-opsx:dispatch",
 };
+
+/** Resolve only the built-in prompt surface for the receiving Agent CLI.
+ * Explicit `agents.yaml` prompt overrides remain byte-for-byte authoritative. */
+export function builtInPromptForAgent(
+  command: string | undefined,
+  role: string,
+): string | undefined {
+  return commandForAgentRole(command, role);
+}
 
 function validatePromptsMap(
   raw: unknown,
@@ -494,7 +504,7 @@ export function resolvePromptForRole(
 ): string | undefined {
   const agentPrompt = agent.prompts?.[role];
   if (agentPrompt !== undefined) return agentPrompt;
-  return BUILT_IN_ROLE_PROMPTS[role];
+  return builtInPromptForAgent(agent.command, role);
 }
 
 /**
@@ -781,7 +791,7 @@ export class AgentRegistry {
     // Resolve the prompt for the dispatched role. explicit = agent.prompts;
     // fallback = built-in default per role.
     const agentPrompt = def.prompts?.[dispatchedRole];
-    const promptTemplate = agentPrompt ?? BUILT_IN_ROLE_PROMPTS[dispatchedRole];
+    const promptTemplate = agentPrompt ?? builtInPromptForAgent(command, dispatchedRole);
     const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
     const isExplicitPrompt = agentPrompt !== undefined;
 
@@ -789,10 +799,11 @@ export class AgentRegistry {
     //   - `mode: live-shell` (worker) — write resolvedPrompt to child.stdin.
     //     Manager `mode: live-shell` is handled by attachPtyToSocket
     //     (Terminal panel WS) and never reaches this branch.
-    //   - `mode: single-prompt` — append `[-p, prompt]` to args when the
-    //     agent has an explicit `prompts.<role>` set AND args does not
-    //     already inline `-p`. Command-only agents with no explicit
-    //     prompt keep their hand-authored args unchanged.
+    //   - `mode: single-prompt` — deliver the resolved prompt using the
+    //     receiving CLI's native non-interactive form. Codex uses
+    //     `codex exec <prompt>`; Claude uses `claude -p <prompt>`.
+    //     Existing hand-authored prompt arguments remain authoritative and
+    //     are not injected a second time.
     let initialInputMode: "cli-arg" | "stdin";
     let initialInput: string | undefined;
     let effectiveArgs = args;
@@ -808,12 +819,20 @@ export class AgentRegistry {
     } else {
       initialInputMode = "cli-arg";
       initialInput = undefined;
-      const shouldInject =
-        resolvedPrompt !== undefined &&
-        isExplicitPrompt &&
-        !args.includes("-p");
-      if (shouldInject) {
-        effectiveArgs = [...args, "-p", resolvedPrompt!];
+      const promptAlreadyPresent = resolvedPrompt !== undefined && (
+        args.includes(resolvedPrompt) ||
+        args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg))
+      );
+      if (resolvedPrompt !== undefined && !promptAlreadyPresent) {
+        if (command === "codex") {
+          effectiveArgs = args.includes("exec")
+            ? [...args, resolvedPrompt]
+            : [...args, "exec", resolvedPrompt];
+        } else if (command === "claude" && !args.includes("-p")) {
+          effectiveArgs = [...args, "-p", resolvedPrompt];
+        } else if (isExplicitPrompt && !args.includes("-p")) {
+          effectiveArgs = [...args, "-p", resolvedPrompt];
+        }
       }
     }
 

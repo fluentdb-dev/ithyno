@@ -12,7 +12,8 @@ write is not an acceptable side effect of creating a project.
   propose workflow in a Codex-managed project.
 - Give ithyno flows equally flat, predictable names such as
   `ithy-opsx-dispatch <change-id>`.
-- Keep Codex prompts project-local and make Manager startup resolve them.
+- Keep generated Codex assets project-local without replacing the Manager's
+  authenticated runtime home.
 - Preserve the existing slash surface for Claude and all non-Codex managers.
 
 ## Non-Goals
@@ -35,13 +36,17 @@ The filename and operator mapping is:
 This avoids punctuation that has meaning in the Claude slash-command surface
 and gives the two ownership domains readable names.
 
-### D2 — Project-scoped CODEX_HOME
+### D2 — Initialization-only project-scoped CODEX_HOME
 
 When Codex is the selected Manager, the initialization subprocess invokes
 OpenSpec with `CODEX_HOME=<project>/.codex`. It can then safely rename its
 own generated `opsx-*.md` files to `openspec-*.md` inside the project.
-The Codex Manager process receives the same absolute `CODEX_HOME` value on
-startup. Other manager CLIs receive no new environment variable.
+The override is limited to the OpenSpec generation subprocess. The Codex CLI
+also reads authentication from `CODEX_HOME/auth.json`; passing the isolated
+home to the Manager or workers makes an otherwise authenticated CLI fail.
+Runtime therefore receives no ithyno-supplied `CODEX_HOME`. Project-local
+skills remain the supported repository surface; project-local prompt
+discovery remains behind the live compatibility gate.
 
 ### D3 — Manager-specific injection
 
@@ -84,7 +89,7 @@ version, Codex remains visibly unverified in New Project.
 - Codex's interactive custom-prompt trigger spelling can change. The harness
   is the compatibility gate and captures the exact user-facing invocation.
 - Existing Codex users may have global OpenSpec prompts. This change does not
-  delete or rename them; initialized projects use their own scoped home.
+  delete or rename them, and it does not redirect their runtime home.
 - The command resolver needs the manager identity at injection time. A stale
   config must fall back to the existing slash command rather than blocking
   Start for non-Codex projects.

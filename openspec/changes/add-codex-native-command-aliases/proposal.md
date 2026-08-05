@@ -23,8 +23,8 @@ Kanban Start injection match that interface.
    prevents init from mutating a user's global prompts and makes the project
    command surface reproducible.
 3. Render ithyno universal skills to the corresponding Codex-native prompt
-   names, and configure the Codex Manager PTY to use that project-local
-   `CODEX_HOME`.
+   names. Keep the Codex Manager on its normal authenticated `CODEX_HOME`;
+   the initialization-only override must not leak into runtime.
 4. Resolve every dispatched role prompt by its target worker CLI, not only the
    Manager's entry prompt. A Codex code worker receives
    `openspec-apply <change-id>`; Codex review and verify workers receive
@@ -54,8 +54,8 @@ None.
 - `bin/new-project-chain.js` / initialization plumbing — project-scoped Codex
   prompt generation.
 - `server/skill-renderer/renderers/codex.ts` — native alias filenames.
-- `server/sync/pty.ts` and generated `agents.yaml` handling — Codex Manager
-  environment receives the project `CODEX_HOME`.
+- `server/sync/pty.ts` and worker spawn handling — Codex runtime preserves its
+  normal authenticated environment.
 - `web/src/hooks/useStartFlow.tsx` and related Start surfaces — per-manager
   command injection.
 - `ithyno/skills/`, dispatch prompt resolution, and worker spawn tests —

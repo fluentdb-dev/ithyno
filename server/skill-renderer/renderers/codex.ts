@@ -46,9 +46,13 @@ function codexCommandName(source: SkillSource): string {
  * command references inside rendered portable skill bodies as well as the
  * prompt filename so a Codex Manager passes native names to child workers. */
 function translateCommandReferences(body: string): string {
-  return body
-    .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
-    .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1");
+  return body.split(/(<!-- codex-preserve-start -->[\s\S]*?<!-- codex-preserve-end -->)/g)
+    .map((part) => part.startsWith("<!-- codex-preserve-start -->")
+      ? part.replace("<!-- codex-preserve-start -->", "").replace("<!-- codex-preserve-end -->", "")
+      : part
+        .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
+        .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1"))
+    .join("");
 }
 
 function frontmatter(source: SkillSource): string {

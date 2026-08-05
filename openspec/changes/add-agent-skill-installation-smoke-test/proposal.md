@@ -20,7 +20,8 @@ not a new production dispatch stage.
 
 1. Add a Claude-authored `ithy-opsx-test-probe` skill whose only behavior is
    to write a nonce-bearing JSON artifact. Claude remains the authoritative
-   source; existing initialization/rendering supplies the selected CLI's copy.
+   source; a drift-tested portable derivative lets the existing renderers
+   supply native project-local command/prompt files for every supported CLI.
 2. Add a live smoke-test command that selects an Agent with the `probe` role
    from `agents.yaml`, initializes an isolated temporary project, launches the
    Agent, and asks it to use the probe skill.
@@ -42,7 +43,8 @@ None.
 
 ## Impact
 
-- A test-only Claude probe skill and its initialization template.
+- A test-only Claude probe skill, its initialization template, and a
+  Claude-derived universal renderer source under `ithyno/skills`.
 - A test harness/CLI script using `AgentRegistry` and the normal Agent runner
   environment.
 - An `agents.yaml` probe-role fixture or documented example.

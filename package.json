@@ -16,6 +16,7 @@
   },
   "files": [
     "bin",
+    "ithyno/skills",
     "server",
     "templates",
     "web/dist",
@@ -48,7 +49,9 @@
     "release:build": "node scripts/release-build.mjs",
     "release:verify-bundle": "node scripts/verify-bundle.mjs",
     "release:version": "node scripts/release-version.mjs",
-    "e2e:skills": "E2E=1 node scripts/skill-e2e.mjs"
+    "e2e:skills": "E2E=1 node scripts/skill-e2e.mjs",
+    "test:agent-skills": "node --import tsx scripts/agent-skill-smoke.ts",
+    "test:codex-prompts": "node --import tsx scripts/codex-prompt-smoke.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

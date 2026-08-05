@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commandForManager, dispatchCommandForManager } from "./managerCommand";
+import { commandForAgentRole, commandForManager, commandForManagerCommand, dispatchCommandForManager } from "./managerCommand";
 import type { AgentPublic } from "../types";
 
 function agent(command: string, roles: string[]): AgentPublic {
@@ -37,5 +37,31 @@ describe("commandForManager", () => {
       .toBe("/opsx:propose 'hello'");
     expect(commandForManager([], "ithy-opsx", "import", "/tmp/project"))
       .toBe("/ithy-opsx:import /tmp/project");
+  });
+});
+
+describe("commandForManagerCommand", () => {
+  it("is usable by server-side entry points without an Agent list", () => {
+    expect(commandForManagerCommand("codex", "ithy-opsx", "import", "/tmp/project"))
+      .toBe("ithy-opsx-import /tmp/project");
+    expect(commandForManagerCommand(undefined, "ithy-opsx", "import", "/tmp/project"))
+      .toBe("/ithy-opsx:import /tmp/project");
+  });
+});
+
+describe("commandForAgentRole", () => {
+  it.each([
+    ["codex", "code", "openspec-apply ${change_id}"],
+    ["codex", "review", "ithy-opsx-review ${change_id}"],
+    ["codex", "verify", "ithy-opsx-verify ${change_id}"],
+    ["codex", "manager", "ithy-opsx-dispatch"],
+    ["claude", "code", "/opsx:apply ${change_id}"],
+    ["claude", "review", "/ithy-opsx:review ${change_id}"],
+  ])("maps %s %s", (command, role, expected) => {
+    expect(commandForAgentRole(command, role)).toBe(expected);
+  });
+
+  it("returns undefined for a custom role", () => {
+    expect(commandForAgentRole("codex", "probe")).toBeUndefined();
   });
 });

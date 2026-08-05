@@ -4,14 +4,14 @@
   `opsx` → `openspec` and `ithy-opsx` → `ithy-opsx`.
 - [x] 1.2 Update the Codex skill renderer to emit `ithy-opsx-<command>.md` and
   add golden tests for its names and frontmatter.
-- [ ] 1.3 Run upstream OpenSpec initialization with a project-local Codex home
+- [x] 1.3 Run upstream OpenSpec initialization with a project-local Codex home
   and rename generated `opsx-*.md` prompts to `openspec-*.md` safely.
 
 ## 2. Configure Codex Manager startup
 
-- [x] 2.1 Thread the absolute project-local `CODEX_HOME` into the Codex
-  Manager PTY environment without changing other Manager environments.
-- [ ] 2.2 Add initialization tests proving global Codex prompt paths are not
+- [x] 2.1 Keep the initialization-only `CODEX_HOME` out of Codex Manager and
+  worker runtime environments so existing authentication remains available.
+- [x] 2.2 Add initialization tests proving global Codex prompt paths are not
   touched and project prompts are idempotent.
 
 ## 3. Use the native command from ithyno UI
@@ -22,19 +22,19 @@
 
 ## 4. Deliver Codex-native worker commands
 
-- [ ] 4.1 Add a target-agent CLI + role command resolver for Manager, code,
+- [x] 4.1 Add a target-agent CLI + role command resolver for Manager, code,
   review, and verify delivery.
-- [ ] 4.2 Use the resolver in direct subprocess and agmsg worker prompt
+- [x] 4.2 Use the resolver in direct subprocess and agmsg worker prompt
   construction; preserve non-Codex behavior.
 - [x] 4.3 Convert Claude commands to project-local Codex prompts and mirror
   Claude skills to Codex skills without promoting commands into skills.
-- [ ] 4.4 Add role-by-role Codex and non-Codex dispatch regression tests.
+- [x] 4.4 Add role-by-role Codex and non-Codex dispatch regression tests.
 
 ## 5. Verify live compatibility
 
-- [ ] 5.1 Add an executable Codex prompt-discovery smoke harness using the
+- [x] 5.1 Add an executable Codex prompt-discovery smoke harness using the
   installed supported CLI version and the exact user-facing invocation.
-- [ ] 5.2 Keep Codex marked `(unverified)` unless the smoke harness passes.
-- [ ] 5.3 Run `npm run typecheck && npm test && npm run build`.
+- [x] 5.2 Keep Codex marked `(unverified)` unless the smoke harness passes.
+- [x] 5.3 Run `npm run typecheck && npm test && npm run build`.
 - [x] 5.4 Run `npm run openspec -- validate add-codex-native-command-aliases --strict`.
-- [ ] 5.5 Write `outcome.md` before archive.
+- [x] 5.5 Write `outcome.md` before archive.

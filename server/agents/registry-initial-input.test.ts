@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { AgentRegistry } from "./registry.js";
+import { AgentRegistry, builtInPromptForAgent } from "./registry.js";
 
 /**
  * Tests for prompt resolution and template substitution in `resolve()`.
@@ -17,14 +17,9 @@ function stubRegistry() {
 }
 
 describe("AgentRegistry resolve — per-role prompts", () => {
-  // NOTE: post reshape, command-only agents "own" their args — resolve()
-  // does NOT auto-append `-p <prompt>` for them. The prompt for a
-  // command-only single-prompt agent lives in args (user hand-authored).
-  // Only agents that reference a runtime get automatic prompt-injection.
-  //
   // For live-shell agents, initialInput carries the resolved prompt (typed
-  // into PTY). For single-prompt command-only agents, initialInput stays
-  // undefined — args are the source of truth.
+  // into PTY). For single-prompt agents, initialInput stays undefined and
+  // the receiving CLI's native non-interactive args carry the prompt.
 
   it("live-shell agent gets resolved prompt in initialInput (PTY delivery)", () => {
     const reg = stubRegistry();
@@ -82,6 +77,68 @@ describe("AgentRegistry resolve — per-role prompts", () => {
     expect(r.initialInputMode).toBe("cli-arg");
   });
 
+  it.each([
+    ["code", "openspec-apply add-native"],
+    ["review", "ithy-opsx-review add-native"],
+    ["verify", "ithy-opsx-verify add-native"],
+  ])("delivers Codex %s through codex exec", (role, prompt) => {
+    const reg = stubRegistry();
+    const def = {
+      name: "codex-worker",
+      command: "codex",
+      args: ["--sandbox", "workspace-write"],
+      mode: "single-prompt" as const,
+      roles: ["code", "review", "verify"],
+      role: "code",
+    };
+    const r = reg.resolve(
+      def,
+      { change_id: "add-native", worktree_path: "/w", branch: "b" },
+      role,
+    );
+    expect(r.args).toEqual(["--sandbox", "workspace-write", "exec", prompt]);
+  });
+
+  it("delivers a Claude built-in through -p and preserves its slash command", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "claude-worker",
+      command: "claude",
+      args: ["--dangerously-skip-permissions"],
+      mode: "single-prompt" as const,
+      roles: ["review"],
+      role: "review",
+    };
+    const r = reg.resolve(
+      def,
+      { change_id: "add-native", worktree_path: "/w", branch: "b" },
+      "review",
+    );
+    expect(r.args).toEqual([
+      "--dangerously-skip-permissions",
+      "-p",
+      "/ithy-opsx:review add-native",
+    ]);
+  });
+
+  it("does not duplicate a hand-authored Codex prompt", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "codex-worker",
+      command: "codex",
+      args: ["exec", "openspec-apply ${change_id}"],
+      mode: "single-prompt" as const,
+      roles: ["code"],
+      role: "code",
+    };
+    const r = reg.resolve(
+      def,
+      { change_id: "add-native", worktree_path: "/w", branch: "b" },
+      "code",
+    );
+    expect(r.args).toEqual(["exec", "openspec-apply add-native"]);
+  });
+
   it("substitutes template variables in env independently", () => {
     const reg = stubRegistry();
     const def = {
@@ -105,3 +162,55 @@ describe("AgentRegistry resolve — per-role prompts", () => {
   });
 });
 
+describe("builtInPromptForAgent — receiving CLI mapping", () => {
+  it.each([
+    ["code", "openspec-apply ${change_id}"],
+    ["review", "ithy-opsx-review ${change_id}"],
+    ["verify", "ithy-opsx-verify ${change_id}"],
+    ["manager", "ithy-opsx-dispatch"],
+  ])("maps Codex %s", (role, expected) => {
+    expect(builtInPromptForAgent("codex", role)).toBe(expected);
+  });
+
+  it("preserves Claude and unknown CLI built-ins", () => {
+    expect(builtInPromptForAgent("claude", "review")).toBe("/ithy-opsx:review ${change_id}");
+    expect(builtInPromptForAgent("gemini", "code")).toBe("/opsx:apply ${change_id}");
+  });
+
+  it("resolves the requested role rather than the Agent's first role", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "codex-all",
+      command: "codex",
+      args: [],
+      mode: "live-shell" as const,
+      roles: ["code", "review", "verify"],
+      role: "code",
+    };
+    const resolved = reg.resolve(
+      def,
+      { change_id: "add-role-map", worktree_path: "/w", branch: "b" },
+      "verify",
+    );
+    expect(resolved.initialInput).toBe("ithy-opsx-verify add-role-map");
+  });
+
+  it("does not rewrite explicit Codex prompt overrides", () => {
+    const reg = stubRegistry();
+    const def = {
+      name: "codex-custom",
+      command: "codex",
+      args: [],
+      mode: "live-shell" as const,
+      roles: ["review"],
+      role: "review",
+      prompts: { review: "custom reviewer ${change_id}" },
+    };
+    const resolved = reg.resolve(
+      def,
+      { change_id: "add-custom", worktree_path: "/w", branch: "b" },
+      "review",
+    );
+    expect(resolved.initialInput).toBe("custom reviewer add-custom");
+  });
+});

@@ -191,11 +191,25 @@ For each stage `S ∈ {code, review, verify}`:
      escalate rather than self-review is often better; project
      policy decides.
 
-2. **Resolve the prompt**: `entry.prompts[S]` if set, else the
-   built-in default:
+2. **Resolve the prompt for the receiving Agent CLI**:
+   `entry.prompts[S]` wins byte-for-byte when explicitly set. Otherwise start
+   from the established slash-command default:
+
+   <!-- codex-preserve-start -->
    - `code`   → `/opsx:apply <change-id>`
    - `review` → `/ithy-opsx:review <change-id>`
    - `verify` → `/ithy-opsx:verify <change-id>`
+
+   Codex is the sole exception because it does not accept the leading-slash
+   skill form. Only when `entry.command == codex`, rewrite the selected default:
+
+   - `/opsx:apply` → `openspec-apply`
+   - `/ithy-opsx:review` → `ithy-opsx-review`
+   - `/ithy-opsx:verify` → `ithy-opsx-verify`
+   <!-- codex-preserve-end -->
+
+   Use this same resolved string for direct subprocess delivery and the agmsg
+   `--boot-prompt`; never choose it from the Manager's own CLI.
 
    Then substitute template vars: `${change_id}` → the current change id.
 

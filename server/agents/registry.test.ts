@@ -143,8 +143,8 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       worktree_path: "/w/add-foo",
       branch: "agent/add-foo",
     });
-    // Post reshape: command-only agents own their args entirely — no
-    // auto-append. The user is expected to include the prompt in args.
+    // A hand-authored command prompt in args remains authoritative and is
+    // not followed by a second built-in prompt.
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
   });
 });

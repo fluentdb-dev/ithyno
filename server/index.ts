@@ -1442,7 +1442,7 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = { changeId: string; agentName: string };
+type RunBody = { changeId: string; agentName: string; role?: string };
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
@@ -1458,8 +1458,8 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     req.log.warn("agents/run: no agents in agents.yaml");
     return reply.code(503).send({ error: "no agents defined in agents.yaml" });
   }
-  req.log.info({ changeId: body.changeId, agentName: body.agentName }, "agents/run: starting");
-  const res = await agentRunner.run(body.changeId, body.agentName);
+  req.log.info({ changeId: body.changeId, agentName: body.agentName, role: body.role }, "agents/run: starting");
+  const res = await agentRunner.run(body.changeId, body.agentName, body.role);
   if (!res.ok) {
     req.log.warn({ status: res.status, reason: res.reason, changeId: body.changeId }, "agents/run: failed");
     return reply.code(res.status).send({ error: res.reason });
