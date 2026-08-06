@@ -60,8 +60,8 @@ export function selectProbeAgent(agents: readonly AgentDef[], requestedName?: st
 }
 
 export function expectedProbeSkillPath(command: string | undefined): string {
-  if (command === "claude") return ".claude/skills/ithy-opsx-test-probe/SKILL.md";
-  if (command === "codex") return ".codex/skills/ithy-opsx-test-probe/SKILL.md";
+  if (command === "claude") return ".claude/commands/ithy-opsx/test-probe.md";
+  if (command === "codex") return ".codex/prompts/ithy-opsx-test-probe.md";
   if (command === "agy" || command === "antigravity") {
     return ".agents/workflows/ithy-opsx/test-probe.md";
   }

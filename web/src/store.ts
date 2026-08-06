@@ -12,11 +12,12 @@ import {
   fetchGitConfig,
   fetchGitStatus,
   fetchDoctorReport,
+  fetchAgentSkills,
   checkAuth,
   triggerAuthExpired,
   toggleTask as apiToggle,
 } from "./api";
-import type { DoctorReport } from "./api";
+import type { DoctorReport, AgentSkillInfo } from "./api";
 import { getSessionToken } from "./runtime";
 import type {
   AgentPublic,
@@ -157,6 +158,16 @@ type Store = {
    *  Landed by add-doctor-and-installer. */
   doctorReport: DoctorReport | null;
 
+  /** Per-Agent CLI skill state from /api/agent-skills.
+   *  Null before first fetch. Kept independent from doctorReport so
+   *  skill-inspection failures do not affect the CLI executable display.
+   *  (add-settings-agent-skill-installer) */
+  agentSkills: AgentSkillInfo[] | null;
+
+  /** Error message if the last loadAgentSkills() call failed. Null when
+   *  the last fetch succeeded or has not yet been attempted. */
+  agentSkillsError: string | null;
+
   /** User's preferred default Manager CLI. Persisted to
    *  `localStorage["ithyno.defaultManager"]`. Null means unset; resolved
    *  from priority order (claude > codex > …) on first use.
@@ -197,6 +208,7 @@ type Store = {
   clearWorktreeProgress: (changeId: string) => void;
   setBrowseMode: (v: boolean) => void;
   loadDoctorReport: () => Promise<void>;
+  loadAgentSkills: () => Promise<void>;
   setDefaultManager: (cli: Cli) => void;
   pushImportNotification: (n: ImportedProjectNotification) => void;
   dismissImportNotification: (id: string) => void;
@@ -339,6 +351,8 @@ export const useStore = create<Store>((set, get) => ({
   gitConfig: null,
   browseMode: false,
   doctorReport: null,
+  agentSkills: null,
+  agentSkillsError: null,
   defaultManager: readDefaultManager(),
   importedProjectNotifications: [],
 
@@ -475,6 +489,19 @@ export const useStore = create<Store>((set, get) => ({
       set({ doctorReport: report });
     } catch {
       // Non-fatal — keep whatever we had before
+    }
+  },
+
+  loadAgentSkills: async () => {
+    try {
+      const res = await fetchAgentSkills();
+      set({ agentSkills: res.skills, agentSkillsError: null });
+    } catch (err) {
+      // Clear previous skills data on failure and surface the error.
+      set({
+        agentSkills: null,
+        agentSkillsError: err instanceof Error ? err.message : String(err),
+      });
     }
   },
 

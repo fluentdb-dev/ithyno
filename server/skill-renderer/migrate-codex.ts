@@ -9,7 +9,7 @@ export interface CodexCommandCopyResult {
   skipped: Array<{ path: string; reason: string }>;
 }
 
-function codexPromptContent(raw: string, command: string): string {
+export function codexPromptContent(raw: string, command: string): string {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
   const sourceMeta = match ? parseYaml(match[1]) as Record<string, unknown> : {};
   const description = typeof sourceMeta.description === "string"
@@ -34,7 +34,7 @@ function translateCommandBody(raw: string): string {
     .join("");
 }
 
-function translateSkillBody(raw: string): string {
+export function translateSkillBody(raw: string): string {
   return raw
     .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
     .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1");

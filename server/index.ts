@@ -660,6 +660,128 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
   });
 });
 
+// ---- Agent skill inspection + installation (add-settings-agent-skill-installer) ----
+//
+// GET  /api/agent-skills   — report per-CLI OpenSpec and ithyno state.
+//                            Session-token gated (same as /api/doctor).
+// POST /api/agent-skills/install — SSE endpoint; body { cli, components }.
+//                            Local-only + session-token gated.
+
+fastify.get("/api/agent-skills", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  const { runDoctor } = await import("./doctor.js");
+  const report = await runDoctor();
+  const { inspectAgentSkills } = await import("./agent-skills.js");
+  const sourcesDir = join(PKG_ROOT, "ithyno", "skills");
+  const results = await inspectAgentSkills(getProjectRoot(), sourcesDir, report.agents);
+  return { skills: results, projectRoot: getProjectRoot() };
+});
+
+fastify.post<{ Body: { cli?: unknown; components?: unknown } }>(
+  "/api/agent-skills/install",
+  async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+      return reply.code(403).send({ error: "local only" });
+    }
+    const token = extractToken({
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      url: req.url,
+    });
+    if (!token || !verifyToken(token)) {
+      return reply.code(401).send({ error: "auth required" });
+    }
+
+    const { CLI_ADAPTERS, isInstallLocked, installAgentSkills } = await import(
+      "./agent-skills.js"
+    );
+
+    // Validate cli
+    const cli = req.body?.cli;
+    if (typeof cli !== "string" || !(cli in CLI_ADAPTERS)) {
+      return reply
+        .code(400)
+        .send({ error: `cli must be one of: ${Object.keys(CLI_ADAPTERS).join(", ")}` });
+    }
+
+    // Validate components
+    const rawComponents = req.body?.components;
+    const VALID_COMPONENTS = ["openspec", "ithyno"] as const;
+    if (
+      !Array.isArray(rawComponents) ||
+      rawComponents.length === 0 ||
+      !rawComponents.every(
+        (c): c is "openspec" | "ithyno" => VALID_COMPONENTS.includes(c as "openspec" | "ithyno"),
+      )
+    ) {
+      return reply.code(400).send({
+        error: `components must be a non-empty array of: ${VALID_COMPONENTS.join(", ")}`,
+      });
+    }
+    const components = rawComponents as Array<"openspec" | "ithyno">;
+
+    // 409 if a concurrent install is running for this cli in this project
+    const projectRoot = getProjectRoot();
+    if (isInstallLocked(projectRoot, cli)) {
+      return reply.code(409).send({
+        error: `Installation for ${cli} is already running in this project`,
+      });
+    }
+
+    // Set up SSE stream
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    let clientAlive = true;
+    reply.raw.on("close", () => {
+      clientAlive = false;
+    });
+
+    const sendSse = (event: string, data: unknown) => {
+      if (!clientAlive) return;
+      try {
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch {
+        clientAlive = false;
+      }
+    };
+
+    const sourcesDir = join(PKG_ROOT, "ithyno", "skills");
+    try {
+      const installResult = await installAgentSkills(
+        cli,
+        components,
+        projectRoot,
+        sourcesDir,
+        sendSse,
+      );
+      sendSse("done", { result: installResult.result });
+    } catch (err) {
+      sendSse("done", {
+        result: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    if (clientAlive) {
+      try {
+        reply.raw.end();
+      } catch {
+        /* client already closed */
+      }
+    }
+  },
+);
+
 // Dedicated lightweight token-validity check so the UI can detect a stale
 // token at first load (typically after a server restart) without waiting for
 // the user to perform a mutating action.

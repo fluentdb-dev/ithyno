@@ -227,6 +227,21 @@ dispatcher が role に応じて自動選択します。
 - **CLI が PATH に無いと dispatch 失敗**: Agents タブの Runtimes セクションで
   `installed: true/false` を確認できます。
 
+## プロジェクトローカルのスキル設定とインストール
+
+Prerequisites（前提条件）セクションでは、Agent CLI の実行バイナリ自体の検出に加えて、プロジェクトに適用されている **OpenSpec および ithyno スキルのインストール状態** を検査・管理できます。
+
+### 前提条件と認証の分離
+- **重要**: スキルのインストールと、Agent CLI 自体のインストール・認証は **完全に別個の前提条件** です。
+- 設定画面の `Manage skills` からプロジェクトにスキルファイルを配置できますが、これによって `claude` などの Agent CLI そのものがインストールされたり、ベンダー固有の認証（`gcloud auth`、`gh auth` 等）が自動で行われたりするわけではありません。エージェントを動かすには、インストールされた CLI がシステム上で使用可能かつ認証済みである必要があります。
+
+### スキルの検査とインストール
+Settings の Prerequisites テーブルで各 Agent CLI の `Manage skills` をクリックするとダイアログが表示されます：
+- **OpenSpec**: プロジェクトルートへ指定された CLI 用の OpenSpec アダプター（`.claude/commands/opsx/` や `.agent/workflows/` など）を配置します。
+- **ithyno skills**: クロスCLIの共通スキル仕様（`SKILL.md` など）をプロジェクトへレンダリング・配置します。
+- ダイアログ上で、インストールされる対象のプロジェクトローカル相対パスの一覧（Target paths）を確認した上でインストールを実行できます。
+
 ## 関連ページ
 
 - [エージェントのロール](./agents-and-roles.md) — code / review / verify / manager の使い分け (未整備)
+
