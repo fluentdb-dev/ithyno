@@ -420,14 +420,9 @@ exist, create it first.
      Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
      CLI not in the native-adapter registry:
 
-     Direct shell assembly is NOT used. The server subprocess launcher
-     (`POST /api/agents/run`) or `AgentRegistry.resolve()` derives `-p`
-     or `exec` automatically for the CLI.
-
-     Manager passes `changeId`, `agentName`, `role`, `executionMode`, and
-     resolved prompt (with artifact contract) to the server launcher.
-     Manager then awaits worker completion and inspects the resulting
-     review/verify artifact files (`review.md`).
+     The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
+     construction automatically. Manager POSTs to `/api/agents/run` and
+     awaits worker completion before judging artifacts:
 
      ```bash
      ARTIFACT_CONTRACT=""
@@ -442,11 +437,43 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
-     curl -sS -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d "{\"changeId\":\"<change-id>\",\"agentName\":\"$entry_name\",\"role\":\"$S\",\"executionMode\":\"$MODE\",\"prompt\":$(echo "$FULL_PROMPT" | jq -R -s .)}"
+
+     JSON_PAYLOAD=$(node -e '
+       console.log(JSON.stringify({
+         changeId: process.argv[1],
+         agentName: process.argv[2],
+         role: process.argv[3],
+         executionMode: process.argv[4],
+         prompt: process.argv[5]
+       }))
+     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT")
+
+     RUN_RESP=$(curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
+       -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d "$JSON_PAYLOAD")
+
+     JOB_ID=$(echo "$RUN_RESP" | node -e '
+       try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.id || ""); }
+       catch { console.log(""); }
+     ')
+
+     if [ -n "$JOB_ID" ]; then
+       while true; do
+         JOB_STATUS=$(curl -s -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
+           "$ITHYNO_BASE/api/agents/jobs/$JOB_ID" | node -e '
+           try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || ""); }
+           catch { console.log(""); }
+         ')
+         if [ "$JOB_STATUS" = "completed" ]; then
+           break
+         elif [ "$JOB_STATUS" = "crashed" ] || [ "$JOB_STATUS" = "cancelled" ]; then
+           echo "[dispatch] worker process terminated with status: $JOB_STATUS"
+           /ithy-opsx:escalate <change-id> "$S stage worker process $JOB_STATUS"
+         fi
+         sleep 2
+       done
+     fi
      ```
 
      `entry.args` from `agents.yaml` carries CLI flags. Prompt flags

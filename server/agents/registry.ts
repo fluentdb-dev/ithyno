@@ -886,22 +886,29 @@ export class AgentRegistry {
 
       if (promptOverride !== undefined) {
         // When promptOverride is passed explicitly, strip any pre-existing prompt flags
-        // or slash-command prompt positionals from args, then append the override cleanly.
+        // and any existing prompt positionals from args, then append the override cleanly.
         if (command === "codex") {
-          // Filter out existing 'exec' and trailing prompt positional if present
-          const cleanArgs = args.filter((a) => a !== "exec" && !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a));
-          effectiveArgs = [...cleanArgs, "exec", promptOverride];
+          // Codex: strip 'exec' and any trailing non-flag positional arguments that follow it
+          const execIdx = args.indexOf("exec");
+          if (execIdx !== -1) {
+            // Keep flags before exec, strip exec and any following prompt positionals
+            const flagsBeforeExec = args.slice(0, execIdx).filter((a) => a.startsWith("-"));
+            effectiveArgs = [...flagsBeforeExec, "exec", promptOverride];
+          } else {
+            // Strip any positional prompt string at the end if present
+            const cleanFlags = args.filter((a) => a.startsWith("-"));
+            effectiveArgs = [...cleanFlags, "exec", promptOverride];
+          }
         } else {
-          // Filter out existing '-p' and its subsequent value, or trailing prompt positional
+          // Non-Codex: filter out existing '-p' and its value, as well as any positional non-flag prompt strings
           const cleanArgs: string[] = [];
           for (let i = 0; i < args.length; i++) {
             if (args[i] === "-p") {
               if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
               continue;
             }
-            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
-              // Skip the slash command itself and its positional target parameter if present
-              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+            // Strip trailing non-flag prompt string if it looks like a slash command or prompt argument
+            if (!args[i].startsWith("-") && (i === args.length - 1 || /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i]))) {
               continue;
             }
             cleanArgs.push(args[i]);

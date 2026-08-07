@@ -129,7 +129,30 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     if (run1.ok) runner.cancel(run1.job.id);
   });
 
-  it("handles process failure and cancellation cleanly", async () => {
+  it("handles process failure (non-zero exit code / crashed) cleanly", async () => {
+    // Reconfigure worker to exit non-zero
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: failing-worker
+    command: node
+    args: ["-e", "process.exit(1)"]
+    role: code
+`,
+    );
+    await registry.load();
+    const run = await runner.run("add-failing", "failing-worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (run.ok) {
+      // Wait for process to exit non-zero
+      await new Promise((r) => setTimeout(r, 500));
+      const summary = runner.getJob(run.job.id);
+      expect(summary?.status).toBe("crashed");
+      expect(summary?.exitCode).toBe(1);
+    }
+  });
+
+  it("handles cancellation / timeout signal cleanly", async () => {
     const run = await runner.run("add-feat", "worker", "code", "worktree");
     expect(run.ok).toBe(true);
     if (run.ok) {
