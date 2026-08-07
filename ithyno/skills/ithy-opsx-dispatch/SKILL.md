@@ -415,11 +415,17 @@ exist, create it first.
 
      The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
      construction automatically. Manager POSTs to `/api/agents/run` with
-     `"wait": true` and synchronously receives the finished status before
-     judging artifacts:
+     `"wait": true` and a stage-specific `timeoutMs` (15m for code, 5m for
+     review/verify), synchronously receiving the status before judging
+     artifacts:
 
      ```bash
      ARTIFACT_CONTRACT=""
+     STAGE_TIMEOUT=300000 # 5 minutes default for review / verify
+     if [ "$S" = "code" ]; then
+       STAGE_TIMEOUT=900000 # 15 minutes for code stage
+     fi
+
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
 
@@ -432,7 +438,6 @@ exist, create it first.
 "
      fi
 
-     # Construct JSON payload and execute synchronous launch (wait=true)
      JSON_PAYLOAD=$(node -e '
        console.log(JSON.stringify({
          changeId: process.argv[1],
@@ -440,9 +445,10 @@ exist, create it first.
          role: process.argv[3],
          executionMode: process.argv[4],
          prompt: process.argv[5],
-         wait: true
+         wait: true,
+         timeoutMs: parseInt(process.argv[6], 10)
        }))
-     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT")
+     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
 
      RUN_RESP=$(curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
        -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
@@ -457,6 +463,7 @@ exist, create it first.
      if [ "$JOB_STATUS" != "completed" ]; then
        echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"
        /ithy-opsx:escalate <change-id> "$S stage worker execution failed ($JOB_STATUS)"
+       exit 1
      fi
      ```
 

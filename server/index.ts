@@ -1591,6 +1591,17 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     req.log.warn({ body }, "agents/run: invalid prompt type");
     return reply.code(400).send({ error: "prompt must be a string" });
   }
+  if (body.wait !== undefined && typeof body.wait !== "boolean") {
+    req.log.warn({ body }, "agents/run: invalid wait type");
+    return reply.code(400).send({ error: "wait must be a boolean" });
+  }
+  if (
+    body.timeoutMs !== undefined &&
+    (typeof body.timeoutMs !== "number" || !Number.isInteger(body.timeoutMs) || body.timeoutMs <= 0)
+  ) {
+    req.log.warn({ body }, "agents/run: invalid timeoutMs");
+    return reply.code(400).send({ error: "timeoutMs must be a positive integer" });
+  }
   const cfg = agentRegistry.publicConfig();
   if (cfg.agents.length === 0) {
     req.log.warn("agents/run: no agents in agents.yaml");

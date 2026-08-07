@@ -152,14 +152,56 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     }
   });
 
-  it("handles cancellation / timeout signal cleanly", async () => {
+  it("waitForCompletion resolves completed status for normal process exit", async () => {
     const run = await runner.run("add-feat", "worker", "code", "worktree");
     expect(run.ok).toBe(true);
     if (run.ok) {
-      const cancelRes = runner.cancel(run.job.id);
-      expect(cancelRes.ok).toBe(true);
+      const res = await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+      expect(res.status).toBe("completed");
+      expect(res.exitCode).toBe(0);
+    }
+  });
+
+  it("waitForCompletion resolves crashed status for process error exit", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: failing-worker
+    command: node
+    args: ["-e", "process.exit(2)"]
+    role: code
+`,
+    );
+    await registry.load();
+    const run = await runner.run("add-failing", "failing-worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (run.ok) {
+      const res = await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+      expect(res.status).toBe("crashed");
+      expect(res.exitCode).toBe(2);
+    }
+  });
+
+  it("waitForCompletion rejects with timeout error and marks job timed-out when limit is exceeded", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: slow-worker
+    command: node
+    args: ["-e", "setTimeout(() => {}, 10000)"]
+    role: code
+`,
+    );
+    await registry.load();
+    const run = await runner.run("add-slow", "slow-worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (run.ok) {
+      await expect(
+        runner.waitForCompletion(run.job.id, { timeoutMs: 50 }),
+      ).rejects.toThrow(/Execution timed out after 50ms/);
+
       const summary = runner.getJob(run.job.id);
-      expect(summary?.status).toBe("cancelled");
+      expect(summary?.status).toBe("timed-out");
     }
   });
 });

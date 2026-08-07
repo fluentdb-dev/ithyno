@@ -20,7 +20,7 @@ const execFile = promisify(execFileCb);
  * in a ring buffer and broadcast over the dashboard's WebSocket.
  */
 
-export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";
+export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned" | "timed-out";
 
 /** Controls the execution-root policy for dispatcher-initiated runs.
  *  Landed by route-dispatch-by-manager-worker-cli (Task 2.2). */
@@ -615,7 +615,7 @@ export class AgentRunner {
       if (options?.timeoutMs && options.timeoutMs > 0) {
         timer = setTimeout(() => {
           cleanup();
-          this.cancel(jobId);
+          this.timeoutJob(jobId);
           reject(new Error(`Execution timed out after ${options.timeoutMs}ms`));
         }, options.timeoutMs);
       }
@@ -623,6 +623,14 @@ export class AgentRunner {
   }
 
   cancel(id: string): { ok: boolean; reason?: string } {
+    return this.terminateJobWithStatus(id, "cancelled");
+  }
+
+  timeoutJob(id: string): { ok: boolean; reason?: string } {
+    return this.terminateJobWithStatus(id, "timed-out");
+  }
+
+  private terminateJobWithStatus(id: string, status: "cancelled" | "timed-out"): { ok: boolean; reason?: string } {
     const job = this.jobs.get(id);
     if (!job) return { ok: false, reason: "Unknown job id" };
     if (job.status === "orphaned") {
@@ -634,7 +642,7 @@ export class AgentRunner {
     if (job.status !== "running") return { ok: false, reason: "Job is not running" };
     const proc = this.processes.get(id);
     if (!proc) return { ok: false, reason: "Process handle missing" };
-    job.status = "cancelled";
+    job.status = status;
     proc.kill("SIGTERM");
     return { ok: true };
   }
