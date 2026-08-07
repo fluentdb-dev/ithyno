@@ -1575,13 +1575,20 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     req.log.warn({ body }, "agents/run: bad body");
     return reply.code(400).send({ error: "changeId and agentName required" });
   }
+  if (body.executionMode !== undefined && body.executionMode !== "worktree" && body.executionMode !== "main-tree") {
+    req.log.warn({ body }, "agents/run: invalid executionMode");
+    return reply.code(400).send({ error: "executionMode must be 'worktree' or 'main-tree'" });
+  }
+  if (body.prompt !== undefined && typeof body.prompt !== "string") {
+    req.log.warn({ body }, "agents/run: invalid prompt type");
+    return reply.code(400).send({ error: "prompt must be a string" });
+  }
   const cfg = agentRegistry.publicConfig();
   if (cfg.agents.length === 0) {
     req.log.warn("agents/run: no agents in agents.yaml");
     return reply.code(503).send({ error: "no agents defined in agents.yaml" });
   }
-  const executionMode: RunnerExecutionMode =
-    body.executionMode === "main-tree" ? "main-tree" : "worktree";
+  const executionMode: RunnerExecutionMode = body.executionMode ?? "worktree";
   req.log.info(
     { changeId: body.changeId, agentName: body.agentName, role: body.role, executionMode },
     "agents/run: starting",

@@ -26,7 +26,7 @@
 - [x] 2.3 Make the dispatcher use the Agent runner for cross-CLI and native-
   unavailable subprocess launches, then await the returned job's terminal
   state and preserve its diagnostics.
-- [ ] 2.4 Test worktree reuse, main-tree execution, stale/wrong worktree
+- [x] 2.4 Test worktree reuse, main-tree execution, stale/wrong worktree
   rejection, duplicate jobs, process failure, and timeout behavior.
 
 ## 3. Native Same-CLI Delegation
@@ -35,8 +35,8 @@
   CLI equality plus native-adapter availability.
 - [x] 3.2 Render the Claude same-client path through its native Task/Agent tool
   with the resolved role prompt and artifact contract.
-- [x] 3.3 Render the Codex same-client path through its native sub-agent tool
-  with the equivalent prompt, target, and completion contract.
+- [x] 3.3 Document fallback from Codex same-client path to subprocess because Codex
+  has no native sub-agent tool API in its current stable CLI surface.
 - [x] 3.4 Implement or explicitly fall back from the Agy native adapter based
   on task 1.2, without changing the cross-CLI subprocess contract.
 

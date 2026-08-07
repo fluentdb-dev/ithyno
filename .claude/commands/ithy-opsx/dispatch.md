@@ -385,11 +385,10 @@ without change:<id>.
      child Agent/Tool (currently: `claude` only; Codex and Agy fall
      through to the subprocess branch):
 
-     **Claude Manager (Task 3.2)** — use the Task/Agent tool with the
-     resolved role prompt and artifact contract:
+     **Claude Manager** — use the Task/Agent tool with the resolved
+     role prompt and artifact contract:
 
      ```bash
-     # Build the full prompt: resolved role prompt + artifact contract.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -405,35 +404,27 @@ exist, create it first.
      FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
-     Then invoke the Task tool (or Agent tool — whichever is available
-     in this Claude rendering) with `FULL_PROMPT` as the prompt and
-     the worktree path (or project root for main-tree execution) as
-     the working directory. The subagent runs in-process and returns
-     when the slash command completes.
+     Then invoke the Task tool (or Agent tool) with `FULL_PROMPT` as
+     the prompt and the worktree path (or project root for main-tree
+     execution) as the working directory. The subagent runs in-process
+     and returns when the slash command completes.
 
-     **Codex Manager (Task 3.3)** — Codex has no native sub-agent tool
-     in its current stable surface. A Codex Manager MUST NOT attempt
-     native delegation even when `MANAGER_CLI == WORKER_CLI`. Instead,
-     fall through to the subprocess branch for all Codex-to-Codex
-     dispatches until a Codex sub-agent facility is available and
-     confirmed in a follow-up proposal. The routing matrix condition
+     **Codex Manager** — Codex has no native sub-agent tool in its
+     current stable surface. Fall through to the subprocess branch for
+     all Codex-to-Codex dispatches. The routing matrix condition
      `native adapter available for MANAGER_CLI` evaluates to false for
      Codex.
 
    - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
      Agy worker), same-CLI workers without a native adapter (e.g. Agy
      Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
-     CLI that does not appear in the native-adapter registry:
+     CLI not in the native-adapter registry:
 
-     Do NOT assemble `<command> <args> -p <prompt>` directly. Instead,
-     delegate to the server AgentRunner API so that `AgentRegistry.resolve()`
-     owns all prompt-flag and argv construction:
+     Do NOT assemble `<command> <args> -p <prompt>` directly. Delegate
+     to the server AgentRunner API so `AgentRegistry.resolve()` owns
+     all prompt-flag and argv construction:
 
      ```bash
-     # POST to the server AgentRunner — it derives the correct cwd,
-     # appends -p / exec per CLI, and validates the execution root.
-     # Same artifact contract shape for review / verify — the absolute
-     # path removes ambiguity for CLIs that ignore process cwd.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -446,26 +437,27 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     # The runner resolves execution root from changeId + executionMode;
-     # the caller never passes a raw filesystem path.
+     # Use jq to construct valid JSON (handles multi-line prompts and quote escaping safely)
+     JSON_PAYLOAD=$(jq -n \
+       --arg changeId "<change-id>" \
+       --arg agentName "$entry_name" \
+       --arg role "$S" \
+       --arg executionMode "<worktree|main-tree>" \
+       --arg prompt "<resolved-prompt>$ARTIFACT_CONTRACT" \
+       '{changeId: $changeId, agentName: $agentName, role: $role, executionMode: $executionMode, prompt: $prompt}')
+
      curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
        -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
        -H "Content-Type: application/json" \
-       -d "{
-         \"changeId\": \"<change-id>\",
-         \"agentName\": \"$entry_name\",
-         \"role\": \"$S\",
-         \"executionMode\": \"<worktree|main-tree>\",
-         \"prompt\": \"<resolved-prompt>$ARTIFACT_CONTRACT\"
-       }"
-     # Then poll $ITHYNO_BASE/api/agents/jobs?changeId=<change-id>
-     # until the job reaches a terminal state (completed/crashed/cancelled).
+       -d "$JSON_PAYLOAD"
+     # Poll $ITHYNO_BASE/api/agents/jobs?changeId=<change-id> until
+     # the job reaches a terminal state (completed/crashed/cancelled).
      # Treat non-zero exitCode or status==crashed as a subprocess failure.
      ```
 
-     `entry.args` from `agents.yaml` carries CLI flags (e.g.
-     `--dangerously-skip-permissions`). The server registry appends
-     the prompt flag automatically — do NOT add `-p` or `exec` manually.
+     `entry.args` from `agents.yaml` carries CLI flags. The server
+     registry appends the prompt flag automatically — do NOT add `-p`
+     or `exec` manually.
 
 4. **Judge success**:
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
@@ -270,23 +270,25 @@ export class AgentRunner {
     if (existsSync(worktreePath)) {
       // Validate the existing worktree: must belong to this repo and branch.
       try {
-        const [repoRoot, currentBranch] = await Promise.all([
-          execFile("git", ["rev-parse", "--show-toplevel"], { cwd: worktreePath }).then(
+        const [commonDirRel, currentBranch] = await Promise.all([
+          execFile("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath }).then(
             (r) => r.stdout.trim(),
           ),
           execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktreePath }).then(
             (r) => r.stdout.trim(),
           ),
         ]);
-        const expectedRoot = await execFile("git", ["rev-parse", "--show-toplevel"], {
+        const commonDir = realpathSync(resolve(worktreePath, commonDirRel));
+        const expectedCommonDirRel = await execFile("git", ["rev-parse", "--git-common-dir"], {
           cwd: this.projectRoot,
         }).then((r) => r.stdout.trim());
-        if (repoRoot !== expectedRoot) {
+        const expectedCommonDir = realpathSync(resolve(this.projectRoot, expectedCommonDirRel));
+        if (commonDir !== expectedCommonDir) {
           return {
             ok: false,
             status: 409,
             reason:
-              `${worktreePath} exists but belongs to a different repository (${repoRoot}). ` +
+              `${worktreePath} exists but belongs to a different repository. ` +
               `Remove it manually before retrying.`,
           };
         }

@@ -430,16 +430,19 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
+     # Use jq to construct valid JSON (handles multi-line prompts and quote escaping safely)
+     JSON_PAYLOAD=$(jq -n \
+       --arg changeId "<change-id>" \
+       --arg agentName "$entry_name" \
+       --arg role "$S" \
+       --arg executionMode "<worktree|main-tree>" \
+       --arg prompt "<resolved-prompt>$ARTIFACT_CONTRACT" \
+       '{changeId: $changeId, agentName: $agentName, role: $role, executionMode: $executionMode, prompt: $prompt}')
+
      curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
        -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
        -H "Content-Type: application/json" \
-       -d "{
-         \"changeId\": \"<change-id>\",
-         \"agentName\": \"$entry_name\",
-         \"role\": \"$S\",
-         \"executionMode\": \"<worktree|main-tree>\",
-         \"prompt\": \"<resolved-prompt>$ARTIFACT_CONTRACT\"
-       }"
+       -d "$JSON_PAYLOAD"
      # Poll $ITHYNO_BASE/api/agents/jobs?changeId=<change-id> until
      # the job reaches a terminal state (completed/crashed/cancelled).
      # Treat non-zero exitCode or status==crashed as a subprocess failure.
