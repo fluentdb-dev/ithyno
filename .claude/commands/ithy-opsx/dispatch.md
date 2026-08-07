@@ -457,7 +457,8 @@ exist, create it first.
        }))
      ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
 
-     RUN_RESP=$(curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
+     CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
+     RUN_RESP=$(curl -s --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
        -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
        -H "Content-Type: application/json" \
        -d "$JSON_PAYLOAD")

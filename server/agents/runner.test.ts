@@ -30,7 +30,7 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       `agents:
   - name: worker
     command: node
-    args: ["-e", "console.log('ok')"]
+    args: ["-e", "console.log('ok')", "--"]
     role: code
 `,
     );
@@ -130,13 +130,12 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
   });
 
   it("handles process failure (non-zero exit code / crashed) cleanly", async () => {
-    // Reconfigure worker to exit non-zero
     writeFileSync(
       join(dir, "agents.yaml"),
       `agents:
   - name: failing-worker
     command: node
-    args: ["-e", "process.exit(1)"]
+    args: ["-e", "process.exit(1)", "--"]
     role: code
 `,
     );
@@ -144,7 +143,6 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     const run = await runner.run("add-failing", "failing-worker", "code", "worktree");
     expect(run.ok).toBe(true);
     if (run.ok) {
-      // Wait for process to exit non-zero
       await new Promise((r) => setTimeout(r, 500));
       const summary = runner.getJob(run.job.id);
       expect(summary?.status).toBe("crashed");
@@ -168,7 +166,7 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       `agents:
   - name: failing-worker
     command: node
-    args: ["-e", "process.exit(2)"]
+    args: ["-e", "process.exit(2)", "--"]
     role: code
 `,
     );
@@ -188,7 +186,7 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       `agents:
   - name: slow-worker
     command: node
-    args: ["-e", "setTimeout(() => {}, 10000)"]
+    args: ["-e", "setTimeout(() => {}, 10000)", "--"]
     role: code
 `,
     );
