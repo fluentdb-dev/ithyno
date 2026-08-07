@@ -148,29 +148,31 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
   });
 
-  it("automatically appends -p for agy and antigravity commands when prompts are resolved", async () => {
-    const reg = await loadWith(
-      `agents:
-  - name: my-agy
-    command: agy
+  it.each(["agy", "antigravity", "copilot"])(
+    "automatically appends -p for non-Codex command %s when a built-in prompt is resolved",
+    async (command) => {
+      const reg = await loadWith(
+        `agents:
+  - name: worker
+    command: ${command}
     args: ["--dangerously-skip-permissions"]
     role: code
 `,
-    );
-    const def = reg.find("my-agy");
-    expect(def).not.toBeNull();
-    const r = reg.resolve(def!, {
-      change_id: "add-foo",
-      worktree_path: "/w/add-foo",
-      branch: "agent/add-foo",
-    });
-    // System should automatically append -p and the resolved prompt (e.g. "/opsx:apply add-foo")
-    expect(r.args).toEqual([
-      "--dangerously-skip-permissions",
-      "-p",
-      "/opsx:apply add-foo"
-    ]);
-  });
+      );
+      const def = reg.find("worker");
+      expect(def).not.toBeNull();
+      const r = reg.resolve(def!, {
+        change_id: "add-foo",
+        worktree_path: "/w/add-foo",
+        branch: "agent/add-foo",
+      });
+      expect(r.args).toEqual([
+        "--dangerously-skip-permissions",
+        "-p",
+        "/opsx:apply add-foo",
+      ]);
+    },
+  );
 });
 
 describe("AgentRegistry manager selection (add-manager-agent-config)", () => {

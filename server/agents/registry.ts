@@ -793,7 +793,6 @@ export class AgentRegistry {
     const agentPrompt = def.prompts?.[dispatchedRole];
     const promptTemplate = agentPrompt ?? builtInPromptForAgent(command, dispatchedRole);
     const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
-    const isExplicitPrompt = agentPrompt !== undefined;
 
     // Wire the prompt into the runner:
     //   - `mode: live-shell` (worker) — write resolvedPrompt to child.stdin.
@@ -828,9 +827,7 @@ export class AgentRegistry {
           effectiveArgs = args.includes("exec")
             ? [...args, resolvedPrompt]
             : [...args, "exec", resolvedPrompt];
-        } else if ((command === "claude" || command === "agy" || command === "antigravity") && !args.includes("-p")) {
-          effectiveArgs = [...args, "-p", resolvedPrompt];
-        } else if (isExplicitPrompt && !args.includes("-p")) {
+        } else if (!args.includes("-p")) {
           effectiveArgs = [...args, "-p", resolvedPrompt];
         }
       }
