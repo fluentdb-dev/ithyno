@@ -3,9 +3,9 @@
 ### Requirement: Settings Agent CLI Skill Controls
 
 The Settings Prerequisites table SHALL display project-local OpenSpec and
-ithyno skill state plus a `Manage skills` button on every supported Agent CLI
-row. Skill state MUST be displayed independently from the Agent CLI executable
-installation state.
+ithyno skill state on every supported Agent CLI row. A `Manage skills` button
+SHALL be available when that Agent CLI executable is installed. When the
+executable is missing, both skill components SHALL be displayed as unsupported.
 
 These controls SHALL be attached to the existing Agent CLI rows and SHALL NOT
 add separate OpenSpec or ithyno prerequisite rows.
@@ -14,7 +14,8 @@ add separate OpenSpec or ithyno prerequisite rows.
 - **GIVEN** Settings has loaded doctor results and Agent skill state
 - **WHEN** the Prerequisites table renders
 - **THEN** every Agent CLI row displays separate OpenSpec and ithyno states
-- **AND** the same row displays a `Manage skills` button
+- **AND** each row whose Agent CLI executable is installed displays a `Manage skills` button
+- **AND** a row whose Agent CLI executable is missing does not display the button
 - **AND** tmux, agmsg, git, and node rows do not display Agent skill controls
 
 #### Scenario: CLI and skill state remain distinct
@@ -52,11 +53,12 @@ a single-component failure as a partial result.
 - **THEN** the request contains the selected CLI and ithyno component only
 - **AND** OpenSpec initialization does not run
 
-#### Scenario: Preinstall skills before the CLI executable
+#### Scenario: Skills are unavailable before the CLI executable
 - **GIVEN** doctor reports that the selected Agent CLI executable is missing
-- **WHEN** the skill installation dialog opens
-- **THEN** the dialog warns that the Agent cannot run yet
-- **AND** the user can continue with project-local skill installation
+- **WHEN** Settings renders the Agent CLI row
+- **THEN** OpenSpec and ithyno skill state are displayed as unsupported
+- **AND** the `Manage skills` button is not displayed
+- **AND** project-local skill installation cannot be started for that CLI
 
 #### Scenario: Display a per-component partial failure
 - **GIVEN** OpenSpec installation succeeds and the ithyno renderer fails

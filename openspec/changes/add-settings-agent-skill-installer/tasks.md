@@ -33,11 +33,12 @@
 - [x] 3.1 Load Agent skill state when Settings mounts or refreshes and keep
   doctor failures independent from skill-inspection failures in the store and
   API client.
-- [x] 3.2 Add OpenSpec and ithyno status plus a `Manage skills` button to every
-  Agent CLI row in Prerequisites, excluding non-Agent rows.
-- [x] 3.3 Add a dialog with selected CLI, project root, current states, output
-  summary, OpenSpec and ithyno checkboxes, missing-CLI warning, and Install and
-  Cancel actions.
+- [x] 3.2 Add OpenSpec and ithyno status to every Agent CLI row in
+  Prerequisites, plus a `Manage skills` button for installed Agent CLIs, while
+  excluding non-Agent rows.
+- [x] 3.3 Add a dialog with selected installed CLI, project root, current
+  states, output summary, OpenSpec and ithyno checkboxes, and Install and Cancel
+  actions.
 - [x] 3.4 Display SSE progress, component success and failure, partial success,
   and retry controls, then refresh the selected row without reloading the page.
 - [x] 3.5 Match existing modal conventions for focus management, Escape and
@@ -48,8 +49,9 @@
 
 - [x] 4.1 Test Settings row state combinations, non-Agent rows, unknown state,
   and Refresh behavior.
-- [x] 4.2 Test dialog defaults, component-only requests, missing-CLI warnings,
-  SSE success and partial failure, retry, and post-completion refresh.
+- [x] 4.2 Test dialog defaults, component-only requests, unavailable actions for
+  missing CLIs, SSE success and partial failure, retry, and post-completion
+  refresh.
 - [x] 4.3 Run Settings-triggered installation in temporary projects for each
   CLI and verify OpenSpec and ithyno paths, idempotent reruns, and project
   boundary enforcement.
