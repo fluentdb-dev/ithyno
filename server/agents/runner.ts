@@ -342,6 +342,9 @@ export class AgentRunner {
     agentName: string,
     role?: string,
     executionMode: RunnerExecutionMode = "worktree",
+    /** Dispatcher-supplied prompt with artifact contract. When set, overrides
+     *  both `agents.yaml` prompts and the built-in default for this run. */
+    promptOverride?: string,
   ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
@@ -358,7 +361,7 @@ export class AgentRunner {
     // Derive and validate the execution root (Task 2.2).
     const rootResult = await this.resolveExecutionRoot(changeId, executionMode);
     if (!rootResult.ok) return rootResult;
-    const { cwd: worktreePath, branch } = rootResult;
+    const { cwd: worktreePath, branch, created } = rootResult;
 
     let resolved;
     try {
@@ -370,11 +373,13 @@ export class AgentRunner {
           branch,
         },
         role ?? def.roles[0],
+        promptOverride,
       );
     } catch (err) {
-      // Clean up before returning — otherwise a misconfigured runtime
-      // leaks a worktree on every dispatch attempt.
-      await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
+      // Clean up only when the worktree was freshly created by this call.
+      // In main-tree mode or when reusing an existing worktree, we must
+      // not remove anything.
+      if (created) await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
       return {
         ok: false,
         status: 400,

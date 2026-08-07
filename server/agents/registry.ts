@@ -811,6 +811,12 @@ export class AgentRegistry {
       branch: string;
     },
     role?: string,
+    /** Caller-supplied prompt that overrides both `def.prompts` and the
+     *  built-in default. Used by the server AgentRunner when the dispatcher
+     *  passes an artifact-contract-augmented prompt via the API body.
+     *  Template substitution (${change_id} etc.) is NOT applied to this
+     *  string — callers must supply the final text. */
+    promptOverride?: string,
   ): {
     command: string;
     args: string[];
@@ -841,11 +847,17 @@ export class AgentRegistry {
     const command = def.command ?? "";
     const args = (def.args ?? []).map(replace);
 
-    // Resolve the prompt for the dispatched role. explicit = agent.prompts;
-    // fallback = built-in default per role.
+    // Resolve the prompt for the dispatched role. Priority:
+    //   1. promptOverride from caller (dispatcher API — includes artifact contract).
+    //   2. agent.prompts[role] from agents.yaml.
+    //   3. built-in default per role.
     const agentPrompt = def.prompts?.[dispatchedRole];
-    const promptTemplate = agentPrompt ?? builtInPromptForAgent(command, dispatchedRole);
-    const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
+    const promptTemplate = promptOverride !== undefined
+      ? undefined  // skip template; use override verbatim below
+      : (agentPrompt ?? builtInPromptForAgent(command, dispatchedRole));
+    const resolvedPrompt = promptOverride !== undefined
+      ? promptOverride
+      : (promptTemplate === undefined ? undefined : replace(promptTemplate));
 
     // Wire the prompt into the runner:
     //   - `mode: live-shell` (worker) — write resolvedPrompt to child.stdin.

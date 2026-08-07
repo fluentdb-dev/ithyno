@@ -385,11 +385,11 @@ without change:<id>.
      child Agent/Tool (currently: `claude` only; Codex and Agy fall
      through to the subprocess branch):
 
+     **Claude Manager (Task 3.2)** — use the Task/Agent tool with the
+     resolved role prompt and artifact contract:
+
      ```bash
-     # For review / verify stages, append the SAME absolute-path
-     # artifact contract used by the agmsg branch, so the native
-     # subagent writes review.md at $REVIEW_MD_PATH — where
-     # Manager reads from. Matches harden-dispatch-round5.
+     # Build the full prompt: resolved role prompt + artifact contract.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -402,11 +402,23 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     # Native Task/Agent tool: prompt = "<resolved-prompt>$ARTIFACT_CONTRACT"
+     FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
-     The native subagent runs in-process and returns when the slash
-     command completes.
+     Then invoke the Task tool (or Agent tool — whichever is available
+     in this Claude rendering) with `FULL_PROMPT` as the prompt and
+     the worktree path (or project root for main-tree execution) as
+     the working directory. The subagent runs in-process and returns
+     when the slash command completes.
+
+     **Codex Manager (Task 3.3)** — Codex has no native sub-agent tool
+     in its current stable surface. A Codex Manager MUST NOT attempt
+     native delegation even when `MANAGER_CLI == WORKER_CLI`. Instead,
+     fall through to the subprocess branch for all Codex-to-Codex
+     dispatches until a Codex sub-agent facility is available and
+     confirmed in a follow-up proposal. The routing matrix condition
+     `native adapter available for MANAGER_CLI` evaluates to false for
+     Codex.
 
    - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
      Agy worker), same-CLI workers without a native adapter (e.g. Agy

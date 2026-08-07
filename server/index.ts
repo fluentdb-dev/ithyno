@@ -1564,7 +1564,7 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = { changeId: string; agentName: string; role?: string; executionMode?: RunnerExecutionMode };
+type RunBody = { changeId: string; agentName: string; role?: string; executionMode?: RunnerExecutionMode; prompt?: string };
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
@@ -1586,7 +1586,7 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     { changeId: body.changeId, agentName: body.agentName, role: body.role, executionMode },
     "agents/run: starting",
   );
-  const res = await agentRunner.run(body.changeId, body.agentName, body.role, executionMode);
+  const res = await agentRunner.run(body.changeId, body.agentName, body.role, executionMode, body.prompt || undefined);
   if (!res.ok) {
     req.log.warn({ status: res.status, reason: res.reason, changeId: body.changeId }, "agents/run: failed");
     return reply.code(res.status).send({ error: res.reason });

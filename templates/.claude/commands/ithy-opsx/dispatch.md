@@ -20,7 +20,8 @@ The dispatch advances the change through `proposed → coded → reviewed
    override.
 2. Setting up the worktree if needed (idempotent).
 3. Dispatching each stage's worker via the **Dispatch helper protocol**
-   (Task tool for `command == "claude"`, subprocess `-p` otherwise).
+   (native Task/Agent tool when Manager and worker share the same canonical CLI
+   and a native adapter is available; server AgentRunner subprocess otherwise).
 4. Judging review / verify by the **3-stage success contract**.
 5. Looping code↔review until pass or MAX_ITERATIONS; escalating on
    non-convergence.
@@ -367,14 +368,27 @@ without change:<id>.
      then waits for the worker's `stage:$S status:done` message
      rather than polling files.
 
-   - **Task tool branch** — `entry.command == "claude"` (Manager
-     self-dispatch or `mode: single-prompt` claude workers):
+   Determine the launch strategy by comparing canonical CLI identities:
+
+   ```
+   MANAGER_CLI = canonical form of this Manager's executable
+                 ("agy" and "antigravity" are the same identity)
+   WORKER_CLI  = canonical form of entry.command
+   STRATEGY:
+     if entry.mode == "live-shell" AND agmsg configured → agmsg (already handled above)
+     elif MANAGER_CLI == WORKER_CLI AND native adapter available for MANAGER_CLI → native
+     else → subprocess (via server AgentRunner)
+   ```
+
+   - **Native-delegation branch** — Manager and worker share the same
+     canonical CLI identity AND the Manager rendering exposes a native
+     child Agent/Tool (currently: `claude` only; Codex and Agy fall
+     through to the subprocess branch):
+
+     **Claude Manager** — use the Task/Agent tool with the resolved
+     role prompt and artifact contract:
 
      ```bash
-     # For review / verify stages, append the SAME absolute-path
-     # artifact contract used by the agmsg branch, so the Task-
-     # tool subagent writes review.md at $REVIEW_MD_PATH — where
-     # Manager reads from. Matches harden-dispatch-round5.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -387,20 +401,30 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     # Task tool: prompt = "<resolved-prompt>$ARTIFACT_CONTRACT"
+     FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
-     The subagent runs in-process and returns when the slash command
-     completes.
+     Then invoke the Task tool (or Agent tool) with `FULL_PROMPT` as
+     the prompt and the worktree path (or project root for main-tree
+     execution) as the working directory. The subagent runs in-process
+     and returns when the slash command completes.
 
-   - **Subprocess branch** — anything else (copilot, agy, aider, or
-     any CLI without a Task-tool integration):
+     **Codex Manager** — Codex has no native sub-agent tool in its
+     current stable surface. Fall through to the subprocess branch for
+     all Codex-to-Codex dispatches. The routing matrix condition
+     `native adapter available for MANAGER_CLI` evaluates to false for
+     Codex.
+
+   - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
+     Agy worker), same-CLI workers without a native adapter (e.g. Agy
+     Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
+     CLI not in the native-adapter registry:
+
+     Do NOT assemble `<command> <args> -p <prompt>` directly. Delegate
+     to the server AgentRunner API so `AgentRegistry.resolve()` owns
+     all prompt-flag and argv construction:
 
      ```bash
-     # Same artifact contract shape for review / verify —
-     # some CLIs (notably copilot) ignore process cwd and write
-     # to a discovered project root; the absolute path removes
-     # the ambiguity. Matches harden-dispatch-round5.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -413,13 +437,24 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     cd .worktrees/<change-id>   # only when worktree mode
-     <entry.command> <entry.args...> -p "<resolved-prompt>$ARTIFACT_CONTRACT"
+     curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
+       -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d "{
+         \"changeId\": \"<change-id>\",
+         \"agentName\": \"$entry_name\",
+         \"role\": \"$S\",
+         \"executionMode\": \"<worktree|main-tree>\",
+         \"prompt\": \"<resolved-prompt>$ARTIFACT_CONTRACT\"
+       }"
+     # Poll $ITHYNO_BASE/api/agents/jobs?changeId=<change-id> until
+     # the job reaches a terminal state (completed/crashed/cancelled).
+     # Treat non-zero exitCode or status==crashed as a subprocess failure.
      ```
 
-     `entry.args` from `agents.yaml` MUST include the CLI's
-     permission-skip flag (`--yolo` for Copilot,
-     `--dangerously-skip-permissions` for Antigravity, etc.).
+     `entry.args` from `agents.yaml` carries CLI flags. The server
+     registry appends the prompt flag automatically — do NOT add `-p`
+     or `exec` manually.
 
 4. **Judge success**:
 

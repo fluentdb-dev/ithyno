@@ -33,9 +33,9 @@
 
 - [x] 3.1 Replace the Claude-command condition with Manager/worker canonical
   CLI equality plus native-adapter availability.
-- [ ] 3.2 Render the Claude same-client path through its native Task/Agent tool
+- [x] 3.2 Render the Claude same-client path through its native Task/Agent tool
   with the resolved role prompt and artifact contract.
-- [ ] 3.3 Render the Codex same-client path through its native sub-agent tool
+- [x] 3.3 Render the Codex same-client path through its native sub-agent tool
   with the equivalent prompt, target, and completion contract.
 - [x] 3.4 Implement or explicitly fall back from the Agy native adapter based
   on task 1.2, without changing the cross-CLI subprocess contract.
@@ -44,7 +44,7 @@
 
 - [x] 4.1 Update the Claude-authored dispatch source as the behavioral source
   of truth and remove the generic direct `<command> ... -p` subprocess recipe.
-- [ ] 4.2 Regenerate universal/per-CLI dispatch outputs through renderers rather
+- [x] 4.2 Regenerate universal/per-CLI dispatch outputs through renderers rather
   than editing generated copies independently.
 - [ ] 4.3 Add drift and rendered-content tests proving Claude, Codex, Agy, and
   fallback clients receive the correct strategy and command syntax.
