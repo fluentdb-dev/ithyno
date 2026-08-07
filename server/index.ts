@@ -51,6 +51,7 @@ import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, active
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { validateRunPayload, type RunBody } from "./agents/run-validation.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
@@ -1564,44 +1565,17 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = {
-  changeId: string;
-  agentName: string;
-  role?: string;
-  executionMode?: RunnerExecutionMode;
-  prompt?: string;
-  wait?: boolean;
-  timeoutMs?: number;
-};
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
     return reply.code(403).send({ error: "local only" });
   }
-  const body = req.body;
-  if (!body?.changeId || !body?.agentName) {
-    req.log.warn({ body }, "agents/run: bad body");
-    return reply.code(400).send({ error: "changeId and agentName required" });
+  const validation = validateRunPayload(req.body);
+  if (!validation.ok) {
+    req.log.warn({ body: req.body }, `agents/run: ${validation.error}`);
+    return reply.code(validation.status).send({ error: validation.error });
   }
-  if (body.executionMode !== undefined && body.executionMode !== "worktree" && body.executionMode !== "main-tree") {
-    req.log.warn({ body }, "agents/run: invalid executionMode");
-    return reply.code(400).send({ error: "executionMode must be 'worktree' or 'main-tree'" });
-  }
-  if (body.prompt !== undefined && typeof body.prompt !== "string") {
-    req.log.warn({ body }, "agents/run: invalid prompt type");
-    return reply.code(400).send({ error: "prompt must be a string" });
-  }
-  if (body.wait !== undefined && typeof body.wait !== "boolean") {
-    req.log.warn({ body }, "agents/run: invalid wait type");
-    return reply.code(400).send({ error: "wait must be a boolean" });
-  }
-  if (
-    body.timeoutMs !== undefined &&
-    (typeof body.timeoutMs !== "number" || !Number.isInteger(body.timeoutMs) || body.timeoutMs <= 0)
-  ) {
-    req.log.warn({ body }, "agents/run: invalid timeoutMs");
-    return reply.code(400).send({ error: "timeoutMs must be a positive integer" });
-  }
+  const body = validation.data;
   const cfg = agentRegistry.publicConfig();
   if (cfg.agents.length === 0) {
     req.log.warn("agents/run: no agents in agents.yaml");

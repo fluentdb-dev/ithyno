@@ -7,6 +7,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { AgentRegistry } from "./registry.js";
 import { AgentRunner } from "./runner.js";
+import { validateRunPayload } from "./run-validation.js";
 
 const execFile = promisify(execFileCb);
 
@@ -204,21 +205,30 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
   });
 });
 
-describe("API Validation rules for wait & timeoutMs", () => {
-  it("rejects non-boolean wait and non-positive-integer timeoutMs values", () => {
-    const validateWait = (wait: unknown) => typeof wait === "boolean";
-    const validateTimeout = (timeoutMs: unknown) =>
-      typeof timeoutMs === "number" && Number.isInteger(timeoutMs) && timeoutMs > 0;
+describe("API Validation rules for wait & timeoutMs (validateRunPayload)", () => {
+  it("validates valid payload and rejects bad wait, timeoutMs, and missing fields", () => {
+    const base = { changeId: "add-feat", agentName: "worker" };
 
-    expect(validateWait(true)).toBe(true);
-    expect(validateWait(false)).toBe(true);
-    expect(validateWait("true")).toBe(false);
-    expect(validateWait(1)).toBe(false);
+    // Valid payloads
+    expect(validateRunPayload({ ...base, wait: true, timeoutMs: 5000 }).ok).toBe(true);
+    expect(validateRunPayload({ ...base, wait: false }).ok).toBe(true);
 
-    expect(validateTimeout(5000)).toBe(true);
-    expect(validateTimeout(0)).toBe(false);
-    expect(validateTimeout(-100)).toBe(false);
-    expect(validateTimeout(1.5)).toBe(false);
-    expect(validateTimeout("5000")).toBe(false);
+    // Invalid wait
+    const badWait = validateRunPayload({ ...base, wait: "true" });
+    expect(badWait.ok).toBe(false);
+    if (!badWait.ok) expect(badWait.error).toMatch(/wait must be a boolean/);
+
+    // Invalid timeoutMs
+    const badTimeoutZero = validateRunPayload({ ...base, timeoutMs: 0 });
+    expect(badTimeoutZero.ok).toBe(false);
+    if (!badTimeoutZero.ok) expect(badTimeoutZero.error).toMatch(/timeoutMs must be a positive integer/);
+
+    const badTimeoutFloat = validateRunPayload({ ...base, timeoutMs: 1.5 });
+    expect(badTimeoutFloat.ok).toBe(false);
+    if (!badTimeoutFloat.ok) expect(badTimeoutFloat.error).toMatch(/timeoutMs must be a positive integer/);
+
+    const badTimeoutString = validateRunPayload({ ...base, timeoutMs: "5000" });
+    expect(badTimeoutString.ok).toBe(false);
+    if (!badTimeoutString.ok) expect(badTimeoutString.error).toMatch(/timeoutMs must be a positive integer/);
   });
 });

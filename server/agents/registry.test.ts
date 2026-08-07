@@ -268,9 +268,9 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       "OVERRIDDEN PROMPT",
     );
     expect(r.args).toEqual([
+      "exec",
       "--sandbox",
       "workspace-write",
-      "exec",
       "OVERRIDDEN PROMPT",
     ]);
   });
