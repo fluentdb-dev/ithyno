@@ -885,29 +885,22 @@ export class AgentRegistry {
       initialInput = undefined;
 
       if (promptOverride !== undefined) {
-        // When promptOverride is passed explicitly, strip any pre-existing prompt flags
-        // and any existing prompt positionals from args, then append the override cleanly.
+        // When promptOverride is passed explicitly:
+        // - Codex: keep all args except 'exec' and explicit slash-command positionals, then append "exec <promptOverride>"
+        // - Non-Codex: keep all args except explicit "-p <old>" pairs and slash-command positionals, then append "-p <promptOverride>"
         if (command === "codex") {
-          // Codex: keep all option flags/arguments before 'exec', strip 'exec' and any following prompt positionals
-          const execIdx = args.indexOf("exec");
-          if (execIdx !== -1) {
-            const argsBeforeExec = args.slice(0, execIdx);
-            effectiveArgs = [...argsBeforeExec, "exec", promptOverride];
-          } else {
-            // No 'exec' found: keep all pre-existing args except any trailing positional prompt string
-            const cleanArgs = args.filter((a) => a.startsWith("-") || !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a));
-            effectiveArgs = [...cleanArgs, "exec", promptOverride];
-          }
+          const cleanArgs = args.filter(
+            (a) => a !== "exec" && !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a),
+          );
+          effectiveArgs = [...cleanArgs, "exec", promptOverride];
         } else {
-          // Non-Codex: filter out existing '-p' and its value, as well as any positional non-flag prompt strings
           const cleanArgs: string[] = [];
           for (let i = 0; i < args.length; i++) {
             if (args[i] === "-p") {
               if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
               continue;
             }
-            // Strip trailing non-flag prompt string if it looks like a slash command or prompt argument
-            if (!args[i].startsWith("-") && (i === args.length - 1 || /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i]))) {
+            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
               continue;
             }
             cleanArgs.push(args[i]);

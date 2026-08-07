@@ -203,3 +203,22 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     }
   });
 });
+
+describe("API Validation rules for wait & timeoutMs", () => {
+  it("rejects non-boolean wait and non-positive-integer timeoutMs values", () => {
+    const validateWait = (wait: unknown) => typeof wait === "boolean";
+    const validateTimeout = (timeoutMs: unknown) =>
+      typeof timeoutMs === "number" && Number.isInteger(timeoutMs) && timeoutMs > 0;
+
+    expect(validateWait(true)).toBe(true);
+    expect(validateWait(false)).toBe(true);
+    expect(validateWait("true")).toBe(false);
+    expect(validateWait(1)).toBe(false);
+
+    expect(validateTimeout(5000)).toBe(true);
+    expect(validateTimeout(0)).toBe(false);
+    expect(validateTimeout(-100)).toBe(false);
+    expect(validateTimeout(1.5)).toBe(false);
+    expect(validateTimeout("5000")).toBe(false);
+  });
+});

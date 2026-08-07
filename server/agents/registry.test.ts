@@ -225,6 +225,55 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       "OVERRIDDEN PROMPT WITH ARTIFACT CONTRACT",
     ]);
   });
+
+  it("promptOverride preserves non-Codex option values like --model gemini-2.5 verbatim", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: worker
+    command: aider
+    args: ["--model", "gemini-2.5", "--no-auto-commits"]
+    role: code
+`,
+    );
+    const def = reg.find("worker");
+    const r = reg.resolve(
+      def!,
+      { change_id: "add-new", worktree_path: "/w/add-new", branch: "agent/add-new" },
+      "code",
+      "OVERRIDDEN PROMPT",
+    );
+    expect(r.args).toEqual([
+      "--model",
+      "gemini-2.5",
+      "--no-auto-commits",
+      "-p",
+      "OVERRIDDEN PROMPT",
+    ]);
+  });
+
+  it("promptOverride preserves Codex options placed after exec like --sandbox workspace-write", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: worker
+    command: codex
+    args: ["exec", "--sandbox", "workspace-write"]
+    role: code
+`,
+    );
+    const def = reg.find("worker");
+    const r = reg.resolve(
+      def!,
+      { change_id: "add-new", worktree_path: "/w/add-new", branch: "agent/add-new" },
+      "code",
+      "OVERRIDDEN PROMPT",
+    );
+    expect(r.args).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "exec",
+      "OVERRIDDEN PROMPT",
+    ]);
+  });
 });
 
 describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
