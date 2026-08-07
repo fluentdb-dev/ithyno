@@ -828,7 +828,7 @@ export class AgentRegistry {
           effectiveArgs = args.includes("exec")
             ? [...args, resolvedPrompt]
             : [...args, "exec", resolvedPrompt];
-        } else if (command === "claude" && !args.includes("-p")) {
+        } else if ((command === "claude" || command === "agy" || command === "antigravity") && !args.includes("-p")) {
           effectiveArgs = [...args, "-p", resolvedPrompt];
         } else if (isExplicitPrompt && !args.includes("-p")) {
           effectiveArgs = [...args, "-p", resolvedPrompt];

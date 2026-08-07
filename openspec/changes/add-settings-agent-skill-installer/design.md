@@ -36,9 +36,10 @@ Agent CLI row in Prerequisites rather than to each configured Agent instance.
 ### D1 — The operation targets a CLI type, not an Agent instance
 
 Each Agent CLI row in the existing Prerequisites table receives separate
-OpenSpec and ithyno status badges plus a `Manage skills` button. Multiple Agents
-that use the same CLI share the same project-local files, so the UI does not
-duplicate the action for every Agent name.
+OpenSpec and ithyno status badges. Rows whose CLI executable is installed also
+receive a `Manage skills` button. Multiple Agents that use the same CLI share
+the same project-local files, so the UI does not duplicate the action for every
+Agent name.
 
 Putting the button on each configured row in the Agents tab was considered but
 rejected because it would duplicate operations for the same CLI and would make
@@ -74,10 +75,10 @@ command strings.
 
 ### D4 — One dialog state machine covers selection, execution, and results
 
-The dialog displays the selected CLI, current OpenSpec and ithyno states,
-project root, and an output-path summary, with both components selected by
-default. If the CLI executable is missing, the dialog warns that the Agent
-cannot run yet but still permits pre-installing project-local files.
+The dialog displays the selected installed CLI, current OpenSpec and ithyno
+states, project root, and an output-path summary, with both components selected
+by default. When the CLI executable is missing, inspection reports both
+components as unsupported and Settings does not offer the installation action.
 
 Inputs are locked during execution while per-component progress is appended.
 Failure of one component does not stop the other component. The final UI and
@@ -103,9 +104,9 @@ installation and partial-failure reporting.
   official OpenSpec CLI update behavior.
 - **An SSE disconnect may hide the final result** → Let the server operation
   complete and make final state recoverable through the inspection API.
-- **Skills can be present before the CLI executable** → Permit this while
-  clearly warning that the Agent itself cannot run until installed and
-  authenticated.
+- **Skill files can remain after the CLI executable is removed** → Report the
+  components as unsupported and withhold the installation action until the CLI
+  is installed and authenticated again.
 - **Concurrent installs can race** → Allow only one operation per project root
   and CLI; reject duplicates with HTTP 409.
 

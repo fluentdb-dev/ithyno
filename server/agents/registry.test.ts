@@ -147,6 +147,30 @@ describe("AgentRegistry role / specialties / concurrency", () => {
     // not followed by a second built-in prompt.
     expect(r.args).toEqual(["/opsx:apply", "add-foo"]);
   });
+
+  it("automatically appends -p for agy and antigravity commands when prompts are resolved", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: my-agy
+    command: agy
+    args: ["--dangerously-skip-permissions"]
+    role: code
+`,
+    );
+    const def = reg.find("my-agy");
+    expect(def).not.toBeNull();
+    const r = reg.resolve(def!, {
+      change_id: "add-foo",
+      worktree_path: "/w/add-foo",
+      branch: "agent/add-foo",
+    });
+    // System should automatically append -p and the resolved prompt (e.g. "/opsx:apply add-foo")
+    expect(r.args).toEqual([
+      "--dangerously-skip-permissions",
+      "-p",
+      "/opsx:apply add-foo"
+    ]);
+  });
 });
 
 describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
