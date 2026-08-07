@@ -63,8 +63,8 @@ describe("Agent skill smoke configuration", () => {
   });
 
   it("maps only supported receiving CLIs to initialized skill paths", () => {
-    expect(expectedProbeSkillPath("claude")).toBe(".claude/skills/ithy-opsx-test-probe/SKILL.md");
-    expect(expectedProbeSkillPath("codex")).toBe(".codex/skills/ithy-opsx-test-probe/SKILL.md");
+    expect(expectedProbeSkillPath("claude")).toBe(".claude/commands/ithy-opsx/test-probe.md");
+    expect(expectedProbeSkillPath("codex")).toBe(".codex/prompts/ithy-opsx-test-probe.md");
     expect(expectedProbeSkillPath("agy")).toBe(".agents/workflows/ithy-opsx/test-probe.md");
     expect(expectedProbeSkillPath("cursor")).toBe(".cursor/commands/ithy-opsx-test-probe.md");
     expect(expectedProbeSkillPath("gemini")).toBe(".gemini/commands/ithy-opsx/test-probe.toml");
@@ -93,7 +93,7 @@ describe("runAgentSkillSmoke", () => {
 
     expect(result.ok).toBe(true);
     expect(d.pathExists).toHaveBeenCalledWith(
-      "/tmp/probe-project/.codex/skills/ithy-opsx-test-probe/SKILL.md",
+      "/tmp/probe-project/.codex/prompts/ithy-opsx-test-probe.md",
     );
     expect(d.run).toHaveBeenCalledWith(expect.objectContaining({
       nonce: "nonce-1",

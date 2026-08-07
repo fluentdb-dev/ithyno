@@ -3930,7 +3930,120 @@ a.modal-btn:hover {
   width: 100%;
 }
 
+/* ---- Agent skill installer (add-settings-agent-skill-installer) ---- */
+
+/* Warn state: partial or update-available */
+.prereq-warn {
+  color: var(--warning, #d97706);
+}
+
+/* Muted: unsupported or unknown */
+.prereq-muted {
+  color: var(--fg-muted);
+}
+
+/* Skill badges column in the prerequisites table */
+.prereq-skills-cell {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.prereq-skills-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.prereq-skills-badges span:not(.prereq-skill-badge) {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.prereq-skill-badge {
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+/* Agent skill install dialog — extends the shared prereq-modal styles */
+.agent-skill-dialog {
+  width: min(700px, 90vw);
+}
+
+.agent-skill-warning {
+  font-size: 13px;
+}
+
+.agent-skill-info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.agent-skill-info-table th {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  font-weight: 600;
+  color: var(--fg-muted);
+  width: 130px;
+  white-space: nowrap;
+}
+
+.agent-skill-info-table td {
+  padding: 4px 8px;
+  color: var(--fg-primary);
+}
+
+.agent-skill-components {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-skill-components p {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.agent-skill-results {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.agent-skill-results p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.agent-skill-paths-preview {
+  margin-top: 6px;
+  padding-left: 12px;
+}
+
+.agent-skill-paths-preview span {
+  font-size: 11px;
+}
+
+.agent-skill-paths-preview ul {
+  margin: 2px 0 0 0;
+  padding-left: 16px;
+  list-style-type: disc;
+}
+
+.agent-skill-paths-preview li {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono, monospace);
+  line-height: 1.4;
+}
+
 /* ---- Import-completion notifications (enable-import-both-patterns) ---- */
+
 /* Stacked top-right region, below topbar (z-index 10), above main content. */
 .import-notifications-region {
   position: fixed;

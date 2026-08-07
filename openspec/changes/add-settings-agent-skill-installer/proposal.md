@@ -11,8 +11,9 @@ install only the missing or outdated components before running the Agent.
 
 ## What Changes
 
-- Add project-local OpenSpec and ithyno skill status plus an action button to
-  each Agent CLI row in Settings > Prerequisites.
+- Add project-local OpenSpec and ithyno skill status to each Agent CLI row in
+  Settings > Prerequisites, with an action button when that CLI executable is
+  installed.
 - Open an Agent-specific dialog that shows the selected CLI, current OpenSpec
   and ithyno states, target paths, and planned operations before installation.
 - Allow the user to select OpenSpec only, ithyno only, or both, and display

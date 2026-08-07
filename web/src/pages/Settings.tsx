@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { setParallelExecution, setTmux } from "../api";
-import type { CliStatus } from "../api";
+import type { AgentSkillInfo, AgentSkillStatus, CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
 import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
+import { AgentSkillInstallDialog } from "../components/AgentSkillInstallDialog";
 import { isAbsolutePath } from "../lib/paths";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
 // Note: the `defaultManager` store slice + localStorage persistence remain
@@ -35,12 +36,16 @@ export function Settings() {
   const hasAgentsYaml = useStore((s) => s.state?.hasAgentsYaml ?? true);
   const doctorReport = useStore((s) => s.doctorReport);
   const loadDoctorReport = useStore((s) => s.loadDoctorReport);
+  const agentSkills = useStore((s) => s.agentSkills);
+  const agentSkillsError = useStore((s) => s.agentSkillsError);
+  const loadAgentSkills = useStore((s) => s.loadAgentSkills);
   const [busy, setBusy] = useState(false);
 
-  // Fetch the doctor report on mount
+  // Fetch the doctor report and agent skill state on mount
   useEffect(() => {
     void loadDoctorReport();
-  }, [loadDoctorReport]);
+    void loadAgentSkills();
+  }, [loadDoctorReport, loadAgentSkills]);
 
   const onToggleParallel = async (next: boolean) => {
     setBusy(true);
@@ -84,7 +89,15 @@ export function Settings() {
         </div>
       )}
 
-      <PrerequisitesSection report={doctorReport} onRefresh={loadDoctorReport} />
+      <PrerequisitesSection
+        report={doctorReport}
+        agentSkills={agentSkills}
+        agentSkillsError={agentSkillsError}
+        onRefresh={async () => {
+          await Promise.all([loadDoctorReport(), loadAgentSkills()]);
+        }}
+        onRefreshSkills={loadAgentSkills}
+      />
 
       <section className="settings-section">
         <h3>Appearance</h3>
@@ -285,10 +298,39 @@ const AGENT_CLI_KEYS: Cli[] = [
 
 function PrerequisitesSection(props: {
   report: DoctorReport | null;
+  agentSkills: AgentSkillInfo[] | null;
+  agentSkillsError: string | null;
   onRefresh: () => Promise<void>;
+  onRefreshSkills: () => Promise<void>;
 }) {
-  const { report, onRefresh } = props;
+  const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills } = props;
   const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+  const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
+
+  const skillInfoFor = (cli: string): AgentSkillInfo | undefined =>
+    agentSkills?.find((s) => s.cli === cli);
+
+  const skillBadge = (state: AgentSkillStatus) => {
+    const classes: Record<string, string> = {
+      installed: "prereq-ok",
+      partial: "prereq-warn",
+      "update-available": "prereq-warn",
+      missing: "prereq-missing",
+      unsupported: "prereq-muted",
+    };
+    const labels: Record<string, string> = {
+      installed: "✓ installed",
+      partial: "⚠ partial",
+      "update-available": "↑ update available",
+      missing: "✗ not installed",
+      unsupported: "— unsupported",
+    };
+    return (
+      <span className={`prereq-skill-badge ${classes[state] ?? ""}`} title={state}>
+        {labels[state] ?? state}
+      </span>
+    );
+  };
 
   const renderRow = (
     name: string,
@@ -331,6 +373,50 @@ function PrerequisitesSection(props: {
     );
   };
 
+  /** Render an Agent CLI row with skill state badges + Manage skills button. */
+  const renderAgentRow = (key: Cli, status: CliStatus | undefined) => {
+    const info = skillInfoFor(key);
+    const unknownSkills = agentSkillsError !== null && agentSkills === null;
+
+    return (
+      <tr key={key} className="prereq-row">
+        <td className="prereq-name">{key}</td>
+        <td className={`prereq-status ${status?.installed ? "prereq-ok" : "prereq-missing"}`}>
+          {status ? (status.installed ? "✓" : "✗") : "—"}
+        </td>
+        <td className="prereq-version">{status?.version ?? ""}</td>
+        <td className="prereq-path prereq-skills-cell">
+          {unknownSkills ? (
+            <span className="prereq-muted" title="Skill state unknown — refresh to retry">
+              skills: ?
+            </span>
+          ) : info ? (
+            <span className="prereq-skills-badges">
+              <span>OpenSpec: </span>
+              {skillBadge(info.openspec.status)}{" "}
+              <span>ithyno: </span>
+              {skillBadge(info.ithyno.status)}
+            </span>
+          ) : (
+            <span className="prereq-muted">skills: loading…</span>
+          )}
+        </td>
+        <td className="prereq-action">
+          {status?.installed && (
+            <button
+              type="button"
+              id={`prereq-manage-skills-${key}`}
+              className="prereq-install-btn"
+              onClick={() => setSkillDialogCli(key)}
+            >
+              Manage skills
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <>
       <section className="settings-section prereq-section">
@@ -338,7 +424,15 @@ function PrerequisitesSection(props: {
         <p className="muted">
           Required CLIs and tools. Agent CLIs must be installed manually (auth is
           vendor-specific). tmux and agmsg can be installed from this panel.
+          Skill files can be installed per-CLI using the{" "}
+          <strong>Manage skills</strong> button.
         </p>
+        {agentSkillsError && (
+          <div className="info-banner" role="alert">
+            Skill inspection failed: {agentSkillsError}. Skill state may be
+            out of date — click Refresh to retry.
+          </div>
+        )}
         {!report ? (
           <p className="muted">Checking prerequisites…</p>
         ) : (
@@ -349,7 +443,7 @@ function PrerequisitesSection(props: {
                   <th>Tool</th>
                   <th>Status</th>
                   <th>Version</th>
-                  <th>Path</th>
+                  <th>Skills / Path</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -370,9 +464,7 @@ function PrerequisitesSection(props: {
                     ? "Required for New Project / Import (npm, npx). Install: https://nodejs.org"
                     : undefined,
                 )}
-                {AGENT_CLI_KEYS.map((key) =>
-                  renderRow(key, report.agents[key], null),
-                )}
+                {AGENT_CLI_KEYS.map((key) => renderAgentRow(key, report.agents[key]))}
                 {renderRow("tmux", report.tmux, "tmux")}
                 {renderRow(
                   "agmsg",
@@ -389,7 +481,10 @@ function PrerequisitesSection(props: {
               </span>
             </p>
             <div className="settings-actions">
-              <button type="button" onClick={() => void onRefresh()}>
+              <button
+                type="button"
+                onClick={() => void Promise.all([onRefresh(), onRefreshSkills()])}
+              >
                 Refresh
               </button>
             </div>
@@ -406,6 +501,15 @@ function PrerequisitesSection(props: {
           }}
         />
       )}
+
+      {skillDialogCli && (
+        <AgentSkillInstallDialog
+          cli={skillDialogCli}
+          skillInfo={skillInfoFor(skillDialogCli)}
+          cliStatus={report?.agents[skillDialogCli as Cli]}
+          onClose={() => setSkillDialogCli(null)}
+        />
+      )}
     </>
   );
 }
@@ -415,3 +519,4 @@ function PrerequisitesSection(props: {
 // current project's Manager entry. The `defaultManager` store slice + its
 // localStorage persistence remain intact for InitDialog preselect and any
 // future implicit-set path.
+
