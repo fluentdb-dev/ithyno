@@ -883,10 +883,11 @@ export class AgentRegistry {
     } else {
       initialInputMode = "cli-arg";
       initialInput = undefined;
-      const promptAlreadyPresent = resolvedPrompt !== undefined && (
-        args.includes(resolvedPrompt) ||
-        args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg))
-      );
+      const promptAlreadyPresent =
+        promptOverride === undefined &&
+        resolvedPrompt !== undefined &&
+        (args.includes(resolvedPrompt) ||
+          args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg)));
       if (resolvedPrompt !== undefined && !promptAlreadyPresent) {
         if (command === "codex") {
           effectiveArgs = args.includes("exec")

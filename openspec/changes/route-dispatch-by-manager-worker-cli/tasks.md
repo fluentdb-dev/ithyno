@@ -23,9 +23,9 @@
 - [x] 2.2 Extend the Agent runner/API with a server-derived execution-root
   policy that can safely reuse the expected worktree or current project root
   without accepting a raw caller path.
-- [x] 2.3 Make the dispatcher use the Agent runner for cross-CLI and native-
-  unavailable subprocess launches, then await the returned job's terminal
-  state and preserve its diagnostics.
+- [x] 2.3 Route cross-CLI and native-unavailable workers through the shared
+  subprocess launcher. After the worker returns, judge semantic success from the
+  established artifact files and preserve launcher diagnostics only for execution failures.
 - [x] 2.4 Test worktree reuse, main-tree execution, stale/wrong worktree
   rejection, duplicate jobs, process failure, and timeout behavior.
 

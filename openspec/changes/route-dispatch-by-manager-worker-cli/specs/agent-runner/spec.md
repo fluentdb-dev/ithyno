@@ -119,11 +119,11 @@ through the universal-source renderer pipeline. Renderers MAY translate command
 syntax and native Agent/Tool instructions, but generated copies MUST preserve
 the launch priority and worker contracts defined by this capability.
 
-#### Scenario: Codex rendering uses native Codex terminology
-- **GIVEN** the canonical dispatch source describes same-client native delegation
-- **WHEN** the Codex renderer generates project-local dispatch material
-- **THEN** the result instructs a Codex Manager to use its native sub-agent facility
-- **AND** it does not claim that native delegation is selected only for Claude
+#### Scenario: Codex rendering uses registry-backed subprocess fallback
+- **GIVEN** the canonical dispatch source describes launch strategy selection
+- **WHEN** the Codex rendering evaluates a same-CLI Codex worker
+- **THEN** it falls back to the server Agent runner subprocess path
+- **AND** it does not invent an unsupported native sub-agent tool
 
 #### Scenario: Generated output does not restore direct shell assembly
 - **GIVEN** any supported CLI rendering of the dispatch skill

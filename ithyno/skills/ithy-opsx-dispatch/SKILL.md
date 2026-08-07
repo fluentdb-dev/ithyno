@@ -413,9 +413,8 @@ exist, create it first.
      Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
      CLI not in the native-adapter registry:
 
-     Do NOT assemble `<command> <args> -p <prompt>` directly. Delegate
-     to the server AgentRunner API so `AgentRegistry.resolve()` owns
-     all prompt-flag and argv construction:
+     The server registry owns all prompt-flag (`-p` / `exec`) and argv
+     construction automatically.
 
      ```bash
      ARTIFACT_CONTRACT=""
@@ -430,27 +429,13 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     # Use jq to construct valid JSON (handles multi-line prompts and quote escaping safely)
-     JSON_PAYLOAD=$(jq -n \
-       --arg changeId "<change-id>" \
-       --arg agentName "$entry_name" \
-       --arg role "$S" \
-       --arg executionMode "<worktree|main-tree>" \
-       --arg prompt "<resolved-prompt>$ARTIFACT_CONTRACT" \
-       '{changeId: $changeId, agentName: $agentName, role: $role, executionMode: $executionMode, prompt: $prompt}')
-
-     curl -s -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d "$JSON_PAYLOAD"
-     # Poll $ITHYNO_BASE/api/agents/jobs?changeId=<change-id> until
-     # the job reaches a terminal state (completed/crashed/cancelled).
-     # Treat non-zero exitCode or status==crashed as a subprocess failure.
+     cd .worktrees/<change-id>   # only when worktree mode
+     <entry.command> <entry.args...> "<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
-     `entry.args` from `agents.yaml` carries CLI flags. The server
-     registry appends the prompt flag automatically — do NOT add `-p`
-     or `exec` manually.
+     `entry.args` from `agents.yaml` carries CLI flags. Prompt flags
+     (`-p` for non-Codex, `exec` for Codex) are automatically derived by
+     the server registry.
 
 4. **Judge success**:
 
