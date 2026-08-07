@@ -414,8 +414,9 @@ exist, create it first.
      CLI not in the native-adapter registry:
 
      The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
-     construction automatically. Manager POSTs to `/api/agents/run` and
-     awaits worker completion before judging artifacts:
+     construction automatically. Manager POSTs to `/api/agents/run` with
+     `"wait": true` and synchronously receives the finished status before
+     judging artifacts:
 
      ```bash
      ARTIFACT_CONTRACT=""
@@ -431,13 +432,15 @@ exist, create it first.
 "
      fi
 
+     # Construct JSON payload and execute synchronous launch (wait=true)
      JSON_PAYLOAD=$(node -e '
        console.log(JSON.stringify({
          changeId: process.argv[1],
          agentName: process.argv[2],
          role: process.argv[3],
          executionMode: process.argv[4],
-         prompt: process.argv[5]
+         prompt: process.argv[5],
+         wait: true
        }))
      ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT")
 
@@ -446,26 +449,14 @@ exist, create it first.
        -H "Content-Type: application/json" \
        -d "$JSON_PAYLOAD")
 
-     JOB_ID=$(echo "$RUN_RESP" | node -e '
-       try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.id || ""); }
+     JOB_STATUS=$(echo "$RUN_RESP" | node -e '
+       try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
        catch { console.log(""); }
      ')
 
-     if [ -n "$JOB_ID" ]; then
-       while true; do
-         JOB_STATUS=$(curl -s -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
-           "$ITHYNO_BASE/api/agents/jobs/$JOB_ID" | node -e '
-           try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || ""); }
-           catch { console.log(""); }
-         ')
-         if [ "$JOB_STATUS" = "completed" ]; then
-           break
-         elif [ "$JOB_STATUS" = "crashed" ] || [ "$JOB_STATUS" = "cancelled" ]; then
-           echo "[dispatch] worker process terminated with status: $JOB_STATUS"
-           /ithy-opsx:escalate <change-id> "$S stage worker process $JOB_STATUS"
-         fi
-         sleep 2
-       done
+     if [ "$JOB_STATUS" != "completed" ]; then
+       echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"
+       /ithy-opsx:escalate <change-id> "$S stage worker execution failed ($JOB_STATUS)"
      fi
      ```
 

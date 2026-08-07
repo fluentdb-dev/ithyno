@@ -1564,7 +1564,15 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = { changeId: string; agentName: string; role?: string; executionMode?: RunnerExecutionMode; prompt?: string };
+type RunBody = {
+  changeId: string;
+  agentName: string;
+  role?: string;
+  executionMode?: RunnerExecutionMode;
+  prompt?: string;
+  wait?: boolean;
+  timeoutMs?: number;
+};
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
@@ -1598,6 +1606,21 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     req.log.warn({ status: res.status, reason: res.reason, changeId: body.changeId }, "agents/run: failed");
     return reply.code(res.status).send({ error: res.reason });
   }
+
+  if (body.wait) {
+    try {
+      const finished = await agentRunner.waitForCompletion(res.job.id, {
+        timeoutMs: body.timeoutMs,
+      });
+      const updatedJob = agentRunner.getJob(res.job.id);
+      return { ...(updatedJob ?? res.job), ...finished };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      req.log.warn({ jobId: res.job.id, error: msg }, "agents/run: wait timed out or failed");
+      return reply.code(504).send({ error: msg, jobId: res.job.id });
+    }
+  }
+
   req.log.info({ jobId: res.job.id, changeId: body.changeId }, "agents/run: ok");
   return res.job;
 });

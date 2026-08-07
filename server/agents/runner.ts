@@ -2,6 +2,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { EventEmitter } from "node:events";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
@@ -82,6 +83,7 @@ export class AgentRunner {
   private processes = new Map<string, ChildProcess>();
   private locks = new Map<string, string>(); // changeId -> jobId
   private seq = 0;
+  private readonly eventEmitter = new EventEmitter();
 
   constructor(
     private readonly projectRoot: string,
@@ -525,6 +527,7 @@ export class AgentRunner {
       // and the Kanban card returns to TODO without a server restart.
       // Disposal happens in removeJobExternally itself.
       // Landed by add-worktree-external-discard-detection.
+      this.eventEmitter.emit(`finished:${id}`, { status, exitCode });
       this.emit({ type: "agent-job-finished", jobId: id, status, exitCode });
       // Release the lock LAST — a concurrent runner.run(changeId, ...)
       // must see either "job in progress" or a fully-populated finished
@@ -577,6 +580,46 @@ export class AgentRunner {
         `[runner] branch delete (early return) failed for ${branch}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Synchronously await job completion without HTTP polling.
+   * Resolves when the job reaches a terminal state (completed/crashed/cancelled).
+   * Times out after `timeoutMs` if specified, killing the process and throwing.
+   */
+  async waitForCompletion(
+    jobId: string,
+    options?: { timeoutMs?: number },
+  ): Promise<{ status: JobStatus; exitCode: number | null }> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error(`Unknown job id "${jobId}"`);
+    if (job.status !== "running") {
+      return { status: job.status, exitCode: job.exitCode ?? null };
+    }
+
+    return new Promise((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.eventEmitter.removeListener(`finished:${jobId}`, onFinished);
+      };
+
+      const onFinished = (data: { status: JobStatus; exitCode: number | null }) => {
+        cleanup();
+        resolve(data);
+      };
+
+      this.eventEmitter.once(`finished:${jobId}`, onFinished);
+
+      if (options?.timeoutMs && options.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          cleanup();
+          this.cancel(jobId);
+          reject(new Error(`Execution timed out after ${options.timeoutMs}ms`));
+        }, options.timeoutMs);
+      }
+    });
   }
 
   cancel(id: string): { ok: boolean; reason?: string } {

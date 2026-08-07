@@ -888,16 +888,15 @@ export class AgentRegistry {
         // When promptOverride is passed explicitly, strip any pre-existing prompt flags
         // and any existing prompt positionals from args, then append the override cleanly.
         if (command === "codex") {
-          // Codex: strip 'exec' and any trailing non-flag positional arguments that follow it
+          // Codex: keep all option flags/arguments before 'exec', strip 'exec' and any following prompt positionals
           const execIdx = args.indexOf("exec");
           if (execIdx !== -1) {
-            // Keep flags before exec, strip exec and any following prompt positionals
-            const flagsBeforeExec = args.slice(0, execIdx).filter((a) => a.startsWith("-"));
-            effectiveArgs = [...flagsBeforeExec, "exec", promptOverride];
+            const argsBeforeExec = args.slice(0, execIdx);
+            effectiveArgs = [...argsBeforeExec, "exec", promptOverride];
           } else {
-            // Strip any positional prompt string at the end if present
-            const cleanFlags = args.filter((a) => a.startsWith("-"));
-            effectiveArgs = [...cleanFlags, "exec", promptOverride];
+            // No 'exec' found: keep all pre-existing args except any trailing positional prompt string
+            const cleanArgs = args.filter((a) => a.startsWith("-") || !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a));
+            effectiveArgs = [...cleanArgs, "exec", promptOverride];
           }
         } else {
           // Non-Codex: filter out existing '-p' and its value, as well as any positional non-flag prompt strings
