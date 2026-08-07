@@ -883,18 +883,44 @@ export class AgentRegistry {
     } else {
       initialInputMode = "cli-arg";
       initialInput = undefined;
-      const promptAlreadyPresent =
-        promptOverride === undefined &&
-        resolvedPrompt !== undefined &&
-        (args.includes(resolvedPrompt) ||
-          args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg)));
-      if (resolvedPrompt !== undefined && !promptAlreadyPresent) {
+
+      if (promptOverride !== undefined) {
+        // When promptOverride is passed explicitly, strip any pre-existing prompt flags
+        // or slash-command prompt positionals from args, then append the override cleanly.
         if (command === "codex") {
-          effectiveArgs = args.includes("exec")
-            ? [...args, resolvedPrompt]
-            : [...args, "exec", resolvedPrompt];
-        } else if (!args.includes("-p")) {
-          effectiveArgs = [...args, "-p", resolvedPrompt];
+          // Filter out existing 'exec' and trailing prompt positional if present
+          const cleanArgs = args.filter((a) => a !== "exec" && !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a));
+          effectiveArgs = [...cleanArgs, "exec", promptOverride];
+        } else {
+          // Filter out existing '-p' and its subsequent value, or trailing prompt positional
+          const cleanArgs: string[] = [];
+          for (let i = 0; i < args.length; i++) {
+            if (args[i] === "-p") {
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
+              // Skip the slash command itself and its positional target parameter if present
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            cleanArgs.push(args[i]);
+          }
+          effectiveArgs = [...cleanArgs, "-p", promptOverride];
+        }
+      } else {
+        const promptAlreadyPresent =
+          resolvedPrompt !== undefined &&
+          (args.includes(resolvedPrompt) ||
+            args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg)));
+        if (resolvedPrompt !== undefined && !promptAlreadyPresent) {
+          if (command === "codex") {
+            effectiveArgs = args.includes("exec")
+              ? [...args, resolvedPrompt]
+              : [...args, "exec", resolvedPrompt];
+          } else if (!args.includes("-p")) {
+            effectiveArgs = [...args, "-p", resolvedPrompt];
+          }
         }
       }
     }

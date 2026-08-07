@@ -415,8 +415,19 @@ exist, create it first.
      `native adapter available for MANAGER_CLI` evaluates to false for
      Codex.
 
-     The server registry owns all prompt-flag (`-p` / `exec`) and argv
-     construction automatically.
+   - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
+     Agy worker), same-CLI workers without a native adapter (e.g. Agy
+     Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
+     CLI not in the native-adapter registry:
+
+     Direct shell assembly is NOT used. The server subprocess launcher
+     (`POST /api/agents/run`) or `AgentRegistry.resolve()` derives `-p`
+     or `exec` automatically for the CLI.
+
+     Manager passes `changeId`, `agentName`, `role`, `executionMode`, and
+     resolved prompt (with artifact contract) to the server launcher.
+     Manager then awaits worker completion and inspects the resulting
+     review/verify artifact files (`review.md`).
 
      ```bash
      ARTIFACT_CONTRACT=""
@@ -431,8 +442,11 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     cd .worktrees/<change-id>   # only when worktree mode
-     <entry.command> <entry.args...> "<resolved-prompt>$ARTIFACT_CONTRACT"
+     FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
+     curl -sS -X POST "$ITHYNO_BASE/api/agents/run" \
+       -H 'content-type: application/json' \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+       -d "{\"changeId\":\"<change-id>\",\"agentName\":\"$entry_name\",\"role\":\"$S\",\"executionMode\":\"$MODE\",\"prompt\":$(echo "$FULL_PROMPT" | jq -R -s .)}"
      ```
 
      `entry.args` from `agents.yaml` carries CLI flags. Prompt flags

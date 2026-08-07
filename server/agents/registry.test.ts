@@ -178,6 +178,53 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       ]);
     },
   );
+
+  it("promptOverride cleanly replaces pre-existing slash command args in non-Codex command", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: worker
+    command: agy
+    args: ["--dangerously-skip-permissions", "/opsx:apply", "add-old"]
+    role: code
+`,
+    );
+    const def = reg.find("worker");
+    const r = reg.resolve(
+      def!,
+      { change_id: "add-new", worktree_path: "/w/add-new", branch: "agent/add-new" },
+      "code",
+      "OVERRIDDEN PROMPT WITH ARTIFACT CONTRACT",
+    );
+    expect(r.args).toEqual([
+      "--dangerously-skip-permissions",
+      "-p",
+      "OVERRIDDEN PROMPT WITH ARTIFACT CONTRACT",
+    ]);
+  });
+
+  it("promptOverride cleanly replaces pre-existing exec args in Codex command", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: worker
+    command: codex
+    args: ["--profile", "fast", "exec", "/opsx:apply add-old"]
+    role: code
+`,
+    );
+    const def = reg.find("worker");
+    const r = reg.resolve(
+      def!,
+      { change_id: "add-new", worktree_path: "/w/add-new", branch: "agent/add-new" },
+      "code",
+      "OVERRIDDEN PROMPT WITH ARTIFACT CONTRACT",
+    );
+    expect(r.args).toEqual([
+      "--profile",
+      "fast",
+      "exec",
+      "OVERRIDDEN PROMPT WITH ARTIFACT CONTRACT",
+    ]);
+  });
 });
 
 describe("AgentRegistry manager selection (add-manager-agent-config)", () => {

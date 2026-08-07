@@ -64,9 +64,10 @@ native adapter, it takes the registry-backed subprocess fallback.
 The canonical dispatch source describes the semantic operation: start one
 child for a role with the resolved prompt, target root, and artifact contract,
 then await that child. Renderers supply the client-specific instructions. The
-Claude rendering uses its Task/Agent tool and the Codex rendering uses Codex's
-sub-agent facility. Agy's adapter is verified during implementation and may be
-refined before apply without changing the semantic routing contract.
+Claude rendering uses its native Task/Agent tool. CLIs without a verified
+native sub-agent adapter in their target version (including Codex and Agy 1.1.10)
+fall back to the registry-backed subprocess branch even when the Manager and
+worker share the same canonical CLI identity.
 
 Native children do not pass through `AgentRegistry.resolve()` because no Agent
 CLI subprocess is started. They receive the already resolved role prompt and

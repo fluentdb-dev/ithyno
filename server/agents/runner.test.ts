@@ -112,4 +112,31 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
 
     rmSync(foreignDir, { recursive: true, force: true });
   });
+
+  it("rejects starting a duplicate job for an active change", async () => {
+    // Start first job
+    const run1 = await runner.run("add-feat", "worker", "code", "worktree");
+    expect(run1.ok).toBe(true);
+
+    // Second run attempt on the same change is rejected with 409
+    const run2 = await runner.run("add-feat", "worker", "code", "worktree");
+    expect(run2.ok).toBe(false);
+    if (!run2.ok) {
+      expect(run2.status).toBe(409);
+      expect(run2.reason).toMatch(/A job is already running for add-feat/);
+    }
+
+    if (run1.ok) runner.cancel(run1.job.id);
+  });
+
+  it("handles process failure and cancellation cleanly", async () => {
+    const run = await runner.run("add-feat", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (run.ok) {
+      const cancelRes = runner.cancel(run.job.id);
+      expect(cancelRes.ok).toBe(true);
+      const summary = runner.getJob(run.job.id);
+      expect(summary?.status).toBe("cancelled");
+    }
+  });
 });
