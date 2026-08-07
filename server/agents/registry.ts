@@ -889,9 +889,14 @@ export class AgentRegistry {
         // - Codex: keep all args except 'exec' and explicit slash-command positionals, then append "exec <promptOverride>"
         // - Non-Codex: keep all args except explicit "-p <old>" pairs and slash-command positionals, then append "-p <promptOverride>"
         if (command === "codex") {
-          // Codex: strip old slash-command positionals, preserve existing 'exec' and options before/after it,
-          // appending promptOverride after 'exec' and its options.
-          const cleanArgs = args.filter((a) => !/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(a));
+          const cleanArgs: string[] = [];
+          for (let i = 0; i < args.length; i++) {
+            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            cleanArgs.push(args[i]);
+          }
           const hasExec = cleanArgs.includes("exec");
           if (hasExec) {
             effectiveArgs = [...cleanArgs, promptOverride];

@@ -223,6 +223,10 @@ describe("API Validation rules for wait & timeoutMs (validateRunPayload)", () =>
     expect(badTimeoutZero.ok).toBe(false);
     if (!badTimeoutZero.ok) expect(badTimeoutZero.error).toMatch(/timeoutMs must be a positive integer/);
 
+    const badTimeoutNegative = validateRunPayload({ ...base, timeoutMs: -100 });
+    expect(badTimeoutNegative.ok).toBe(false);
+    if (!badTimeoutNegative.ok) expect(badTimeoutNegative.error).toMatch(/timeoutMs must be a positive integer/);
+
     const badTimeoutFloat = validateRunPayload({ ...base, timeoutMs: 1.5 });
     expect(badTimeoutFloat.ok).toBe(false);
     if (!badTimeoutFloat.ok) expect(badTimeoutFloat.error).toMatch(/timeoutMs must be a positive integer/);
