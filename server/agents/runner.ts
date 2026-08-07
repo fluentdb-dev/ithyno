@@ -21,6 +21,10 @@ const execFile = promisify(execFileCb);
 
 export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";
 
+/** Controls the execution-root policy for dispatcher-initiated runs.
+ *  Landed by route-dispatch-by-manager-worker-cli (Task 2.2). */
+export type RunnerExecutionMode = "worktree" | "main-tree";
+
 export type JobSummary = {
   id: string;
   changeId: string;
@@ -235,6 +239,91 @@ export class AgentRunner {
     return stripOutput(all[0]);
   }
 
+  // ---------------------------------------------------------------------------
+  // Execution-root policy — route-dispatch-by-manager-worker-cli (Task 2.2)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Derive and validate the execution root for a dispatcher-initiated run.
+   *
+   * - `"worktree"`: use `.worktrees/<changeId>`. If the directory already
+   *   exists it must belong to this repo AND track `agent/<changeId>`;
+   *   anything else is rejected with diagnostics rather than overwritten.
+   * - `"main-tree"`: use the project root as-is (no worktree created).
+   *
+   * Returns `{ ok: true; cwd; branch; created }` on success,
+   * or `{ ok: false; status; reason }` on failure.
+   */
+  async resolveExecutionRoot(
+    changeId: string,
+    mode: RunnerExecutionMode,
+  ): Promise<
+    | { ok: true; cwd: string; branch: string; created: boolean }
+    | { ok: false; status: number; reason: string }
+  > {
+    if (mode === "main-tree") {
+      return { ok: true, cwd: this.projectRoot, branch: "", created: false };
+    }
+    // worktree mode
+    const worktreePath = join(this.projectRoot, ".worktrees", changeId);
+    const branch = `agent/${changeId}`;
+    if (existsSync(worktreePath)) {
+      // Validate the existing worktree: must belong to this repo and branch.
+      try {
+        const [repoRoot, currentBranch] = await Promise.all([
+          execFile("git", ["rev-parse", "--show-toplevel"], { cwd: worktreePath }).then(
+            (r) => r.stdout.trim(),
+          ),
+          execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktreePath }).then(
+            (r) => r.stdout.trim(),
+          ),
+        ]);
+        const expectedRoot = await execFile("git", ["rev-parse", "--show-toplevel"], {
+          cwd: this.projectRoot,
+        }).then((r) => r.stdout.trim());
+        if (repoRoot !== expectedRoot) {
+          return {
+            ok: false,
+            status: 409,
+            reason:
+              `${worktreePath} exists but belongs to a different repository (${repoRoot}). ` +
+              `Remove it manually before retrying.`,
+          };
+        }
+        if (currentBranch !== branch) {
+          return {
+            ok: false,
+            status: 409,
+            reason:
+              `${worktreePath} exists on branch '${currentBranch}', expected '${branch}'. ` +
+              `Merge or discard the previous run before starting another.`,
+          };
+        }
+        // Existing worktree is valid — reuse it.
+        return { ok: true, cwd: worktreePath, branch, created: false };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          status: 409,
+          reason: `${worktreePath} exists but could not be validated: ${msg}. Remove it manually before retrying.`,
+        };
+      }
+    }
+    // Create a fresh worktree.
+    try {
+      console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
+      await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
+        cwd: this.projectRoot,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runner] git worktree add failed: ${msg}`);
+      return { ok: false, status: 500, reason: `git worktree add failed: ${msg}` };
+    }
+    return { ok: true, cwd: worktreePath, branch, created: true };
+  }
+
   /** Spawn an agent for a change.
    *
    *  `role` is the dispatch role — set by the caller (Manager, or an
@@ -242,11 +331,17 @@ export class AgentRunner {
    *  the agent's first declared role (`def.roles[0]`), which is the
    *  legacy behavior. Phase view uses this to bucket the change into
    *  the correct role lane. Added by
-   *  reshape-phase-view-to-active-agent-state. */
+   *  reshape-phase-view-to-active-agent-state.
+   *
+   *  `executionMode` controls the execution-root policy
+   *  (route-dispatch-by-manager-worker-cli Task 2.2):
+   *  - `"worktree"` (default): create / reuse `.worktrees/<changeId>`.
+   *  - `"main-tree"`: use the project root as cwd; no worktree created. */
   async run(
     changeId: string,
     agentName: string,
     role?: string,
+    executionMode: RunnerExecutionMode = "worktree",
   ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
@@ -259,30 +354,11 @@ export class AgentRunner {
     if (!def) {
       return { ok: false, status: 400, reason: `Unknown agent "${agentName}". Check agents.yaml.` };
     }
-    // Dedicated per-change worktree.
-    const worktreePath = join(this.projectRoot, ".worktrees", changeId);
-    const branch = `agent/${changeId}`;
-    if (existsSync(worktreePath)) {
-      return {
-        ok: false,
-        status: 409,
-        reason: `${worktreePath} already exists. Merge or discard the previous run before starting another.`,
-      };
-    }
-    try {
-      console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
-      await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
-        cwd: this.projectRoot,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[runner] git worktree add failed: ${msg}`);
-      return {
-        ok: false,
-        status: 500,
-        reason: `git worktree add failed: ${msg}`,
-      };
-    }
+
+    // Derive and validate the execution root (Task 2.2).
+    const rootResult = await this.resolveExecutionRoot(changeId, executionMode);
+    if (!rootResult.ok) return rootResult;
+    const { cwd: worktreePath, branch } = rootResult;
 
     let resolved;
     try {

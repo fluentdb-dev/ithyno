@@ -140,6 +140,59 @@ export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
   manager: "/ithy-opsx:dispatch",
 };
 
+// ---------------------------------------------------------------------------
+// CLI identity normalization — route-dispatch-by-manager-worker-cli (Task 1.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a CLI command name to its canonical identity.
+ * Known aliases that denote the same client compare as one identity.
+ *   `agy` and `antigravity` → "agy"
+ * Unknown / arbitrary executable names are returned as-is (lowercased).
+ */
+export function canonicalCli(command: string | undefined): string {
+  const c = (command ?? "").toLowerCase().trim();
+  if (c === "antigravity") return "agy";
+  return c;
+}
+
+/**
+ * Whether the given canonical CLI has a known same-client native child-agent
+ * adapter available to a Manager running as that CLI.
+ *
+ * - `claude` → Task-tool subagent (always available).
+ * - all others (including `agy` 1.1.10) → no adapter; fall back to subprocess.
+ */
+export function hasNativeAdapter(canonicalCommand: string): boolean {
+  return canonicalCommand === "claude";
+}
+
+/** Strategy returned by {@link selectLaunchStrategy}. */
+export type LaunchStrategy = "agmsg" | "native" | "subprocess";
+
+/**
+ * Select the worker launch strategy for a given (Manager, worker) pair.
+ *
+ * Priority (first match wins):
+ *  1. `agmsg`     — worker is `live-shell` AND agmsg is configured.
+ *  2. `native`    — same canonical CLI AND the Manager rendering has a
+ *                   native child-agent adapter.
+ *  3. `subprocess`— all other cases, including same-CLI without an adapter
+ *                   (e.g. Agy Manager + Agy worker).
+ */
+export function selectLaunchStrategy(
+  managerCommand: string | undefined,
+  workerMode: AgentMode,
+  agmsgConfigured: boolean,
+  workerCommand: string | undefined,
+): LaunchStrategy {
+  if (workerMode === "live-shell" && agmsgConfigured) return "agmsg";
+  const mgr = canonicalCli(managerCommand);
+  const wkr = canonicalCli(workerCommand);
+  if (mgr === wkr && hasNativeAdapter(mgr)) return "native";
+  return "subprocess";
+}
+
 /** Resolve only the built-in prompt surface for the receiving Agent CLI.
  * Explicit `agents.yaml` prompt overrides remain byte-for-byte authoritative. */
 export function builtInPromptForAgent(

@@ -50,7 +50,7 @@ import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys } from "./sync/pty.js";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
-import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
@@ -1564,7 +1564,7 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = { changeId: string; agentName: string; role?: string };
+type RunBody = { changeId: string; agentName: string; role?: string; executionMode?: RunnerExecutionMode };
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
@@ -1580,8 +1580,13 @@ fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
     req.log.warn("agents/run: no agents in agents.yaml");
     return reply.code(503).send({ error: "no agents defined in agents.yaml" });
   }
-  req.log.info({ changeId: body.changeId, agentName: body.agentName, role: body.role }, "agents/run: starting");
-  const res = await agentRunner.run(body.changeId, body.agentName, body.role);
+  const executionMode: RunnerExecutionMode =
+    body.executionMode === "main-tree" ? "main-tree" : "worktree";
+  req.log.info(
+    { changeId: body.changeId, agentName: body.agentName, role: body.role, executionMode },
+    "agents/run: starting",
+  );
+  const res = await agentRunner.run(body.changeId, body.agentName, body.role, executionMode);
   if (!res.ok) {
     req.log.warn({ status: res.status, reason: res.reason, changeId: body.changeId }, "agents/run: failed");
     return reply.code(res.status).send({ error: res.reason });

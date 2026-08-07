@@ -3,7 +3,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRegistry } from "./registry.js";
+import {
+  AgentRegistry,
+  canonicalCli,
+  hasNativeAdapter,
+  selectLaunchStrategy,
+} from "./registry.js";
 
 /**
  * Tests for the role / specialties / concurrency metadata fields added by
@@ -627,5 +632,146 @@ agents:
     const cfg = reg.publicConfig();
     expect(cfg.ok).toBe(false);
     if (!cfg.ok) expect(cfg.error).toMatch(/tmux must be a boolean/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Routing matrix — route-dispatch-by-manager-worker-cli (Tasks 1.1, 1.3, 1.3.1)
+// ---------------------------------------------------------------------------
+
+describe("canonicalCli — CLI identity normalization", () => {
+  it("leaves 'agy' unchanged", () => {
+    expect(canonicalCli("agy")).toBe("agy");
+  });
+
+  it("normalizes 'antigravity' to 'agy'", () => {
+    expect(canonicalCli("antigravity")).toBe("agy");
+  });
+
+  it("normalizes 'ANTIGRAVITY' to 'agy' (case-insensitive)", () => {
+    expect(canonicalCli("ANTIGRAVITY")).toBe("agy");
+  });
+
+  it("leaves 'claude' unchanged", () => {
+    expect(canonicalCli("claude")).toBe("claude");
+  });
+
+  it("leaves 'codex' unchanged", () => {
+    expect(canonicalCli("codex")).toBe("codex");
+  });
+
+  it("lowercases unknown executables without aliasing them", () => {
+    expect(canonicalCli("MyCustomBot")).toBe("mycustombot");
+  });
+
+  it("returns empty string for undefined", () => {
+    expect(canonicalCli(undefined)).toBe("");
+  });
+});
+
+describe("hasNativeAdapter — native child-agent availability", () => {
+  it("claude has a native adapter", () => {
+    expect(hasNativeAdapter("claude")).toBe(true);
+  });
+
+  it("agy 1.1.10 has no native adapter", () => {
+    expect(hasNativeAdapter("agy")).toBe(false);
+  });
+
+  it("codex has no native adapter", () => {
+    expect(hasNativeAdapter("codex")).toBe(false);
+  });
+
+  it("unknown CLI has no native adapter", () => {
+    expect(hasNativeAdapter("mycustombot")).toBe(false);
+  });
+});
+
+describe("selectLaunchStrategy — routing matrix (Tasks 1.3, 1.3.1)", () => {
+  // --- agmsg priority ---
+
+  it("live-shell worker + agmsg configured → agmsg (highest priority)", () => {
+    expect(
+      selectLaunchStrategy("claude", "live-shell", true, "claude"),
+    ).toBe("agmsg");
+  });
+
+  it("agmsg priority beats same-CLI native even when both match", () => {
+    // Claude Manager + Claude live-shell worker + agmsg → agmsg, not native
+    expect(
+      selectLaunchStrategy("claude", "live-shell", true, "claude"),
+    ).toBe("agmsg");
+  });
+
+  it("single-prompt worker ignores agmsg even if configured", () => {
+    // agmsg is only triggered for live-shell mode
+    expect(
+      selectLaunchStrategy("claude", "single-prompt", true, "claude"),
+    ).toBe("native");
+  });
+
+  // --- native delegation ---
+
+  it("Claude Manager + Claude worker (same-CLI, adapter available) → native", () => {
+    expect(
+      selectLaunchStrategy("claude", "single-prompt", false, "claude"),
+    ).toBe("native");
+  });
+
+  // --- subprocess fallback ---
+
+  it("Task 1.3.1: Agy Manager + Agy worker (same-CLI, no native adapter) → subprocess", () => {
+    expect(
+      selectLaunchStrategy("agy", "single-prompt", false, "agy"),
+    ).toBe("subprocess");
+  });
+
+  it("Task 1.3.1: antigravity Manager + agy worker normalizes to same-CLI but still → subprocess", () => {
+    // Both normalize to 'agy'; still no native adapter → subprocess
+    expect(
+      selectLaunchStrategy("antigravity", "single-prompt", false, "agy"),
+    ).toBe("subprocess");
+  });
+
+  it("Task 1.3.1: agy Manager + antigravity worker normalizes to same-CLI → subprocess", () => {
+    expect(
+      selectLaunchStrategy("agy", "single-prompt", false, "antigravity"),
+    ).toBe("subprocess");
+  });
+
+  it("cross-CLI: Claude Manager + Agy worker → subprocess", () => {
+    expect(
+      selectLaunchStrategy("claude", "single-prompt", false, "agy"),
+    ).toBe("subprocess");
+  });
+
+  it("cross-CLI: Codex Manager + Agy worker → subprocess (spec L76-79)", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "agy"),
+    ).toBe("subprocess");
+  });
+
+  it("cross-CLI: Agy Manager + Claude worker → subprocess", () => {
+    expect(
+      selectLaunchStrategy("agy", "single-prompt", false, "claude"),
+    ).toBe("subprocess");
+  });
+
+  it("cross-CLI: Codex Manager + Claude worker → subprocess", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "claude"),
+    ).toBe("subprocess");
+  });
+
+  it("unknown CLI Manager + unknown CLI worker (same name) → subprocess (no invented adapter)", () => {
+    expect(
+      selectLaunchStrategy("mycustombot", "single-prompt", false, "mycustombot"),
+    ).toBe("subprocess");
+  });
+
+  it("agmsg unconfigured + live-shell worker → subprocess, not agmsg", () => {
+    expect(
+      selectLaunchStrategy("claude", "live-shell", false, "claude"),
+    ).toBe("native");
   });
 });
