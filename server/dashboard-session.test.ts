@@ -8,21 +8,29 @@ import {
 
 describe('shouldReuseHealthySession', () => {
   it('reuses the active child for a healthy same-project reload', () => {
-    expect(shouldReuseHealthySession('/project-a', '/project-a', { child: { exitCode: null } })).toBe(true);
+    expect(shouldReuseHealthySession('/project-a', '/project-a', { child: { exitCode: null, signalCode: null } })).toBe(true);
   });
 
   it('does not reuse the active child after a project switch', () => {
-    expect(shouldReuseHealthySession('/project-b', '/project-a', { child: { exitCode: null } })).toBe(false);
+    expect(shouldReuseHealthySession('/project-b', '/project-a', { child: { exitCode: null, signalCode: null } })).toBe(false);
+  });
+
+  it('does not reuse the active child after a signal-based exit', () => {
+    expect(shouldReuseHealthySession('/project-a', '/project-a', { child: { exitCode: null, signalCode: 'SIGTERM' } })).toBe(false);
   });
 });
 
 describe('resolveReloadBehavior', () => {
   it('keeps the existing server alive for a healthy active session', () => {
-    expect(resolveReloadBehavior({ child: { exitCode: null } }, '/project-a')).toBe('reload-url');
+    expect(resolveReloadBehavior({ child: { exitCode: null, signalCode: null } }, '/project-a')).toBe('reload-url');
   });
 
   it('recreates the server when a project is active but the child is no longer healthy', () => {
-    expect(resolveReloadBehavior({ child: { exitCode: 1 } }, '/project-a')).toBe('recreate-server');
+    expect(resolveReloadBehavior({ child: { exitCode: 1, signalCode: null } }, '/project-a')).toBe('recreate-server');
+  });
+
+  it('recreates the server after a signal-based exit', () => {
+    expect(resolveReloadBehavior({ child: { exitCode: null, signalCode: 'SIGTERM' } }, '/project-a')).toBe('recreate-server');
   });
 
   it('shows the welcome screen when no project session is active', () => {
