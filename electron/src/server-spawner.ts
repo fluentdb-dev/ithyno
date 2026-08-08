@@ -19,6 +19,8 @@ export interface SpawnOptions {
   projectRoot: string;
   nodePath?: string;
   onLog?: (line: string, stream: 'stdout' | 'stderr') => void;
+  port?: number;
+  sessionToken?: string;
 }
 
 const TOKEN_RE = /token=([a-f0-9]+)/;
@@ -72,9 +74,7 @@ function fetchHealth(port: number): Promise<boolean> {
   });
 }
 
-export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
-  const port = await pickFreePort();
-  const nodeBin = opts.nodePath ?? process.execPath;
+export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'sessionToken'>, port: number): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   // The Electron shell always runs the server in production-static mode, even
   // if the developer's shell has ITHYNO_DEV set for the CLI workflow.
@@ -83,6 +83,16 @@ export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
   env.ITHYNO_PROJECT_ROOT = opts.projectRoot;
   env.PORT = String(port);
   env.ITHYNO_OPEN = '0';
+  if (opts.sessionToken) {
+    env.ITHYNO_LAUNCHER_SESSION_TOKEN = opts.sessionToken;
+  }
+  return env;
+}
+
+export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
+  const port = opts.port ?? (await pickFreePort());
+  const nodeBin = opts.nodePath ?? process.execPath;
+  const env = buildServerSpawnEnv(opts, port);
 
   const child = spawn(
     nodeBin,

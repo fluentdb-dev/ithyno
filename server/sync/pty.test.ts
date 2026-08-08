@@ -13,6 +13,7 @@ import {
   terminateAllLivePtys,
   activeTerminalCount,
   tmuxSessionName,
+  buildManagerPtyEnv,
 } from "./pty.js";
 
 /**
@@ -301,6 +302,21 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
     await reg.load();
     const line = ptyStartup(reg, dir).startup;
     expect(line).toBe("claude --dangerously-skip-permissions");
+  });
+});
+
+describe("buildManagerPtyEnv", () => {
+  it("uses the server's active port/token when explicit values are present", () => {
+    const env = buildManagerPtyEnv(57703, "abc123");
+    expect(env.ITHYNO_PORT).toBe("57703");
+    expect(env.ITHYNO_BASE).toBe("http://localhost:57703");
+    expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
+  });
+
+  it("falls back to the default port only when no explicit port was supplied", () => {
+    const env = buildManagerPtyEnv(undefined, "abc123");
+    expect(env.ITHYNO_PORT).toBe("4321");
+    expect(env.ITHYNO_BASE).toBe("http://localhost:4321");
   });
 });
 

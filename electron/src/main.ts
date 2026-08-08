@@ -53,6 +53,7 @@ import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu, type AboutConfig } from './menu';
 import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
+import { buildSessionRecoveryOptions, shouldReuseHealthySession } from './dashboard-session';
 
 /**
  * Read the root package.json and return an AboutConfig object.
@@ -91,6 +92,7 @@ const store = new ProjectStore(stateFilePath(app.getPath('userData')));
 let mainWindow: BrowserWindow | null = null;
 let currentSpawn: SpawnResult | null = null;
 let currentProjectRoot: string | null = null;
+let currentDashboardSession: { projectRoot: string; port: number; token: string } | null = null;
 let quitting = false;
 
 /**
@@ -269,10 +271,22 @@ function saveWindowState(win: BrowserWindow): void {
  * (add-electron-welcome-window, same-window swap pivot.)
  */
 async function createWindowForProject(projectRoot: string | null): Promise<void> {
-  await tearDownServer();
+  const resolvedProjectRoot = projectRoot !== null ? resolve(projectRoot) : null;
+  const reuseHealthyServer = shouldReuseHealthySession(resolvedProjectRoot, currentProjectRoot, currentSpawn);
 
   let spawn: SpawnResult | null = null;
-  if (projectRoot !== null) {
+  if (projectRoot === null) {
+    await tearDownServer();
+    currentDashboardSession = null;
+  } else if (reuseHealthyServer) {
+    spawn = currentSpawn;
+  } else {
+    if (resolvedProjectRoot !== null && currentDashboardSession?.projectRoot === resolvedProjectRoot) {
+      await tearDownServer();
+    } else {
+      await tearDownServer();
+    }
+
     const binPath = resolveBinPath();
     if (!existsSync(binPath)) {
       dialog.showErrorBox(
@@ -286,11 +300,12 @@ async function createWindowForProject(projectRoot: string | null): Promise<void>
     try {
       spawn = await spawnServer({
         binPath,
-        projectRoot,
+        projectRoot: resolvedProjectRoot ?? projectRoot,
         onLog: (line, stream) => {
           if (stream === 'stderr') process.stderr.write(line);
           else process.stdout.write(line);
         },
+        ...buildSessionRecoveryOptions(resolvedProjectRoot, currentDashboardSession),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -310,9 +325,15 @@ async function createWindowForProject(projectRoot: string | null): Promise<void>
       }
       return;
     }
+  }
+
+  if (spawn) {
     currentSpawn = spawn;
-    currentProjectRoot = resolve(projectRoot);
-    store.setProject(projectRoot);
+    currentProjectRoot = resolvedProjectRoot ?? currentProjectRoot;
+    if (resolvedProjectRoot) {
+      currentDashboardSession = { projectRoot: resolvedProjectRoot, port: spawn.port, token: spawn.token };
+    }
+    store.setProject(projectRoot ?? '');
     refreshMenu();
   }
 
@@ -479,6 +500,24 @@ function resolveOnboardingPreload(): string {
  * user picks a folder (same-window swap; see `createWindowForProject`).
  * (add-electron-welcome-window.)
  */
+async function reloadCurrentSession(): Promise<void> {
+  if (currentSpawn && currentSpawn.child.exitCode === null) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      void mainWindow.loadURL(currentSpawn.url);
+    }
+    return;
+  }
+
+  if (currentProjectRoot) {
+    await createWindowForProject(currentProjectRoot);
+    return;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    void mainWindow.loadFile(resolveWelcomeHtml());
+  }
+}
+
 function registerWelcomeIpc(): void {
   ipcMain.handle('welcome:get-about', () => {
     // Extend the About payload with an inline icon data URL so
@@ -521,11 +560,7 @@ function registerWelcomeIpc(): void {
     app.quit();
   });
   ipcMain.on('ithyno:reload-session', () => {
-    if (currentProjectRoot) {
-      void createWindowForProject(currentProjectRoot);
-    } else if (mainWindow && currentSpawn) {
-      void mainWindow.loadURL(currentSpawn.url);
-    }
+    void reloadCurrentSession();
   });
 }
 

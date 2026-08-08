@@ -312,6 +312,19 @@ function tmuxMissingFallback(): string {
   return `printf '${line1}\\n${line2}\\n${line3}\\n'`;
 }
 
+export function buildManagerPtyEnv(port: string | number | undefined, token: string): NodeJS.ProcessEnv {
+  const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
+  const base = `http://localhost:${resolvedPort}`;
+  return {
+    LANG: process.env.LANG || "en_US.UTF-8",
+    ...process.env,
+    TERM: "xterm-256color",
+    ITHYNO_SESSION_TOKEN: token,
+    ITHYNO_PORT: resolvedPort,
+    ITHYNO_BASE: base,
+  };
+}
+
 /** Wrap `s` in single quotes when it contains characters a shell would
  *  interpret. Kept intentionally minimal — the manager agent's args
  *  are usually clean flags like `--continue`. */
@@ -484,29 +497,7 @@ export async function attachPtyToSocket(
     cols: opts.cols ?? 80,
     rows: opts.rows ?? 24,
     cwd: opts.cwd,
-    env: {
-      LANG: process.env.LANG || "en_US.UTF-8",
-      ...process.env,
-      TERM: "xterm-256color",
-      // The Manager (and any CLI it launches from this shell) needs the
-      // session token to reach token-gated endpoints such as
-      // POST /api/manager/activity. The PTY is local-only and already
-      // origin/token gated at the WebSocket upgrade, so exporting it into
-      // the shell environment adds no new exposure surface.
-      // Landed by expose-manager-activity-per-change.
-      ITHYNO_SESSION_TOKEN: SESSION_TOKEN,
-      // The Electron shell (server-spawner.ts) and the VSCode extension
-      // both spawn the server on an ephemeral per-project port. Without
-      // these two vars the Manager's dispatch skill has no way to reach
-      // /api/changes/<id>/phase — it would fall back to the hardcoded
-      // 4321 and hit connection-refused. Set here so any subshell that
-      // needs to curl the server picks up the actual port:
-      //   ITHYNO_PORT — bare port number, e.g. "57703".
-      //   ITHYNO_BASE — full base URL, e.g. "http://localhost:57703".
-      // Falls back to 4321 when PORT isn't set (CLI dev workflow).
-      ITHYNO_PORT: process.env.PORT ?? "4321",
-      ITHYNO_BASE: `http://localhost:${process.env.PORT ?? "4321"}`,
-    },
+    env: buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN),
   });
 
   const entry: LiveTerminal = { term, ws, cwd: opts.cwd };
