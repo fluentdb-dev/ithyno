@@ -318,6 +318,13 @@ describe("buildManagerPtyEnv", () => {
     expect(env.ITHYNO_PORT).toBe("4321");
     expect(env.ITHYNO_BASE).toBe("http://localhost:4321");
   });
+
+  it("removes inherited launcher tokens before handing the env to the Manager PTY", () => {
+    process.env.ITHYNO_LAUNCHER_SESSION_TOKEN = "stale-token";
+    const env = buildManagerPtyEnv(57703, "abc123");
+    expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
+    expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
+  });
 });
 
 describe("ptyStartup — tmux wrap (wrap-embedded-pty-in-tmux)", () => {

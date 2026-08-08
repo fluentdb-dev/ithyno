@@ -313,11 +313,14 @@ function tmuxMissingFallback(): string {
 }
 
 export function buildManagerPtyEnv(port: string | number | undefined, token: string): NodeJS.ProcessEnv {
+  const inherited = { ...process.env };
+  delete inherited.ITHYNO_LAUNCHER_SESSION_TOKEN;
+
   const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
   const base = `http://localhost:${resolvedPort}`;
   return {
-    LANG: process.env.LANG || "en_US.UTF-8",
-    ...process.env,
+    ...inherited,
+    LANG: inherited.LANG || "en_US.UTF-8",
     TERM: "xterm-256color",
     ITHYNO_SESSION_TOKEN: token,
     ITHYNO_PORT: resolvedPort,

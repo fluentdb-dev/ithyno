@@ -11,6 +11,8 @@ export interface SpawnLike {
   };
 }
 
+export type ReloadBehavior = 'reload-url' | 'recreate-server' | 'show-welcome';
+
 export function shouldReuseHealthySession(
   projectRoot: string | null,
   currentProjectRoot: string | null,
@@ -21,6 +23,19 @@ export function shouldReuseHealthySession(
   }
 
   return projectRoot === currentProjectRoot && currentSpawn.child.exitCode === null;
+}
+
+export function resolveReloadBehavior(
+  currentSpawn: SpawnLike | null,
+  currentProjectRoot: string | null,
+): ReloadBehavior {
+  if (currentSpawn?.child.exitCode === null) {
+    return 'reload-url';
+  }
+  if (currentProjectRoot) {
+    return 'recreate-server';
+  }
+  return 'show-welcome';
 }
 
 export function buildSessionRecoveryOptions(

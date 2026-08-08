@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
-import { buildSessionRecoveryOptions, shouldReuseHealthySession } from '../electron/src/dashboard-session.js';
+import {
+  buildSessionRecoveryOptions,
+  resolveReloadBehavior,
+  shouldReuseHealthySession,
+} from '../electron/src/dashboard-session.js';
 
 describe('shouldReuseHealthySession', () => {
   it('reuses the active child for a healthy same-project reload', () => {
@@ -9,6 +13,20 @@ describe('shouldReuseHealthySession', () => {
 
   it('does not reuse the active child after a project switch', () => {
     expect(shouldReuseHealthySession('/project-b', '/project-a', { child: { exitCode: null } })).toBe(false);
+  });
+});
+
+describe('resolveReloadBehavior', () => {
+  it('keeps the existing server alive for a healthy active session', () => {
+    expect(resolveReloadBehavior({ child: { exitCode: null } }, '/project-a')).toBe('reload-url');
+  });
+
+  it('recreates the server when a project is active but the child is no longer healthy', () => {
+    expect(resolveReloadBehavior({ child: { exitCode: 1 } }, '/project-a')).toBe('recreate-server');
+  });
+
+  it('shows the welcome screen when no project session is active', () => {
+    expect(resolveReloadBehavior(null, null)).toBe('show-welcome');
   });
 });
 

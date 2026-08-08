@@ -53,7 +53,7 @@ import { ProjectStore, stateFilePath, type WindowState } from './project-store';
 import { spawnServer, type SpawnResult } from './server-spawner';
 import { buildAppMenu, type AboutConfig } from './menu';
 import { buildAboutInfo, SPONSORS, LICENSE_URL, REPO_URL } from './about-config';
-import { buildSessionRecoveryOptions, shouldReuseHealthySession } from './dashboard-session';
+import { buildSessionRecoveryOptions, resolveReloadBehavior, shouldReuseHealthySession } from './dashboard-session';
 
 /**
  * Read the root package.json and return an AboutConfig object.
@@ -501,20 +501,24 @@ function resolveOnboardingPreload(): string {
  * (add-electron-welcome-window.)
  */
 async function reloadCurrentSession(): Promise<void> {
-  if (currentSpawn && currentSpawn.child.exitCode === null) {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      void mainWindow.loadURL(currentSpawn.url);
+  switch (resolveReloadBehavior(currentSpawn, currentProjectRoot)) {
+    case 'reload-url': {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        void mainWindow.loadURL(currentSpawn!.url);
+      }
+      return;
     }
-    return;
-  }
-
-  if (currentProjectRoot) {
-    await createWindowForProject(currentProjectRoot);
-    return;
-  }
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    void mainWindow.loadFile(resolveWelcomeHtml());
+    case 'recreate-server': {
+      if (currentProjectRoot) {
+        await createWindowForProject(currentProjectRoot);
+      }
+      return;
+    }
+    case 'show-welcome':
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        void mainWindow.loadFile(resolveWelcomeHtml());
+      }
+      return;
   }
 }
 

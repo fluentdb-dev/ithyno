@@ -79,11 +79,12 @@ export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'se
   // The Electron shell always runs the server in production-static mode, even
   // if the developer's shell has ITHYNO_DEV set for the CLI workflow.
   delete env.ITHYNO_DEV;
+  delete env.ITHYNO_LAUNCHER_SESSION_TOKEN;
   env.ELECTRON_RUN_AS_NODE = '1';
   env.ITHYNO_PROJECT_ROOT = opts.projectRoot;
   env.PORT = String(port);
   env.ITHYNO_OPEN = '0';
-  if (opts.sessionToken) {
+  if (opts.sessionToken !== undefined) {
     env.ITHYNO_LAUNCHER_SESSION_TOKEN = opts.sessionToken;
   }
   return env;
