@@ -46,17 +46,17 @@
   of truth and remove the generic direct `<command> ... -p` subprocess recipe.
 - [x] 4.2 Regenerate universal/per-CLI dispatch outputs through renderers rather
   than editing generated copies independently.
-- [ ] 4.3 Add drift and rendered-content tests proving Claude, Codex, Agy, and
+- [x] 4.3 Add drift and rendered-content tests proving Claude, Codex, Agy, and
   fallback clients receive the correct strategy and command syntax.
 - [x] 4.4 Update the multi-agent CLI manual to describe automatic Codex `exec`
   and non-Codex `-p` prompt delivery.
 
 ## 5. Verification
 
-- [ ] 5.1 Run focused registry, runner, API, renderer, and dispatch tests.
-- [ ] 5.2 Run `npm run typecheck && npm test && npm run build`.
-- [ ] 5.3 Run `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`
+- [x] 5.1 Run focused registry, runner, API, renderer, and dispatch tests.
+- [x] 5.2 Run `npm run typecheck && npm test && npm run build`.
+- [x] 5.3 Run `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`
   and `npm run openspec -- validate --all`.
-- [ ] 5.4 Exercise at least one same-CLI native dispatch and one cross-CLI
+- [x] 5.4 Exercise at least one same-CLI native dispatch and one cross-CLI
   registry-backed dispatch in a temporary project, then record results in
   `outcome.md`.

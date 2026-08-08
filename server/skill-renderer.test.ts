@@ -661,6 +661,48 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     });
   }
 
+  it("renders the dispatch routing contract consistently for Claude, Codex, Agy, and fallback clients", async () => {
+    const sources = await discoverSkillSources(SKILLS_DIR);
+    const dispatch = sources.find((source) => source.id === "ithy-opsx-dispatch");
+    expect(dispatch).toBeDefined();
+
+    const render = (cli: import("./skill-renderer/types.js").CliId) => {
+      const renderer = getRenderer(cli);
+      expect(renderer, `renderer missing for ${cli}`).toBeDefined();
+      const files = renderer!.render(dispatch!, { projectRoot: projectRoot, cli });
+      expect(files).toHaveLength(1);
+      return files[0].content;
+    };
+
+    const outputs = {
+      claude: render("claude"),
+      codex: render("codex"),
+      agy: render("antigravity"),
+      fallback: render("cursor"),
+    };
+
+    for (const [cli, content] of Object.entries(outputs)) {
+      expect(content, `${cli}: routing priority missing`).toContain(
+        "MANAGER_CLI == WORKER_CLI AND native adapter available for MANAGER_CLI",
+      );
+      expect(content, `${cli}: AgentRunner fallback missing`).toContain("server AgentRunner");
+      expect(content, `${cli}: synchronous wait contract missing`).toContain("wait: true");
+      expect(content, `${cli}: transport timeout missing`).toContain("--connect-timeout 10");
+      expect(content, `${cli}: direct argv assembly returned`).not.toContain(
+        "<entry.command> <entry.args...> -p <resolved-prompt>",
+      );
+    }
+
+    expect(outputs.claude).toContain("Claude Manager");
+    expect(outputs.claude).toContain("Task tool (or Agent tool)");
+    expect(outputs.codex).toContain("Codex Manager");
+    expect(outputs.codex).toContain("Fall through to the subprocess branch");
+    expect(outputs.codex).toContain("ithy-opsx-escalate");
+    expect(outputs.codex).not.toContain("/ithy-opsx:escalate");
+    expect(outputs.agy).toContain("Agy 1.1.10 has no child-agent API");
+    expect(outputs.fallback).toContain("CLI not in the native-adapter registry");
+  });
+
   it("converts Claude commands to prompts and mirrors only Claude skills", async () => {
     const commands = join(projectRoot, ".claude", "commands", "ithy-opsx");
     mkdirSync(commands, { recursive: true });

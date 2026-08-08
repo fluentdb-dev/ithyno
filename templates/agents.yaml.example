@@ -56,6 +56,11 @@
 #     roles: [manager]
 #     command: claude
 #     args: [--resume, <session-id>]         # pin to a specific past session
+#
+# Dispatch uses the Manager's native delegation path when available:
+# - Claude Manager -> Task/Agent tool
+# - Agy/Antigravity Manager -> invoke_subagent
+# - Codex Manager -> subprocess fallback
 
 # --- Worker agents -------------------------------------------------------
 agents:

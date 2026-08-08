@@ -20,8 +20,8 @@ The dispatch advances the change through `proposed → coded → reviewed
    override.
 2. Setting up the worktree if needed (idempotent).
 3. Dispatching each stage's worker via the **Dispatch helper protocol**
-   (native Task/Agent tool when Manager and worker share the same canonical CLI
-   and a native adapter is available; server AgentRunner subprocess otherwise).
+   (native subagent delegation when available; otherwise Task tool
+   for `command == "claude"`, subprocess `-p` otherwise).
 4. Judging review / verify by the **3-stage success contract**.
 5. Looping code↔review until pass or MAX_ITERATIONS; escalating on
    non-convergence.
@@ -247,6 +247,24 @@ For each stage `S ∈ {code, review, verify}`:
    these branches — the Manager IS the dispatcher and runs in tmux
    pane 0 (or the direct-spawn PTY when agmsg is not configured).
    These branches only fire for worker roles.
+
+   - **Native-delegation branch** — the Manager and worker share a
+     native subagent adapter and the runtime exposes it (currently
+     Antigravity/Agy via `invoke_subagent`; Claude via Task/Agent
+     tools):
+
+     - **Claude Manager** — use the Task tool branch below.
+     - **Agy / Antigravity Manager** — call `invoke_subagent`
+       directly with the resolved worker prompt and the same artifact
+       contract used for review / verify stages. When `entry.args`
+       contains `--model <id>`, thread that model through the native
+       delegate call.
+     - **Codex Manager** — no native subagent API is available; fall
+       through to the subprocess branch.
+
+     This branch is preferred when the Manager and worker share the
+     same native adapter and the runtime exposes it; otherwise keep
+     the Task tool / subprocess branches as the fallback.
 
    - **agmsg branch** — `entry.mode == "live-shell"` AND `agents.yaml`
      contains a valid `agmsg:` block (top-level `agmsg.team` set):

@@ -274,6 +274,25 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       "OVERRIDDEN PROMPT",
     ]);
   });
+
+  it("promptOverride removes a split Codex slash command and its change-id target", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: worker
+    command: codex
+    args: ["exec", "/opsx:apply", "add-old"]
+    role: code
+`,
+    );
+    const def = reg.find("worker");
+    const r = reg.resolve(
+      def!,
+      { change_id: "add-new", worktree_path: "/w/add-new", branch: "agent/add-new" },
+      "code",
+      "OVERRIDDEN PROMPT",
+    );
+    expect(r.args).toEqual(["exec", "OVERRIDDEN PROMPT"]);
+  });
 });
 
 describe("AgentRegistry manager selection (add-manager-agent-config)", () => {
