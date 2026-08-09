@@ -160,11 +160,12 @@ export function canonicalCli(command: string | undefined): string {
  * Whether the given canonical CLI has a known same-client native child-agent
  * adapter available to a Manager running as that CLI.
  *
- * - `claude` → Task-tool subagent (always available).
- * - all others (including `agy` 1.1.10) → no adapter; fall back to subprocess.
+ * - `claude` → Task-tool subagent.
+ * - `agy` → Agy 1.1.11 `invoke_subagent`.
+ * - all others → no adapter; fall back to subprocess.
  */
 export function hasNativeAdapter(canonicalCommand: string): boolean {
-  return canonicalCommand === "claude";
+  return canonicalCommand === "claude" || canonicalCommand === "agy";
 }
 
 /** Strategy returned by {@link selectLaunchStrategy}. */
@@ -178,7 +179,7 @@ export type LaunchStrategy = "agmsg" | "native" | "subprocess";
  *  2. `native`    — same canonical CLI AND the Manager rendering has a
  *                   native child-agent adapter.
  *  3. `subprocess`— all other cases, including same-CLI without an adapter
- *                   (e.g. Agy Manager + Agy worker).
+ *                   (e.g. Codex Manager + Codex worker).
  */
 export function selectLaunchStrategy(
   managerCommand: string | undefined,

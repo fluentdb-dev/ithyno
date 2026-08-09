@@ -20,8 +20,8 @@ The dispatch advances the change through `proposed → coded → reviewed
    override.
 2. Setting up the worktree if needed (idempotent).
 3. Dispatching each stage's worker via the **Dispatch helper protocol**
-   (native subagent delegation when available; otherwise Task tool
-   for `command == "claude"`, subprocess `-p` otherwise).
+   (agmsg for eligible live shells, same-CLI native delegation when
+   available, and server AgentRunner otherwise).
 4. Judging review / verify by the **3-stage success contract**.
 5. Looping code↔review until pass or MAX_ITERATIONS; escalating on
    non-convergence.
@@ -248,24 +248,6 @@ For each stage `S ∈ {code, review, verify}`:
    pane 0 (or the direct-spawn PTY when agmsg is not configured).
    These branches only fire for worker roles.
 
-   - **Native-delegation branch** — the Manager and worker share a
-     native subagent adapter and the runtime exposes it (currently
-     Antigravity/Agy via `invoke_subagent`; Claude via Task/Agent
-     tools):
-
-     - **Claude Manager** — use the Task tool branch below.
-     - **Agy / Antigravity Manager** — call `invoke_subagent`
-       directly with the resolved worker prompt and the same artifact
-       contract used for review / verify stages. When `entry.args`
-       contains `--model <id>`, thread that model through the native
-       delegate call.
-     - **Codex Manager** — no native subagent API is available; fall
-       through to the subprocess branch.
-
-     This branch is preferred when the Manager and worker share the
-     same native adapter and the runtime exposes it; otherwise keep
-     the Task tool / subprocess branches as the fallback.
-
    - **agmsg branch** — `entry.mode == "live-shell"` AND `agents.yaml`
      contains a valid `agmsg:` block (top-level `agmsg.team` set):
 
@@ -400,8 +382,8 @@ without change:<id>.
 
    - **Native-delegation branch** — Manager and worker share the same
      canonical CLI identity AND the Manager rendering exposes a native
-     child Agent/Tool (currently: `claude` only; Codex and Agy fall
-     through to the subprocess branch):
+     child Agent/Tool (currently Claude Task/Agent and Agy 1.1.11
+     `invoke_subagent`; Codex falls through to AgentRunner):
 
      **Claude Manager** — use the Task/Agent tool with the resolved
      role prompt and artifact contract:
@@ -427,6 +409,26 @@ exist, create it first.
      execution) as the working directory. The subagent runs in-process
      and returns when the slash command completes.
 
+     **Agy / Antigravity Manager** — use `invoke_subagent` with the
+     resolved role prompt and artifact contract. Its prompt MUST also
+     include this absolute execution-root contract:
+
+     ```text
+     --- execution root contract ---
+     Work only inside this exact absolute path:
+       <dispatcher-resolved worktree path, or project root in main-tree mode>
+     Do not modify files outside that path.
+     ```
+
+     When `entry.args` contains `--model <id>`, pass that model to
+     `invoke_subagent`. Await the tool result before stage judgment.
+     Once this branch selects an Agy worker, the Manager MUST NOT
+     implement the worker stage itself or directly run its OpenSpec
+     command. Calling `invoke_subagent` is mandatory.
+     If the Agy Manager runtime does not expose `invoke_subagent`, fall
+     through to the AgentRunner subprocess branch instead of assembling
+     a direct `agy -p` command.
+
      **Codex Manager** — Codex has no native sub-agent tool in its
      current stable surface. Fall through to the subprocess branch for
      all Codex-to-Codex dispatches. The routing matrix condition
@@ -434,9 +436,9 @@ exist, create it first.
      Codex.
 
    - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
-     Agy worker), same-CLI workers without a native adapter (e.g. Agy
-     Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
-     CLI not in the native-adapter registry:
+     Agy worker), same-CLI workers without a native adapter (e.g. Codex
+     Manager + Codex worker), an Agy runtime without `invoke_subagent`,
+     or any CLI not in the native-adapter registry:
 
      The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
      construction automatically. Manager POSTs to `/api/agents/run` with

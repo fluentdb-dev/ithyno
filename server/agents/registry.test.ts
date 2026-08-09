@@ -789,8 +789,8 @@ describe("hasNativeAdapter — native child-agent availability", () => {
     expect(hasNativeAdapter("claude")).toBe(true);
   });
 
-  it("agy 1.1.10 has no native adapter", () => {
-    expect(hasNativeAdapter("agy")).toBe(false);
+  it("agy 1.1.11 has an invoke_subagent native adapter", () => {
+    expect(hasNativeAdapter("agy")).toBe(true);
   });
 
   it("codex has no native adapter", () => {
@@ -818,6 +818,12 @@ describe("selectLaunchStrategy — routing matrix (Tasks 1.3, 1.3.1)", () => {
     ).toBe("agmsg");
   });
 
+  it("agmsg priority beats Agy invoke_subagent for a live-shell worker", () => {
+    expect(
+      selectLaunchStrategy("agy", "live-shell", true, "antigravity"),
+    ).toBe("agmsg");
+  });
+
   it("single-prompt worker ignores agmsg even if configured", () => {
     // agmsg is only triggered for live-shell mode
     expect(
@@ -835,23 +841,22 @@ describe("selectLaunchStrategy — routing matrix (Tasks 1.3, 1.3.1)", () => {
 
   // --- subprocess fallback ---
 
-  it("Task 1.3.1: Agy Manager + Agy worker (same-CLI, no native adapter) → subprocess", () => {
+  it("Task 1.3.1: Agy Manager + Agy worker → native invoke_subagent", () => {
     expect(
       selectLaunchStrategy("agy", "single-prompt", false, "agy"),
-    ).toBe("subprocess");
+    ).toBe("native");
   });
 
-  it("Task 1.3.1: antigravity Manager + agy worker normalizes to same-CLI but still → subprocess", () => {
-    // Both normalize to 'agy'; still no native adapter → subprocess
+  it("Task 1.3.1: antigravity Manager + agy worker normalizes to native", () => {
     expect(
       selectLaunchStrategy("antigravity", "single-prompt", false, "agy"),
-    ).toBe("subprocess");
+    ).toBe("native");
   });
 
-  it("Task 1.3.1: agy Manager + antigravity worker normalizes to same-CLI → subprocess", () => {
+  it("Task 1.3.1: agy Manager + antigravity worker normalizes to native", () => {
     expect(
       selectLaunchStrategy("agy", "single-prompt", false, "antigravity"),
-    ).toBe("subprocess");
+    ).toBe("native");
   });
 
   it("cross-CLI: Claude Manager + Agy worker → subprocess", () => {

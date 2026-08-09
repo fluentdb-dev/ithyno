@@ -65,7 +65,7 @@ describe("Agent skill smoke configuration", () => {
   it("maps only supported receiving CLIs to initialized skill paths", () => {
     expect(expectedProbeSkillPath("claude")).toBe(".claude/commands/ithy-opsx/test-probe.md");
     expect(expectedProbeSkillPath("codex")).toBe(".codex/prompts/ithy-opsx-test-probe.md");
-    expect(expectedProbeSkillPath("agy")).toBe(".agents/workflows/ithy-opsx/test-probe.md");
+    expect(expectedProbeSkillPath("agy")).toBe(".agent/workflows/ithy-opsx/test-probe.md");
     expect(expectedProbeSkillPath("cursor")).toBe(".cursor/commands/ithy-opsx-test-probe.md");
     expect(expectedProbeSkillPath("gemini")).toBe(".gemini/commands/ithy-opsx/test-probe.toml");
     expect(expectedProbeSkillPath("copilot")).toBe(".github/prompts/ithy-opsx-test-probe.prompt.md");

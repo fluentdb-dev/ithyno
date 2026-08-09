@@ -7,14 +7,14 @@
   version; if its adapter details change any documented behavior, update this
   proposal, design, and spec delta and rerun strict validation before coding
   continues.
-  _Resolved: `agy 1.1.10` provides no native child-agent/Tool API. Task 3.4
-  documents the explicit subprocess fallback; no adapter is implemented._
+  _Resolved: the installed `agy 1.1.11` runtime exposes
+  `invoke_subagent`; it is the same-CLI native adapter. Cross-CLI Agy workers
+  continue through AgentRunner._
 - [x] 1.3 Add a routing matrix covering same-CLI, cross-CLI, unavailable native
   adapters, and the higher-priority live-shell/agmsg branch.
-- [x] 1.3.1 Add a test case for the `agy`/`antigravity` same-CLI scenario:
-  verify that when both Manager and worker are `agy` (or `antigravity`), the
-  strategy resolves to `subprocess` — NOT native delegation — because `agy
-  1.1.10` provides no native child-agent API.
+- [x] 1.3.1 Add test cases for the `agy`/`antigravity` same-CLI scenarios:
+  verify that aliases normalize to Agy and select native delegation through
+  `invoke_subagent`, while cross-CLI Agy workers select AgentRunner.
 
 ## 2. Registry-Backed Subprocess Execution
 
@@ -37,8 +37,14 @@
   with the resolved role prompt and artifact contract.
 - [x] 3.3 Document fallback from Codex same-client path to subprocess because Codex
   has no native sub-agent tool API in its current stable CLI surface.
-- [x] 3.4 Implement or explicitly fall back from the Agy native adapter based
-  on task 1.2, without changing the cross-CLI subprocess contract.
+- [x] 3.4 Implement the Agy 1.1.11 `invoke_subagent` native adapter without
+  changing the cross-CLI AgentRunner contract.
+- [x] 3.5 Emit an Agy project rule that requires `invoke_subagent` for a
+  selected same-CLI worker, forbids Manager-side implementation, preserves
+  agmsg priority, and permits only the documented AgentRunner fallback.
+- [x] 3.6 Normalize every Agy project-local workflow, rule, probe, and
+  installation-check path to singular `.agent/`, reversing the legacy
+  `.agents/workflows/` migration while leaving global agmsg paths unchanged.
 
 ## 4. Canonical Skill Distribution
 
@@ -57,6 +63,6 @@
 - [x] 5.2 Run `npm run typecheck && npm test && npm run build`.
 - [x] 5.3 Run `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`
   and `npm run openspec -- validate --all`.
-- [x] 5.4 Exercise at least one same-CLI native dispatch and one cross-CLI
-  registry-backed dispatch in a temporary project, then record results in
-  `outcome.md`.
+- [ ] 5.4 Exercise at least one Agy same-CLI `invoke_subagent` dispatch and one
+  cross-CLI registry-backed dispatch in a temporary project, then record the
+  actual results in `outcome.md`.

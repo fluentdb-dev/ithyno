@@ -17,6 +17,14 @@ subprocess. CLI aliases that denote the same client, including `agy` and
 - **THEN** it invokes the native child Agent/Tool with the resolved role prompt
 - **AND** it does not spawn the worker CLI subprocess
 
+#### Scenario: Agy aliases use invoke_subagent
+- **GIVEN** the Manager and worker resolve to canonical CLI `agy`
+- **AND** the Agy 1.1.11 Manager runtime exposes `invoke_subagent`
+- **AND** the worker is not taking the live-shell/agmsg branch
+- **WHEN** the dispatcher starts a stage
+- **THEN** it invokes the worker through `invoke_subagent`
+- **AND** it does not call AgentRunner for that same-CLI launch
+
 #### Scenario: Cross-CLI worker uses subprocess
 - **GIVEN** the Manager and selected worker resolve to different canonical CLIs
 - **AND** the worker is not taking the live-shell/agmsg branch
@@ -55,6 +63,12 @@ the existing code, review, verify, phase, retry, or commit ownership contracts.
 - **GIVEN** review returned `needs-rework` with actionable findings
 - **WHEN** the dispatcher launches the next native code child
 - **THEN** the child prompt includes those findings under the existing rework contract
+
+#### Scenario: Agy native child is restricted to the target root
+- **GIVEN** an Agy Manager launches a same-CLI child with `invoke_subagent`
+- **WHEN** the dispatcher resolves worktree or main-tree execution
+- **THEN** the child receives the exact absolute target root
+- **AND** the child is instructed not to modify files outside that root
 
 ### Requirement: Registry Owns Cross-CLI Prompt Arguments
 
@@ -124,6 +138,28 @@ the launch priority and worker contracts defined by this capability.
 - **WHEN** the Codex rendering evaluates a same-CLI Codex worker
 - **THEN** it falls back to the server Agent runner subprocess path
 - **AND** it does not invent an unsupported native sub-agent tool
+
+#### Scenario: Agy rendering preserves native and fallback paths
+- **GIVEN** the canonical dispatch source describes Agy native delegation
+- **WHEN** the Agy rendering evaluates an Agy same-CLI worker
+- **THEN** it uses `invoke_subagent`
+- **AND** an Agy worker selected by a different Manager CLI still uses the server Agent runner
+
+#### Scenario: Agy dispatch installs a mandatory delegation rule
+- **GIVEN** ithyno dispatch skills are installed for Agy/Antigravity
+- **WHEN** the renderer materializes the dispatch workflow
+- **THEN** it also writes `.agent/rules/ithy-opsx-dispatch.md`
+- **AND** the rule requires `invoke_subagent` for a selected same-CLI Agy worker
+- **AND** it forbids the Manager from implementing the selected worker role itself
+- **AND** it preserves the live-shell/agmsg priority and documented AgentRunner fallback
+
+#### Scenario: Agy project-local output uses the singular directory
+- **GIVEN** ithyno skills are installed for Agy/Antigravity
+- **WHEN** workflows, dispatch rules, smoke probes, and installation status are materialized or inspected
+- **THEN** their project-local paths use `.agent/`
+- **AND** new output is not written under `.agents/`
+- **AND** legacy `.agents/workflows/` output from older ithyno builds is migrated into `.agent/workflows/`
+- **AND** the unrelated global agmsg path `~/.agents/skills/agmsg` remains unchanged
 
 #### Scenario: Generated output does not restore direct shell assembly
 - **GIVEN** any supported CLI rendering of the dispatch skill

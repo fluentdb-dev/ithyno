@@ -12,6 +12,6 @@ agents:
     # Override here with an explicit list to bypass the smart resolver.
     # Dispatch uses the Manager's native delegation path when available:
     # - Claude Manager -> Task/Agent tool
-    # - Agy/Antigravity Manager -> invoke_subagent
-    # - Codex Manager -> subprocess fallback
+    # - Agy/Antigravity Manager -> invoke_subagent for same-CLI workers
+    # - Codex Manager or any cross-CLI worker -> AgentRunner fallback
     args: []

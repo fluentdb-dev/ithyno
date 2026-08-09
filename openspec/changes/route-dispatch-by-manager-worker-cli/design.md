@@ -12,12 +12,9 @@ the Manager can delegate to a same-client child through a native Agent/Tool.
 Cross-client execution necessarily leaves the Manager runtime and must use a
 subprocess or agmsg peer.
 
-Some implementation details of Agy's native child-agent surface may change
-after the implementing agent verifies the installed Agy version. This proposal
-therefore fixes the routing and prompt-delivery contracts while leaving the
-exact Agy tool invocation inside its client adapter. Any observable change to
-the contract must update these artifacts and pass validation before code is
-continued.
+The installed Agy 1.1.11 runtime exposes `invoke_subagent` to its Manager.
+That tool is the verified Agy same-CLI native adapter. Agy workers selected by
+a different Manager CLI remain cross-CLI and use AgentRunner.
 
 ## Goals / Non-Goals
 
@@ -64,14 +61,24 @@ native adapter, it takes the registry-backed subprocess fallback.
 The canonical dispatch source describes the semantic operation: start one
 child for a role with the resolved prompt, target root, and artifact contract,
 then await that child. Renderers supply the client-specific instructions. The
-Claude rendering uses its native Task/Agent tool. CLIs without a verified
-native sub-agent adapter in their target version (including Codex and Agy 1.1.10)
-fall back to the registry-backed subprocess branch even when the Manager and
-worker share the same canonical CLI identity.
+Claude rendering uses its native Task/Agent tool, and the Agy/Antigravity
+rendering uses `invoke_subagent` on Agy 1.1.11. CLIs without a verified native
+sub-agent adapter, including Codex, fall back to the registry-backed subprocess
+branch even when the Manager and worker share the same canonical CLI identity.
 
 Native children do not pass through `AgentRegistry.resolve()` because no Agent
-CLI subprocess is started. They receive the already resolved role prompt and
-the same absolute artifact contract used by every other branch.
+CLI subprocess is started. They receive the already resolved role prompt, the
+absolute target root, and the same artifact contract used by every other
+branch. When Agy's tool does not expose a separate cwd field, the dispatcher
+places the absolute target-root restriction directly in the child prompt.
+
+Because Agy can begin acting on the workflow before it reaches the detailed
+native-delegation section, its renderer also emits
+`.agent/rules/ithy-opsx-dispatch.md`. The rule makes `invoke_subagent`
+mandatory after a single-prompt Agy worker is selected and prohibits the
+Manager from implementing that worker role itself. It preserves the
+higher-priority live-shell/agmsg route and permits only the documented
+AgentRunner fallback when the native tool is unavailable or explicitly fails.
 
 ### D3 — Cross-client subprocesses use the existing Agent runner
 
@@ -114,9 +121,16 @@ are not maintained as independent behavioral specifications.
 
 - **Native tools expose different invocation APIs.** Keep each invocation in a
   small renderer/adapter contract and test the emitted instruction shape.
-- **Agy behavior changes during implementation.** Permit an Agy-specific
-  proposal refinement, but require artifact update and strict validation before
-  implementation continues.
+- **Agy's native tool surface is version-specific.** Treat `invoke_subagent`
+  as available for the verified Agy 1.1.11 runtime and retain AgentRunner as
+  the fallback when the Manager runtime does not expose it.
+- **A workflow instruction alone may be applied too late by Agy.** Emit a
+  concise project rule alongside the workflow so mandatory delegation is in
+  the Manager's always-loaded instruction surface.
+- **Agy project paths are singular.** Render workflows and rules under
+  `.agent/`. Treat only `.agents/workflows/` as legacy ithyno output and move
+  it toward `.agent/workflows/`; do not rewrite the unrelated global agmsg
+  location at `~/.agents/skills/agmsg`.
 - **Worktree reuse could attach to stale work.** Derive the path server-side and
   validate its branch/repository identity; reject ambiguity rather than remove
   or overwrite it.
@@ -136,6 +150,4 @@ installed skill copies.
 
 ## Open Questions
 
-- Which Agy-native child-agent tool is stable in the implementation target?
-  The implementing Agy agent will verify it and either fill the adapter or
-  document the registry-backed subprocess fallback before apply proceeds.
+None.

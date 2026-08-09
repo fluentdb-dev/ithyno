@@ -97,7 +97,7 @@ export const CLI_ADAPTERS: Record<string, CliAdapter> = {
   agy: {
     openspecTool: "antigravity",
     rendererCli: "antigravity",
-    openspecPaths: [".agents/workflows/opsx-propose.md", ".agents/workflows/opsx-apply.md"],
+    openspecPaths: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md"],
   },
   copilot: {
     openspecTool: "github-copilot",
@@ -168,8 +168,8 @@ export const CLI_LAYOUTS: Record<string, OpenspecLayout[]> = {
     {
       name: "legacy-workflows",
       required: [
-        ".agents/workflows/opsx-propose.md",
-        ".agents/workflows/opsx-apply.md",
+        ".agent/workflows/opsx-propose.md",
+        ".agent/workflows/opsx-apply.md",
       ],
     },
   ],

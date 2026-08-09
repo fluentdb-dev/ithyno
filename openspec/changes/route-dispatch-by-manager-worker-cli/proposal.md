@@ -25,6 +25,15 @@ absent or incorrect in `/ithy-opsx:dispatch`.
   use a client-native Agent/Tool for same-CLI delegation when an adapter is
   available, and use the server Agent runner for cross-CLI or unsupported
   native delegation.
+- Use Agy/Antigravity's `invoke_subagent` tool for same-CLI native delegation
+  on the verified Agy 1.1.11 runtime, while retaining AgentRunner for Agy
+  cross-CLI execution.
+- Install an Agy project rule with the dispatch workflow so the Manager cannot
+  silently perform a selected worker role itself instead of calling
+  `invoke_subagent`.
+- Use Agy's singular `.agent/` project root for workflows, rules, smoke probes,
+  and installation checks; migrate output from older ithyno builds that used
+  `.agents/workflows/` in the opposite direction.
 - Make the server registry the single owner of subprocess argv construction:
   Codex receives `codex ... exec <prompt>` and all other supported CLIs receive
   `<cli> ... -p <prompt>` without requiring users to add the prompt flag in

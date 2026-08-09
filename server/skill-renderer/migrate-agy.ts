@@ -2,22 +2,20 @@
 /**
  * Legacy-directory migration for the antigravity (agy) renderer.
  *
- * agy's current convention reads `.agents/workflows/*.md` (with the
- * trailing `s`). openspec's own antigravity adapter is still on the
- * legacy `.agent/workflows/opsx-<id>.md` path. Any project scaffolded
- * by `openspec init --tools antigravity` gets its opsx-* commands
- * written to the wrong dir and agy never discovers them.
+ * agy's current convention reads `.agent/workflows/*.md` (singular).
+ * Older ithyno builds incorrectly emitted `.agents/workflows/*.md`.
  *
  * This helper is invoked ONCE per install by installSkills when the
  * antigravity renderer is selected, BEFORE the render loop runs. It
- * moves every `.agent/workflows/*.md` file into `.agents/workflows/`,
+ * moves every legacy `.agents/workflows/*.md` file into
+ * `.agent/workflows/`,
  * skipping files whose target basename already exists (the renderer's
  * own subsequent write remains authoritative — never clobber it via
- * migration). After moving, empty `.agent/workflows/` and empty
- * `.agent/` are removed.
+ * migration). After moving, empty `.agents/workflows/` and empty
+ * `.agents/` are removed.
  *
  * Idempotent: a second invocation finds nothing and returns empty
- * `moved` and `skipped` arrays. Non-`.md` files under `.agent/` are
+ * `moved` and `skipped` arrays. Non-`.md` files under `.agents/` are
  * left untouched (defensive — respect user files).
  */
 import { access, copyFile, mkdir, readdir, rename, rmdir } from "node:fs/promises";
@@ -53,7 +51,7 @@ async function isEmptyDir(p: string): Promise<boolean> {
 }
 
 /**
- * Migrate legacy `.agent/workflows/*.md` into `.agents/workflows/`.
+ * Migrate legacy `.agents/workflows/*.md` into `.agent/workflows/`.
  *
  * Returned `moved[]` and `skipped[]` paths are project-root-relative
  * so logs/tests can compare them without leaking absolute host paths.
@@ -65,8 +63,8 @@ export async function migrateLegacyAntigravityDir(
   projectRoot: string,
   opts: { dryRun?: boolean } = {},
 ): Promise<MigrationResult> {
-  const legacyDir = join(projectRoot, ".agent", "workflows");
-  const targetDir = join(projectRoot, ".agents", "workflows");
+  const legacyDir = join(projectRoot, ".agents", "workflows");
+  const targetDir = join(projectRoot, ".agent", "workflows");
   const result: MigrationResult = { moved: [], skipped: [] };
 
   if (!(await pathExists(legacyDir))) return result;
@@ -92,7 +90,7 @@ export async function migrateLegacyAntigravityDir(
     // compare (per the doc comment above), so it must be forward-slash
     // regardless of host OS. The real filesystem calls above use `join`
     // (OS-native separators), which is correct for them.
-    const relFrom = posix.join(".agent", "workflows", basename);
+    const relFrom = posix.join(".agents", "workflows", basename);
 
     // Skip on any pre-existing target — the renderer's later write is
     // the source of truth. Never overwrite.
@@ -128,7 +126,7 @@ export async function migrateLegacyAntigravityDir(
         /* ignore — non-empty or permission; not fatal */
       }
     }
-    const legacyParent = join(projectRoot, ".agent");
+    const legacyParent = join(projectRoot, ".agents");
     if (await isEmptyDir(legacyParent)) {
       try {
         await rmdir(legacyParent);
@@ -142,29 +140,29 @@ export async function migrateLegacyAntigravityDir(
 }
 
 /**
- * COPY `.claude/commands/ithy-opsx/*.md` into `.agents/workflows/ithy-opsx/`.
+ * COPY `.claude/commands/ithy-opsx/*.md` into `.agent/workflows/ithy-opsx/`.
  *
  * Complements `migrateLegacyAntigravityDir` for a different legacy shape:
  * pre-per-CLI-renderer scaffolds hand-authored (or blind-copied) their
  * ithy-opsx commands under `.claude/commands/ithy-opsx/`. agy doesn't
  * read `.claude/`, so those `/ithy-opsx:*` slash-commands are invisible
- * until they're mirrored into the `.agents/workflows/ithy-opsx/`
+ * until they're mirrored into the `.agent/workflows/ithy-opsx/`
  * subdirectory (nested colon-form path that agy exposes as
  * `/ithy-opsx:<cmd>`).
  *
  * COPY (not MOVE) semantics — the source `.claude/commands/ithy-opsx/`
  * files are preserved unmodified so Claude users of the same project
  * remain unaffected. Skip-on-conflict guards the target: never
- * overwrite an existing `.agents/workflows/ithy-opsx/<basename>`
+ * overwrite an existing `.agent/workflows/ithy-opsx/<basename>`
  * (which may be renderer output from the same install run).
  * Idempotent, dryRun-aware.
  */
-export async function copyClaudeIthyOpsxCommandsToAgents(
+export async function copyClaudeIthyOpsxCommandsToAgent(
   projectRoot: string,
   opts: { dryRun?: boolean } = {},
 ): Promise<CopyResult> {
   const sourceDir = join(projectRoot, ".claude", "commands", "ithy-opsx");
-  const targetDir = join(projectRoot, ".agents", "workflows", "ithy-opsx");
+  const targetDir = join(projectRoot, ".agent", "workflows", "ithy-opsx");
   const result: CopyResult = { copied: [], skipped: [] };
 
   if (!(await pathExists(sourceDir))) return result;

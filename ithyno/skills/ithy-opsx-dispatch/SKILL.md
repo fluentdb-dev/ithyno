@@ -1,9 +1,8 @@
 
 Dispatch the code / review / verify workers for the given change.
-This is the prompt the persistent Manager (a `claude` live-shell
+This is the prompt the persistent Manager (a live-shell Agent CLI
 session declared in `agents.yaml` with `roles: [manager]`) evaluates
-when the Kanban Start button injects the string into the terminal
-PTY.
+when the Kanban Start button injects the string into the terminal PTY.
 
 The dispatch advances the change through `proposed → coded → reviewed
 → done` by:
@@ -13,8 +12,8 @@ The dispatch advances the change through `proposed → coded → reviewed
    override.
 2. Setting up the worktree if needed (idempotent).
 3. Dispatching each stage's worker via the **Dispatch helper protocol**
-   (native subagent delegation when available; otherwise Task tool
-   for `command == "claude"`, subprocess `-p` otherwise).
+   (agmsg for eligible live shells, same-CLI native delegation when
+   available, and server AgentRunner otherwise).
 4. Judging review / verify by the **3-stage success contract**.
 5. Looping code↔review until pass or MAX_ITERATIONS; escalating on
    non-convergence.
@@ -133,7 +132,7 @@ For each stage `S ∈ {code, review, verify}`:
    ### Manager fallback semantics
 
    "Manager self-dispatch" and "Manager fallback" refer to the same
-   thing: the Manager (this Claude session) performs the stage's
+   thing: the current Manager session performs the stage's
    work directly, in-session, instead of routing to a configured
    worker CLI. This applies both when no agent entry exists for `S`
    AND when the configured agent fails at runtime after retries
@@ -149,9 +148,9 @@ For each stage `S ∈ {code, review, verify}`:
      dispatch, if the Manager is the fallback executor, walk changes
      one at a time.
    - **Distinct from Manager-spawned subagents.** When the Manager
-     invokes the Task tool to spawn a subagent (e.g., the `code`
-     stage's Manager-fallback path spawning a fresh Claude Code
-     instance), that IS a form of ad-hoc agent definition, NOT
+     invokes its native tool to spawn a subagent (e.g., Claude Task or
+     Agy `invoke_subagent` for the `code` stage), that IS a form of
+     ad-hoc agent definition, NOT
      Manager fallback. Subagent spawn CAN run in parallel — it
      follows the standard dispatch parallelism rules. The key
      distinguisher is *who executes the work*: the Manager itself
@@ -241,24 +240,6 @@ For each stage `S ∈ {code, review, verify}`:
    pane 0 (or the direct-spawn PTY when agmsg is not configured).
    These branches only fire for worker roles.
 
-   - **Native-delegation branch** — the Manager and worker share a
-     native subagent adapter and the runtime exposes it (currently
-     Antigravity/Agy via `invoke_subagent`; Claude via Task/Agent
-     tools):
-
-     - **Claude Manager** — use the Task tool branch below.
-     - **Agy / Antigravity Manager** — call `invoke_subagent`
-       directly with the resolved worker prompt and the same artifact
-       contract used for review / verify stages. When `entry.args`
-       contains `--model <id>`, thread that model through the native
-       delegate call.
-     - **Codex Manager** — no native subagent API is available; fall
-       through to the subprocess branch.
-
-     This branch is preferred when the Manager and worker share the
-     same native adapter and the runtime exposes it; otherwise keep
-     the Task tool / subprocess branches as the fallback.
-
    - **agmsg branch** — `entry.mode == "live-shell"` AND `agents.yaml`
      contains a valid `agmsg:` block (top-level `agmsg.team` set):
 
@@ -266,7 +247,7 @@ For each stage `S ∈ {code, review, verify}`:
      # First: presence check for local agmsg install.
      if [ ! -f "$HOME/.agents/skills/agmsg/scripts/send.sh" ]; then
        echo "[dispatch] agmsg configured but not installed locally; falling back to non-agmsg dispatch"
-       # Fall through to the Task tool / subprocess branches below.
+       # Fall through to the native / AgentRunner branches below.
      else
        case "$entry_command" in
          claude)      AGMSG_TYPE=claude-code ;;
@@ -301,7 +282,7 @@ For each stage `S ∈ {code, review, verify}`:
            break
          fi
        done
-       # Slash command form (inside the Manager's Claude session).
+       # Slash command form (inside the Manager session).
        # This creates a new tmux pane running the worker CLI in
        # agmsg monitor mode, then injects the boot prompt.
        # $MODEL_ARG is empty when entry.args has no --model; a full
@@ -393,8 +374,8 @@ without change:<id>.
 
    - **Native-delegation branch** — Manager and worker share the same
      canonical CLI identity AND the Manager rendering exposes a native
-     child Agent/Tool (currently: `claude` only; Codex and Agy fall
-     through to the subprocess branch):
+     child Agent/Tool (currently Claude Task/Agent and Agy 1.1.11
+     `invoke_subagent`; Codex falls through to AgentRunner):
 
      **Claude Manager** — use the Task/Agent tool with the resolved
      role prompt and artifact contract:
@@ -420,6 +401,26 @@ exist, create it first.
      execution) as the working directory. The subagent runs in-process
      and returns when the slash command completes.
 
+     **Agy / Antigravity Manager** — use `invoke_subagent` with the
+     resolved role prompt and artifact contract. Its prompt MUST also
+     include this absolute execution-root contract:
+
+     ```text
+     --- execution root contract ---
+     Work only inside this exact absolute path:
+       <dispatcher-resolved worktree path, or project root in main-tree mode>
+     Do not modify files outside that path.
+     ```
+
+     When `entry.args` contains `--model <id>`, pass that model to
+     `invoke_subagent`. Await the tool result before stage judgment.
+     Once this branch selects an Agy worker, the Manager MUST NOT
+     implement the worker stage itself or directly run its OpenSpec
+     command. Calling `invoke_subagent` is mandatory.
+     If the Agy Manager runtime does not expose `invoke_subagent`, fall
+     through to the AgentRunner subprocess branch instead of assembling
+     a direct `agy -p` command.
+
      **Codex Manager** — Codex has no native sub-agent tool in its
      current stable surface. Fall through to the subprocess branch for
      all Codex-to-Codex dispatches. The routing matrix condition
@@ -427,9 +428,9 @@ exist, create it first.
      Codex.
 
    - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
-     Agy worker), same-CLI workers without a native adapter (e.g. Agy
-     Manager + Agy worker — Agy 1.1.10 has no child-agent API), or any
-     CLI not in the native-adapter registry:
+     Agy worker), same-CLI workers without a native adapter (e.g. Codex
+     Manager + Codex worker), an Agy runtime without `invoke_subagent`,
+     or any CLI not in the native-adapter registry:
 
      The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
      construction automatically. Manager POSTs to `/api/agents/run` with
@@ -493,16 +494,16 @@ exist, create it first.
 4. **Judge success**:
 
    **Boundary post — the worker's result is in hand and Manager
-   starts inspecting it** (report message received, subprocess
-   exited, or Task-tool subagent returned):
+   starts inspecting it** (report message received, AgentRunner job
+   completed, or native subagent returned):
 
    ```bash
    postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"judging\"}"
    ```
 
-   - **`S = code`**: no artifact contract for Task tool / subprocess
-     branches. Success = subprocess exit 0 / Task-tool subagent
-     returned; failure = non-zero exit / tool failure → escalate
+   - **`S = code`**: no artifact contract for native tool / AgentRunner
+     branches. Success = AgentRunner completed / native subagent
+     returned; failure = runner or tool failure → escalate
      `code stage subprocess failed with exit code <n>`. For the
      agmsg branch, use the polling contract below.
    - **`S = review` or `S = verify`**: apply the **3-stage success
@@ -511,13 +512,13 @@ exist, create it first.
 ## 3-stage success contract (review / verify only)
 
 Never trust exit code alone — Copilot and Antigravity return exit code
-0 even on semantic failure. Judgment order for the Task tool /
-subprocess branches:
+0 even on semantic failure. Judgment order for native-tool /
+AgentRunner branches:
 
-1. **Subprocess non-zero exit** (or Task-tool subagent reported
-   failure) → subprocess failure → escalate with `<stage> subprocess
+1. **AgentRunner execution failure** (or native subagent reported
+   failure) → execution failure → escalate with `<stage> subprocess
    failed with exit code <N>`.
-2. **Subprocess exit 0 but `$REVIEW_MD_PATH` is absent or its
+2. **Execution completed but `$REVIEW_MD_PATH` is absent or its
    frontmatter unparseable** → contract failure → escalate with
    `<stage> returned no artifact`. The check uses the absolute
    path computed in step 4, not the relative form; see the
@@ -943,7 +944,7 @@ teardown done outside the ladder.
   dispatcher — that's `/ithy-opsx:escalate`'s job.
 
 - **Do NOT modify code from the dispatcher session**. All code changes
-  happen inside dispatched worker invocations (Task tool subagent OR
+  happen inside dispatched worker invocations (native subagent OR
   subprocess CLI). If the dispatcher needs to investigate, use
   Read-only tools.
 
