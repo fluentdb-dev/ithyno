@@ -47,6 +47,9 @@ absent or incorrect in `/ithy-opsx:dispatch`.
 - Keep Claude-authored ithyno dispatch definitions as the source of truth and
   generate client-specific native-delegation instructions through the existing
   renderer pipeline.
+- Generate a thin Codex Skill-catalog entrypoint for single-change dispatch in
+  addition to its Prompt, so `ithy-opsx-dispatch <change-id>` resolves exactly
+  instead of falling through to `ithy-opsx-dispatch-multi`.
 - Add routing-matrix, argv, worktree-reuse, generated-skill drift, and dispatch
   integration coverage.
 

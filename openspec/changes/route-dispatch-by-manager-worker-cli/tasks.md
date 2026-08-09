@@ -62,6 +62,9 @@
   fallback clients receive the correct strategy and command syntax.
 - [x] 4.4 Update the multi-agent CLI manual to describe automatic Codex `exec`
   and non-Codex `-p` prompt delivery.
+- [x] 4.5 Generate `.codex/skills/ithy-opsx-dispatch/SKILL.md` as a thin
+  single-change entrypoint backed by the canonical Codex Prompt, with an
+  explicit guard against substituting `dispatch-multi` for one change ID.
 
 ## 5. Verification
 

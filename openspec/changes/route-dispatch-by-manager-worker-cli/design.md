@@ -117,6 +117,12 @@ renderer logic translate only client syntax and native-tool instructions.
 Generated Claude, Codex, Agy, and other outputs are checked by drift tests and
 are not maintained as independent behavioral specifications.
 
+Codex receives both the canonical rendered Prompt and a concise project-local
+Skill entrypoint for single-change dispatch. The Skill contains trigger and
+routing guardrails only, then reads the Prompt completely; it does not duplicate
+the dispatcher body. This makes the natural `ithy-opsx-dispatch <change-id>`
+form discoverable without allowing `dispatch-multi` to substitute for one ID.
+
 ## Risks / Trade-offs
 
 - **Native tools expose different invocation APIs.** Keep each invocation in a

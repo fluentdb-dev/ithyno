@@ -139,6 +139,12 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the currently-ported ithy-opsx skills (baseline: `ithy-opsx-apply` and `ithy-opsx-dispatch` as of `port-ithy-opsx-dispatch-to-universal-source`) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
+For `ithy-opsx-dispatch`, the Codex renderer SHALL emit both the canonical
+`.codex/prompts/ithy-opsx-dispatch.md` workflow and a concise
+`.codex/skills/ithy-opsx-dispatch/SKILL.md` catalog entrypoint. The Skill SHALL
+reference the Prompt rather than duplicating its body and SHALL distinguish
+single-change dispatch from `ithy-opsx-dispatch-multi`.
+
 When the antigravity renderer is invoked (either directly with `cli: "antigravity"` or via the `agy → antigravity` alias resolved by `mapDoctorCliToRendererCli`), `installSkills` SHALL first invoke a one-shot legacy-directory MIGRATION (destructive, MOVE semantics) that moves any `.agents/workflows/*.md` files written by older ithyno builds into Agy's canonical `.agent/workflows/` directory. The migration SHALL:
 - Skip any file whose target `.agent/workflows/<same-basename>` already exists, leaving the legacy file in place and reporting it in `InstallResult.migrations[].skipped[]` with reason `"target exists"` — the renderer's own subsequent write remains authoritative.
 - Move every non-conflicting file with `fs.rename` semantics (single atomic step where the platform supports it; fall back to copy+unlink otherwise).

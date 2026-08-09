@@ -139,6 +139,13 @@ the launch priority and worker contracts defined by this capability.
 - **THEN** it falls back to the server Agent runner subprocess path
 - **AND** it does not invent an unsupported native sub-agent tool
 
+#### Scenario: Codex catalog resolves single-change dispatch exactly
+- **GIVEN** ithyno dispatch is installed for Codex
+- **WHEN** the user invokes `ithy-opsx-dispatch <change-id>` or asks to dispatch one change
+- **THEN** `.codex/skills/ithy-opsx-dispatch/SKILL.md` provides an exact Skill-catalog match
+- **AND** the Skill reads `.codex/prompts/ithy-opsx-dispatch.md` as the canonical workflow body
+- **AND** it does not substitute `ithy-opsx-dispatch-multi` unless multiple change IDs are explicitly requested
+
 #### Scenario: Agy rendering preserves native and fallback paths
 - **GIVEN** the canonical dispatch source describes Agy native delegation
 - **WHEN** the Agy rendering evaluates an Agy same-CLI worker

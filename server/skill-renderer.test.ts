@@ -742,6 +742,35 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     }
   });
 
+  it("renders a thin Codex Skill entrypoint for single-change dispatch", async () => {
+    const sources = await discoverSkillSources(SKILLS_DIR);
+    const dispatch = sources.find((source) => source.id === "ithy-opsx-dispatch");
+    expect(dispatch).toBeDefined();
+
+    const files = getRenderer("codex")!.render(dispatch!, {
+      projectRoot,
+      cli: "codex",
+    });
+    const prompt = files.find(
+      (file) => file.path === ".codex/prompts/ithy-opsx-dispatch.md",
+    );
+    const skill = files.find(
+      (file) => file.path === ".codex/skills/ithy-opsx-dispatch/SKILL.md",
+    );
+    expect(prompt).toBeDefined();
+    expect(skill).toBeDefined();
+
+    const fm = /^---\n([\s\S]+?)\n---/.exec(skill!.content);
+    expect(fm).not.toBeNull();
+    const metadata = parseYaml(fm![1]);
+    expect(Object.keys(metadata).sort()).toEqual(["description", "name"]);
+    expect(metadata.name).toBe("ithy-opsx-dispatch");
+    expect(metadata.description).toContain("ithy-opsx-dispatch CHANGE_ID");
+    expect(metadata.description).toContain("Do not substitute dispatch-multi");
+    expect(skill!.content).toContain(".codex/prompts/ithy-opsx-dispatch.md");
+    expect(skill!.content).toContain("without replacing it with");
+  });
+
   it("converts Claude commands to prompts and mirrors only Claude skills", async () => {
     const commands = join(projectRoot, ".claude", "commands", "ithy-opsx");
     mkdirSync(commands, { recursive: true });
@@ -777,6 +806,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"))).toBe(false);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"))).toBe(false);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-test-probe/SKILL.md"))).toBe(true);
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"), "utf8"))
       .toContain("ithy-opsx-verify ${change_id}");
@@ -786,6 +816,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       .toContain("openspec-apply ${change_id}");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"), "utf8"))
       .toContain("ithy-opsx-archive ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-dispatch/SKILL.md"), "utf8"))
+      .toContain(".codex/prompts/ithy-opsx-dispatch.md");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-test-probe/SKILL.md"), "utf8"))
       .toContain('"probe": "ithy-opsx-test-probe"');
   });
@@ -802,10 +834,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     // Claude: both skills at .claude/commands/<ns>/<cmd>.md.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    // Antigravity (agy): nested .agent/workflows/<ns>/<cmd>.md — this shape
-    // is what agy uses to surface the skill as `/<ns>:<cmd>` (colon form).
-    // Flat `<ns>-<cmd>.md` would produce `/<ns>-<cmd>` (hyphen), a
-    // different command name.
+    // Antigravity (agy): flat .agent/workflows/<ns>-<cmd>.md — Agy only
+    // discovers workflow files directly under the workflows directory.
     expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".agent/rules/ithy-opsx-dispatch.md"))).toBe(true);

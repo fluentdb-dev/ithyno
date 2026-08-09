@@ -21,6 +21,11 @@ under either singular or plural roots is flattened during installation.
 Claude-only workflow names and metadata are removed during conversion, so
 copied commands are also exposed uniformly as `/ithy-opsx-<command>`.
 
+Codex now receives a thin `.codex/skills/ithy-opsx-dispatch/SKILL.md`
+entrypoint alongside the existing Prompt. It matches the plain
+`ithy-opsx-dispatch <change-id>` form, reads the Prompt as the single source of
+workflow behavior, and prevents accidental substitution by dispatch-multi.
+
 AgentRegistry owns subprocess prompt construction: Codex receives
 `exec <prompt>`, while non-Codex CLIs receive `-p <prompt>`. Explicit prompt
 overrides replace recognized legacy command prompts without dropping unrelated
@@ -37,7 +42,7 @@ judging the established artifact files.
 
 - `npm run typecheck`: passed.
 - Focused registry, runner, renderer, init, and validation tests: passed.
-- Full Vitest suite: passed (846 tests passed, 1 skipped). Existing fixtures
+- Full Vitest suite: passed (847 tests passed, 1 skipped). Existing fixtures
   emitted non-fatal watcher and sandboxed agmsg configuration warnings.
 - `npm run build`: passed.
 - `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`:
