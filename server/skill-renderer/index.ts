@@ -60,7 +60,7 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
       });
     }
 
-    // COPY: `.claude/commands/ithy-opsx/*.md` → `.agent/workflows/ithy-opsx/`
+    // COPY: `.claude/commands/ithy-opsx/*.md` → `.agent/workflows/ithy-opsx-`
     // Non-destructive — source .claude/ preserved for Claude users.
     // Runs BEFORE the render loop so a same-run renderer write at the
     // target correctly takes precedence via target-exists skip.

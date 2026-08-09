@@ -514,7 +514,7 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
   }> = [
     { cli: "codex", pathContains: [".codex/", "ithy-opsx-apply", ".md"] },
     // agy: nested `<ns>/<cmd>.md` so slash-command surface is `/ithy-opsx:apply`.
-    { cli: "antigravity", pathContains: [".agent/workflows/ithy-opsx/apply.md"] },
+    { cli: "antigravity", pathContains: [".agent/workflows/ithy-opsx-apply.md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
     { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
     { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
@@ -590,8 +590,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     },
     {
       cli: "antigravity",
-      expectedPathContains: [".agent/workflows/ithy-opsx/"],
-      probeCommandPath: ".agent/workflows/ithy-opsx/test-probe.md",
+      expectedPathContains: [".agent/workflows/ithy-opsx-"],
+      probeCommandPath: ".agent/workflows/ithy-opsx-test-probe.md",
     },
     {
       cli: "cursor",
@@ -703,6 +703,9 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(outputs.agy).toContain("Agy / Antigravity Manager");
     expect(outputs.agy).toContain("invoke_subagent");
     expect(outputs.agy).toContain("execution root contract");
+    expect(outputs.agy).toContain("/opsx-apply");
+    expect(outputs.agy).toContain("/ithy-opsx-review");
+    expect(outputs.agy).not.toMatch(/\/(?:ithy-)?opsx:/);
     expect(outputs.agy).not.toContain("Agy 1.1.10 has no child-agent API");
     expect(outputs.agy.indexOf("**agmsg branch**")).toBeLessThan(
       outputs.agy.indexOf("**Native-delegation branch**"),
@@ -803,8 +806,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     // is what agy uses to surface the skill as `/<ns>:<cmd>` (colon form).
     // Flat `<ns>-<cmd>.md` would produce `/<ns>-<cmd>` (hyphen), a
     // different command name.
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".agent/rules/ithy-opsx-dispatch.md"))).toBe(true);
     // Cursor: flat .cursor/commands/<ns>-<cmd>.md — matches openspec adapter.
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-apply.md"))).toBe(true);
@@ -919,6 +922,36 @@ describe("migrateLegacyAntigravityDir — unit", () => {
     // But the empty workflows/ subdir IS gone.
     expect(existsSync(join(projectRoot, ".agents/workflows"))).toBe(false);
   });
+
+  it("flattens nested singular Agy workflows into discoverable files", async () => {
+    const nestedDir = join(projectRoot, ".agent", "workflows", "ithy-opsx");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(nestedDir, "dispatch.md"), "nested\n", "utf-8");
+
+    const result = await migrate();
+
+    expect(result.moved).toEqual([".agent/workflows/ithy-opsx/dispatch.md"]);
+    expect(readFileSync(
+      join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"),
+      "utf-8",
+    )).toBe("nested\n");
+    expect(existsSync(nestedDir)).toBe(false);
+  });
+
+  it("flattens nested plural Agy workflows into the singular root", async () => {
+    const nestedDir = join(projectRoot, ".agents", "workflows", "ithy-opsx");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(nestedDir, "review.md"), "nested plural\n", "utf-8");
+
+    const result = await migrate();
+
+    expect(result.moved).toEqual([".agents/workflows/ithy-opsx/review.md"]);
+    expect(readFileSync(
+      join(projectRoot, ".agent/workflows/ithy-opsx-review.md"),
+      "utf-8",
+    )).toBe("nested plural\n");
+    expect(existsSync(join(projectRoot, ".agents"))).toBe(false);
+  });
 });
 
 describe("installSkills — antigravity migration wire-up", () => {
@@ -963,8 +996,8 @@ describe("installSkills — antigravity migration wire-up", () => {
     // Renderer's own ithy-opsx-* output landed alongside, under the
     // nested `<ns>/<cmd>.md` shape (openspec-flat vs renderer-nested
     // don't collide because they use different filename shapes).
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
   });
 
   it("emits an empty migration entry when antigravity is selected with nothing to migrate", async () => {
@@ -1045,7 +1078,7 @@ describe("installSkills — antigravity migration wire-up", () => {
 
 // ---------------------------------------------------------------------------
 // copy-claude-ithy-opsx-into-agents-workflows-for-agy
-// COPY .claude/commands/ithy-opsx/*.md → .agent/workflows/ithy-opsx/*.md
+// COPY .claude/commands/ithy-opsx/*.md → .agent/workflows/ithy-opsx-*.md
 // when antigravity is selected. Non-destructive to .claude/ source.
 // ---------------------------------------------------------------------------
 
@@ -1072,12 +1105,12 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
   }
 
   function seedAgentTarget(basename: string, body = "target body\n") {
-    const dir = join(projectRoot, ".agent", "workflows", "ithy-opsx");
+    const dir = join(projectRoot, ".agent", "workflows");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, basename), body, "utf-8");
+    writeFileSync(join(dir, `ithy-opsx-${basename}`), body, "utf-8");
   }
 
-  it("copies .claude/commands/ithy-opsx/*.md → .agent/workflows/ithy-opsx/", async () => {
+  it("copies .claude/commands/ithy-opsx/*.md → .agent/workflows/ithy-opsx-", async () => {
     seedClaude("dispatch.md", "DISPATCH BODY\n");
     seedClaude("merge.md", "MERGE BODY\n");
     const result = await copy();
@@ -1087,10 +1120,10 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
     ]);
     expect(result.skipped).toEqual([]);
     // Target files present with copied content.
-    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"), "utf-8")).toBe(
+    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"), "utf-8")).toBe(
       "DISPATCH BODY\n",
     );
-    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx/merge.md"), "utf-8")).toBe(
+    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx-merge.md"), "utf-8")).toBe(
       "MERGE BODY\n",
     );
     // Source files unchanged (COPY semantics).
@@ -1102,6 +1135,31 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
     );
     // .claude/ dir preserved (nothing deleted).
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx"))).toBe(true);
+  });
+
+  it("normalizes Claude frontmatter and command references for Agy", async () => {
+    seedClaude("review.md", [
+      "---",
+      'name: "ITHY-OPSX: Review"',
+      "description: Review a change",
+      "category: Workflow",
+      "---",
+      "",
+      "Run /opsx:apply then /ithy-opsx:verify.",
+      "",
+    ].join("\n"));
+
+    await copy();
+    const rendered = readFileSync(
+      join(projectRoot, ".agent/workflows/ithy-opsx-review.md"),
+      "utf-8",
+    );
+    expect(rendered).toContain("description: Review a change");
+    expect(rendered).not.toContain("name:");
+    expect(rendered).not.toContain("category:");
+    expect(rendered).toContain("/opsx-apply");
+    expect(rendered).toContain("/ithy-opsx-verify");
+    expect(rendered).not.toMatch(/\/(?:ithy-)?opsx:/);
   });
 
   it("skips when target already exists (never clobbers renderer output)", async () => {
@@ -1116,7 +1174,7 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
     expect(readFileSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"), "utf-8")).toBe(
       "STALE\n",
     );
-    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"), "utf-8")).toBe(
+    expect(readFileSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"), "utf-8")).toBe(
       "NEW\n",
     );
   });
@@ -1145,7 +1203,7 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
     expect(result.skipped).toEqual([]);
     // Source untouched, target absent.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(false);
   });
 });
 
@@ -1187,8 +1245,8 @@ describe("installSkills — claude→agent copy wire-up", () => {
       ".claude/commands/ithy-opsx/merge.md",
     ]);
     // Copied to target dir.
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/merge.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-merge.md"))).toBe(true);
     // .claude/ source untouched.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/merge.md"))).toBe(true);
@@ -1204,14 +1262,14 @@ describe("installSkills — claude→agent copy wire-up", () => {
     // No migration entries at all for the claude-only case.
     expect(result.migrations).toEqual([]);
     // .agent/ target NOT created.
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(false);
     // .claude/ source untouched.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
   });
 
   it("copy hook skips when renderer will write to the same target basename", async () => {
     // Seed .claude/commands/ithy-opsx/apply.md — the antigravity
-    // renderer will ALSO write .agent/workflows/ithy-opsx/apply.md
+    // renderer will ALSO write .agent/workflows/ithy-opsx-apply.md
     // (from ithyno/skills/ithy-opsx-apply/). Order-of-operations:
     // copy runs BEFORE render, so at copy time the target is absent
     // and the copy proceeds. Then the renderer overwrites it with
@@ -1227,7 +1285,7 @@ describe("installSkills — claude→agent copy wire-up", () => {
     expect(copyEntry!.copied).toContain(".claude/commands/ithy-opsx/apply.md");
     // Target has renderer output (GENERATED banner), not the stale copy.
     const finalContent = readFileSync(
-      join(projectRoot, ".agent/workflows/ithy-opsx/apply.md"),
+      join(projectRoot, ".agent/workflows/ithy-opsx-apply.md"),
       "utf-8",
     );
     expect(finalContent).toContain("GENERATED FILE");
@@ -1247,6 +1305,6 @@ describe("installSkills — claude→agent copy wire-up", () => {
     expect(copyEntry!.copied).toEqual([".claude/commands/ithy-opsx/dispatch.md"]);
     // Source untouched, target absent.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx/dispatch.md"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-dispatch.md"))).toBe(false);
   });
 });

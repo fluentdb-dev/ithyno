@@ -161,6 +161,14 @@ the launch priority and worker contracts defined by this capability.
 - **AND** legacy `.agents/workflows/` output from older ithyno builds is migrated into `.agent/workflows/`
 - **AND** the unrelated global agmsg path `~/.agents/skills/agmsg` remains unchanged
 
+#### Scenario: Agy workflows use flat discoverable names
+- **GIVEN** ithyno skills are rendered for Agy/Antigravity
+- **WHEN** the renderer emits the dispatch workflow and its related commands
+- **THEN** it writes flat files such as `.agent/workflows/ithy-opsx-dispatch.md`
+- **AND** it does not rely on a nested `.agent/workflows/ithy-opsx/` directory
+- **AND** executable command references use `/opsx-apply` and `/ithy-opsx-review` rather than Claude colon syntax
+- **AND** converted Claude commands omit the Claude `name:` field so Agy does not expose labels such as `/ITHY-OPSX: Review`
+
 #### Scenario: Generated output does not restore direct shell assembly
 - **GIVEN** any supported CLI rendering of the dispatch skill
 - **WHEN** its cross-CLI subprocess instructions are inspected

@@ -45,6 +45,12 @@
 - [x] 3.6 Normalize every Agy project-local workflow, rule, probe, and
   installation-check path to singular `.agent/`, reversing the legacy
   `.agents/workflows/` migration while leaving global agmsg paths unchanged.
+- [x] 3.7 Flatten Agy ithyno workflows to `ithy-opsx-<command>.md`, translate
+  command references to Agy's hyphen syntax, and migrate both singular and
+  plural nested workflow output.
+- [x] 3.8 Strip Claude-only `name`, category, tag, and argument metadata when
+  converting unported Claude commands so Agy recognizes every copied workflow
+  from its flat filename.
 
 ## 4. Canonical Skill Distribution
 

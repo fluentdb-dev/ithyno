@@ -34,6 +34,9 @@ absent or incorrect in `/ithy-opsx:dispatch`.
 - Use Agy's singular `.agent/` project root for workflows, rules, smoke probes,
   and installation checks; migrate output from older ithyno builds that used
   `.agents/workflows/` in the opposite direction.
+- Emit Agy workflows as flat `.agent/workflows/ithy-opsx-<command>.md` files
+  and translate Claude-style frontmatter and colon command references to Agy's
+  filename-derived hyphen form.
 - Make the server registry the single owner of subprocess argv construction:
   Codex receives `codex ... exec <prompt>` and all other supported CLIs receive
   `<cli> ... -p <prompt>` without requiring users to add the prompt flag in

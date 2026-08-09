@@ -2,16 +2,14 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.agent/workflows/<namespace>/<command>.md` — agy reads
+ * Emits `.agent/workflows/<namespace>-<command>.md` — agy reads
  * `.agent/workflows/` and derives the slash-command name from the
  * file's path shape:
  *   - flat `<name>.md`                → `/<name>`   (openspec's opsx-*)
- *   - nested `<namespace>/<cmd>.md`   → `/<namespace>:<cmd>`
- * ithy-opsx skills need the colon form (`/ithy-opsx:dispatch`), so
- * they go under a `<namespace>/` subdirectory. OpenSpec's own Agy adapter
- * emits flat `opsx-<id>.md` files under the same singular `.agent/` root;
- * that flat shape is what OpenSpec chose for its own commands. Frontmatter
- * shape (description only) matches OpenSpec's adapter.
+ * Agy discovers only flat files in this directory. OpenSpec's own Agy
+ * adapter follows the same convention with `opsx-<id>.md`; ithyno therefore
+ * emits `ithy-opsx-<command>.md`. Frontmatter shape (description only)
+ * matches OpenSpec's adapter.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
@@ -43,6 +41,16 @@ function fillPlaceholders(body: string, source: SkillSource): string {
   return body.replace(/\{\{namespace\}\}/g, () => ns).replace(/\{\{command\}\}/g, () => cmd);
 }
 
+/** Agy's flat workflow surface uses `/namespace-command`, not Claude's
+ * `/namespace:command` syntax. Translate executable references in the
+ * rendered body so native children and Manager fallbacks receive commands
+ * that Agy can actually discover. */
+function translateCommandReferences(body: string): string {
+  return body
+    .replace(/\/opsx:([a-z0-9-]+)/g, "/opsx-$1")
+    .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "/ithy-opsx-$1");
+}
+
 function frontmatter(source: SkillSource): string {
   // openspec's antigravity adapter emits only `description:` — mirror it.
   const doc: Record<string, unknown> = {
@@ -68,8 +76,8 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "",
     "# Ithy OpenSpec Dispatch Execution Rules",
     "",
-    "When performing `/ithy-opsx:dispatch` or evaluating",
-    "`.agent/workflows/ithy-opsx/dispatch.md` as an Agy/Antigravity Manager:",
+    "When performing `/ithy-opsx-dispatch` or evaluating",
+    "`.agent/workflows/ithy-opsx-dispatch.md` as an Agy/Antigravity Manager:",
     "",
     "1. **Delegate selected Agy workers.** After the dispatcher selects a",
     "   single-prompt Agy/Antigravity worker from `agents.yaml`, you MUST call",
@@ -101,12 +109,12 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
 export const antigravityRenderer: Renderer = {
   cli: "antigravity",
   render(source: SkillSource): RenderedFile[] {
-    // Nested `<namespace>/<command>.md` shape → agy exposes it as
-    // `/<namespace>:<command>` (colon-separated), which matches how
-    // the ithy-opsx skills are referenced everywhere else in this
-    // codebase (e.g. `/ithy-opsx:dispatch`).
-    const path = `.agent/workflows/${source.manifest.namespace}/${source.manifest.command}.md`;
-    const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
+    // Agy discovers flat workflow files. A nested namespace directory is
+    // silently ignored, so encode the namespace into the basename.
+    const path = `.agent/workflows/${source.manifest.namespace}-${source.manifest.command}.md`;
+    const body = translateCommandReferences(
+      expandTokens(fillPlaceholders(source.body.trimEnd(), source)),
+    );
     const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
     const files: RenderedFile[] = [{ path, content, mode: "create" }];
     if (source.id === "ithy-opsx-dispatch") {

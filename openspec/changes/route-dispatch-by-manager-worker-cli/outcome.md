@@ -15,6 +15,11 @@ the stage itself, while preserving agmsg priority and the AgentRunner fallback.
 All Agy project-local workflows, rules, smoke probes, and installation checks
 now use singular `.agent/`; only the compatibility migration reads the older
 plural `.agents/workflows/` location. Global agmsg paths remain unchanged.
+Agy workflows are emitted as flat `ithy-opsx-<command>.md` files, with command
+references translated to Agy's hyphen syntax. Existing nested workflow output
+under either singular or plural roots is flattened during installation.
+Claude-only workflow names and metadata are removed during conversion, so
+copied commands are also exposed uniformly as `/ithy-opsx-<command>`.
 
 AgentRegistry owns subprocess prompt construction: Codex receives
 `exec <prompt>`, while non-Codex CLIs receive `-p <prompt>`. Explicit prompt
@@ -32,7 +37,7 @@ judging the established artifact files.
 
 - `npm run typecheck`: passed.
 - Focused registry, runner, renderer, init, and validation tests: passed.
-- Full Vitest suite: passed (843 tests passed, 1 skipped). Existing fixtures
+- Full Vitest suite: passed (846 tests passed, 1 skipped). Existing fixtures
   emitted non-fatal watcher and sandboxed agmsg configuration warnings.
 - `npm run build`: passed.
 - `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`:

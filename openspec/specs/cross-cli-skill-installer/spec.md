@@ -146,9 +146,11 @@ When the antigravity renderer is invoked (either directly with `cli: "antigravit
 - Be idempotent: a second invocation finds nothing and returns an empty `moved[]` and `skipped[]`.
 - Honor `opts.dryRun`: report the planned moves in `moved[]` without touching disk.
 
-Additionally, when antigravity is selected, `installSkills` SHALL invoke a second helper that COPIES any `.claude/commands/ithy-opsx/*.md` files into `.agent/workflows/ithy-opsx/<same-basename>`. These files are typically ithyno-ui's own `ithy-opsx-*` skills that were hand-authored (or blind-copied) into `.claude/` by pre-per-CLI-renderer scaffold flows. The COPY step SHALL:
+Additionally, when antigravity is selected, `installSkills` SHALL invoke a second helper that COPIES any `.claude/commands/ithy-opsx/*.md` files into `.agent/workflows/ithy-opsx-<same-basename>`. These files are typically ithyno-ui's own `ithy-opsx-*` skills that were hand-authored (or blind-copied) into `.claude/` by pre-per-CLI-renderer scaffold flows. The COPY step SHALL:
 - Preserve the source: the `.claude/commands/ithy-opsx/*.md` files SHALL NOT be modified or deleted (Claude users of the same project remain unaffected).
-- Skip on target conflict: if `.agent/workflows/ithy-opsx/<same-basename>` already exists (e.g. because the antigravity renderer already wrote it, or a prior copy step ran), leave both source and target untouched and report the source in the entry's `skipped[]`.
+- Normalize the target frontmatter to Agy's description-only shape, removing Claude's `name`, `category`, `tags`, and `argument-hint` fields so Agy derives the slash command from the flat filename.
+- Translate target-body `/opsx:<command>` and `/ithy-opsx:<command>` references to Agy's `/opsx-<command>` and `/ithy-opsx-<command>` forms.
+- Skip on target conflict: if `.agent/workflows/ithy-opsx-<same-basename>` already exists (e.g. because the antigravity renderer already wrote it, or a prior copy step ran), leave both source and target untouched and report the source in the entry's `skipped[]`.
 - Be idempotent, dryRun-aware, per the same shape as the legacy-dir migration.
 
 Both operations SHALL be surfaced in `InstallResult.migrations` as separate entries. Each entry MAY carry an optional `kind: "move" | "copy"` field to distinguish the semantics (`"move"` for the legacy-dir migration, `"copy"` for the claude-commands mirror). Consumers that ignore `kind` SHALL treat entries the same way — the field is purely diagnostic. Migration failures (permission errors, EBUSY on rename, ENOENT during copy) SHALL be routed to `InstallResult.errors` per file, NOT thrown — a partial migration must not block installing healthy skills.
@@ -166,7 +168,7 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **AND** `CLAUDE.md` is copied from `templates/CLAUDE.md` (CLI-neutral fixture)
 - **AND** no `templates/.claude/…` blind-copy occurs for CLI-specific skill files
 - **WHEN** the user instead selects `agy`
-- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.agent/workflows/ithy-opsx/<cmd>.md` per the renderer's nested colon-form output)
+- **THEN** the antigravity renderer materializes each skill as a flat workflow at `.agent/workflows/ithy-opsx-<cmd>.md`
 - **AND** `.claude/commands/` is NOT populated by the renderer (Claude was not selected)
 - **AND** `agents.yaml` writes `manager.command: agy` (unchanged from existing behavior)
 
@@ -190,7 +192,7 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 #### Scenario: init emits every ported ithy-opsx skill per selected CLI
 - **GIVEN** `ithyno/skills/` contains `ithy-opsx-apply` and `ithy-opsx-dispatch` (baseline coverage as of this change)
 - **WHEN** `openspec init` is invoked and the user selects any CLI (e.g. `agy`)
-- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.agent/workflows/ithy-opsx/apply.md` AND `.agent/workflows/ithy-opsx/dispatch.md`)
+- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.agent/workflows/ithy-opsx-apply.md` AND `.agent/workflows/ithy-opsx-dispatch.md`)
 - **AND** the emitted files each carry the `GENERATED FILE — do not hand-edit` banner sourcing back to `ithyno/skills/<id>/`
 
 #### Scenario: agy init migrates legacy .agents/workflows/ output into .agent/workflows/
@@ -198,7 +200,7 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **AND** `.agent/workflows/` does not yet exist
 - **WHEN** the user re-runs init through openspec-ui with the antigravity renderer selected
 - **THEN** `installSkills` invokes the migration BEFORE the render loop
-- **AND** every `.agents/workflows/*.md` file is moved to `.agent/workflows/<same-name>` (renderer's own output at `.agent/workflows/ithy-opsx/<cmd>.md` then lands alongside them)
+- **AND** every `.agents/workflows/*.md` file is moved to `.agent/workflows/<same-name>` (renderer's own output at `.agent/workflows/ithy-opsx-<cmd>.md` then lands alongside them)
 - **AND** the empty `.agents/workflows/` directory is removed
 - **AND** the empty `.agents/` directory is removed (only if truly empty — user files under `.agents/` outside `workflows/` are respected)
 - **AND** `InstallResult.migrations` contains at least one entry with `cli: "antigravity"`, `moved: [".agents/workflows/opsx-propose.md", ".agents/workflows/opsx-apply.md"]`, and (if `kind` is present) `kind: "move"`
@@ -224,17 +226,25 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **AND** `.agents/workflows/opsx-propose.md` remains on disk unmodified
 - **AND** `.agent/workflows/opsx-propose.md` is NOT created
 
-#### Scenario: agy init copies legacy .claude/commands/ithy-opsx/ into .agent/workflows/ithy-opsx/
+#### Scenario: agy init flattens nested ithyno workflows
+- **GIVEN** an older ithyno install wrote `.agent/workflows/ithy-opsx/dispatch.md` or `.agents/workflows/ithy-opsx/dispatch.md`
+- **WHEN** `installSkills` runs with antigravity selected
+- **THEN** the workflow is moved to `.agent/workflows/ithy-opsx-dispatch.md`
+- **AND** the empty nested source directory is removed
+- **AND** the generated workflow uses Agy command references such as `/opsx-apply` and `/ithy-opsx-review`, not Claude colon syntax
+
+#### Scenario: agy init copies legacy Claude commands into flat workflows
 - **GIVEN** a project has `.claude/commands/ithy-opsx/dispatch.md` and `.claude/commands/ithy-opsx/merge.md` on disk (either hand-authored legacy or renderer output from a previous `[claude]` install)
-- **AND** `.agent/workflows/ithy-opsx/` does not yet exist
+- **AND** the corresponding flat Agy workflow files do not yet exist
 - **WHEN** the user runs `installSkills` with antigravity selected
 - **THEN** `installSkills` invokes the copy helper alongside the existing legacy-dir migration
-- **AND** every `.claude/commands/ithy-opsx/*.md` file is COPIED to `.agent/workflows/ithy-opsx/<same-basename>`
+- **AND** every `.claude/commands/ithy-opsx/*.md` file is COPIED to `.agent/workflows/ithy-opsx-<same-basename>`
 - **AND** the source files at `.claude/commands/ithy-opsx/*` are unchanged (COPY, not move — Claude users of the same project unaffected)
+- **AND** each target omits Claude's `name:` field and is recognized by its flat `/ithy-opsx-<command>` filename
 - **AND** `InstallResult.migrations` gains a SECOND entry with `cli: "antigravity"`, `copied: [".claude/commands/ithy-opsx/dispatch.md", ".claude/commands/ithy-opsx/merge.md"]`, and `kind: "copy"`
 
 #### Scenario: copy-from-claude skips on target-file conflict
-- **GIVEN** `.claude/commands/ithy-opsx/dispatch.md` exists AND `.agent/workflows/ithy-opsx/dispatch.md` also already exists (e.g., because the antigravity renderer wrote it in the same install, or a prior copy step ran)
+- **GIVEN** `.claude/commands/ithy-opsx/dispatch.md` exists AND `.agent/workflows/ithy-opsx-dispatch.md` also already exists (e.g., because the antigravity renderer wrote it in the same install, or a prior copy step ran)
 - **WHEN** the copy helper runs
 - **THEN** the source file is NOT copied
 - **AND** it appears in the entry's `skipped[]` with reason `"target exists"`
@@ -244,5 +254,5 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **GIVEN** a project has `.claude/commands/ithy-opsx/dispatch.md` present
 - **WHEN** `installSkills` is invoked with only `[claude]` selected
 - **THEN** the copy helper is NOT invoked
-- **AND** `.agent/workflows/ithy-opsx/` is NOT created
+- **AND** `.agent/workflows/ithy-opsx-dispatch.md` is NOT created
 - **AND** `InstallResult.migrations` contains no entry with `kind: "copy"` (nor any antigravity entry at all)

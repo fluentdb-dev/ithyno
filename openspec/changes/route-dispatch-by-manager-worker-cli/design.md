@@ -131,6 +131,10 @@ are not maintained as independent behavioral specifications.
   `.agent/`. Treat only `.agents/workflows/` as legacy ithyno output and move
   it toward `.agent/workflows/`; do not rewrite the unrelated global agmsg
   location at `~/.agents/skills/agmsg`.
+- **Agy workflow discovery is flat.** Encode the namespace in filenames such
+  as `ithy-opsx-dispatch.md`; nested `ithy-opsx/dispatch.md` output is migrated
+  and Claude `/namespace:command` references are rendered as Agy
+  `/namespace-command` references.
 - **Worktree reuse could attach to stale work.** Derive the path server-side and
   validate its branch/repository identity; reject ambiguity rather than remove
   or overwrite it.

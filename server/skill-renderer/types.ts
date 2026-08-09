@@ -123,7 +123,7 @@ export interface InstallResult {
    * As of `copy-claude-ithy-opsx-into-agents-workflows-for-agy`,
    * antigravity installs generate TWO entries per run:
    *   1. MOVE  legacy `.agents/workflows/*.md` → `.agent/workflows/`
-   *   2. COPY  `.claude/commands/ithy-opsx/*.md` → `.agent/workflows/ithy-opsx/`
+   *   2. COPY  `.claude/commands/ithy-opsx/*.md` → `.agent/workflows/ithy-opsx-`
    *
    * `kind` is optional to keep the shape back-compatible with pre-
    * copy consumers; entries without a `kind` field are implicit-MOVE.
