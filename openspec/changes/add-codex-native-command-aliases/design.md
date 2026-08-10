@@ -63,7 +63,7 @@ therefore occur at the final delivery point:
 | Role | Claude-shaped command | Codex command |
 | --- | --- | --- |
 | manager | `/ithy-opsx:dispatch <id>` | `ithy-opsx-dispatch <id>` |
-| code | `/opsx:apply <id>` | `openspec-apply <id>` |
+| code | `/opsx:apply <id>` | `openspec-apply-change <id>` plus the code-worker scope contract |
 | review | `/ithy-opsx:review <id>` | `ithy-opsx-review <id>` |
 | verify | `/ithy-opsx:verify <id>` | `ithy-opsx-verify <id>` |
 

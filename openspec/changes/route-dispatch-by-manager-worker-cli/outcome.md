@@ -26,6 +26,11 @@ entrypoint alongside the existing Prompt. It matches the plain
 `ithy-opsx-dispatch <change-id>` form, reads the Prompt as the single source of
 workflow behavior, and prevents accidental substitution by dispatch-multi.
 
+Codex code workers receive the installed OpenSpec Skill name
+`openspec-apply-change` together with an implementation-only scope contract.
+The former `openspec-apply` shorthand had no matching Skill and could be
+interpreted as free-form work beyond the code stage.
+
 AgentRegistry owns subprocess prompt construction: Codex receives
 `exec <prompt>`, while non-Codex CLIs receive `-p <prompt>`. Explicit prompt
 overrides replace recognized legacy command prompts without dropping unrelated

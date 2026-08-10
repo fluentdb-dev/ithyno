@@ -29,6 +29,7 @@ function translateCommandBody(raw: string): string {
     .map((part) => part.startsWith("<!-- codex-preserve-start -->")
       ? part.replace("<!-- codex-preserve-start -->", "").replace("<!-- codex-preserve-end -->", "")
       : part
+        .replace(/\/opsx:apply\b/g, "openspec-apply-change")
         .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
         .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1"))
     .join("");
@@ -36,6 +37,7 @@ function translateCommandBody(raw: string): string {
 
 export function translateSkillBody(raw: string): string {
   return raw
+    .replace(/\/opsx:apply\b/g, "openspec-apply-change")
     .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
     .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1");
 }

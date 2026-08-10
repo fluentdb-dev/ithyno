@@ -12,6 +12,14 @@ const ROLE_OPERATIONS: Readonly<Record<string, [SkillNamespace, string]>> = {
   manager: ["ithy-opsx", "dispatch"],
 };
 
+export const CODEX_CODE_SCOPE_CONTRACT = [
+  "Code-worker scope contract:",
+  "- Implement only the change's unchecked implementation tasks.",
+  "- Do not archive the change.",
+  "- Do not sync change specs into the main specs.",
+  "- Do not create a git commit; the Manager owns the stage commit.",
+].join("\n");
+
 /** Resolve one operation for the CLI that receives it. */
 export function commandForManagerCommand(
   managerCommand: string | undefined,
@@ -19,10 +27,13 @@ export function commandForManagerCommand(
   operation: string,
   args = "",
 ): string {
-  const prefix = managerCommand === "codex"
-    ? namespace === "opsx" ? "openspec-" : "ithy-opsx-"
-    : `/${namespace}:`;
-  return `${prefix}${operation}${args ? ` ${args}` : ""}`;
+  if (managerCommand === "codex") {
+    const command = namespace === "opsx"
+      ? `openspec-${operation === "apply" ? "apply-change" : operation}`
+      : `ithy-opsx-${operation}`;
+    return `${command}${args ? ` ${args}` : ""}`;
+  }
+  return `/${namespace}:${operation}${args ? ` ${args}` : ""}`;
 }
 
 /** Resolve a built-in role prompt for the worker/Manager CLI receiving it. */
@@ -34,12 +45,15 @@ export function commandForAgentRole(
   const mapping = ROLE_OPERATIONS[role];
   if (!mapping) return undefined;
   const [namespace, operation] = mapping;
-  return commandForManagerCommand(
+  const prompt = commandForManagerCommand(
     command,
     namespace,
     operation,
     role === "manager" ? "" : changeIdTemplate,
   );
+  return command === "codex" && (role === "code" || role === "coder")
+    ? `${prompt}\n\n${CODEX_CODE_SCOPE_CONTRACT}`
+    : prompt;
 }
 
 /** Resolve a project command using the active Manager entry, if present. */

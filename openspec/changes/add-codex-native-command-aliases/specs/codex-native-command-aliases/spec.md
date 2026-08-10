@@ -54,7 +54,7 @@ existing `/ithy-opsx:dispatch <change-id>` injection.
 
 The dispatcher SHALL resolve a role's command using the receiving Agent's CLI.
 For a Codex target Agent, the mappings SHALL be `code` →
-`openspec-apply <change-id>`, `review` → `ithy-opsx-review <change-id>`, and
+`openspec-apply-change <change-id>` plus an implementation-only scope contract, `review` → `ithy-opsx-review <change-id>`, and
 `verify` → `ithy-opsx-verify <change-id>`. For a non-Codex target Agent, the
 dispatcher SHALL preserve the established slash-command prompts.
 
@@ -66,7 +66,7 @@ return an actionable missing-skill error naming the role and command.
 #### Scenario: Codex code worker
 - **GIVEN** a dispatch stage selects an Agent with `command: codex` for `code`
 - **WHEN** it starts work on `add-hello`
-- **THEN** the worker receives `openspec-apply add-hello`
+- **THEN** the worker receives `openspec-apply-change add-hello` with explicit prohibitions on archive, spec sync, and commit
 
 #### Scenario: Codex review skill is unavailable
 - **GIVEN** a dispatch stage selects Codex for `review`

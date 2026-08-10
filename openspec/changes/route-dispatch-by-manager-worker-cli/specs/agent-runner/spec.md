@@ -82,8 +82,9 @@ subcommand, flag, or prompt.
 
 #### Scenario: Claude Manager launches Codex worker
 - **GIVEN** a Claude Manager and a Codex single-prompt worker with no prompt in its args
-- **WHEN** the dispatcher launches the worker with resolved prompt `openspec-apply add-x`
-- **THEN** the Agent runner argv contains `exec` followed by `openspec-apply add-x`
+- **WHEN** the dispatcher launches the worker with resolved prompt beginning `openspec-apply-change add-x`
+- **THEN** the Agent runner argv contains `exec` followed by one prompt that invokes `openspec-apply-change add-x`
+- **AND** that prompt explicitly limits the worker to implementation tasks and prohibits archive, spec sync, and commit
 - **AND** the argv does not use `-p` as a prompt flag
 
 #### Scenario: Codex Manager launches Agy worker

@@ -91,7 +91,7 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "   `verify`). Pass its full prompt and artifact contract, the exact",
     "   absolute execution root, and the configured model when one is present",
     "   in `agents.yaml`. Await the child result before judging the stage.",
-    "4. **Do not bypass delegation.** Do not directly run `openspec-apply`, edit",
+    "4. **Do not bypass delegation.** Do not directly run `openspec-apply-change`, edit",
     "   implementation files, or perform the selected worker's role in the",
     "   Manager session unless `invoke_subagent` is unavailable or its call",
     "   explicitly fails. In that case, use the documented AgentRunner",

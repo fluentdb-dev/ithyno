@@ -29,6 +29,8 @@
 - [x] 4.3 Convert Claude commands to project-local Codex prompts and mirror
   Claude skills to Codex skills without promoting commands into skills.
 - [x] 4.4 Add role-by-role Codex and non-Codex dispatch regression tests.
+- [x] 4.5 Use the installed `openspec-apply-change` Skill name for Codex code
+  workers and attach an implementation-only scope contract.
 
 ## 5. Verify live compatibility
 
@@ -38,3 +40,5 @@
 - [x] 5.3 Run `npm run typecheck && npm test && npm run build`.
 - [x] 5.4 Run `npm run openspec -- validate add-codex-native-command-aliases --strict`.
 - [x] 5.5 Write `outcome.md` before archive.
+- [x] 5.6 Re-run registry, renderer, drift, typecheck, build, and strict
+  validation after correcting the Codex apply Skill name.

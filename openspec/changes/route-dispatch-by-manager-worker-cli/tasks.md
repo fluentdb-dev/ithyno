@@ -65,6 +65,9 @@
 - [x] 4.5 Generate `.codex/skills/ithy-opsx-dispatch/SKILL.md` as a thin
   single-change entrypoint backed by the canonical Codex Prompt, with an
   explicit guard against substituting `dispatch-multi` for one change ID.
+- [x] 4.6 Resolve Codex code workers to the installed
+  `openspec-apply-change` Skill and append an implementation-only scope
+  contract that forbids archive, spec sync, and commit.
 
 ## 5. Verification
 
@@ -75,3 +78,5 @@
 - [ ] 5.4 Exercise at least one Agy same-CLI `invoke_subagent` dispatch and one
   cross-CLI registry-backed dispatch in a temporary project, then record the
   actual results in `outcome.md`.
+- [x] 5.5 Verify the corrected Codex Skill name and scope contract through
+  registry, renderer, template-drift, typecheck, build, and strict validation.

@@ -126,7 +126,7 @@ Codex以外のCLIにはClaudeと同じ `-p <prompt>` 形式を使用します。
 ビルトインの `code` プロンプトを使う場合、次のように起動されます。
 
 ```text
-codex --dangerously-bypass-approvals-and-sandbox exec "openspec-apply <change_id>"
+codex --dangerously-bypass-approvals-and-sandbox exec "openspec-apply-change <change_id>"
 ```
 
 `runtimes:` blockを使う場合も同じ変換が適用されます。

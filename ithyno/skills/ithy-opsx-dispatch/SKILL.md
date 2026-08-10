@@ -223,7 +223,7 @@ For each stage `S ∈ {code, review, verify}`:
    Codex is the sole exception because it does not accept the leading-slash
    skill form. Only when `entry.command == codex`, rewrite the selected default:
 
-   - `/opsx:apply` → `openspec-apply`
+   - `/opsx:apply` → `openspec-apply-change`
    - `/ithy-opsx:review` → `ithy-opsx-review`
    - `/ithy-opsx:verify` → `ithy-opsx-verify`
    <!-- codex-preserve-end -->
@@ -232,6 +232,21 @@ For each stage `S ∈ {code, review, verify}`:
    `--boot-prompt`; never choose it from the Manager's own CLI.
 
    Then substitute template vars: `${change_id}` → the current change id.
+
+   For a Codex `code` worker, append this scope contract to the resolved
+   prompt after the change id:
+
+   ```text
+   Code-worker scope contract:
+   - Implement only the change's unchecked implementation tasks.
+   - Do not archive the change.
+   - Do not sync change specs into the main specs.
+   - Do not create a git commit; the Manager owns the stage commit.
+   ```
+
+   The exact `openspec-apply-change` name is required: it matches the
+   OpenSpec-installed Codex Skill. Do not shorten it to `openspec-apply`,
+   which has no matching Skill and can be interpreted as free-form prose.
 
    **Worker MUST NOT commit.** The dispatched code worker's role is
    apply-only. The auto-committing `/ithy-opsx:apply` variant is

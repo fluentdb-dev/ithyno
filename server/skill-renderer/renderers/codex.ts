@@ -39,7 +39,10 @@ function fillPlaceholders(body: string, source: SkillSource): string {
 
 function codexCommandName(source: SkillSource): string {
   const prefix = source.manifest.namespace === "opsx" ? "openspec" : "ithy-opsx";
-  return `${prefix}-${source.manifest.command}`;
+  const command = source.manifest.namespace === "opsx" && source.manifest.command === "apply"
+    ? "apply-change"
+    : source.manifest.command;
+  return `${prefix}-${command}`;
 }
 
 /** Codex does not expose Claude's `/namespace:command` grammar. Translate
@@ -50,6 +53,7 @@ function translateCommandReferences(body: string): string {
     .map((part) => part.startsWith("<!-- codex-preserve-start -->")
       ? part.replace("<!-- codex-preserve-start -->", "").replace("<!-- codex-preserve-end -->", "")
       : part
+        .replace(/\/opsx:apply\b/g, "openspec-apply-change")
         .replace(/\/opsx:([a-z0-9-]+)/g, "openspec-$1")
         .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "ithy-opsx-$1"))
     .join("");

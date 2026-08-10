@@ -206,7 +206,7 @@ describe("inspectAgentSkills (add-settings-agent-skill-installer)", () => {
     const { codexPromptContent } = await import("./skill-renderer/migrate-codex.js");
     const rawClaude = "---\ndescription: Test\n---\n/opsx:apply change-1";
     const expected = codexPromptContent(rawClaude, "test");
-    expect(expected).toContain("openspec-apply change-1");
+    expect(expected).toContain("openspec-apply-change change-1");
   });
 
   it("reports installed for Codex when .openspec-target is 'codex' and Codex skills exist", async () => {

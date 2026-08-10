@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { AgentRegistry, builtInPromptForAgent } from "./registry.js";
+import { CODEX_CODE_SCOPE_CONTRACT } from "../manager-command.js";
 
 /**
  * Tests for prompt resolution and template substitution in `resolve()`.
@@ -78,7 +79,7 @@ describe("AgentRegistry resolve — per-role prompts", () => {
   });
 
   it.each([
-    ["code", "openspec-apply add-native"],
+    ["code", `openspec-apply-change add-native\n\n${CODEX_CODE_SCOPE_CONTRACT}`],
     ["review", "ithy-opsx-review add-native"],
     ["verify", "ithy-opsx-verify add-native"],
   ])("delivers Codex %s through codex exec", (role, prompt) => {
@@ -126,7 +127,7 @@ describe("AgentRegistry resolve — per-role prompts", () => {
     const def = {
       name: "codex-worker",
       command: "codex",
-      args: ["exec", "openspec-apply ${change_id}"],
+      args: ["exec", "openspec-apply-change ${change_id}"],
       mode: "single-prompt" as const,
       roles: ["code"],
       role: "code",
@@ -136,7 +137,7 @@ describe("AgentRegistry resolve — per-role prompts", () => {
       { change_id: "add-native", worktree_path: "/w", branch: "b" },
       "code",
     );
-    expect(r.args).toEqual(["exec", "openspec-apply add-native"]);
+    expect(r.args).toEqual(["exec", "openspec-apply-change add-native"]);
   });
 
   it("substitutes template variables in env independently", () => {
@@ -164,7 +165,7 @@ describe("AgentRegistry resolve — per-role prompts", () => {
 
 describe("builtInPromptForAgent — receiving CLI mapping", () => {
   it.each([
-    ["code", "openspec-apply ${change_id}"],
+    ["code", `openspec-apply-change \${change_id}\n\n${CODEX_CODE_SCOPE_CONTRACT}`],
     ["review", "ithy-opsx-review ${change_id}"],
     ["verify", "ithy-opsx-verify ${change_id}"],
     ["manager", "ithy-opsx-dispatch"],

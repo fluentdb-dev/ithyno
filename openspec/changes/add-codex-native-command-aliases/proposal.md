@@ -27,7 +27,7 @@ Kanban Start injection match that interface.
    the initialization-only override must not leak into runtime.
 4. Resolve every dispatched role prompt by its target worker CLI, not only the
    Manager's entry prompt. A Codex code worker receives
-   `openspec-apply <change-id>`; Codex review and verify workers receive
+   `openspec-apply-change <change-id>`; Codex review and verify workers receive
    `ithy-opsx-review <change-id>` and `ithy-opsx-verify <change-id>`. Other CLIs
    retain their existing slash-command prompts.
 5. Preserve the Claude surface as the source of truth: convert Claude

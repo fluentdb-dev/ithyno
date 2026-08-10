@@ -795,6 +795,10 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     );
     expect(prompt).toBeDefined();
     expect(skill).toBeDefined();
+    expect(prompt!.content).toContain("openspec-apply-change");
+    expect(prompt!.content).toContain("Do not archive the change.");
+    expect(prompt!.content).toContain("Do not sync change specs into the main specs.");
+    expect(prompt!.content).toContain("Do not create a git commit");
 
     const fm = /^---\n([\s\S]+?)\n---/.exec(skill!.content);
     expect(fm).not.toBeNull();
@@ -849,7 +853,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"), "utf8"))
       .toContain("codex=ithy-opsx-review legacy=/ithy-opsx:review");
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"), "utf8"))
-      .toContain("openspec-apply ${change_id}");
+      .toContain("openspec-apply-change ${change_id}");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"), "utf8"))
       .toContain("ithy-opsx-archive ${change_id}");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-dispatch/SKILL.md"), "utf8"))
