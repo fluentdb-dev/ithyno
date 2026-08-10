@@ -689,6 +689,18 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(content, `${cli}: AgentRunner fallback missing`).toContain("server AgentRunner");
       expect(content, `${cli}: synchronous wait contract missing`).toContain("wait: true");
       expect(content, `${cli}: transport timeout missing`).toContain("--connect-timeout 10");
+      expect(content, `${cli}: authoritative endpoint guard missing`).toContain(
+        'if [ -z "${ITHYNO_BASE:-}" ]',
+      );
+      expect(content, `${cli}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${cli}: stale endpoint fallback remains`).not.toContain(
+        "ITHYNO_PORT:-4321",
+      );
+      expect(content, `${cli}: token secrecy rule missing`).toContain(
+        "Never print the token itself",
+      );
       expect(content, `${cli}: direct argv assembly returned`).not.toContain(
         "<entry.command> <entry.args...> -p <resolved-prompt>",
       );
@@ -733,6 +745,9 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(rule!.content).toContain("configured model");
     expect(rule!.content).toContain("server AgentRunner");
     expect(rule!.content).toContain("live-shell` agmsg worker");
+    expect(rule!.content).toContain("Use only the injected dashboard endpoint");
+    expect(rule!.content).toContain("that exact value");
+    expect(rule!.content).toContain("never print the token itself");
 
     for (const cli of ["claude", "codex", "gemini"] as const) {
       const paths = getRenderer(cli)!

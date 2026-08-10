@@ -327,6 +327,21 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("ithyno API commands never embed a default-port fallback", async () => {
+    const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
+    for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {
+      const content = await readFile(join(commandsDir, name), "utf8");
+      expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
+      expect(content, `${name}: authoritative base missing`).toContain("ITHYNO_BASE");
+      expect(content, `${name}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${name}: session token guard missing`).toContain(
+        "ITHYNO_SESSION_TOKEN",
+      );
+    }
+  });
+
   it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {
     const devSkillsRoot = join(REPO_ROOT, ".claude/skills");
     const tmplSkillsRoot = join(REPO_ROOT, "templates/.claude/skills");

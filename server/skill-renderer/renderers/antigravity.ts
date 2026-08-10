@@ -96,6 +96,11 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "   Manager session unless `invoke_subagent` is unavailable or its call",
     "   explicitly fails. In that case, use the documented AgentRunner",
     "   fallback; do not assemble a direct `agy -p` subprocess.",
+    "5. **Use only the injected dashboard endpoint.** Before dispatch, use",
+    "   `ITHYNO_BASE`; if only `ITHYNO_PORT` was injected, derive the URL from",
+    "   that exact value. Require `ITHYNO_SESSION_TOKEN`. Never use a default",
+    "   or guessed port after a request fails. Report",
+    "   only whether the token is set; never print the token itself.",
     "",
   ].join("\n");
 

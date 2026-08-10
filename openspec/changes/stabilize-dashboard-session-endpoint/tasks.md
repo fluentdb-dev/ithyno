@@ -15,8 +15,10 @@
 
 - [x] 3.1 Keep `ITHYNO_PORT`, `ITHYNO_BASE`, and `ITHYNO_SESSION_TOKEN` sourced from the running server session when constructing the embedded PTY environment.
 - [x] 3.2 Add PTY tests asserting exact port/base/token propagation and no fallback to port 4321 when explicit session values exist.
+- [x] 3.3 Require the authoritative base URL and session token in the cross-CLI dispatch workflow, remove the default-port fallback, and add an Agy eager-rule guard.
 
 ## 4. Verification
 
 - [x] 4.1 Run focused Electron, authentication, and PTY tests.
 - [x] 4.2 Run typecheck, the non-Claude test suite, production build, and strict OpenSpec validation for this change.
+- [x] 4.3 Validate the cross-CLI endpoint guard, template drift, build, and strict OpenSpec contract after the dispatch hardening.

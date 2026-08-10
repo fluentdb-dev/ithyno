@@ -30,16 +30,20 @@ returning the change to the phase it was in before being escalated.
    Use the Bash tool:
 
    ```bash
-   curl -sS -X POST "${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}/api/changes/<change-id>/needs-human/answer" \
+   if [ -z "${ITHYNO_BASE:-}" ]; then
+     [ -n "${ITHYNO_PORT:-}" ] || { echo "ITHYNO_BASE and ITHYNO_PORT are unset"; exit 1; }
+     ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
+   fi
+   [ -n "${ITHYNO_SESSION_TOKEN:-}" ] || { echo "ITHYNO_SESSION_TOKEN is unset"; exit 1; }
+   curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/needs-human/answer" \
      -H 'content-type: application/json' \
      -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
      -d '{"answer":"<answer>"}'
    ```
 
-   `ITHYNO_BASE` is exported into the Manager PTY by the ithyno server
-   (per-project ephemeral port under Electron / VSCode). Do NOT
-   hardcode `http://localhost:4321` — it will connection-refuse under
-   packaged shells.
+   Prefer the authoritative `ITHYNO_BASE` exported into the Manager
+   PTY. If only `ITHYNO_PORT` was injected, derive the URL from that
+   exact port. Never guess a default port or print the session token.
 
    JSON-escape the answer body (heredoc or JSON.stringify).
 

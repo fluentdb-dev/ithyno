@@ -8,6 +8,7 @@ Electron session recovery currently tears down and respawns the ithyno server, c
 - Keep both values constant for the lifetime of an Electron dashboard session, including renderer reloads and authentication recovery.
 - Reload the current authenticated launch URL for renderer recovery instead of replacing a healthy server process.
 - Ensure the Manager PTY receives the exact port and token owned by its dashboard session.
+- Make dispatch fail closed when the authoritative endpoint or token is absent; it must never retry a remembered/default port or expose the token during diagnostics.
 - Start a new endpoint identity only when starting a genuinely new dashboard session, such as an application launch or project switch.
 - Preserve the existing CSRF checks and token secrecy; this change alters token lifetime, not authorization requirements.
 
@@ -28,4 +29,5 @@ None.
 - Electron main-process session and reload handling.
 - Server authentication token initialization.
 - Embedded PTY environment construction.
+- Cross-CLI dispatch workflow and Agy's eager dispatch rule.
 - Electron and server authentication tests; no HTTP API shape or external dependency changes.

@@ -42,33 +42,43 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — base URL of the local ithyno server. The Electron
-  shell and VSCode extension each spawn the server on an ephemeral
-  per-project port and export `ITHYNO_PORT` + `ITHYNO_BASE` into the
-  Manager PTY, so `$ITHYNO_BASE` is already resolved. In the CLI dev
-  workflow (no parent shell), fall back to
-  `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`.
-  Every `curl` block below uses `$ITHYNO_BASE` as-is — Manager MUST
-  read the shell's env, NOT hardcode 4321.
+- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
+  The Electron shell and VSCode extension export the resolved,
+  per-project endpoint into the Manager PTY. If only the injected
+  `ITHYNO_PORT` is available, derive the base URL from that exact
+  value. Never use a remembered or default port.
 
 - `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
   token. Required by every token-gated endpoint, including
   `POST /api/manager/activity` (see **Manager activity publication**
   below). The server exports it into the Manager PTY's environment at
-  spawn time, so in the normal case it is already set and you do
-  nothing. Verify once at dispatch start:
+  spawn time. Before any dispatch action or diagnostic, validate the
+  injected context once:
 
   ```bash
-  if [ -z "$ITHYNO_SESSION_TOKEN" ]; then
-    echo "[dispatch] ITHYNO_SESSION_TOKEN unset — Manager activity will not be published."
-    echo "[dispatch] It is exported into the terminal PTY by the ithyno server;"
-    echo "[dispatch] if you launched this shell outside the dashboard terminal,"
-    echo "[dispatch] copy the token from the launch URL (…/?token=<token>)."
+  if [ -z "${ITHYNO_BASE:-}" ]; then
+    if [ -n "${ITHYNO_PORT:-}" ]; then
+      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
+    else
+      echo "[dispatch] ITHYNO_BASE and ITHYNO_PORT are unset."
+      echo "[dispatch] Restart this Manager from the active dashboard; do not guess a port."
+      exit 1
+    fi
+  fi
+  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
+    echo "[dispatch] authoritative ithyno session context is missing."
+    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
+    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
+    echo "[dispatch] Restart this Manager from the active dashboard."
+    exit 1
   fi
   ```
 
-  A missing token is NOT a dispatch blocker — activity publication is
-  best-effort telemetry. Continue the dispatch either way.
+  Never print the token itself. If a request fails, report the value
+  of `ITHYNO_BASE` and whether the token is set, then stop. Do not
+  retry a guessed endpoint or declare the server offline based on a
+  request to another port. Activity publication remains best-effort
+  only after this initial session-context validation succeeds.
 
 ## Manager activity publication
 

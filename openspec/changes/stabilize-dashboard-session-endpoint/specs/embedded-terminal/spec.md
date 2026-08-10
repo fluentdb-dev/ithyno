@@ -18,3 +18,16 @@ The embedded PTY SHALL provide each Manager process with `ITHYNO_PORT`, `ITHYNO_
 - **GIVEN** `ITHYNO_BASE` and `ITHYNO_PORT` are present in the Manager environment
 - **WHEN** an ithyno command contacts the dashboard server
 - **THEN** it uses the supplied endpoint and does not replace it with the default port `4321`
+
+#### Scenario: Only the authoritative port is available
+- **GIVEN** `ITHYNO_BASE` is absent and the injected `ITHYNO_PORT` is present
+- **WHEN** an ithyno command resolves the dashboard endpoint
+- **THEN** it derives `http://localhost:<ITHYNO_PORT>` from that exact value
+- **AND** it does not use a default or remembered port
+
+#### Scenario: Dispatch has no authoritative session context
+- **GIVEN** both `ITHYNO_BASE` and `ITHYNO_PORT` are absent, or `ITHYNO_SESSION_TOKEN` is absent
+- **WHEN** the Manager starts an ithyno dispatch or diagnoses a failed server request
+- **THEN** dispatch stops before contacting an endpoint
+- **AND** it does not construct or retry a URL using a default or guessed port
+- **AND** diagnostics may state whether the token is set but MUST NOT print the token value
