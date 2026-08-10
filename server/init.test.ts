@@ -343,6 +343,33 @@ describe("ithy-opsx template drift guard", () => {
         name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
       );
     }
+
+    const multiCopies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of multiCopies) {
+      const content = await readFile(path, "utf8");
+      expect(content, `${path}: default-port fallback`).not.toContain(
+        "ITHYNO_PORT:-4321",
+      );
+      expect(content, `${path}: authoritative base missing`).toContain(
+        "authoritative base URL",
+      );
+      expect(content, `${path}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${path}: token fail-closed guard missing`).toContain(
+        "authoritative ithyno session context is missing",
+      );
+      expect(content, `${path}: freshness checkpoint missing`).toContain(
+        "before every ithyno HTTP",
+      );
+    }
+    const multiContents = await Promise.all(
+      multiCopies.map((path) => readFile(path, "utf8")),
+    );
+    expect(new Set(multiContents).size, "dispatch-multi template drift").toBe(1);
   });
 
   it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {

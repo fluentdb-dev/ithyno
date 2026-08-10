@@ -51,17 +51,42 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
-- `ITHYNO_BASE` — phase API base URL. Exported into the Manager PTY
-  by the ithyno server (Electron / VSCode each spawn on an ephemeral
-  per-project port and set `ITHYNO_PORT` + `ITHYNO_BASE` accordingly).
-  Fall back to `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`
-  when neither is set. Do NOT hardcode 4321 — dispatch will
-  connection-refuse under Electron.
-- `ITHYNO_SESSION_TOKEN` — session token for the token-gated
-  `POST /api/manager/activity` endpoint. Exported into the Manager
-  PTY's environment by the ithyno server, so normally already set.
-  Warn once when absent and continue — activity publication is
-  best-effort telemetry, never a dispatch blocker.
+- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
+  The Electron shell and VSCode extension export the resolved,
+  per-project endpoint into the Manager PTY. If only the injected
+  `ITHYNO_PORT` is available, derive the base URL from that exact
+  value. Never use a remembered or default port.
+- `ITHYNO_SESSION_TOKEN` — the current dashboard session token.
+  Validate the injected context before preflight or worker routing:
+
+  ```bash
+  if [ -z "${ITHYNO_BASE:-}" ]; then
+    if [ -n "${ITHYNO_PORT:-}" ]; then
+      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
+    else
+      echo "[dispatch-multi] ITHYNO_BASE and ITHYNO_PORT are unset."
+      echo "[dispatch-multi] Restart this Manager from the active dashboard; do not guess a port."
+      exit 1
+    fi
+  fi
+  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
+    echo "[dispatch-multi] authoritative ithyno session context is missing."
+    echo "[dispatch-multi] ITHYNO_BASE=$ITHYNO_BASE"
+    echo "[dispatch-multi] ITHYNO_SESSION_TOKEN is unset."
+    echo "[dispatch-multi] Restart this Manager from the active dashboard."
+    exit 1
+  fi
+  ```
+
+  Never print the token itself. Immediately before every ithyno HTTP
+  request, reconsider whether the dashboard or server restarted and
+  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
+  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
+  re-read them once and retry only if the request values demonstrably
+  changed. Otherwise stop; a control-plane failure must not enter a
+  worker, Manager-execution, or guessed-endpoint fallback. Activity
+  publication remains best-effort only after this initial session-
+  context validation succeeds.
 
 ## Manager activity publication (per change)
 

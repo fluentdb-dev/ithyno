@@ -51,9 +51,11 @@ The skill covers:
    `transitioning` → `idle`) so each Kanban card shows what Manager
    is doing for THAT change. Every post carries its own `changeId`;
    parallel dispatches never share a badge. Requires
-   `ITHYNO_SESSION_TOKEN` (exported into the Manager PTY by the
-   ithyno server); best-effort — a missing token never blocks
-   dispatch. Landed by expose-manager-activity-per-change.
+   the authoritative `ITHYNO_BASE` / `ITHYNO_PORT` and
+   `ITHYNO_SESSION_TOKEN` exported into the Manager PTY. Missing
+   session context stops dispatch before worker routing; individual
+   activity publication failures remain best-effort after that guard.
+   Landed by expose-manager-activity-per-change.
 
 Do not skip steps. Respect `MAX_ITERATIONS = 5` per change.
 Escalation of one change does NOT stop the others.

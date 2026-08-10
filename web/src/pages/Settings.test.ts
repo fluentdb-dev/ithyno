@@ -260,6 +260,7 @@ describe("Agent CLI row discrimination (add-settings-agent-skill-installer)", ()
       "partial",
       "installed",
       "update-available",
+      "conflict",
       "unsupported",
     ] as const;
     for (const s of states) {

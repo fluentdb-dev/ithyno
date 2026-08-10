@@ -496,6 +496,7 @@ export type AgentSkillStatus =
   | "partial"
   | "installed"
   | "update-available"
+  | "conflict"
   | "unsupported";
 
 export interface ComponentInspection {

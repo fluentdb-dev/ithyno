@@ -14,8 +14,9 @@
  * A per-(projectRoot, cli) lock prevents duplicate concurrent installs.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, relative } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import {
   getRenderer,
@@ -34,6 +35,7 @@ export type AgentSkillStatus =
   | "partial"
   | "installed"
   | "update-available"
+  | "conflict"
   | "unsupported";
 
 export type AgentSkillComponent = "openspec" | "ithyno";
@@ -223,6 +225,50 @@ async function readIfExists(path: string): Promise<string | null> {
   }
 }
 
+async function walkFiles(root: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) files.push(...await walkFiles(path));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
+}
+
+/**
+ * Claude can resolve both project-local and ~/.claude definitions with the
+ * same command/skill name. Report those duplicates so a stale global copy
+ * cannot silently shadow the project version. This is intentionally
+ * read-only: project installation never deletes or overwrites user-global
+ * configuration.
+ */
+async function findClaudeGlobalConflicts(
+  projectRoot: string,
+  userHome: string,
+): Promise<string[]> {
+  const projectClaudeRoot = join(projectRoot, ".claude");
+  const globalClaudeRoot = join(userHome, ".claude");
+  const candidates = [
+    ...await walkFiles(join(projectClaudeRoot, "commands", "ithy-opsx")),
+    ...(await walkFiles(join(projectClaudeRoot, "skills"))).filter((path) =>
+      relative(join(projectClaudeRoot, "skills"), path)
+        .split(/[\\/]/, 1)[0]
+        .startsWith("ithy-opsx-"),
+    ),
+  ];
+  return candidates
+    .map((path) => relative(projectClaudeRoot, path))
+    .filter((path) => existsSync(join(globalClaudeRoot, path)))
+    .map((path) => join(globalClaudeRoot, path))
+    .sort();
+}
+
 function inspectOpenspecPaths(
   projectRoot: string,
   cli: string,
@@ -387,6 +433,7 @@ export async function inspectAgentSkills(
   projectRoot: string,
   sourcesDir: string,
   installedClis?: Record<string, { installed: boolean }>,
+  userHome = homedir(),
 ): Promise<AgentSkillInfo[]> {
   const now = new Date().toISOString();
   const results: AgentSkillInfo[] = [];
@@ -422,6 +469,21 @@ export async function inspectAgentSkills(
           status: "unsupported",
           diagnostics: [err instanceof Error ? err.message : String(err)],
           paths: [],
+        };
+      }
+    }
+
+    if (cli === "claude") {
+      const conflicts = await findClaudeGlobalConflicts(projectRoot, userHome);
+      if (conflicts.length > 0) {
+        ithyno = {
+          ...ithyno,
+          status: "conflict",
+          diagnostics: [
+            ...ithyno.diagnostics,
+            `Global Claude definitions may shadow project-local ithyno files: ${conflicts.join(", ")}`,
+            "Move or remove the global duplicates, then restart the Claude session. Manage Skills does not modify global files.",
+          ],
         };
       }
     }
@@ -637,4 +699,5 @@ export async function installAgentSkills(
 
 export const _test_exports = {
   spawn,
+  findClaudeGlobalConflicts,
 };

@@ -17,6 +17,8 @@
 - [x] 3.2 Add PTY tests asserting exact port/base/token propagation and no fallback to port 4321 when explicit session values exist.
 - [x] 3.3 Require the authoritative base URL and session token in the cross-CLI dispatch workflow, remove the default-port fallback, and add an Agy eager-rule guard.
 - [x] 3.4 Add a mandatory per-request session-freshness checkpoint, prevent auth/transport failures from entering worker fallback, and use the server-supported session-token header.
+- [x] 3.5 Bring multi-change dispatch onto the same fail-closed endpoint policy and remove its default-port and optional-token guidance.
+- [x] 3.6 Detect duplicate global Claude ithyno definitions in Manage Skills and surface their paths as a conflict without deleting them automatically.
 
 ## 4. Verification
 
@@ -24,3 +26,4 @@
 - [x] 4.2 Run typecheck, the non-Claude test suite, production build, and strict OpenSpec validation for this change.
 - [x] 4.3 Validate the cross-CLI endpoint guard, template drift, build, and strict OpenSpec contract after the dispatch hardening.
 - [x] 4.4 Validate per-request freshness guidance, rendered CLI outputs, template drift, and strict OpenSpec consistency.
+- [x] 4.5 Extend the drift guard across API-using command and skill definitions, then run focused tests, build, and strict validation.

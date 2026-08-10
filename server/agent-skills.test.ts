@@ -4,7 +4,7 @@
  * (add-settings-agent-skill-installer)
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -179,6 +179,27 @@ describe("inspectAgentSkills (add-settings-agent-skill-installer)", () => {
     expect(opencode?.openspec.status).toBe("unsupported");
     expect(opencode?.ithyno.status).toBe("unsupported");
     expect(opencode?.openspec.diagnostics).toContain("CLI not installed");
+  });
+
+  it("reports project/global Claude ithyno definition collisions without modifying them", async () => {
+    const projectCommand = join(tmpDir, ".claude/commands/ithy-opsx/dispatch.md");
+    const fakeHome = join(tmpDir, "home");
+    const globalCommand = join(fakeHome, ".claude/commands/ithy-opsx/dispatch.md");
+    await mkdir(join(projectCommand, ".."), { recursive: true });
+    await mkdir(join(globalCommand, ".."), { recursive: true });
+    await writeFile(projectCommand, "project definition");
+    await writeFile(globalCommand, "stale global definition");
+
+    const results = await inspectAgentSkills(
+      tmpDir,
+      fakeSourcesDir,
+      mockInstalledClis,
+      fakeHome,
+    );
+    const claude = results.find((r) => r.cli === "claude");
+    expect(claude?.ithyno.status).toBe("conflict");
+    expect(claude?.ithyno.diagnostics.join("\n")).toContain(globalCommand);
+    expect(await readFile(globalCommand, "utf8")).toBe("stale global definition");
   });
 
   it("translates Claude commands to Codex prompt format correctly for inspection expectations", async () => {
