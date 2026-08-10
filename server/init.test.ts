@@ -339,6 +339,9 @@ describe("ithy-opsx template drift guard", () => {
       expect(content, `${name}: session token guard missing`).toContain(
         "ITHYNO_SESSION_TOKEN",
       );
+      expect(content, `${name}: per-request environment refresh missing`).toContain(
+        name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
+      );
     }
   });
 

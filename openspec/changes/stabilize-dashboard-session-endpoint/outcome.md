@@ -7,6 +7,7 @@
 - Manager PTYs inherit the authoritative server port/token values from the active dashboard session, and the new regression tests cover auth, PTY env propagation, and session-reuse logic.
 - The cross-CLI dispatch workflow now fails closed when that injected context is missing and never retries port 4321; Agy receives the same restriction in its eager project rule.
 - Endpoint/template tests, typecheck, production build, strict change validation, and all OpenSpec validations pass. The full test run passed 848 tests with one existing timing-sensitive Runner assertion failing under parallel load; its complete 11-test file passed immediately in isolation.
+- Every ithyno HTTP boundary now tells the Manager to reconsider session freshness and re-expand the current environment; auth/transport failures stop instead of becoming worker failures, and AgentRunner requests use `X-Session-Token` consistently with the server contract.
 
 ## ⚠️ Surprises
 

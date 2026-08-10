@@ -60,8 +60,7 @@ The dispatch advances the change through `proposed → coded → reviewed
   token. Required by every token-gated endpoint, including
   `POST /api/manager/activity` (see **Manager activity publication**
   below). The server exports it into the Manager PTY's environment at
-  spawn time. Before any dispatch action or diagnostic, validate the
-  injected context once:
+  spawn time. Validate the injected context at dispatch start:
 
   ```bash
   if [ -z "${ITHYNO_BASE:-}" ]; then
@@ -87,6 +86,18 @@ The dispatch advances the change through `proposed → coded → reviewed
   retry a guessed endpoint or declare the server offline based on a
   request to another port. Activity publication remains best-effort
   only after this initial session-context validation succeeds.
+
+  **Mandatory freshness checkpoint:** immediately before every ithyno
+  HTTP request, pause and ask whether the dashboard or server may have
+  restarted since the preceding request. Expand the current shell's
+  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
+  moment; never reuse a literal endpoint/token copied from an earlier
+  command or explanation. On HTTP 401/403 or a transport failure,
+  re-read those variables once. Retry only when the current values are
+  demonstrably different from the values used by the failed request;
+  otherwise stop and request a fresh Manager session. An auth/transport
+  failure is not a worker failure and MUST NOT trigger Manager self-
+  execution, `invoke_subagent`, or another worker-routing fallback.
 
 ## Manager activity publication
 
@@ -153,8 +164,9 @@ For each stage `S ∈ {code, review, verify}`:
    thing: the Manager (this Claude session) performs the stage's
    work directly, in-session, instead of routing to a configured
    worker CLI. This applies both when no agent entry exists for `S`
-   AND when the configured agent fails at runtime after retries
-   (sandbox block, API timeout, network error, missing binary).
+   AND when the configured worker itself fails at runtime after retries
+   (sandbox block, worker timeout, missing binary). It does not apply to
+   ithyno session authentication or controller-transport failure.
 
    The rules for Manager fallback are uniform across ALL stages
    (`code`, `review`, `verify`):
@@ -174,10 +186,10 @@ For each stage `S ∈ {code, review, verify}`:
      distinguisher is *who executes the work*: the Manager itself
      (fallback, sequential) vs a distinct subagent instance the
      Manager spawned (agent-like, parallel-eligible).
-   - **Runtime failure fallback ladder** (when a configured agent
-     fails):
-     1. Retry the configured agent once (transient network/API
-        error).
+   - **Worker runtime failure fallback ladder** (when a configured
+     worker fails after dispatch reached the server or native tool):
+     1. Retry the configured worker once when the worker failure is
+        transient.
      2. If still failing, invoke Manager fallback for the stage —
         Manager performs the work in-session and writes the same
         artifact contract the configured agent would have written
@@ -187,6 +199,11 @@ For each stage `S ∈ {code, review, verify}`:
      3. If Manager itself cannot perform (e.g., an external tool is
         required that the Manager lacks access to), escalate to
         needs-human per the standard escalate contract.
+   - **Controller/session failures never enter that ladder.** HTTP
+     401/403, an unreachable `ITHYNO_BASE`, or failure to contact the
+     ithyno AgentRunner means the dispatch control plane is stale or
+     unavailable. Re-read the current environment as described above;
+     if it did not change, stop and request a fresh Manager session.
    - **Verify fallback is the same shape.** When no verify agent is
      defined and the Manager runs verify, it means: cd into the
      worktree, run `npm test`, `npm run typecheck`, `npm run build`
@@ -489,14 +506,27 @@ exist, create it first.
 
      CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
      RUN_RESP=$(curl -s --connect-timeout 10 --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H "Authorization: Bearer $ITHYNO_SESSION_TOKEN" \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
        -H "Content-Type: application/json" \
        -d "$JSON_PAYLOAD")
+     CURL_EXIT=$?
+
+     if [ "$CURL_EXIT" -ne 0 ]; then
+       echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
+       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+       exit 1
+     fi
 
      JOB_STATUS=$(echo "$RUN_RESP" | node -e '
        try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
        catch { console.log(""); }
      ')
+
+     if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
+       echo "[dispatch] ithyno session authentication failed at $ITHYNO_BASE."
+       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+       exit 1
+     fi
 
      if [ "$JOB_STATUS" != "completed" ]; then
        echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"

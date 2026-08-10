@@ -101,6 +101,12 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "   that exact value. Require `ITHYNO_SESSION_TOKEN`. Never use a default",
     "   or guessed port after a request fails. Report",
     "   only whether the token is set; never print the token itself.",
+    "6. **Question freshness before every request.** Ask whether the dashboard",
+    "   or server restarted since the preceding request, then expand the current",
+    "   shell's endpoint and token variables again. On 401/403 or transport",
+    "   failure, re-read once and retry only if the values demonstrably changed.",
+    "   Otherwise stop; do not treat session failure as worker failure or invoke",
+    "   a delegation fallback.",
     "",
   ].join("\n");
 

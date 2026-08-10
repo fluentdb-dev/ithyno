@@ -701,6 +701,24 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(content, `${cli}: token secrecy rule missing`).toContain(
         "Never print the token itself",
       );
+      expect(content, `${cli}: per-request freshness checkpoint missing`).toContain(
+        "Mandatory freshness checkpoint",
+      );
+      expect(content, `${cli}: session failure may enter worker fallback`).toContain(
+        "failure is not a worker failure",
+      );
+      expect(content, `${cli}: wrong auth header remains`).not.toContain(
+        "Authorization: Bearer $ITHYNO_SESSION_TOKEN",
+      );
+      expect(content, `${cli}: session-token header missing`).toContain(
+        "X-Session-Token: $ITHYNO_SESSION_TOKEN",
+      );
+      expect(content, `${cli}: transport failure not separated`).toContain(
+        'if [ "$CURL_EXIT" -ne 0 ]',
+      );
+      expect(content, `${cli}: auth failure not separated`).toContain(
+        'JOB_STATUS" = "auth required"',
+      );
       expect(content, `${cli}: direct argv assembly returned`).not.toContain(
         "<entry.command> <entry.args...> -p <resolved-prompt>",
       );
@@ -748,6 +766,9 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(rule!.content).toContain("Use only the injected dashboard endpoint");
     expect(rule!.content).toContain("that exact value");
     expect(rule!.content).toContain("never print the token itself");
+    expect(rule!.content).toContain("Question freshness before every request");
+    expect(rule!.content).toContain("retry only if the values demonstrably changed");
+    expect(rule!.content).toContain("do not treat session failure as worker failure");
 
     for (const cli of ["claude", "codex", "gemini"] as const) {
       const paths = getRenderer(cli)!

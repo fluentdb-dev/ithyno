@@ -9,6 +9,7 @@ Electron session recovery currently tears down and respawns the ithyno server, c
 - Reload the current authenticated launch URL for renderer recovery instead of replacing a healthy server process.
 - Ensure the Manager PTY receives the exact port and token owned by its dashboard session.
 - Make dispatch fail closed when the authoritative endpoint or token is absent; it must never retry a remembered/default port or expose the token during diagnostics.
+- Require every ithyno HTTP boundary to reconsider session freshness and re-expand the current environment instead of trusting values used by an earlier request.
 - Start a new endpoint identity only when starting a genuinely new dashboard session, such as an application launch or project switch.
 - Preserve the existing CSRF checks and token secrecy; this change alters token lifetime, not authorization requirements.
 

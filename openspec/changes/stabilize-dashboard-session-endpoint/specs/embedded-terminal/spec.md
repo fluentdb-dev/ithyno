@@ -31,3 +31,11 @@ The embedded PTY SHALL provide each Manager process with `ITHYNO_PORT`, `ITHYNO_
 - **THEN** dispatch stops before contacting an endpoint
 - **AND** it does not construct or retry a URL using a default or guessed port
 - **AND** diagnostics may state whether the token is set but MUST NOT print the token value
+
+#### Scenario: Session identity may have changed between requests
+- **GIVEN** an ithyno workflow previously completed an authenticated HTTP request
+- **WHEN** it is about to make another ithyno HTTP request
+- **THEN** it explicitly reconsiders whether the dashboard or server restarted
+- **AND** it expands the current `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` values again rather than reusing copied literals
+- **AND** after HTTP 401/403 or a transport failure it re-reads the environment once and retries only if the request values demonstrably changed
+- **AND** an unchanged or invalid session stops the workflow without entering a worker or Manager-execution fallback

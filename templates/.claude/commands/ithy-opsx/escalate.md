@@ -56,6 +56,9 @@ in the needs-human state and hand off to the user.
    Prefer the authoritative `ITHYNO_BASE` exported into the Manager
    PTY. If only `ITHYNO_PORT` was injected, derive the URL from that
    exact port. Never guess a default port or print the session token.
+   Immediately before the request, reconsider whether the dashboard or
+   server restarted and expand all three environment variables again;
+   never reuse values copied from an earlier request.
 
    Escape the JSON body appropriately (use a heredoc or Node's
    JSON.stringify equivalent to avoid quoting bugs).
