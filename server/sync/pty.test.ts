@@ -327,6 +327,10 @@ describe("buildManagerPtyEnv", () => {
   });
 });
 
+function expectedTmuxStartup(session: string, command: string): string {
+  return `(tmux show-options -gv update-environment 2>/dev/null | grep -qw ITHYNO_SESSION_TOKEN || tmux set-option -ag update-environment ' ITHYNO_PORT ITHYNO_BASE ITHYNO_SESSION_TOKEN' 2>/dev/null || true); exec tmux new-session -A -s ${session} -e ITHYNO_PORT="$ITHYNO_PORT" -e ITHYNO_BASE="$ITHYNO_BASE" -e ITHYNO_SESSION_TOKEN="$ITHYNO_SESSION_TOKEN" -- ${command}`;
+}
+
 describe("ptyStartup — tmux wrap (wrap-embedded-pty-in-tmux)", () => {
   it("agmsg absent → direct spawn unchanged (regression lock)", async () => {
     _setTmuxCacheForTest(true); // tmux available but no agmsg → still no wrap
@@ -354,8 +358,27 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({
-      startup: "tmux new-session -A -s ithyno -- claude --continue",
+      startup: expectedTmuxStartup("ithyno", "claude --continue"),
     });
+  });
+
+  it("passes the authoritative dashboard identity into the tmux session environment", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `tmux: true
+agents:
+  - name: primary
+    role: manager
+    command: codex
+`,
+    );
+    const startup = ptyStartup(reg).startup;
+    expect(startup).toContain('update-environment');
+    expect(startup).toContain('ITHYNO_PORT ITHYNO_BASE ITHYNO_SESSION_TOKEN');
+    expect(startup).toContain('-e ITHYNO_PORT="$ITHYNO_PORT"');
+    expect(startup).toContain('-e ITHYNO_BASE="$ITHYNO_BASE"');
+    expect(startup).toContain('-e ITHYNO_SESSION_TOKEN="$ITHYNO_SESSION_TOKEN"');
+    expect(startup).not.toMatch(/[a-f0-9]{64}/i);
   });
 
   it("agmsg present + tmux missing → fallback banner; initialInput suppressed", async () => {
@@ -393,7 +416,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg).startup).toBe(
-      "tmux new-session -A -s proj-a -- claude --continue",
+      expectedTmuxStartup("proj-a", "claude --continue"),
     );
   });
 
@@ -410,7 +433,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg).startup).toBe(
-      "tmux new-session -A -s ithyno -- claude --project 'my project'",
+      expectedTmuxStartup("ithyno", "claude --project 'my project'"),
     );
   });
 
@@ -428,7 +451,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({
-      startup: "tmux new-session -A -s ithyno -- claude --continue",
+      startup: expectedTmuxStartup("ithyno", "claude --continue"),
       initialInput: "/ithy-opsx:dispatch",
     });
   });
@@ -447,7 +470,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({
-      startup: "tmux new-session -A -s ithyno -- claude --continue",
+      startup: expectedTmuxStartup("ithyno", "claude --continue"),
     });
   });
 
@@ -465,7 +488,7 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({
-      startup: "tmux new-session -A -s ithyno -- claude --continue",
+      startup: expectedTmuxStartup("ithyno", "claude --continue"),
     });
   });
 

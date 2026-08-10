@@ -131,7 +131,7 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * `registry.agmsg()` is non-null (workspace opted into the
  * PTY→tmux→agmsg flavor via `add-agmsg-config-block`) — the resolved
  * manager command is further wrapped in
- * `tmux new-session -A -s <name> -- <cmd> <args…>` where `<name>` is
+ * `tmux new-session -A -s <name> -e ITHYNO_*=... -- <cmd> <args…>` where `<name>` is
  * `$ITHYNO_TMUX_SESSION` when set (non-empty) else `ithyno`. `agmsg`
  * being configured implies tmux unconditionally (there is no way to
  * configure agmsg without tmux); the `tmux` toggle is independent and
@@ -276,7 +276,20 @@ export function ptyStartup(
       : { startup: baseStartup, initialInput };
   }
   const session = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
-  const startup = `tmux new-session -A -s ${shellQuote(session)} -- ${baseStartup}`;
+  // A tmux server outlives the PTY client that created it. Explicitly put the
+  // dashboard identity in a new session and register those names with
+  // update-environment before `-A` attaches to an existing session. The shell
+  // expands values only when executing this line, so startup logging contains
+  // variable references rather than the token itself.
+  const ithynoEnvNames = "ITHYNO_PORT ITHYNO_BASE ITHYNO_SESSION_TOKEN";
+  const ensureTmuxEnvUpdate =
+    `(tmux show-options -gv update-environment 2>/dev/null | ` +
+    `grep -qw ITHYNO_SESSION_TOKEN || ` +
+    `tmux set-option -ag update-environment ${shellQuote(` ${ithynoEnvNames}`)} 2>/dev/null || true)`;
+  const explicitSessionEnv = ["ITHYNO_PORT", "ITHYNO_BASE", "ITHYNO_SESSION_TOKEN"]
+    .map((name) => `-e ${name}=\"$${name}\"`)
+    .join(" ");
+  const startup = `${ensureTmuxEnvUpdate}; exec tmux new-session -A -s ${shellQuote(session)} ${explicitSessionEnv} -- ${baseStartup}`;
   return initialInput === undefined
     ? { startup }
     : { startup, initialInput };
