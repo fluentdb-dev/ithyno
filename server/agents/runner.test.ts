@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
@@ -203,6 +203,40 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       expect(summary?.status).toBe("timed-out");
     }
   });
+
+  it.each(["review", "verify"])(
+    "removes a stale review artifact before a %s worker starts",
+    async (role) => {
+      const root = await runner.resolveExecutionRoot("add-stale", "worktree");
+      expect(root.ok).toBe(true);
+      if (!root.ok) return;
+
+      const artifact = join(
+        root.cwd,
+        "openspec",
+        "changes",
+        "add-stale",
+        "review.md",
+      );
+      mkdirSync(join(artifact, ".."), { recursive: true });
+      writeFileSync(artifact, [
+        "---",
+        "verdict: pass",
+        "findings: []",
+        "---",
+        "",
+        "stale",
+      ].join("\n"));
+
+      const run = await runner.run("add-stale", "worker", role, "worktree");
+      expect(run.ok).toBe(true);
+      if (!run.ok) return;
+      await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+      expect(existsSync(artifact)).toBe(false);
+      expect(runner.getJob(run.job.id)?.verdict).toBeUndefined();
+    },
+  );
 });
 
 describe("API Validation rules for wait & timeoutMs (validateRunPayload)", () => {

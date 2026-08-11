@@ -215,6 +215,25 @@ For each stage `S ∈ {code, review, verify}`:
      escalate rather than self-review is often better; project
      policy decides.
 
+   **Invalidate the prior stage artifact before execution.** For `review`
+   and `verify`, after `$REVIEW_MD_PATH` has been resolved and immediately
+   before invoking Manager fallback, agmsg, a native tool, or AgentRunner,
+   remove the prior artifact:
+
+   ```bash
+   if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
+     rm -f -- "$REVIEW_MD_PATH" || {
+       /ithy-opsx:escalate <change-id> "cannot invalidate prior review artifact at $REVIEW_MD_PATH"
+       exit 1
+     }
+   fi
+   ```
+
+   AgentRunner enforces the same rule server-side for subprocess launches.
+   Removing the old file here is still required for Manager, agmsg, and
+   native-tool branches. A stage may only succeed from an artifact created
+   by its current worker invocation.
+
 2. **Resolve the prompt for the receiving Agent CLI**:
    `entry.prompts[S]` wins byte-for-byte when explicitly set. Otherwise start
    from the established slash-command default:

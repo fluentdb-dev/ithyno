@@ -24,7 +24,11 @@ import {
   installSkills,
   type CliId,
 } from "./skill-renderer/index.js";
-import { codexPromptContent, translateSkillBody } from "./skill-renderer/migrate-codex.js";
+import {
+  codexPromptContent,
+  codexWorkerSkillFromCommand,
+  translateSkillBody,
+} from "./skill-renderer/migrate-codex.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -397,6 +401,54 @@ async function inspectIthynoState(
         }
         if (existing !== expectedContent) {
           outdated.push(f.path);
+        }
+      }
+    }
+  }
+
+  // Review and verify are Claude-authored command bodies mirrored into Codex
+  // Prompts after the universal render loop. Their thin Codex Skills are also
+  // required output even though they do not originate under ithyno/skills/.
+  if (rendererCli === "codex") {
+    for (const command of ["review", "verify"]) {
+      const projectSource = join(
+        projectRoot,
+        ".claude",
+        "commands",
+        "ithy-opsx",
+        `${command}.md`,
+      );
+      const bundledSource = join(
+        sourcesDir,
+        "..",
+        "..",
+        "templates",
+        ".claude",
+        "commands",
+        "ithy-opsx",
+        `${command}.md`,
+      );
+      const raw = await readIfExists(projectSource) ?? await readIfExists(bundledSource);
+      if (raw === null) continue;
+
+      const expectedWorkerFiles = [
+        {
+          path: `.codex/prompts/ithy-opsx-${command}.md`,
+          content: codexPromptContent(raw, command),
+        },
+        {
+          path: `.codex/skills/ithy-opsx-${command}/SKILL.md`,
+          content: codexWorkerSkillFromCommand(raw, command),
+        },
+      ];
+      for (const expected of expectedWorkerFiles) {
+        expectedCount++;
+        paths.push(expected.path);
+        const existing = await readIfExists(join(projectRoot, expected.path));
+        if (existing === null) {
+          missing.push(expected.path);
+        } else if (existing !== expected.content) {
+          outdated.push(expected.path);
         }
       }
     }

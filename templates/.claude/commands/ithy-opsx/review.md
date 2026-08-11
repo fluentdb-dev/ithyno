@@ -11,13 +11,42 @@ Review the specified OpenSpec change and write a structured verdict to
 (via `/ithy-opsx:dispatch`), the verdict flows back and drives the
 next phase transition.
 
-**Input**: `$ARGUMENTS` is the change id. The worktree at
-`.worktrees/<change-id>/` (branch `agent/<change-id>`) is assumed to
-exist with the code worker's commit already landed.
+**Input**: `$ARGUMENTS` is the change id. When invoked by dispatch, the
+worker starts in the server-resolved worktree or main tree and the prompt
+includes an artifact contract with the exact absolute `review.md` path.
+That absolute path is authoritative.
 
 ## Steps
 
-1. **Understand the change**
+1. **Resolve the execution root and artifact path**
+
+   Do not blindly run `cd .worktrees/<change-id>`. AgentRunner and native
+   delegation normally start this worker inside the resolved execution
+   root already. Resolve the root without nesting worktrees:
+
+   ```bash
+   CHANGE_ID="<change-id>"
+   if [ -f "openspec/changes/$CHANGE_ID/proposal.md" ]; then
+     EXECUTION_ROOT="$(pwd)"
+   elif [ -f ".worktrees/$CHANGE_ID/openspec/changes/$CHANGE_ID/proposal.md" ]; then
+     EXECUTION_ROOT="$(pwd)/.worktrees/$CHANGE_ID"
+   else
+     echo "Cannot resolve execution root for $CHANGE_ID" >&2
+     exit 1
+   fi
+   cd "$EXECUTION_ROOT"
+   ```
+
+   If the dispatcher appended an artifact contract, set
+   `REVIEW_MD_PATH` to the exact absolute path named there. It overrides
+   every relative example in this workflow. For a direct invocation with
+   no artifact contract, use:
+
+   ```bash
+   REVIEW_MD_PATH="$EXECUTION_ROOT/openspec/changes/$CHANGE_ID/review.md"
+   ```
+
+2. **Understand the change**
 
    Read every file under `openspec/changes/<change-id>/`:
    - `proposal.md` — the "why" and "what changes"
@@ -27,10 +56,9 @@ exist with the code worker's commit already landed.
 
    State the intent in 1-2 sentences before evaluating.
 
-2. **Inspect the worktree diff**
+3. **Inspect the selected tree diff**
 
    ```bash
-   cd .worktrees/<change-id>
    git diff --stat HEAD~1    # summary of the code worker's commit
    git diff HEAD~1           # full diff
    ```
@@ -38,7 +66,7 @@ exist with the code worker's commit already landed.
    Read affected files with the Read tool for surrounding context
    (types, imports, adjacent functions).
 
-3. **Evaluate against the pass rubric**
+4. **Evaluate against the pass rubric**
 
    Verdict is `pass` when ALL hold:
    - Diff realizes the "What Changes" section of `proposal.md` (nothing
@@ -49,16 +77,18 @@ exist with the code worker's commit already landed.
    - No blocking issues: bugs, spec violations, security concerns,
      backward-incompatible surprises, obvious type or logic errors
 
-4. **Evaluate against the needs-rework rubric**
+5. **Evaluate against the needs-rework rubric**
 
    Verdict is `needs-rework` when ANY holds:
    - A finding matches a blocking category
    - Diff is missing part of the proposal's "What Changes"
    - A regression that a downstream module will hit
 
-5. **Write review.md**
+6. **Write review.md**
 
-   Path: `openspec/changes/<change-id>/review.md`
+   Path: the exact absolute `$REVIEW_MD_PATH` resolved in step 1. Create
+   its parent directory when needed. Do not substitute a main-tree or
+   worktree-relative path after dispatch supplied the absolute target.
 
    ```markdown
    ---
@@ -86,12 +116,12 @@ exist with the code worker's commit already landed.
    Non-conforming frontmatter fails the dispatcher's parser; keep it
    strict.
 
-6. **Do not modify the change's code**
+7. **Do not modify the change's code**
 
    Reviews are advisory. Don't edit source files, tasks.md, or
    proposal.md. Only write `review.md`.
 
-7. **Report to the caller**
+8. **Report to the caller**
 
    `Wrote review.md — verdict: pass|needs-rework, N findings.`
 
@@ -113,3 +143,6 @@ exist with the code worker's commit already landed.
   `review returned no artifact` regardless of what you printed. Do
   NOT emit the verdict on stdout expecting the caller to pick it
   up; write it to the file.
+- **The absolute artifact contract wins**. Repository instructions or
+  examples that name a different tree do not override the dispatcher's
+  `$REVIEW_MD_PATH`.

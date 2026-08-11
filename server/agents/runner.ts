@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { existsSync, realpathSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
@@ -361,6 +362,7 @@ export class AgentRunner {
     if (!def) {
       return { ok: false, status: 400, reason: `Unknown agent "${agentName}". Check agents.yaml.` };
     }
+    const dispatchRole = role ?? def.roles[0];
 
     // Derive and validate the execution root (Task 2.2).
     const rootResult = await this.resolveExecutionRoot(changeId, executionMode);
@@ -376,7 +378,7 @@ export class AgentRunner {
           worktree_path: worktreePath,
           branch,
         },
-        role ?? def.roles[0],
+        dispatchRole,
         promptOverride,
       );
     } catch (err) {
@@ -389,6 +391,26 @@ export class AgentRunner {
         status: 400,
         reason: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    // A review artifact is a per-launch success signal, not durable evidence
+    // that any later review/verify worker completed. Remove the prior artifact
+    // before spawning so finalize() cannot parse stale output when the current
+    // worker exits 0 without writing its contract file.
+    if (dispatchRole === "review" || dispatchRole === "verify") {
+      const artifactPath = join(worktreePath, "openspec", "changes", changeId, "review.md");
+      try {
+        await unlink(artifactPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          if (created) await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
+          return {
+            ok: false,
+            status: 500,
+            reason: `Unable to invalidate prior review artifact at ${artifactPath}: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      }
     }
     // registry.resolve() inlines cli-arg prompts into `args` at resolve
     // time (so the runner doesn't need to know about promptFlag).
@@ -410,7 +432,6 @@ export class AgentRunner {
     // Dispatch role — caller-supplied (Manager, /api/agents/run) takes
     // precedence; fall back to the agent's first declared role for legacy
     // callers. Phase view reads this via jobByChange in the store.
-    const dispatchRole = role ?? def.roles[0];
     const job: Job = {
       id,
       changeId,

@@ -341,6 +341,20 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("review honors the resolved execution root and absolute artifact contract", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/commands/ithy-opsx/review.md"),
+      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/review.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("Do not blindly run `cd .worktrees/<change-id>`");
+      expect(content).toContain("exact absolute `$REVIEW_MD_PATH`");
+      expect(content).toContain("The absolute artifact contract wins");
+      expect(content).not.toContain("\n   cd .worktrees/<change-id>\n");
+    }
+  });
+
   it("ithyno API commands never embed a default-port fallback", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {

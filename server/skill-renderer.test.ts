@@ -814,7 +814,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(skill!.content).toContain("without replacing it with");
   });
 
-  it("converts Claude commands to prompts and mirrors only Claude skills", async () => {
+  it("converts Claude commands to prompts and adds exact Codex worker entrypoints", async () => {
     const commands = join(projectRoot, ".claude", "commands", "ithy-opsx");
     mkdirSync(commands, { recursive: true });
     writeFileSync(join(commands, "review.md"), [
@@ -846,8 +846,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(result.errors).toEqual([]);
     expect(existsSync(join(projectRoot, ".codex/prompts/ithy-opsx-review.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"))).toBe(false);
-    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".codex/skills/ithy-opsx-test-probe/SKILL.md"))).toBe(true);
@@ -857,6 +857,12 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       .toContain("codex=ithy-opsx-review legacy=/ithy-opsx:review");
     expect(readFileSync(join(projectRoot, ".codex/prompts/ithy-opsx-verify.md"), "utf8"))
       .toContain("openspec-apply-change ${change_id}");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"), "utf8"))
+      .toContain(".codex/prompts/ithy-opsx-review.md");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-review/SKILL.md"), "utf8"))
+      .toContain("absolute artifact contract");
+    expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-verify/SKILL.md"), "utf8"))
+      .toContain(".codex/prompts/ithy-opsx-verify.md");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-archive/SKILL.md"), "utf8"))
       .toContain("ithy-opsx-archive ${change_id}");
     expect(readFileSync(join(projectRoot, ".codex/skills/ithy-opsx-dispatch/SKILL.md"), "utf8"))

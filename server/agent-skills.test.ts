@@ -209,6 +209,41 @@ describe("inspectAgentSkills (add-settings-agent-skill-installer)", () => {
     expect(expected).toContain("openspec-apply-change change-1");
   });
 
+  it("includes Codex review and verify worker Skills in ithyno inspection", async () => {
+    const { codexPromptContent, codexWorkerSkillFromCommand } = await import("./skill-renderer/migrate-codex.js");
+    const commandsDir = join(tmpDir, ".claude", "commands", "ithy-opsx");
+    await mkdir(commandsDir, { recursive: true });
+
+    for (const command of ["review", "verify"]) {
+      const raw = `---\ndescription: ${command} a change\n---\n\n# ${command}\n`;
+      await writeFile(join(commandsDir, `${command}.md`), raw);
+      const prompt = join(tmpDir, ".codex", "prompts", `ithy-opsx-${command}.md`);
+      await mkdir(join(prompt, ".."), { recursive: true });
+      await writeFile(prompt, codexPromptContent(raw, command));
+      const skill = join(tmpDir, ".codex", "skills", `ithy-opsx-${command}`, "SKILL.md");
+      await mkdir(join(skill, ".."), { recursive: true });
+      await writeFile(skill, codexWorkerSkillFromCommand(raw, command));
+    }
+
+    const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
+    const codex = results.find((result) => result.cli === "codex");
+    expect(codex?.ithyno.status).toBe("installed");
+    expect(codex?.ithyno.paths).toContain(".codex/prompts/ithy-opsx-review.md");
+    expect(codex?.ithyno.paths).toContain(".codex/skills/ithy-opsx-review/SKILL.md");
+    expect(codex?.ithyno.paths).toContain(".codex/skills/ithy-opsx-verify/SKILL.md");
+
+    await rm(join(tmpDir, ".codex", "prompts", "ithy-opsx-review.md"));
+    const missingPromptResults = await inspectAgentSkills(
+      tmpDir,
+      fakeSourcesDir,
+      mockInstalledClis,
+    );
+    const missingPromptCodex = missingPromptResults.find((result) => result.cli === "codex");
+    expect(missingPromptCodex?.ithyno.status).toBe("partial");
+    expect(missingPromptCodex?.ithyno.diagnostics.join("\n"))
+      .toContain(".codex/prompts/ithy-opsx-review.md");
+  });
+
   it("reports installed for Codex when .openspec-target is 'codex' and Codex skills exist", async () => {
     // Write marker file
     const targetFile = join(tmpDir, ".agents/skills/.openspec-target");
