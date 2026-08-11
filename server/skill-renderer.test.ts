@@ -758,6 +758,12 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(rule).toBeDefined();
     expect(rule!.content).toContain("MUST call");
     expect(rule!.content).toContain("invoke_subagent");
+    expect(rule!.content).toContain("`/ithy-opsx-dispatch-multi`");
+    expect(rule!.content).toContain("For each change and each stage");
+    expect(rule!.content).toContain("Never replace a cross-CLI worker");
+    expect(rule!.content).toContain(
+      "`invoke_subagent` is valid only for a selected same-CLI Agy worker",
+    );
     expect(rule!.content).toContain("Do not implement that worker stage");
     expect(rule!.content).toContain("`TypeName` / `Role`");
     expect(rule!.content).toContain("configured model");
