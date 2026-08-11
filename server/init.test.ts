@@ -327,6 +327,20 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("verify treats undefined npm scripts as not-applicable without hiding required checks", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/commands/ithy-opsx/verify.md"),
+      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/verify.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("An undefined script is `not-applicable`");
+      expect(content).toContain("Every applicable check exited 0");
+      expect(content).toContain("explicitly require that check");
+      expect(content).toContain("No automated npm checks were");
+    }
+  });
+
   it("ithyno API commands never embed a default-port fallback", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {

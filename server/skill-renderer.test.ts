@@ -799,6 +799,9 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     expect(prompt!.content).toContain("Do not archive the change.");
     expect(prompt!.content).toContain("Do not sync change specs into the main specs.");
     expect(prompt!.content).toContain("Do not create a git commit");
+    expect(prompt!.content).toContain("undefined script as `not-applicable`");
+    expect(prompt!.content).toContain("when every applicable check passes");
+    expect(prompt!.content).toContain("proposal, tasks, or specs");
 
     const fm = /^---\n([\s\S]+?)\n---/.exec(skill!.content);
     expect(fm).not.toBeNull();

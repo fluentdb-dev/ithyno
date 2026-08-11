@@ -198,10 +198,14 @@ For each stage `S ∈ {code, review, verify}`:
      if it did not change, stop and request a fresh Manager session.
    - **Verify fallback is the same shape.** When no verify agent is
      defined and the Manager runs verify, it means: cd into the
-     worktree, run `npm test`, `npm run typecheck`, `npm run build`
-     in fail-fast order, write review.md at `$REVIEW_MD_PATH` with
-     `verdict: pass` if all three pass, `verdict: needs-rework` with
-     the failure output otherwise. Sequential across changes.
+     worktree, inspect `package.json` and run only its defined `test`,
+     `typecheck`, and `build` scripts in fail-fast order. Record each
+     undefined script as `not-applicable`; do not fail merely because
+     an optional script is absent. If the proposal, tasks, or specs
+     explicitly require a missing check, write `verdict: needs-rework`.
+     Otherwise write `verdict: pass` when every applicable check passes,
+     including when no npm check applies, and list all run/skipped checks
+     in review.md at `$REVIEW_MD_PATH`. Sequential across changes.
    - **Review fallback is the same shape.** When the review agent is
      unavailable, the Manager reads the diff (`git diff main...HEAD`
      in the worktree), assesses against the change's spec/proposal,
