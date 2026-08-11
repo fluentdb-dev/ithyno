@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from "react";
-import { useStore, type CommandStyle } from "../store";
+import type { CommandStyle } from "../store";
+import { CopyIcon, useClipboardCopy } from "./ClipboardCopyButton";
 
 /**
  * Confirm-and-send modal for /opsx:* (Claude mode) and `npx openspec` (CLI mode)
@@ -57,31 +58,13 @@ export function CommandModal({
 }: CommandModalProps) {
   const [input, setInput] = useState(initialInput);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const copyResetRef = useRef<number | null>(null);
-  const pushToast = useStore((s) => s.pushToast);
 
   const activeMode: CommandStyle = mode ?? "claude";
   const preview = build(input, activeMode);
+  const { copied, copy: doCopy } = useClipboardCopy(preview);
   const inputValid = validateInput ? validateInput(input, activeMode) : true;
   const canSend = preview.trim().length > 0 && inputValid && !busy;
-
-  const doCopy = async () => {
-    const text = preview;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
-      copyResetRef.current = window.setTimeout(() => {
-        setCopied(false);
-        copyResetRef.current = null;
-      }, 1200);
-    } catch {
-      pushToast("error", "Copy failed — clipboard permission not granted");
-    }
-  };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -101,7 +84,6 @@ export function CommandModal({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onCancel, preview]);
@@ -170,41 +152,13 @@ export function CommandModal({
           <span className="muted">Will type into the terminal:</span>
           <button
             type="button"
-            className="modal-preview-copy"
-            onClick={doCopy}
+            className="clipboard-copy-button modal-preview-copy"
+            onClick={() => void doCopy()}
             aria-label="Copy command"
             title="Copy command"
             disabled={!preview}
           >
-            {copied ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M3 8.5l3 3 7-7"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect
-                  x="4.5"
-                  y="4.5"
-                  width="8"
-                  height="9"
-                  rx="1.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                />
-                <path
-                  d="M6.5 4.5V3.5A1 1 0 0 1 7.5 2.5h3a1 1 0 0 1 1 1v1"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            )}
+            <CopyIcon copied={copied} />
           </button>
           <pre>{preview || " "}</pre>
         </div>

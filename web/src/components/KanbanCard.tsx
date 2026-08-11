@@ -7,6 +7,7 @@ import { WorkerStateIndicator, type LaneContext } from "./WorkerStateIndicator";
 import { laneForPhase } from "../phases";
 import type { Change, JobSummary } from "../types";
 import { hasNonVerifyWork } from "../util/changeState";
+import { ClipboardCopyButton } from "./ClipboardCopyButton";
 
 /**
  * `KanbanCard` — the single-change render body used by both the 3-column
@@ -21,6 +22,10 @@ import { hasNonVerifyWork } from "../util/changeState";
  */
 
 export type CardSlot = "todo" | "inprogress" | "done";
+
+export function changeIdCopyLabel(changeId: string): string {
+  return `Copy change ID ${changeId}`;
+}
 
 /**
  * Same rules as `Kanban.tsx::bucketize()` but for a single change. Used by the
@@ -134,6 +139,12 @@ export function KanbanCard({
 
   return (
     <div className="kanban-card">
+      <ClipboardCopyButton
+        text={change.id}
+        label={changeIdCopyLabel(change.id)}
+        title={`Copy change ID: ${change.id}`}
+        className="kanban-card-id-copy"
+      />
       <Link
         to={`/change/${encodeURIComponent(change.id)}${showWorktreeProgress ? "?tree=worktree" : ""}`}
         className="kanban-card-link"
