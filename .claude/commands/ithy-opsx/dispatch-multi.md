@@ -35,9 +35,11 @@ The skill covers:
    dispatch.
 4. **Fan-out code stage** — spawn `ACTIVE` code workers concurrently
    via the standard Dispatch helper protocol.
-5. **Combined poll loop** — one `while` loop over the Manager inbox;
-   route each message to its `(stage, change)` owner via the extended
-   report contract (`stage:$S status:done change:<id>`).
+5. **Combined completion loop** — inspect the Manager inbox and any
+   AgentRunner job ids; route each completion to its `(stage, change)`
+   owner. Stages for one change remain sequential, while different
+   changes may run at different stages concurrently within
+   `maxParallel`.
 6. **Per-change advance** — commit worker output on `code done`,
    advance phase, spawn next stage (review, then verify). Loop back
    to code on `needs-rework`.

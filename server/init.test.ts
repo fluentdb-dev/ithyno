@@ -357,6 +357,21 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("dispatch-multi keeps per-change stages sequential without a global phase barrier", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("Workers for the same change MUST run sequentially");
+      expect(content).toContain("Workers for different changes MAY run concurrently regardless of");
+      expect(content).toContain("POST every currently available AgentRunner job with `wait: false`");
+      expect(content).toContain("Poll `GET /api/agents/jobs/<job_id>`");
+      expect(content).toContain("`wait: true` serially inside the per-change fan-out loop");
+    }
+  });
+
   it("ithyno API commands never embed a default-port fallback", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {

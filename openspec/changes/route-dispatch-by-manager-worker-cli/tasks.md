@@ -68,6 +68,9 @@
 - [x] 4.6 Resolve Codex code workers to the installed
   `openspec-apply-change` Skill and append an implementation-only scope
   contract that forbids archive, spec sync, and commit.
+- [x] 4.7 Define dispatch-multi concurrency as sequential stages per change and
+  phase-independent concurrency across changes, with non-blocking AgentRunner
+  fan-out and change-owned job polling.
 
 ## 5. Verification
 

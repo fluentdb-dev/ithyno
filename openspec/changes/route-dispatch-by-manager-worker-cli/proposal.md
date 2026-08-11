@@ -50,6 +50,9 @@ absent or incorrect in `/ithy-opsx:dispatch`.
 - Generate a thin Codex Skill-catalog entrypoint for single-change dispatch in
   addition to its Prompt, so `ithy-opsx-dispatch <change-id>` resolves exactly
   instead of falling through to `ithy-opsx-dispatch-multi`.
+- Preserve dispatch-multi's per-change pipeline ordering while allowing workers
+  for different changes to run concurrently at different stages; AgentRunner
+  launches must fan out before any one change blocks completion processing.
 - Add routing-matrix, argv, worktree-reuse, generated-skill drift, and dispatch
   integration coverage.
 
@@ -70,6 +73,7 @@ None.
   run API.
 - Claude-canonical dispatch command/skill sources, universal ithyno skill
   sources, and per-CLI renderer output.
+- The dispatch-multi completion loop and AgentRunner job ownership contract.
 - Existing project-local ithyno dispatch skills require regeneration after the
   implementation is released; OpenSpec skills are unchanged.
 - No new `agents.yaml` fields and no requirement for users to add `-p`, `exec`,

@@ -1,6 +1,6 @@
 ---
 name: ithy-opsx-dispatch-multi
-description: Parallel N-change dispatcher for ithyno. Fans out code / review / verify workers across multiple in-flight changes concurrently, with per-change queue + combined poll loop + `change:<id>` message routing. Invoked via `/ithy-opsx:dispatch-multi <id1> [id2] ...`. Landed by add-multi-dispatch-orchestrator.
+description: Parallel N-change dispatcher for ithyno. Fans out code, review, and verify workers across multiple in-flight changes with a per-change queue, combined completion loop, and change-tagged message routing. Use when invoking `/ithy-opsx:dispatch-multi` with two or more change IDs.
 ---
 
 # `/ithy-opsx:dispatch-multi <id1> [id2] …` — parallel dispatcher
@@ -173,9 +173,9 @@ card was posted last.
      parallel. The Manager awaits all of them together, then
      proceeds to review / verify per change.
 
-   Only the subprocess-only branch (non-claude workers with no
-   agmsg) is strictly sequential — that path degrades to a
-   for-loop with a warning.
+   - **AgentRunner branch** (cross-CLI or no native adapter): submit
+     every available worker without blocking on an earlier change,
+     then track its job id in the combined completion loop.
 
 ### 2. Capacity resolution
 
@@ -183,6 +183,21 @@ card was posted last.
    Cap invalid values at the range bounds and log.
 2. `ACTIVE = min(len(ids), maxParallel)`.
 3. Split ids into `RUNNING` (first `ACTIVE`) and `QUEUE` (rest).
+
+### Concurrency invariant
+
+Workers for the same change MUST run sequentially:
+
+`code completed → review starts → review passed → verify starts`
+
+Never start a change's next stage merely because a launch returned a
+job id. Start it only after the current stage reaches a successful
+terminal state and its required artifact or commit contract passes.
+
+Workers for different changes MAY run concurrently regardless of
+stage, subject to `maxParallel`. For example, `review(add-a)` may run
+while `code(add-b)` is still running. Do not impose a global phase
+barrier that waits for every code worker before starting any review.
 
 ### 3. Per-change worktree setup
 
@@ -244,8 +259,26 @@ state[id] = {
   iterations: 1,
   PRE_HEAD: <git rev-parse agent/<id>>,
   start_ts: <now>,
+  transport: "agmsg" | "native" | "agent-runner",
+  job_id: <AgentRunner job id or null>,
 }
 ```
+
+**AgentRunner completion contract**: the single-change dispatch uses
+`wait: true` as its per-stage barrier. Multi-dispatch MUST NOT call
+`wait: true` serially inside the per-change fan-out loop because that
+would block the remaining changes from launching. Instead:
+
+1. POST every currently available AgentRunner job with `wait: false`.
+2. Store each returned job id in its owning `state[id].job_id`.
+3. Poll `GET /api/agents/jobs/<job_id>` in the combined completion
+   loop.
+4. Advance only that owning change when the job reaches a successful
+   terminal state and its stage contract passes.
+
+Launching all `wait: true` requests concurrently and awaiting them
+collectively is also valid, but `wait: false` plus the combined loop is
+preferred because changes can advance independently.
 
 ### 6. Combined poll loop
 
@@ -264,8 +297,11 @@ while true; do
   fi
   sleep $POLL_INTERVAL
 
-  # Read all unread messages once per tick.
+  # Read all unread agmsg messages once per tick.
   MESSAGES=$(~/.agents/skills/agmsg/scripts/inbox.sh "$AGMSG_TEAM" manager 2>/dev/null)
+
+  # Also inspect each non-terminal AgentRunner state by its job_id.
+  # Route a terminal job to the owning change; never advance another id.
 
   # For each line matching `[<ts>] <sender>: stage:<S> status:done change:<id>`
   # OR the legacy `[<ts>] <sender>: stage:<S> status:done` (fall back to
@@ -363,6 +399,13 @@ Same 3-step ladder as `/ithy-opsx:dispatch`:
 - **maxParallel is the concurrency cap for THIS invocation, not
   globally**. A parallel `/ithy-opsx:dispatch <single>` invocation
   running in a different Manager session is independent.
+- **Same change sequential; different changes concurrent.** Never
+  overlap code/review/verify workers for one change. Different changes
+  may run at different stages concurrently within `maxParallel`; do not
+  add a global phase barrier.
+- **Fan out before waiting.** Never make a serial `wait: true`
+  AgentRunner call inside the per-change submission loop. Submit all
+  available jobs first and retain their change-to-job ownership.
 - **`change:<id>` matching is strict**. Legacy `stage:$S
   status:done` (no `change:<id>`) is accepted ONLY when exactly
   one in-flight change uses that `entry_name`. Ambiguous legacy

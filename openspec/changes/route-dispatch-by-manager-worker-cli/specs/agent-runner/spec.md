@@ -126,6 +126,41 @@ target without overwriting or deleting it.
 - **THEN** the server rejects the launch with actionable diagnostics
 - **AND** it does not remove, reset, overwrite, or execute inside that directory
 
+### Requirement: Multi-Dispatch Preserves Per-Change Stage Ordering
+
+The multi-change dispatcher SHALL run `code`, `review`, and `verify`
+sequentially for each individual change. A later stage SHALL start only after
+the preceding worker reaches a successful terminal state and its commit or
+artifact contract passes. Workers belonging to different changes MAY run
+concurrently regardless of their current stage, subject to `maxParallel`.
+
+When using AgentRunner, multi-dispatch SHALL NOT serialize changes by issuing
+one blocking `wait: true` request at a time. It SHALL either submit jobs with
+`wait: false` and track their ids in the combined completion loop, or launch
+blocking requests concurrently and await them collectively. Completion state
+MUST remain associated with the owning change.
+
+#### Scenario: Different changes advance independently
+- **GIVEN** `add-a` and `add-b` are running within `maxParallel`
+- **AND** the code worker for `add-a` completes before the code worker for
+  `add-b`
+- **WHEN** the dispatcher validates `add-a`'s code-stage contract
+- **THEN** it may start review for `add-a` while code for `add-b` continues
+- **AND** it does not wait for every change to finish the code phase
+
+#### Scenario: One change never overlaps its stages
+- **GIVEN** the code worker for `add-a` is still running
+- **WHEN** another change completes or another AgentRunner job id is returned
+- **THEN** review for `add-a` does not start
+- **AND** `add-a` advances only after its own code job completes successfully
+
+#### Scenario: AgentRunner jobs fan out before waiting
+- **GIVEN** multiple changes have available capacity
+- **WHEN** multi-dispatch routes their workers through AgentRunner
+- **THEN** every available job is submitted before waiting for one job to
+  complete
+- **AND** each returned job id is tracked against its owning change
+
 ### Requirement: Claude-Canonical Dispatch Skill Distribution
 
 The repository SHALL keep the Claude-authored ithyno dispatch definition as the
