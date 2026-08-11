@@ -11,9 +11,10 @@ and write a structured verdict to `openspec/changes/<change-id>/review.md`.
 When invoked by the dispatcher (`/ithy-opsx:dispatch`), the verdict
 drives the final `reviewed → done` phase transition.
 
-**Input**: `$ARGUMENTS` is the change id. The worktree at
-`.worktrees/<change-id>/` must exist with the code worker's commit
-landed.
+**Input**: `$ARGUMENTS` is the change id. When invoked by dispatch, the
+worker starts in the server-resolved worktree or main tree and the prompt
+includes an artifact contract with the exact absolute `review.md` path.
+That absolute path is authoritative.
 
 **Node assumption**: This fallback understands the conventional `test`,
 `typecheck`, and `build` scripts in `package.json`. A missing script is
@@ -24,10 +25,32 @@ need a project-specific verify template — see
 
 ## Steps
 
-1. **cd into the worktree**
+1. **Resolve the execution root and artifact path**
+
+   Do not blindly run `cd .worktrees/<change-id>`. AgentRunner and native
+   delegation normally start this worker inside the resolved execution
+   root already. Resolve the root without nesting worktrees:
 
    ```bash
-   cd .worktrees/<change-id>
+   CHANGE_ID="<change-id>"
+   if [ -f "openspec/changes/$CHANGE_ID/proposal.md" ]; then
+     EXECUTION_ROOT="$(pwd)"
+   elif [ -f ".worktrees/$CHANGE_ID/openspec/changes/$CHANGE_ID/proposal.md" ]; then
+     EXECUTION_ROOT="$(pwd)/.worktrees/$CHANGE_ID"
+   else
+     echo "Cannot resolve execution root for $CHANGE_ID" >&2
+     exit 1
+   fi
+   cd "$EXECUTION_ROOT"
+   ```
+
+   If the dispatcher appended an artifact contract, set
+   `REVIEW_MD_PATH` to the exact absolute path named there. It overrides
+   every relative example in this workflow. For a direct invocation with
+   no artifact contract, use:
+
+   ```bash
+   REVIEW_MD_PATH="$EXECUTION_ROOT/openspec/changes/$CHANGE_ID/review.md"
    ```
 
 2. **Discover applicable checks before running them**
@@ -76,7 +99,8 @@ need a project-specific verify template — see
 4. **Success case — write pass verdict**
 
    Every applicable check exited 0 and no explicitly required check is
-   missing. Write `openspec/changes/<change-id>/review.md`:
+   missing. Write the exact absolute `$REVIEW_MD_PATH` resolved in step 1.
+   Create its parent directory when needed:
 
    ```markdown
    ---
@@ -100,7 +124,8 @@ need a project-specific verify template — see
 
 5. **Failure case — write needs-rework verdict**
 
-   Write `openspec/changes/<change-id>/review.md`:
+   Write the failure verdict to the same exact absolute
+   `$REVIEW_MD_PATH` resolved in step 1:
 
    ```markdown
    ---
@@ -142,6 +167,9 @@ need a project-specific verify template — see
 - **`review.md` is the sole contract**. The dispatcher parses only
   the artifact frontmatter — stdout is ignored. Write the verdict
   to the file, not to stdout.
+- **The absolute artifact contract wins**. Repository instructions or
+  examples that name a different tree do not override the dispatcher's
+  `$REVIEW_MD_PATH`.
 - **Do NOT invent success for unmet requirements**. If proposal, tasks,
   or specs require a check that cannot be run, write `needs-rework` and
   identify the missing verification command.

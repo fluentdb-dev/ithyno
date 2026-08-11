@@ -2,8 +2,8 @@
 
 AgentRunner launches subprocess workers with `cwd` already set to the resolved
 worktree or main tree. Native launches receive the same execution root and an
-artifact contract naming an absolute `review.md` path. However, the review
-workflow still assumes it starts in the repository root and runs
+artifact contract naming an absolute `review.md` path. However, the review and
+verify workflows still assume they start in the repository root and can run
 `cd .worktrees/<change-id>`. Repository-level `AGENTS.md` also tells workers to
 write the artifact outside the worktree, while AgentRunner parses it from the
 resolved execution root.
@@ -38,9 +38,10 @@ In worktree mode, `review.md` belongs under the resolved worktree. In main-tree
 mode, it belongs under the project root. The dispatcher passes the exact
 absolute path; this contract overrides relative examples in the workflow.
 
-The review workflow detects whether its current directory is already the
-target tree. It only selects `.worktrees/<change-id>` for a direct interactive
-invocation that starts from a repository root containing that worktree.
+The review and verify workflows detect whether their current directory is
+already the target tree. They only select `.worktrees/<change-id>` for a direct
+interactive invocation that starts from a repository root containing that
+worktree.
 
 ### D2 — AgentRunner invalidates stale review output before launch
 

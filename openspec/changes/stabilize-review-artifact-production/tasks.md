@@ -3,6 +3,7 @@
 - [x] 1.1 Make the review workflow execution-root aware and give the absolute artifact contract precedence.
 - [x] 1.2 Align repository worker instructions with worktree/main-tree artifact ownership.
 - [x] 1.3 Invalidate stale review artifacts before review and verify launches.
+- [x] 1.4 Apply the execution-root and absolute artifact-path contract to the verify workflow and packaged templates.
 
 ## 2. Codex Worker Discovery
 

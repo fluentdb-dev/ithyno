@@ -1,7 +1,8 @@
 ## Worked
 
 - Making the dispatcher-provided absolute artifact path authoritative removes
-  the main-tree/worktree ambiguity without changing the review schema.
+  the main-tree/worktree ambiguity for both review and verify without changing
+  the review schema.
 - Thin Codex Skills preserve the existing generated Prompts as the procedure
   source while making the exact worker names discoverable.
 - AgentRunner-side stale-artifact invalidation provides an enforceable guard in
@@ -13,7 +14,7 @@
 
 - Repository `AGENTS.md` explicitly required the opposite artifact location
   from AgentRunner and the dispatch workflow.
-- The review workflow still assumed a repository-root cwd even though
+- The review and verify workflows assumed a repository-root cwd even though
   AgentRunner had already standardized subprocess cwd on the execution root.
 - Existing tests intentionally asserted that Codex review and verify Skills did
   not exist, exposing the same free-form command-resolution risk previously

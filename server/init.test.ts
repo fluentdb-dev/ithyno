@@ -341,17 +341,19 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
-  it("review honors the resolved execution root and absolute artifact contract", async () => {
-    const copies = [
-      join(REPO_ROOT, ".claude/commands/ithy-opsx/review.md"),
-      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/review.md"),
-    ];
-    for (const path of copies) {
-      const content = await readFile(path, "utf8");
-      expect(content).toContain("Do not blindly run `cd .worktrees/<change-id>`");
-      expect(content).toContain("exact absolute `$REVIEW_MD_PATH`");
-      expect(content).toContain("The absolute artifact contract wins");
-      expect(content).not.toContain("\n   cd .worktrees/<change-id>\n");
+  it("review and verify honor the resolved execution root and absolute artifact contract", async () => {
+    for (const command of ["review", "verify"]) {
+      const copies = [
+        join(REPO_ROOT, `.claude/commands/ithy-opsx/${command}.md`),
+        join(REPO_ROOT, `templates/.claude/commands/ithy-opsx/${command}.md`),
+      ];
+      for (const path of copies) {
+        const content = await readFile(path, "utf8");
+        expect(content).toContain("Do not blindly run `cd .worktrees/<change-id>`");
+        expect(content).toContain("exact absolute `$REVIEW_MD_PATH`");
+        expect(content).toContain("The absolute artifact contract wins");
+        expect(content).not.toContain("\n   cd .worktrees/<change-id>\n");
+      }
     }
   });
 

@@ -11,8 +11,9 @@ Codex Skill entrypoint.
 
 - Make the dispatcher-selected execution root and absolute artifact path the
   authoritative review contract for every worker launch strategy.
-- Make the review workflow safe when it starts in either the repository root or
-  an already-selected worktree, without blindly entering `.worktrees/<id>`.
+- Make the review and verify workflows safe when they start in either the
+  repository root or an already-selected worktree, without blindly entering
+  `.worktrees/<id>`.
 - Align repository worker instructions with the dispatcher's worktree artifact
   contract.
 - Materialize discoverable Codex Skill entrypoints for internally invoked

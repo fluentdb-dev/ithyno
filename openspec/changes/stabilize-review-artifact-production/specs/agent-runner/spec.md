@@ -18,6 +18,13 @@ created by the current launch.
 - **THEN** the review workflow does not enter `.worktrees/add-x` again
 - **AND** it writes to `<worktree>/openspec/changes/add-x/review.md`
 
+#### Scenario: Verify starts inside an existing worktree
+- **GIVEN** AgentRunner resolved `.worktrees/add-x` as the execution root
+- **WHEN** it launches the verify worker with that directory as `cwd`
+- **THEN** the verify workflow does not enter `.worktrees/add-x` again
+- **AND** both pass and needs-rework verdicts are written to the exact absolute
+  artifact path supplied by the dispatcher
+
 #### Scenario: Stale review exists before launch
 - **GIVEN** a prior `review.md` exists in the resolved execution root
 - **WHEN** AgentRunner starts a new review or verify worker
@@ -27,5 +34,11 @@ created by the current launch.
 #### Scenario: Main-tree review
 - **GIVEN** the dispatcher selected main-tree execution
 - **WHEN** the review worker starts
+- **THEN** the artifact path is `<project-root>/openspec/changes/<id>/review.md`
+- **AND** no worktree path is inferred
+
+#### Scenario: Main-tree verify
+- **GIVEN** the dispatcher selected main-tree execution
+- **WHEN** the verify worker starts
 - **THEN** the artifact path is `<project-root>/openspec/changes/<id>/review.md`
 - **AND** no worktree path is inferred
