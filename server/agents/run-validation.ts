@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { RunnerExecutionMode } from "./runner.js";
+import { isSafeChangeId } from "../util/change-id.js";
+
+export const MAX_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type RunBody = {
   changeId: string;
@@ -19,6 +22,9 @@ export function validateRunPayload(body: unknown): { ok: true; data: RunBody } |
   if (!b.changeId || typeof b.changeId !== "string" || !b.agentName || typeof b.agentName !== "string") {
     return { ok: false, status: 400, error: "changeId and agentName required" };
   }
+  if (!isSafeChangeId(b.changeId)) {
+    return { ok: false, status: 400, error: "changeId must contain only letters, numbers, '.', '_', or '-' and must not be '.' or '..'" };
+  }
   if (b.executionMode !== undefined && b.executionMode !== "worktree" && b.executionMode !== "main-tree") {
     return { ok: false, status: 400, error: "executionMode must be 'worktree' or 'main-tree'" };
   }
@@ -30,9 +36,16 @@ export function validateRunPayload(body: unknown): { ok: true; data: RunBody } |
   }
   if (
     b.timeoutMs !== undefined &&
-    (typeof b.timeoutMs !== "number" || !Number.isInteger(b.timeoutMs) || b.timeoutMs <= 0)
+    (typeof b.timeoutMs !== "number" ||
+      !Number.isInteger(b.timeoutMs) ||
+      b.timeoutMs <= 0 ||
+      b.timeoutMs > MAX_AGENT_TIMEOUT_MS)
   ) {
-    return { ok: false, status: 400, error: "timeoutMs must be a positive integer" };
+    return {
+      ok: false,
+      status: 400,
+      error: `timeoutMs must be a positive integer no greater than ${MAX_AGENT_TIMEOUT_MS}`,
+    };
   }
 
   return {
