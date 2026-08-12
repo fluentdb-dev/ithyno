@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -281,15 +281,23 @@ export class AgentRunner {
             (r) => r.stdout.trim(),
           ),
         ]);
-        // Parse worktree paths from porcelain output; normalize separators and
-        // case for Windows where git may output forward slashes but Node.js
-        // join() produces backslashes.
-        const normSep = (p: string) => p.replace(/[/\\]+/g, "/").toLowerCase();
+        // Parse worktree paths from porcelain output and compare canonically.
+        // git resolves symlinks when recording worktree paths (e.g. macOS
+        // /var → /private/var), so we must do the same for worktreePath.
+        // We also normalize separators and case for Windows where git outputs
+        // forward slashes but path.join() produces backslashes.
+        const normPath = (p: string) => {
+          try {
+            return realpathSync(p).toLowerCase().replace(/\\/g, "/");
+          } catch {
+            return p.toLowerCase().replace(/[/\\]+/g, "/");
+          }
+        };
         const knownPaths = listOut
           .split(/\n/)
           .filter((l) => l.startsWith("worktree "))
           .map((l) => l.slice("worktree ".length).trim());
-        if (!knownPaths.some((p) => normSep(p) === normSep(worktreePath))) {
+        if (!knownPaths.some((p) => normPath(p) === normPath(worktreePath))) {
           return {
             ok: false,
             status: 409,
