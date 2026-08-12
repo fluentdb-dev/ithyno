@@ -1,0 +1,16 @@
+name: ithy-opsx-test-probe
+namespace: ithy-opsx
+command: test-probe
+description: >-
+  Test-only probe that proves an Agent can discover an initialized ithyno
+  instruction by writing a nonce-bearing JSON artifact.
+supports:
+  - claude
+  - codex
+  - antigravity
+  - cursor
+  - gemini
+  - copilot
+  - opencode
+capabilities_required:
+  - file_write

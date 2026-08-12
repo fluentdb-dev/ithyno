@@ -488,3 +488,62 @@ export async function injectPty(data: string, terminate = true): Promise<InjectR
   const { data: body } = await postJson<InjectResponse>("/api/pty/inject", { data, terminate });
   return body;
 }
+
+// ---- Agent skill inspection + installation (add-settings-agent-skill-installer) ----
+
+export type AgentSkillStatus =
+  | "missing"
+  | "partial"
+  | "installed"
+  | "update-available"
+  | "conflict"
+  | "unsupported";
+
+export interface ComponentInspection {
+  status: AgentSkillStatus;
+  diagnostics: string[];
+  paths: string[];
+}
+
+export interface AgentSkillInfo {
+  /** Doctor CLI key, e.g. "claude", "agy", "copilot" */
+  cli: string;
+  openspec: ComponentInspection;
+  ithyno: ComponentInspection;
+  inspectedAt: string;
+}
+
+export interface AgentSkillsResponse {
+  skills: AgentSkillInfo[];
+  projectRoot: string;
+}
+
+/**
+ * Fetch per-Agent CLI skill state from the current project.
+ * Returns null on 4xx/5xx (caller decides how to surface the error).
+ */
+export async function fetchAgentSkills(): Promise<AgentSkillsResponse> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Session-Token"] = token;
+  const res = await fetch("/api/agent-skills", { headers });
+  if (!res.ok) throw new Error(`GET /api/agent-skills failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * POST /api/agent-skills/install — returns the raw Response for SSE streaming.
+ * The endpoint accepts `{ cli, components }` and streams `progress`,
+ * `component-result`, and `done` events.
+ */
+export async function installAgentSkills(
+  cli: string,
+  components: Array<"openspec" | "ithyno">,
+): Promise<Response> {
+  const res = await fetch("/api/agent-skills/install", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ cli, components }),
+  });
+  return res;
+}

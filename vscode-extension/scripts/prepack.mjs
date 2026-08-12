@@ -22,7 +22,7 @@ console.log(`[prepack] staging ${repoRoot} → ${stageDir}`);
 rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
-for (const rel of ["bin", "server", "web/dist", "templates"]) {
+for (const rel of ["bin", "server", "web/dist", "templates", "ithyno"]) {
   const src = resolve(repoRoot, rel);
   if (!existsSync(src)) {
     throw new Error(`missing required dir: ${rel} (run "npm run build" at repo root first)`);
@@ -64,6 +64,7 @@ const platformEsbuilds = {
   "@esbuild/linux-x64": esbuildVersion,
   "@esbuild/linux-arm64": esbuildVersion,
   "@esbuild/win32-x64": esbuildVersion,
+  "@esbuild/win32-arm64": esbuildVersion,
 };
 
 const stagedPkg = {

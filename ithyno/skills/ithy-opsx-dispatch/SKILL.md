@@ -1,9 +1,8 @@
 
 Dispatch the code / review / verify workers for the given change.
-This is the prompt the persistent Manager (a `claude` live-shell
+This is the prompt the persistent Manager (a live-shell Agent CLI
 session declared in `agents.yaml` with `roles: [manager]`) evaluates
-when the Kanban Start button injects the string into the terminal
-PTY.
+when the Kanban Start button injects the string into the terminal PTY.
 
 The dispatch advances the change through `proposed → coded → reviewed
 → done` by:
@@ -13,7 +12,8 @@ The dispatch advances the change through `proposed → coded → reviewed
    override.
 2. Setting up the worktree if needed (idempotent).
 3. Dispatching each stage's worker via the **Dispatch helper protocol**
-   (Task tool for `command == "claude"`, subprocess `-p` otherwise).
+   (agmsg for eligible live shells, same-CLI native delegation when
+   available, and server AgentRunner otherwise).
 4. Judging review / verify by the **3-stage success contract**.
 5. Looping code↔review until pass or MAX_ITERATIONS; escalating on
    non-convergence.
@@ -42,33 +42,54 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — base URL of the local ithyno server. The Electron
-  shell and VSCode extension each spawn the server on an ephemeral
-  per-project port and export `ITHYNO_PORT` + `ITHYNO_BASE` into the
-  Manager PTY, so `$ITHYNO_BASE` is already resolved. In the CLI dev
-  workflow (no parent shell), fall back to
-  `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`.
-  Every `curl` block below uses `$ITHYNO_BASE` as-is — Manager MUST
-  read the shell's env, NOT hardcode 4321.
+- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
+  The Electron shell and VSCode extension export the resolved,
+  per-project endpoint into the Manager PTY. If only the injected
+  `ITHYNO_PORT` is available, derive the base URL from that exact
+  value. Never use a remembered or default port.
 
 - `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
   token. Required by every token-gated endpoint, including
   `POST /api/manager/activity` (see **Manager activity publication**
   below). The server exports it into the Manager PTY's environment at
-  spawn time, so in the normal case it is already set and you do
-  nothing. Verify once at dispatch start:
+  spawn time. Validate the injected context at dispatch start:
 
   ```bash
-  if [ -z "$ITHYNO_SESSION_TOKEN" ]; then
-    echo "[dispatch] ITHYNO_SESSION_TOKEN unset — Manager activity will not be published."
-    echo "[dispatch] It is exported into the terminal PTY by the ithyno server;"
-    echo "[dispatch] if you launched this shell outside the dashboard terminal,"
-    echo "[dispatch] copy the token from the launch URL (…/?token=<token>)."
+  if [ -z "${ITHYNO_BASE:-}" ]; then
+    if [ -n "${ITHYNO_PORT:-}" ]; then
+      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
+    else
+      echo "[dispatch] ITHYNO_BASE and ITHYNO_PORT are unset."
+      echo "[dispatch] Restart this Manager from the active dashboard; do not guess a port."
+      exit 1
+    fi
+  fi
+  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
+    echo "[dispatch] authoritative ithyno session context is missing."
+    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
+    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
+    echo "[dispatch] Restart this Manager from the active dashboard."
+    exit 1
   fi
   ```
 
-  A missing token is NOT a dispatch blocker — activity publication is
-  best-effort telemetry. Continue the dispatch either way.
+  Never print the token itself. If a request fails, report the value
+  of `ITHYNO_BASE` and whether the token is set, then stop. Do not
+  retry a guessed endpoint or declare the server offline based on a
+  request to another port. Activity publication remains best-effort
+  only after this initial session-context validation succeeds.
+
+  **Mandatory freshness checkpoint:** immediately before every ithyno
+  HTTP request, pause and ask whether the dashboard or server may have
+  restarted since the preceding request. Expand the current shell's
+  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
+  moment; never reuse a literal endpoint/token copied from an earlier
+  command or explanation. On HTTP 401/403 or a transport failure,
+  re-read those variables once. Retry only when the current values are
+  demonstrably different from the values used by the failed request;
+  otherwise stop and request a fresh Manager session. An auth/transport
+  failure is not a worker failure and MUST NOT trigger Manager self-
+  execution, `invoke_subagent`, or another worker-routing fallback.
 
 ## Manager activity publication
 
@@ -132,11 +153,12 @@ For each stage `S ∈ {code, review, verify}`:
    ### Manager fallback semantics
 
    "Manager self-dispatch" and "Manager fallback" refer to the same
-   thing: the Manager (this Claude session) performs the stage's
+   thing: the current Manager session performs the stage's
    work directly, in-session, instead of routing to a configured
    worker CLI. This applies both when no agent entry exists for `S`
-   AND when the configured agent fails at runtime after retries
-   (sandbox block, API timeout, network error, missing binary).
+   AND when the configured worker itself fails at runtime after retries
+   (sandbox block, worker timeout, missing binary). It does not apply to
+   ithyno session authentication or controller-transport failure.
 
    The rules for Manager fallback are uniform across ALL stages
    (`code`, `review`, `verify`):
@@ -148,18 +170,18 @@ For each stage `S ∈ {code, review, verify}`:
      dispatch, if the Manager is the fallback executor, walk changes
      one at a time.
    - **Distinct from Manager-spawned subagents.** When the Manager
-     invokes the Task tool to spawn a subagent (e.g., the `code`
-     stage's Manager-fallback path spawning a fresh Claude Code
-     instance), that IS a form of ad-hoc agent definition, NOT
+     invokes its native tool to spawn a subagent (e.g., Claude Task or
+     Agy `invoke_subagent` for the `code` stage), that IS a form of
+     ad-hoc agent definition, NOT
      Manager fallback. Subagent spawn CAN run in parallel — it
      follows the standard dispatch parallelism rules. The key
      distinguisher is *who executes the work*: the Manager itself
      (fallback, sequential) vs a distinct subagent instance the
      Manager spawned (agent-like, parallel-eligible).
-   - **Runtime failure fallback ladder** (when a configured agent
-     fails):
-     1. Retry the configured agent once (transient network/API
-        error).
+   - **Worker runtime failure fallback ladder** (when a configured
+     worker fails after dispatch reached the server or native tool):
+     1. Retry the configured worker once when the worker failure is
+        transient.
      2. If still failing, invoke Manager fallback for the stage —
         Manager performs the work in-session and writes the same
         artifact contract the configured agent would have written
@@ -169,12 +191,21 @@ For each stage `S ∈ {code, review, verify}`:
      3. If Manager itself cannot perform (e.g., an external tool is
         required that the Manager lacks access to), escalate to
         needs-human per the standard escalate contract.
+   - **Controller/session failures never enter that ladder.** HTTP
+     401/403, an unreachable `ITHYNO_BASE`, or failure to contact the
+     ithyno AgentRunner means the dispatch control plane is stale or
+     unavailable. Re-read the current environment as described above;
+     if it did not change, stop and request a fresh Manager session.
    - **Verify fallback is the same shape.** When no verify agent is
      defined and the Manager runs verify, it means: cd into the
-     worktree, run `npm test`, `npm run typecheck`, `npm run build`
-     in fail-fast order, write review.md at `$REVIEW_MD_PATH` with
-     `verdict: pass` if all three pass, `verdict: needs-rework` with
-     the failure output otherwise. Sequential across changes.
+     worktree, inspect `package.json` and run only its defined `test`,
+     `typecheck`, and `build` scripts in fail-fast order. Record each
+     undefined script as `not-applicable`; do not fail merely because
+     an optional script is absent. If the proposal, tasks, or specs
+     explicitly require a missing check, write `verdict: needs-rework`.
+     Otherwise write `verdict: pass` when every applicable check passes,
+     including when no npm check applies, and list all run/skipped checks
+     in review.md at `$REVIEW_MD_PATH`. Sequential across changes.
    - **Review fallback is the same shape.** When the review agent is
      unavailable, the Manager reads the diff (`git diff main...HEAD`
      in the worktree), assesses against the change's spec/proposal,
@@ -184,13 +215,61 @@ For each stage `S ∈ {code, review, verify}`:
      escalate rather than self-review is often better; project
      policy decides.
 
-2. **Resolve the prompt**: `entry.prompts[S]` if set, else the
-   built-in default:
+   **Invalidate the prior stage artifact before execution.** For `review`
+   and `verify`, after `$REVIEW_MD_PATH` has been resolved and immediately
+   before invoking Manager fallback, agmsg, a native tool, or AgentRunner,
+   remove the prior artifact:
+
+   ```bash
+   if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
+     rm -f -- "$REVIEW_MD_PATH" || {
+       /ithy-opsx:escalate <change-id> "cannot invalidate prior review artifact at $REVIEW_MD_PATH"
+       exit 1
+     }
+   fi
+   ```
+
+   AgentRunner enforces the same rule server-side for subprocess launches.
+   Removing the old file here is still required for Manager, agmsg, and
+   native-tool branches. A stage may only succeed from an artifact created
+   by its current worker invocation.
+
+2. **Resolve the prompt for the receiving Agent CLI**:
+   `entry.prompts[S]` wins byte-for-byte when explicitly set. Otherwise start
+   from the established slash-command default:
+
+   <!-- codex-preserve-start -->
    - `code`   → `/opsx:apply <change-id>`
    - `review` → `/ithy-opsx:review <change-id>`
    - `verify` → `/ithy-opsx:verify <change-id>`
 
+   Codex is the sole exception because it does not accept the leading-slash
+   skill form. Only when `entry.command == codex`, rewrite the selected default:
+
+   - `/opsx:apply` → `openspec-apply-change`
+   - `/ithy-opsx:review` → `ithy-opsx-review`
+   - `/ithy-opsx:verify` → `ithy-opsx-verify`
+   <!-- codex-preserve-end -->
+
+   Use this same resolved string for direct subprocess delivery and the agmsg
+   `--boot-prompt`; never choose it from the Manager's own CLI.
+
    Then substitute template vars: `${change_id}` → the current change id.
+
+   For a Codex `code` worker, append this scope contract to the resolved
+   prompt after the change id:
+
+   ```text
+   Code-worker scope contract:
+   - Implement only the change's unchecked implementation tasks.
+   - Do not archive the change.
+   - Do not sync change specs into the main specs.
+   - Do not create a git commit; the Manager owns the stage commit.
+   ```
+
+   The exact `openspec-apply-change` name is required: it matches the
+   OpenSpec-installed Codex Skill. Do not shorten it to `openspec-apply`,
+   which has no matching Skill and can be interpreted as free-form prose.
 
    **Worker MUST NOT commit.** The dispatched code worker's role is
    apply-only. The auto-committing `/ithy-opsx:apply` variant is
@@ -233,7 +312,7 @@ For each stage `S ∈ {code, review, verify}`:
      # First: presence check for local agmsg install.
      if [ ! -f "$HOME/.agents/skills/agmsg/scripts/send.sh" ]; then
        echo "[dispatch] agmsg configured but not installed locally; falling back to non-agmsg dispatch"
-       # Fall through to the Task tool / subprocess branches below.
+       # Fall through to the native / AgentRunner branches below.
      else
        case "$entry_command" in
          claude)      AGMSG_TYPE=claude-code ;;
@@ -268,7 +347,7 @@ For each stage `S ∈ {code, review, verify}`:
            break
          fi
        done
-       # Slash command form (inside the Manager's Claude session).
+       # Slash command form (inside the Manager session).
        # This creates a new tmux pane running the worker CLI in
        # agmsg monitor mode, then injects the boot prompt.
        # $MODEL_ARG is empty when entry.args has no --model; a full
@@ -346,14 +425,27 @@ without change:<id>.
      then waits for the worker's `stage:$S status:done` message
      rather than polling files.
 
-   - **Task tool branch** — `entry.command == "claude"` (Manager
-     self-dispatch or `mode: single-prompt` claude workers):
+   Determine the launch strategy by comparing canonical CLI identities:
+
+   ```
+   MANAGER_CLI = canonical form of this Manager's executable
+                 ("agy" and "antigravity" are the same identity)
+   WORKER_CLI  = canonical form of entry.command
+   STRATEGY:
+     if entry.mode == "live-shell" AND agmsg configured → agmsg (already handled above)
+     elif MANAGER_CLI == WORKER_CLI AND native adapter available for MANAGER_CLI → native
+     else → subprocess (via server AgentRunner)
+   ```
+
+   - **Native-delegation branch** — Manager and worker share the same
+     canonical CLI identity AND the Manager rendering exposes a native
+     child Agent/Tool (currently Claude Task/Agent and Agy 1.1.11
+     `invoke_subagent`; Codex falls through to AgentRunner):
+
+     **Claude Manager** — use the Task/Agent tool with the resolved
+     role prompt and artifact contract:
 
      ```bash
-     # For review / verify stages, append the SAME absolute-path
-     # artifact contract used by the agmsg branch, so the Task-
-     # tool subagent writes review.md at $REVIEW_MD_PATH — where
-     # Manager reads from. Matches harden-dispatch-round5.
      ARTIFACT_CONTRACT=""
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
@@ -366,21 +458,58 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     # Task tool: prompt = "<resolved-prompt>$ARTIFACT_CONTRACT"
+     FULL_PROMPT="<resolved-prompt>$ARTIFACT_CONTRACT"
      ```
 
-     The subagent runs in-process and returns when the slash command
-     completes.
+     Then invoke the Task tool (or Agent tool) with `FULL_PROMPT` as
+     the prompt and the worktree path (or project root for main-tree
+     execution) as the working directory. The subagent runs in-process
+     and returns when the slash command completes.
 
-   - **Subprocess branch** — anything else (copilot, agy, aider, or
-     any CLI without a Task-tool integration):
+     **Agy / Antigravity Manager** — use `invoke_subagent` with the
+     resolved role prompt and artifact contract. Its prompt MUST also
+     include this absolute execution-root contract:
+
+     ```text
+     --- execution root contract ---
+     Work only inside this exact absolute path:
+       <dispatcher-resolved worktree path, or project root in main-tree mode>
+     Do not modify files outside that path.
+     ```
+
+     When `entry.args` contains `--model <id>`, pass that model to
+     `invoke_subagent`. Await the tool result before stage judgment.
+     Once this branch selects an Agy worker, the Manager MUST NOT
+     implement the worker stage itself or directly run its OpenSpec
+     command. Calling `invoke_subagent` is mandatory.
+     If the Agy Manager runtime does not expose `invoke_subagent`, fall
+     through to the AgentRunner subprocess branch instead of assembling
+     a direct `agy -p` command.
+
+     **Codex Manager** — Codex has no native sub-agent tool in its
+     current stable surface. Fall through to the subprocess branch for
+     all Codex-to-Codex dispatches. The routing matrix condition
+     `native adapter available for MANAGER_CLI` evaluates to false for
+     Codex.
+
+   - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
+     Agy worker), same-CLI workers without a native adapter (e.g. Codex
+     Manager + Codex worker), an Agy runtime without `invoke_subagent`,
+     or any CLI not in the native-adapter registry:
+
+     The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
+     construction automatically. Manager POSTs to `/api/agents/run` with
+     `"wait": true` and a stage-specific `timeoutMs` (15m for code, 5m for
+     review/verify), synchronously receiving the status before judging
+     artifacts:
 
      ```bash
-     # Same artifact contract shape for review / verify —
-     # some CLIs (notably copilot) ignore process cwd and write
-     # to a discovered project root; the absolute path removes
-     # the ambiguity. Matches harden-dispatch-round5.
      ARTIFACT_CONTRACT=""
+     STAGE_TIMEOUT=300000 # 5 minutes default for review / verify
+     if [ "$S" = "code" ]; then
+       STAGE_TIMEOUT=900000 # 15 minutes for code stage
+     fi
+
      if [ "$S" = "review" ] || [ "$S" = "verify" ]; then
        ARTIFACT_CONTRACT="
 
@@ -392,27 +521,67 @@ at this exact path only. If the path's parent directory does not
 exist, create it first.
 "
      fi
-     cd .worktrees/<change-id>   # only when worktree mode
-     <entry.command> <entry.args...> -p "<resolved-prompt>$ARTIFACT_CONTRACT"
+
+     JSON_PAYLOAD=$(node -e '
+       console.log(JSON.stringify({
+         changeId: process.argv[1],
+         agentName: process.argv[2],
+         role: process.argv[3],
+         executionMode: process.argv[4],
+         prompt: process.argv[5],
+         wait: true,
+         timeoutMs: parseInt(process.argv[6], 10)
+       }))
+     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
+
+     CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
+     RUN_RESP=$(curl -s --connect-timeout 10 --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
+       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d "$JSON_PAYLOAD")
+     CURL_EXIT=$?
+
+     if [ "$CURL_EXIT" -ne 0 ]; then
+       echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
+       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+       exit 1
+     fi
+
+     JOB_STATUS=$(echo "$RUN_RESP" | node -e '
+       try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
+       catch { console.log(""); }
+     ')
+
+     if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
+       echo "[dispatch] ithyno session authentication failed at $ITHYNO_BASE."
+       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+       exit 1
+     fi
+
+     if [ "$JOB_STATUS" != "completed" ]; then
+       echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"
+       /ithy-opsx:escalate <change-id> "$S stage worker execution failed ($JOB_STATUS)"
+       exit 1
+     fi
      ```
 
-     `entry.args` from `agents.yaml` MUST include the CLI's
-     permission-skip flag (`--yolo` for Copilot,
-     `--dangerously-skip-permissions` for Antigravity, etc.).
+     `entry.args` from `agents.yaml` carries CLI flags. Prompt flags
+     (`-p` for non-Codex, `exec` for Codex) are automatically derived by
+     the server registry.
 
 4. **Judge success**:
 
    **Boundary post — the worker's result is in hand and Manager
-   starts inspecting it** (report message received, subprocess
-   exited, or Task-tool subagent returned):
+   starts inspecting it** (report message received, AgentRunner job
+   completed, or native subagent returned):
 
    ```bash
    postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"$S\",\"activity\":\"judging\"}"
    ```
 
-   - **`S = code`**: no artifact contract for Task tool / subprocess
-     branches. Success = subprocess exit 0 / Task-tool subagent
-     returned; failure = non-zero exit / tool failure → escalate
+   - **`S = code`**: no artifact contract for native tool / AgentRunner
+     branches. Success = AgentRunner completed / native subagent
+     returned; failure = runner or tool failure → escalate
      `code stage subprocess failed with exit code <n>`. For the
      agmsg branch, use the polling contract below.
    - **`S = review` or `S = verify`**: apply the **3-stage success
@@ -421,13 +590,13 @@ exist, create it first.
 ## 3-stage success contract (review / verify only)
 
 Never trust exit code alone — Copilot and Antigravity return exit code
-0 even on semantic failure. Judgment order for the Task tool /
-subprocess branches:
+0 even on semantic failure. Judgment order for native-tool /
+AgentRunner branches:
 
-1. **Subprocess non-zero exit** (or Task-tool subagent reported
-   failure) → subprocess failure → escalate with `<stage> subprocess
+1. **AgentRunner execution failure** (or native subagent reported
+   failure) → execution failure → escalate with `<stage> subprocess
    failed with exit code <N>`.
-2. **Subprocess exit 0 but `$REVIEW_MD_PATH` is absent or its
+2. **Execution completed but `$REVIEW_MD_PATH` is absent or its
    frontmatter unparseable** → contract failure → escalate with
    `<stage> returned no artifact`. The check uses the absolute
    path computed in step 4, not the relative form; see the
@@ -853,7 +1022,7 @@ teardown done outside the ladder.
   dispatcher — that's `/ithy-opsx:escalate`'s job.
 
 - **Do NOT modify code from the dispatcher session**. All code changes
-  happen inside dispatched worker invocations (Task tool subagent OR
+  happen inside dispatched worker invocations (native subagent OR
   subprocess CLI). If the dispatcher needs to investigate, use
   Read-only tools.
 

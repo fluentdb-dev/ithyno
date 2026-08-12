@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runNewProjectChain } from "../bin/new-project-chain.js";
+import { normalizeCodexPromptNames, runNewProjectChain } from "../bin/new-project-chain.js";
 import type { ChainEvent } from "../bin/new-project-chain.js";
 
 let dir: string;
@@ -23,18 +23,16 @@ afterEach(async () => {
 }, 30000);
 
 describe("runNewProjectChain — full run against a fresh dir", () => {
-  // Step 2+ (npm install of @fission-ai/openspec, then openspec init —
-  // see new-project-chain.js) hits the real network. A single shared
-  // run covers scaffold behavior, event shape, and target creation —
-  // splitting these into 3 separate tests each running the full real
-  // chain independently tripled the network/npm-install cost and
-  // caused hookTimeout/testTimeout flakiness under full-suite
-  // concurrency. Also: don't race the chain against a timeout and move
-  // on — an earlier version did that and left an orphaned background
-  // process holding a Windows file lock on `dir`, breaking cleanup.
+  // Subprocesses are injected here so the default test suite is deterministic
+  // and offline. The opt-in prompt smoke owns real npm/OpenSpec/Codex coverage.
   it("scaffolds, streams well-shaped events, and completes for a fresh nested dir with autoGitInit", async () => {
     const target = join(dir, "nested", "child");
-    await runNewProjectChain(target, (e) => events.push(e));
+    await runNewProjectChain(target, (e) => events.push(e), {
+      spawnImpl: async (_cmd, _args, _cwd, step, onEvent) => {
+        onEvent({ type: "log", step, line: "fake subprocess completed", stream: "stdout" });
+        return { ok: true, code: 0, message: "" };
+      },
+    });
 
     const scaffoldStart = events.find(
       (e) => e.type === "step-start" && e.step === "scaffold",
@@ -63,7 +61,7 @@ describe("runNewProjectChain — full run against a fresh dir", () => {
         expect(e.stream === "stdout" || e.stream === "stderr").toBe(true);
       }
     }
-  }, 120000);
+  });
 });
 
 describe("runNewProjectChain — scaffold failure", () => {
@@ -91,5 +89,46 @@ describe("runNewProjectChain — scaffold failure", () => {
     expect(
       events.some((e) => e.type === "step-start" && e.step === "openspec-init"),
     ).toBe(false);
+  });
+});
+
+describe("runNewProjectChain — Codex project-local initialization", () => {
+  it("restores AGENTS.md and normalizes prompts without using global CODEX_HOME", async () => {
+    const target = join(dir, "codex-project");
+    const seenEnvs: Array<Record<string, string>> = [];
+    const result = await runNewProjectChain(target, (e) => events.push(e), {
+      managerCli: "codex",
+      spawnImpl: async (_cmd, args, cwd, _step, _onEvent, extraEnv = {}) => {
+        seenEnvs.push(extraEnv);
+        if (args[0] === "openspec") {
+          await writeFile(join(cwd, "AGENTS.md"), "upstream replacement\n");
+          await mkdir(join(cwd, ".codex", "prompts"), { recursive: true });
+          await writeFile(join(cwd, ".codex", "prompts", "opsx-propose.md"), "propose\n");
+        }
+        return { ok: true, code: 0, message: "" };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(target, "AGENTS.md"), "utf8")).toBe(
+      await readFile(join(process.cwd(), "templates", "AGENTS.md"), "utf8"),
+    );
+    expect(existsSync(join(target, ".codex/prompts/openspec-propose.md"))).toBe(true);
+    expect(existsSync(join(target, ".codex/prompts/opsx-propose.md"))).toBe(false);
+    expect(seenEnvs[0]).toEqual({});
+    expect(seenEnvs[1]).toEqual({ CODEX_HOME: join(target, ".codex") });
+  });
+
+  it("keeps an existing native prompt and removes a regenerated legacy alias", async () => {
+    const prompts = join(dir, ".codex", "prompts");
+    await mkdir(prompts, { recursive: true });
+    await writeFile(join(prompts, "openspec-propose.md"), "user-owned\n");
+    await writeFile(join(prompts, "opsx-propose.md"), "generated\n");
+
+    await normalizeCodexPromptNames(dir);
+    await normalizeCodexPromptNames(dir);
+
+    expect(await readFile(join(prompts, "openspec-propose.md"), "utf8")).toBe("user-owned\n");
+    expect(existsSync(join(prompts, "opsx-propose.md"))).toBe(false);
   });
 });

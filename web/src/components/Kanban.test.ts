@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { bucketize, columnHeaderActionType, perCardStartEligible } from "./Kanban";
+import { changeIdCopyLabel } from "./KanbanCard";
 import type { Change, Progress } from "../types";
 
 function mkChange(
@@ -178,5 +179,11 @@ describe("perCardStartEligible (per-card Start button — unchanged by this chan
   it("any slot with a live job → not eligible (job already running)", () => {
     expect(perCardStartEligible("todo", true)).toBe(false);
     expect(perCardStartEligible("inprogress", true)).toBe(false);
+  });
+});
+
+describe("Kanban card change ID copy", () => {
+  it("uses the exact card ID in the accessible copy label", () => {
+    expect(changeIdCopyLabel("add-search")).toBe("Copy change ID add-search");
   });
 });

@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import chokidar, { type FSWatcher } from "chokidar";
+import { commandForAgentRole } from "../manager-command.js";
 
 /**
  * Agent registry — loads `agents.yaml`, validates+normalizes shapes, and
@@ -138,6 +139,69 @@ export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
   verify: "/ithy-opsx:verify ${change_id}",
   manager: "/ithy-opsx:dispatch",
 };
+
+// ---------------------------------------------------------------------------
+// CLI identity normalization — route-dispatch-by-manager-worker-cli (Task 1.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a CLI command name to its canonical identity.
+ * Known aliases that denote the same client compare as one identity.
+ *   `agy` and `antigravity` → "agy"
+ * Unknown / arbitrary executable names are returned as-is (lowercased).
+ */
+export function canonicalCli(command: string | undefined): string {
+  const c = (command ?? "").toLowerCase().trim();
+  if (c === "antigravity") return "agy";
+  return c;
+}
+
+/**
+ * Whether the given canonical CLI has a known same-client native child-agent
+ * adapter available to a Manager running as that CLI.
+ *
+ * - `claude` → Task-tool subagent.
+ * - `agy` → Agy 1.1.11 `invoke_subagent`.
+ * - all others → no adapter; fall back to subprocess.
+ */
+export function hasNativeAdapter(canonicalCommand: string): boolean {
+  return canonicalCommand === "claude" || canonicalCommand === "agy";
+}
+
+/** Strategy returned by {@link selectLaunchStrategy}. */
+export type LaunchStrategy = "agmsg" | "native" | "subprocess";
+
+/**
+ * Select the worker launch strategy for a given (Manager, worker) pair.
+ *
+ * Priority (first match wins):
+ *  1. `agmsg`     — worker is `live-shell` AND agmsg is configured.
+ *  2. `native`    — same canonical CLI AND the Manager rendering has a
+ *                   native child-agent adapter.
+ *  3. `subprocess`— all other cases, including same-CLI without an adapter
+ *                   (e.g. Codex Manager + Codex worker).
+ */
+export function selectLaunchStrategy(
+  managerCommand: string | undefined,
+  workerMode: AgentMode,
+  agmsgConfigured: boolean,
+  workerCommand: string | undefined,
+): LaunchStrategy {
+  if (workerMode === "live-shell" && agmsgConfigured) return "agmsg";
+  const mgr = canonicalCli(managerCommand);
+  const wkr = canonicalCli(workerCommand);
+  if (mgr === wkr && hasNativeAdapter(mgr)) return "native";
+  return "subprocess";
+}
+
+/** Resolve only the built-in prompt surface for the receiving Agent CLI.
+ * Explicit `agents.yaml` prompt overrides remain byte-for-byte authoritative. */
+export function builtInPromptForAgent(
+  command: string | undefined,
+  role: string,
+): string | undefined {
+  return commandForAgentRole(command, role);
+}
 
 function validatePromptsMap(
   raw: unknown,
@@ -494,7 +558,7 @@ export function resolvePromptForRole(
 ): string | undefined {
   const agentPrompt = agent.prompts?.[role];
   if (agentPrompt !== undefined) return agentPrompt;
-  return BUILT_IN_ROLE_PROMPTS[role];
+  return builtInPromptForAgent(agent.command, role);
 }
 
 /**
@@ -748,6 +812,12 @@ export class AgentRegistry {
       branch: string;
     },
     role?: string,
+    /** Caller-supplied prompt that overrides both `def.prompts` and the
+     *  built-in default. Used by the server AgentRunner when the dispatcher
+     *  passes an artifact-contract-augmented prompt via the API body.
+     *  Template substitution (${change_id} etc.) is NOT applied to this
+     *  string — callers must supply the final text. */
+    promptOverride?: string,
   ): {
     command: string;
     args: string[];
@@ -778,21 +848,27 @@ export class AgentRegistry {
     const command = def.command ?? "";
     const args = (def.args ?? []).map(replace);
 
-    // Resolve the prompt for the dispatched role. explicit = agent.prompts;
-    // fallback = built-in default per role.
+    // Resolve the prompt for the dispatched role. Priority:
+    //   1. promptOverride from caller (dispatcher API — includes artifact contract).
+    //   2. agent.prompts[role] from agents.yaml.
+    //   3. built-in default per role.
     const agentPrompt = def.prompts?.[dispatchedRole];
-    const promptTemplate = agentPrompt ?? BUILT_IN_ROLE_PROMPTS[dispatchedRole];
-    const resolvedPrompt = promptTemplate === undefined ? undefined : replace(promptTemplate);
-    const isExplicitPrompt = agentPrompt !== undefined;
+    const promptTemplate = promptOverride !== undefined
+      ? undefined  // skip template; use override verbatim below
+      : (agentPrompt ?? builtInPromptForAgent(command, dispatchedRole));
+    const resolvedPrompt = promptOverride !== undefined
+      ? promptOverride
+      : (promptTemplate === undefined ? undefined : replace(promptTemplate));
 
     // Wire the prompt into the runner:
     //   - `mode: live-shell` (worker) — write resolvedPrompt to child.stdin.
     //     Manager `mode: live-shell` is handled by attachPtyToSocket
     //     (Terminal panel WS) and never reaches this branch.
-    //   - `mode: single-prompt` — append `[-p, prompt]` to args when the
-    //     agent has an explicit `prompts.<role>` set AND args does not
-    //     already inline `-p`. Command-only agents with no explicit
-    //     prompt keep their hand-authored args unchanged.
+    //   - `mode: single-prompt` — deliver the resolved prompt using the
+    //     receiving CLI's native non-interactive form. Codex uses
+    //     `codex exec <prompt>`; Claude uses `claude -p <prompt>`.
+    //     Existing hand-authored prompt arguments remain authoritative and
+    //     are not injected a second time.
     let initialInputMode: "cli-arg" | "stdin";
     let initialInput: string | undefined;
     let effectiveArgs = args;
@@ -808,12 +884,55 @@ export class AgentRegistry {
     } else {
       initialInputMode = "cli-arg";
       initialInput = undefined;
-      const shouldInject =
-        resolvedPrompt !== undefined &&
-        isExplicitPrompt &&
-        !args.includes("-p");
-      if (shouldInject) {
-        effectiveArgs = [...args, "-p", resolvedPrompt!];
+
+      if (promptOverride !== undefined) {
+        // When promptOverride is passed explicitly:
+        // - Codex: keep all args except 'exec' and explicit slash-command positionals, then append "exec <promptOverride>"
+        // - Non-Codex: keep all args except explicit "-p <old>" pairs and slash-command positionals, then append "-p <promptOverride>"
+        if (command === "codex") {
+          const cleanArgs: string[] = [];
+          for (let i = 0; i < args.length; i++) {
+            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            cleanArgs.push(args[i]);
+          }
+          const hasExec = cleanArgs.includes("exec");
+          if (hasExec) {
+            effectiveArgs = [...cleanArgs, promptOverride];
+          } else {
+            effectiveArgs = [...cleanArgs, "exec", promptOverride];
+          }
+        } else {
+          const cleanArgs: string[] = [];
+          for (let i = 0; i < args.length; i++) {
+            if (args[i] === "-p") {
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(args[i])) {
+              if (i + 1 < args.length && !args[i + 1].startsWith("-")) i++;
+              continue;
+            }
+            cleanArgs.push(args[i]);
+          }
+          effectiveArgs = [...cleanArgs, "-p", promptOverride];
+        }
+      } else {
+        const promptAlreadyPresent =
+          resolvedPrompt !== undefined &&
+          (args.includes(resolvedPrompt) ||
+            args.some((arg) => /^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(arg)));
+        if (resolvedPrompt !== undefined && !promptAlreadyPresent) {
+          if (command === "codex") {
+            effectiveArgs = args.includes("exec")
+              ? [...args, resolvedPrompt]
+              : [...args, "exec", resolvedPrompt];
+          } else if (!args.includes("-p")) {
+            effectiveArgs = [...args, "-p", resolvedPrompt];
+          }
+        }
       }
     }
 

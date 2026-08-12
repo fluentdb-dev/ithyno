@@ -6,6 +6,7 @@ import { injectPty } from "../api";
 import type { Change, JobSummary } from "../types";
 import { useStartFlow } from "./useStartFlow";
 import { ERR } from "../lib/errorMessages";
+import { commandForManager } from "../lib/managerCommand";
 
 /**
  * Shared card-action wiring for the Board (`KanbanBoard`) and Phase
@@ -30,23 +31,23 @@ function modalTitle(p: PendingAction): string {
   return `Discard agent worktree for ${p.change.id}`;
 }
 
-function buildPendingCommand(p: PendingAction, mode: string): string {
+function buildPendingCommand(p: PendingAction, mode: string, agents: ReturnType<typeof useStore.getState>["agents"]): string {
   const id = p.change.id;
-  if (p.kind === "apply") return `/opsx:apply ${id}`;
-  if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : `/ithy-opsx:archive ${id}`;
+  if (p.kind === "apply") return commandForManager(agents, "opsx", "apply", id);
+  if (p.kind === "archive") return mode === "cli" ? `npx openspec archive ${id}` : commandForManager(agents, "ithy-opsx", "archive", id);
   if (p.kind === "agent-merge") {
     // Claude mode delegates to the ithy-opsx-merge skill so the auto-stash /
     // auto-pop dance handles a dirty main tree; CLI mode keeps the raw git
     // invocation (users who chose CLI expect to handle stashing themselves).
-    return mode === "cli" ? `git merge --no-ff ${p.job.branch}` : `/ithy-opsx:merge ${id}`;
+    return mode === "cli" ? `git merge --no-ff ${p.job.branch}` : commandForManager(agents, "ithy-opsx", "merge", id);
   }
   return `git worktree remove --force ${p.job.worktreePath} && git branch -D ${p.job.branch}`;
 }
 
-function modalSubmitLabel(p: PendingAction, commandStyle: "claude" | "cli"): string {
-  if (p.kind === "apply") return "Send /opsx:apply";
-  if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive";
-  if (p.kind === "agent-merge") return commandStyle === "cli" ? "Send git merge" : "Send /ithy-opsx:merge";
+function modalSubmitLabel(p: PendingAction, commandStyle: "claude" | "cli", agents: ReturnType<typeof useStore.getState>["agents"]): string {
+  if (p.kind === "apply") return `Send ${commandForManager(agents, "opsx", "apply")}`;
+  if (p.kind === "archive") return commandStyle === "cli" ? "Send npx openspec archive" : `Send ${commandForManager(agents, "ithy-opsx", "archive")}`;
+  if (p.kind === "agent-merge") return commandStyle === "cli" ? "Send git merge" : `Send ${commandForManager(agents, "ithy-opsx", "merge")}`;
   return "Send cleanup";
 }
 
@@ -66,6 +67,7 @@ export function useKanbanActions(): KanbanCardHandlers {
   const setCommandStyle = useStore((s) => s.setCommandStyle);
   const pushToast = useStore((s) => s.pushToast);
   const jobs = useStore((s) => s.jobs);
+  const agents = useStore((s) => s.agents);
   const clearWorktreeProgress = useStore((s) => s.clearWorktreeProgress);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const { startImplementation, startFlowModals } = useStartFlow();
@@ -117,8 +119,8 @@ export function useKanbanActions(): KanbanCardHandlers {
           title={modalTitle(pending)}
           mode={pending.kind === "archive" || pending.kind === "agent-merge" ? commandStyle : undefined}
           onModeChange={pending.kind === "archive" || pending.kind === "agent-merge" ? setCommandStyle : undefined}
-          build={(_input, m) => buildPendingCommand(pending, m ?? "claude")}
-          submitLabel={modalSubmitLabel(pending, commandStyle)}
+          build={(_input, m) => buildPendingCommand(pending, m ?? "claude", agents)}
+          submitLabel={modalSubmitLabel(pending, commandStyle, agents)}
           onCancel={() => setPending(null)}
           onSubmit={runInject}
         >

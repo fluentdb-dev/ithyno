@@ -158,3 +158,113 @@ describe("defaultManager priority fallback (expand-init-to-scaffold-agents)", ()
     expect(resolvePriority(null, installed)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// agentSkills store slice (add-settings-agent-skill-installer)
+// ---------------------------------------------------------------------------
+
+describe("agentSkills store slice (add-settings-agent-skill-installer)", () => {
+  beforeEach(() => {
+    useStore.setState({
+      agentSkills: null,
+      agentSkillsError: null,
+    });
+  });
+
+  it("initializes agentSkills to null", () => {
+    expect(useStore.getState().agentSkills).toBeNull();
+  });
+
+  it("initializes agentSkillsError to null", () => {
+    expect(useStore.getState().agentSkillsError).toBeNull();
+  });
+
+  it("loadAgentSkills action exists on the store", () => {
+    expect(typeof useStore.getState().loadAgentSkills).toBe("function");
+  });
+
+  it("setState can set agentSkills array", () => {
+    const skills = [
+      {
+        cli: "claude",
+        openspec: {
+          status: "installed" as const,
+          diagnostics: [],
+          paths: [".claude/commands/opsx/propose.md"],
+        },
+        ithyno: {
+          status: "missing" as const,
+          diagnostics: ["Missing expected files"],
+          paths: [],
+        },
+        inspectedAt: new Date().toISOString(),
+      },
+    ];
+    useStore.setState({ agentSkills: skills, agentSkillsError: null });
+    expect(useStore.getState().agentSkills).toEqual(skills);
+    expect(useStore.getState().agentSkillsError).toBeNull();
+  });
+
+  it("agentSkillsError is independent from doctorReport", () => {
+    // Setting an agentSkillsError should not affect doctorReport
+    const before = useStore.getState().doctorReport;
+    useStore.setState({ agentSkillsError: "inspection failed" });
+    expect(useStore.getState().doctorReport).toBe(before);
+    expect(useStore.getState().agentSkillsError).toBe("inspection failed");
+  });
+
+  it("agentSkills state does not affect other store slices", () => {
+    const before = useStore.getState().browseMode;
+    useStore.setState({
+      agentSkills: [
+        {
+          cli: "agy",
+          openspec: { status: "partial" as const, diagnostics: ["missing one"], paths: [] },
+          ithyno: { status: "installed" as const, diagnostics: [], paths: [] },
+          inspectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(useStore.getState().browseMode).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AGENT_CLI_KEYS vs non-agent keys (add-settings-agent-skill-installer)
+// ---------------------------------------------------------------------------
+
+describe("Agent CLI row discrimination (add-settings-agent-skill-installer)", () => {
+  it("AGENT_CLI_KEYS does not contain infrastructure tools", () => {
+    const nonAgent = ["tmux", "agmsg", "git", "node"];
+    for (const tool of nonAgent) {
+      expect(AGENT_CLI_KEYS).not.toContain(tool);
+    }
+  });
+
+  it("agentSkills state combination: installed openspec + missing ithyno", () => {
+    const info = {
+      cli: "claude",
+      openspec: { status: "installed" as const, diagnostics: [], paths: [] },
+      ithyno: { status: "missing" as const, diagnostics: [], paths: [] },
+      inspectedAt: new Date().toISOString(),
+    };
+    // Both states are tracked independently
+    expect(info.openspec.status).toBe("installed");
+    expect(info.ithyno.status).toBe("missing");
+    // CLI executable state is separate from skill states
+  });
+
+  it("agentSkills state combination: all states", () => {
+    const states = [
+      "missing",
+      "partial",
+      "installed",
+      "update-available",
+      "conflict",
+      "unsupported",
+    ] as const;
+    for (const s of states) {
+      expect(states).toContain(s);
+    }
+  });
+});

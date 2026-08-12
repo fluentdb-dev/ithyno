@@ -35,6 +35,7 @@ function loadShellEnv(): void {
 
 loadShellEnv();
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
@@ -50,7 +51,8 @@ import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
 import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys } from "./sync/pty.js";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
-import { AgentRunner, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
+import { validateRunPayload, type RunBody } from "./agents/run-validation.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
@@ -64,6 +66,7 @@ import {
   extractToken,
   verifyToken,
 } from "./util/auth.js";
+import { isSafeChangeId } from "./util/change-id.js";
 import type { Change, DocsFile, DocsTree, SpecDomain, GitStatus } from "./model.js";
 import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
@@ -81,16 +84,6 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
-
-// Same shape as the change-id validation done implicitly by other endpoints
-// (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
-// below shell out to `git` with `<id>` embedded in the path.
-const SAFE_CHANGE_ID = /^[A-Za-z0-9._-]+$/;
-function isSafeChangeId(id: string): boolean {
-  if (!id) return false;
-  if (id === "." || id === "..") return false;
-  return SAFE_CHANGE_ID.test(id);
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -130,6 +123,7 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
+await fastify.register(rateLimit, { global: false });
 
 // ---- CSRF protection -------------------------------------------------------
 // Built once we know the listening port (see fastify.listen below). Used by
@@ -659,6 +653,131 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
     });
   });
 });
+
+// ---- Agent skill inspection + installation (add-settings-agent-skill-installer) ----
+//
+// GET  /api/agent-skills   — report per-CLI OpenSpec and ithyno state.
+//                            Session-token gated (same as /api/doctor).
+// POST /api/agent-skills/install — SSE endpoint; body { cli, components }.
+//                            Local-only + session-token gated.
+
+fastify.get("/api/agent-skills", {
+  config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+}, async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+  const { runDoctor } = await import("./doctor.js");
+  const report = await runDoctor();
+  const { inspectAgentSkills } = await import("./agent-skills.js");
+  const sourcesDir = join(PKG_ROOT, "ithyno", "skills");
+  const results = await inspectAgentSkills(getProjectRoot(), sourcesDir, report.agents);
+  return { skills: results, projectRoot: getProjectRoot() };
+});
+
+fastify.post<{ Body: { cli?: unknown; components?: unknown } }>(
+  "/api/agent-skills/install",
+  { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+  async (req, reply) => {
+    if (!isLocal(req.socket.remoteAddress ?? undefined)) {
+      return reply.code(403).send({ error: "local only" });
+    }
+    const token = extractToken({
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      url: req.url,
+    });
+    if (!token || !verifyToken(token)) {
+      return reply.code(401).send({ error: "auth required" });
+    }
+
+    const { CLI_ADAPTERS, isInstallLocked, installAgentSkills } = await import(
+      "./agent-skills.js"
+    );
+
+    // Validate cli
+    const cli = req.body?.cli;
+    if (typeof cli !== "string" || !(cli in CLI_ADAPTERS)) {
+      return reply
+        .code(400)
+        .send({ error: `cli must be one of: ${Object.keys(CLI_ADAPTERS).join(", ")}` });
+    }
+
+    // Validate components
+    const rawComponents = req.body?.components;
+    const VALID_COMPONENTS = ["openspec", "ithyno"] as const;
+    if (
+      !Array.isArray(rawComponents) ||
+      rawComponents.length === 0 ||
+      !rawComponents.every(
+        (c): c is "openspec" | "ithyno" => VALID_COMPONENTS.includes(c as "openspec" | "ithyno"),
+      )
+    ) {
+      return reply.code(400).send({
+        error: `components must be a non-empty array of: ${VALID_COMPONENTS.join(", ")}`,
+      });
+    }
+    const components = rawComponents as Array<"openspec" | "ithyno">;
+
+    // 409 if a concurrent install is running for this cli in this project
+    const projectRoot = getProjectRoot();
+    if (isInstallLocked(projectRoot, cli)) {
+      return reply.code(409).send({
+        error: `Installation for ${cli} is already running in this project`,
+      });
+    }
+
+    // Set up SSE stream
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    let clientAlive = true;
+    reply.raw.on("close", () => {
+      clientAlive = false;
+    });
+
+    const sendSse = (event: string, data: unknown) => {
+      if (!clientAlive) return;
+      try {
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch {
+        clientAlive = false;
+      }
+    };
+
+    const sourcesDir = join(PKG_ROOT, "ithyno", "skills");
+    try {
+      const installResult = await installAgentSkills(
+        cli,
+        components,
+        projectRoot,
+        sourcesDir,
+        sendSse,
+      );
+      sendSse("done", { result: installResult.result });
+    } catch (err) {
+      sendSse("done", {
+        result: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    if (clientAlive) {
+      try {
+        reply.raw.end();
+      } catch {
+        /* client already closed */
+      }
+    }
+  },
+);
 
 // Dedicated lightweight token-validity check so the UI can detect a stale
 // token at first load (typically after a server restart) without waiting for
@@ -1442,28 +1561,47 @@ fastify.get<{ Params: { id: string } }>("/api/agents/jobs/:id", async (req, repl
   return job;
 });
 
-type RunBody = { changeId: string; agentName: string };
 fastify.post<{ Body: RunBody }>("/api/agents/run", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) {
     req.log.warn({ addr: req.socket.remoteAddress }, "agents/run: non-local blocked");
     return reply.code(403).send({ error: "local only" });
   }
-  const body = req.body;
-  if (!body?.changeId || !body?.agentName) {
-    req.log.warn({ body }, "agents/run: bad body");
-    return reply.code(400).send({ error: "changeId and agentName required" });
+  const validation = validateRunPayload(req.body);
+  if (!validation.ok) {
+    req.log.warn({ body: req.body }, `agents/run: ${validation.error}`);
+    return reply.code(validation.status).send({ error: validation.error });
   }
+  const body = validation.data;
   const cfg = agentRegistry.publicConfig();
   if (cfg.agents.length === 0) {
     req.log.warn("agents/run: no agents in agents.yaml");
     return reply.code(503).send({ error: "no agents defined in agents.yaml" });
   }
-  req.log.info({ changeId: body.changeId, agentName: body.agentName }, "agents/run: starting");
-  const res = await agentRunner.run(body.changeId, body.agentName);
+  const executionMode: RunnerExecutionMode = body.executionMode ?? "worktree";
+  req.log.info(
+    { changeId: body.changeId, agentName: body.agentName, role: body.role, executionMode },
+    "agents/run: starting",
+  );
+  const res = await agentRunner.run(body.changeId, body.agentName, body.role, executionMode, body.prompt || undefined);
   if (!res.ok) {
     req.log.warn({ status: res.status, reason: res.reason, changeId: body.changeId }, "agents/run: failed");
     return reply.code(res.status).send({ error: res.reason });
   }
+
+  if (body.wait) {
+    try {
+      const finished = await agentRunner.waitForCompletion(res.job.id, {
+        timeoutMs: body.timeoutMs,
+      });
+      const updatedJob = agentRunner.getJob(res.job.id);
+      return { ...(updatedJob ?? res.job), ...finished };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      req.log.warn({ jobId: res.job.id, error: msg }, "agents/run: wait timed out or failed");
+      return reply.code(504).send({ error: msg, jobId: res.job.id });
+    }
+  }
+
   req.log.info({ jobId: res.job.id, changeId: body.changeId }, "agents/run: ok");
   return res.job;
 });
@@ -1802,6 +1940,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
     const injectResult = injectImportCommand(
       targetPath,
       (data, terminate) => injectIntoManager(managerCwd, data, terminate),
+      agentRegistry.managerAgent()?.command,
     );
     if (!injectResult.ok) {
       // Roll back the registered job — inject failed before dispatch.

@@ -170,6 +170,19 @@ npm run demo                    # shows the examples/ sample
 npm run openspec -- validate --all
 ```
 
+### Agent dispatch compatibility
+
+The following Manager → Worker combinations have been checked with ithyno's
+dispatcher.
+
+| Manager | Claude worker | Agy worker | Copilot worker | Codex worker | `dispatch-multi` |
+|---|---:|---:|---:|---:|---:|
+| Claude | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Codex | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Agy | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+Legend: ✅ confirmed, ❌ currently not working.
+
 ---
 
 ## Concept (in one diagram)

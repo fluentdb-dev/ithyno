@@ -182,6 +182,11 @@ export class ImportTargetWatcher {
       // Watch up to depth 2: targetRoot/openspec/GENERATED.md
       depth: 2,
       awaitWriteFinish: false,
+      // Import targets can be large external repositories. Polling avoids
+      // allocating a native watcher for every directory and also works in
+      // sandboxed Agent/test environments where fs.watch returns EMFILE.
+      usePolling: true,
+      interval: 100,
     });
 
     const handleAdd = (filePath: string) => {

@@ -294,3 +294,126 @@ The rationale: absent `agents.yaml`, there is no dispatch runtime to drive; a te
 - **WHEN** the user opens the Settings page
 - **THEN** an unobtrusive `.info-banner` renders explaining that terminal auto-launch is off and pointing at `agents.yaml` as the enabler
 
+### Requirement: Manager Receives Authoritative Dashboard Endpoint
+The embedded PTY SHALL provide each Manager process with `ITHYNO_PORT`, `ITHYNO_BASE`, and `ITHYNO_SESSION_TOKEN` values that exactly identify the Manager's owning dashboard session.
+
+#### Scenario: Manager starts in Electron dashboard session
+- **WHEN** Electron opens the Manager PTY for a project dashboard session
+- **THEN** `ITHYNO_PORT` equals the session's bound server port
+- **AND** `ITHYNO_BASE` equals `http://localhost:<ITHYNO_PORT>`
+- **AND** `ITHYNO_SESSION_TOKEN` equals the server's active session token
+
+#### Scenario: Renderer reload does not stale Manager environment
+- **GIVEN** a Manager process has inherited the authoritative dashboard endpoint
+- **WHEN** the renderer reloads or performs authentication recovery
+- **THEN** the inherited port and token continue to identify and authorize against the active server
+
+#### Scenario: Explicit values do not fall back to default port
+- **GIVEN** `ITHYNO_BASE` and `ITHYNO_PORT` are present in the Manager environment
+- **WHEN** an ithyno command contacts the dashboard server
+- **THEN** it uses the supplied endpoint and does not replace it with the default port `4321`
+
+#### Scenario: Only the authoritative port is available
+- **GIVEN** `ITHYNO_BASE` is absent and the injected `ITHYNO_PORT` is present
+- **WHEN** an ithyno command resolves the dashboard endpoint
+- **THEN** it derives `http://localhost:<ITHYNO_PORT>` from that exact value
+- **AND** it does not use a default or remembered port
+
+#### Scenario: Dispatch has no authoritative session context
+- **GIVEN** both `ITHYNO_BASE` and `ITHYNO_PORT` are absent, or `ITHYNO_SESSION_TOKEN` is absent
+- **WHEN** the Manager starts an ithyno dispatch or diagnoses a failed server request
+- **THEN** dispatch stops before contacting an endpoint
+- **AND** it does not construct or retry a URL using a default or guessed port
+- **AND** diagnostics may state whether the token is set but MUST NOT print the token value
+
+#### Scenario: Session identity may have changed between requests
+- **GIVEN** an ithyno workflow previously completed an authenticated HTTP request
+- **WHEN** it is about to make another ithyno HTTP request
+- **THEN** it explicitly reconsiders whether the dashboard or server restarted
+- **AND** it expands the current `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` values again rather than reusing copied literals
+- **AND** after HTTP 401/403 or a transport failure it re-reads the environment once and retries only if the request values demonstrably changed
+- **AND** an unchanged or invalid session stops the workflow without entering a worker or Manager-execution fallback
+
+#### Scenario: Multi-change dispatch resolves session context
+- **GIVEN** the Manager starts an ithyno multi-change dispatch
+- **WHEN** its workflow resolves the dashboard endpoint and session token
+- **THEN** it applies the same authoritative environment, no-default-port, token-secrecy, and per-request freshness rules as single-change dispatch
+- **AND** missing or stale control-plane context stops the workflow instead of silently continuing with a guessed endpoint
+
+#### Scenario: Shipped dispatch definitions remain synchronized
+- **WHEN** the repository's Claude command and skill templates are validated
+- **THEN** every ithyno definition that contacts the dashboard API is rejected if it embeds a `4321` endpoint fallback
+- **AND** the development, Init-template, and packaged-extension copies remain byte-identical
+
+#### Scenario: Global Claude definition shadows project definition
+- **GIVEN** a project-local Claude ithyno command or skill and a user-global definition at the corresponding `~/.claude` path
+- **WHEN** Manage Skills inspects the Claude installation
+- **THEN** it reports a configuration conflict and identifies the global path that may shadow or stale-cache the project definition
+- **AND** inspection and installation do not automatically delete or overwrite the global file
+
+### Requirement: Tmux Session Receives Authoritative Dashboard Environment
+When tmux is enabled for the Manager, the system SHALL propagate the attaching PTY's `ITHYNO_PORT`, `ITHYNO_BASE`, and `ITHYNO_SESSION_TOKEN` values into the project tmux session environment.
+
+#### Scenario: Manager starts in a new tmux session
+- **WHEN** ithyno creates a project tmux session
+- **THEN** the `new-session` arguments explicitly set `ITHYNO_PORT`, `ITHYNO_BASE`, and `ITHYNO_SESSION_TOKEN` in the tmux session environment
+- **AND** the generated startup string contains environment-variable references rather than the resolved session token value
+
+#### Scenario: Manager attaches to an existing tmux session
+- **GIVEN** a project tmux session already exists
+- **WHEN** ithyno starts the Manager with `new-session -A`
+- **THEN** tmux's `update-environment` includes `ITHYNO_PORT`, `ITHYNO_BASE`, and `ITHYNO_SESSION_TOKEN`
+- **AND** tmux copies the attaching PTY's authoritative values into the session environment
+
+#### Scenario: Manager CLI selection does not change propagation
+- **WHEN** any supported Manager CLI is started with tmux enabled
+- **THEN** the same three environment variables are propagated before the resolved CLI command
+- **AND** the CLI's configured arguments and initial input remain unchanged
+
+### Requirement: Manager PTY cwd is re-targetable at runtime via HTTP
+
+The server SHALL expose `POST /api/project/switch` that updates its notion of the current project root and terminates all live embedded PTYs, so the next `/pty` WebSocket connection spawns its PTY at the new project root. The server SHALL NOT require a process restart to switch projects at runtime.
+
+#### Scenario: Runtime project switch terminates live PTYs and re-targets
+
+- **GIVEN** ithyno is running with the current project root at `/path/A` and one or more Manager PTYs are attached
+- **WHEN** a client sends `POST /api/project/switch` with `{ projectRoot: "/path/B" }` and the path is valid + authorized
+- **THEN** the server updates its internal project root to `/path/B`
+- **AND** it terminates every live PTY (each PTY process is killed and each attached WebSocket is closed with code 1000 and reason "project switch")
+- **AND** it broadcasts `state-replaced` so connected dashboards refetch state
+- **AND** the endpoint returns 200 with `{ projectRoot: "/path/B" }`
+
+#### Scenario: Reconnect after switch spawns PTY at new cwd
+
+- **GIVEN** a project switch just completed from `/path/A` to `/path/B`
+- **WHEN** the client re-opens the `/pty` WebSocket
+- **THEN** the server spawns the new PTY with cwd = `/path/B`
+- **AND** running `pwd` in that PTY reports `/path/B`
+
+#### Scenario: `/opsx:propose` after switch lands in the correct project
+
+- **GIVEN** ithyno launched with cwd = `/path/A`, then switched to `/path/B`, then the client reconnected the PTY
+- **WHEN** the user invokes `/opsx:propose <id>` in the reconnected Manager PTY
+- **THEN** the change scaffold is created at `/path/B/openspec/changes/<id>/`, not `/path/A/`
+
+#### Scenario: Concurrent switch is guarded
+
+- **WHEN** a `POST /api/project/switch` request is in-flight
+- **AND** a second `POST /api/project/switch` request arrives before the first completes
+- **THEN** the second request returns 409 with a message about a switch already in progress
+- **AND** the first request completes normally
+
+#### Scenario: Unauthorized project path is rejected
+
+- **WHEN** a client sends `POST /api/project/switch` with `projectRoot: "/etc"` (or any path under the system-path blocklist)
+- **THEN** the endpoint returns 403 with the reason
+- **AND** the server's project root is NOT changed
+- **AND** no PTYs are terminated
+
+#### Scenario: Nonexistent or non-directory path is rejected
+
+- **WHEN** a client sends `POST /api/project/switch` with a path that does not exist or is not a directory
+- **THEN** the endpoint returns 400 with a clear reason
+- **AND** the server's project root is NOT changed
+- **AND** no PTYs are terminated
+

@@ -18,7 +18,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { statSync } from "node:fs";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { resolve } from "node:path";
 
@@ -75,13 +74,13 @@ function preflight(input: unknown): PreflightResult {
   return { ok: true, resolvedNext: input };
 }
 
-// `os.tmpdir()` on macOS returns `/var/folders/...` which trips the
-// forbidden path check for `/var`. Use `homedir()` as the test base so
-// preflight sees it as authorized.
+// `os.tmpdir()` on macOS returns `/var/folders/...` and the authorization
+// predicate intentionally rejects `/var`. Use the writable repository cwd;
+// each test removes its temporary directory in afterEach.
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(homedir(), ".ithyno-project-switch-test-"));
+  dir = mkdtempSync(join(process.cwd(), ".ithyno-project-switch-test-"));
 });
 
 afterEach(() => {

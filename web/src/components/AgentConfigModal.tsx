@@ -6,6 +6,7 @@ import type {
   AgentMode,
   AgentPublic,
 } from "../types";
+import { commandForAgentRole } from "../lib/managerCommand";
 
 /**
  * Modal for editing (or adding) an entry in `agents.yaml`. Save posts to
@@ -22,18 +23,6 @@ import type {
  */
 
 const ROLE_OPTIONS = ["propose", "code", "review", "verify", "manager", "other"] as const;
-
-// Client-side mirror of server/agents/registry.ts BUILT_IN_ROLE_PROMPTS.
-// Keep in sync — this is only shown in the modal as a placeholder /
-// preview; the server's version is what actually kicks in when the
-// agent has no `prompts.<role>` entry.
-const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
-  propose: "/opsx:propose ${change_id}",
-  code: "/opsx:apply ${change_id}",
-  review: "/ithy-opsx:review ${change_id}",
-  verify: "/ithy-opsx:verify ${change_id}",
-  manager: "/ithy-opsx:dispatch",
-};
 
 type Props = {
   /** `AgentPublic` = edit mode with the row's data;
@@ -133,7 +122,7 @@ export function AgentConfigModal({
   const resolvedPromptForRole = (role: string): { source: string; value: string } => {
     const local = form.prompts[role]?.trim();
     if (local) return { source: "custom", value: local };
-    const builtIn = BUILT_IN_ROLE_PROMPTS[role];
+    const builtIn = commandForAgentRole(form.command.trim(), role);
     if (builtIn) return { source: "built-in", value: builtIn };
     return { source: "none", value: "" };
   };
@@ -290,7 +279,7 @@ export function AgentConfigModal({
                 <>
                   Prompt{" "}
                   <span className="muted">
-                    (typed into the PTY after Manager boots — leave blank for the built-in <code>/opsx:manage</code>)
+                    (typed into the PTY after Manager boots — leave blank for the CLI-specific built-in)
                   </span>
                 </>
               ) : (

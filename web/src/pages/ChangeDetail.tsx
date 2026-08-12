@@ -10,6 +10,7 @@ import { TagChipList } from "../components/TagChip";
 import { injectPty, fetchChange } from "../api";
 import { useStartFlow } from "../hooks/useStartFlow";
 import { ERR } from "../lib/errorMessages";
+import { commandForManager } from "../lib/managerCommand";
 import { hasNonVerifyWork, isRunningOrPending } from "../util/changeState";
 import type { Change as ChangeType } from "../types";
 import { isVsCodeShell } from "../runtime/shell";
@@ -90,6 +91,7 @@ export function ChangeDetail() {
   const pushToast = useStore((s) => s.pushToast);
   const commandStyle = useStore((s) => s.commandStyle);
   const setCommandStyle = useStore((s) => s.setCommandStyle);
+  const agents = useStore((s) => s.agents);
   const jobs = useStore((s) => s.jobs);
   // Live worktree progress — same source as the Kanban card. Prefer the
   // WS-driven per-change slice; fall back to the running job's own
@@ -291,9 +293,9 @@ export function ChangeDetail() {
           build={(_input, m) =>
             m === "cli"
               ? `npx openspec archive ${change.id}`
-              : `/ithy-opsx:archive ${change.id}`
+              : commandForManager(agents, "ithy-opsx", "archive", change.id)
           }
-          submitLabel={commandStyle === "cli" ? "Send npx openspec archive" : "Send /ithy-opsx:archive"}
+          submitLabel={commandStyle === "cli" ? "Send npx openspec archive" : `Send ${commandForManager(agents, "ithy-opsx", "archive")}`}
           onCancel={() => setPendingAction(null)}
           onSubmit={runInject}
         />

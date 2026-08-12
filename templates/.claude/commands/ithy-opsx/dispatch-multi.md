@@ -35,9 +35,11 @@ The skill covers:
    dispatch.
 4. **Fan-out code stage** — spawn `ACTIVE` code workers concurrently
    via the standard Dispatch helper protocol.
-5. **Combined poll loop** — one `while` loop over the Manager inbox;
-   route each message to its `(stage, change)` owner via the extended
-   report contract (`stage:$S status:done change:<id>`).
+5. **Combined completion loop** — inspect the Manager inbox and any
+   AgentRunner job ids; route each completion to its `(stage, change)`
+   owner. Stages for one change remain sequential, while different
+   changes may run at different stages concurrently within
+   `maxParallel`.
 6. **Per-change advance** — commit worker output on `code done`,
    advance phase, spawn next stage (review, then verify). Loop back
    to code on `needs-rework`.
@@ -51,9 +53,11 @@ The skill covers:
    `transitioning` → `idle`) so each Kanban card shows what Manager
    is doing for THAT change. Every post carries its own `changeId`;
    parallel dispatches never share a badge. Requires
-   `ITHYNO_SESSION_TOKEN` (exported into the Manager PTY by the
-   ithyno server); best-effort — a missing token never blocks
-   dispatch. Landed by expose-manager-activity-per-change.
+   the authoritative `ITHYNO_BASE` / `ITHYNO_PORT` and
+   `ITHYNO_SESSION_TOKEN` exported into the Manager PTY. Missing
+   session context stops dispatch before worker routing; individual
+   activity publication failures remain best-effort after that guard.
+   Landed by expose-manager-activity-per-change.
 
 Do not skip steps. Respect `MAX_ITERATIONS = 5` per change.
 Escalation of one change does NOT stop the others.

@@ -139,16 +139,24 @@ The init flow SHALL continue to copy CLI-neutral fixtures from `templates/` (e.g
 
 For every CLI in `server/doctor.ts::Cli` (`claude`, `codex`, `agy`, `copilot`, `gemini`, `opencode`, `cursor`, `antigravity`), the init flow SHALL EITHER invoke a renderer that materializes at least the currently-ported ithy-opsx skills (baseline: `ithy-opsx-apply` and `ithy-opsx-dispatch` as of `port-ithy-opsx-dispatch-to-universal-source`) OR fail loudly with `"no renderer for <cli>; supported: <list>"` — silent mis-scaffolding (running init with agy and getting `.claude/` populated) is prohibited.
 
-When the antigravity renderer is invoked (either directly with `cli: "antigravity"` or via the `agy → antigravity` alias resolved by `mapDoctorCliToRendererCli`), `installSkills` SHALL first invoke a one-shot legacy-directory MIGRATION (destructive, MOVE semantics) that moves any `.agent/workflows/*.md` files (typically written by openspec's own antigravity adapter, which is on the outdated `.agent/` convention) into `.agents/workflows/`. The migration SHALL:
-- Skip any file whose target `.agents/workflows/<same-basename>` already exists, leaving the legacy file in place and reporting it in `InstallResult.migrations[].skipped[]` with reason `"target exists"` — the renderer's own subsequent write remains authoritative.
+For `ithy-opsx-dispatch`, the Codex renderer SHALL emit both the canonical
+`.codex/prompts/ithy-opsx-dispatch.md` workflow and a concise
+`.codex/skills/ithy-opsx-dispatch/SKILL.md` catalog entrypoint. The Skill SHALL
+reference the Prompt rather than duplicating its body and SHALL distinguish
+single-change dispatch from `ithy-opsx-dispatch-multi`.
+
+When the antigravity renderer is invoked (either directly with `cli: "antigravity"` or via the `agy → antigravity` alias resolved by `mapDoctorCliToRendererCli`), `installSkills` SHALL first invoke a one-shot legacy-directory MIGRATION (destructive, MOVE semantics) that moves any `.agents/workflows/*.md` files written by older ithyno builds into Agy's canonical `.agent/workflows/` directory. The migration SHALL:
+- Skip any file whose target `.agent/workflows/<same-basename>` already exists, leaving the legacy file in place and reporting it in `InstallResult.migrations[].skipped[]` with reason `"target exists"` — the renderer's own subsequent write remains authoritative.
 - Move every non-conflicting file with `fs.rename` semantics (single atomic step where the platform supports it; fall back to copy+unlink otherwise).
-- After moving, `rmdir` the empty `.agent/workflows/` directory and its parent `.agent/` directory if either is empty (do NOT rmdir if non-empty — respect user files).
+- After moving, `rmdir` the empty legacy `.agents/workflows/` directory and its parent `.agents/` directory if either is empty (do NOT rmdir if non-empty — respect user files).
 - Be idempotent: a second invocation finds nothing and returns an empty `moved[]` and `skipped[]`.
 - Honor `opts.dryRun`: report the planned moves in `moved[]` without touching disk.
 
-Additionally, when antigravity is selected, `installSkills` SHALL invoke a second helper that COPIES any `.claude/commands/ithy-opsx/*.md` files into `.agents/workflows/ithy-opsx/<same-basename>`. These files are typically ithyno-ui's own `ithy-opsx-*` skills that were hand-authored (or blind-copied) into `.claude/` by pre-per-CLI-renderer scaffold flows. The COPY step SHALL:
+Additionally, when antigravity is selected, `installSkills` SHALL invoke a second helper that COPIES any `.claude/commands/ithy-opsx/*.md` files into `.agent/workflows/ithy-opsx-<same-basename>`. These files are typically ithyno-ui's own `ithy-opsx-*` skills that were hand-authored (or blind-copied) into `.claude/` by pre-per-CLI-renderer scaffold flows. The COPY step SHALL:
 - Preserve the source: the `.claude/commands/ithy-opsx/*.md` files SHALL NOT be modified or deleted (Claude users of the same project remain unaffected).
-- Skip on target conflict: if `.agents/workflows/ithy-opsx/<same-basename>` already exists (e.g. because the antigravity renderer already wrote it, or a prior copy step ran), leave both source and target untouched and report the source in the entry's `skipped[]`.
+- Normalize the target frontmatter to Agy's description-only shape, removing Claude's `name`, `category`, `tags`, and `argument-hint` fields so Agy derives the slash command from the flat filename.
+- Translate target-body `/opsx:<command>` and `/ithy-opsx:<command>` references to Agy's `/opsx-<command>` and `/ithy-opsx-<command>` forms.
+- Skip on target conflict: if `.agent/workflows/ithy-opsx-<same-basename>` already exists (e.g. because the antigravity renderer already wrote it, or a prior copy step ran), leave both source and target untouched and report the source in the entry's `skipped[]`.
 - Be idempotent, dryRun-aware, per the same shape as the legacy-dir migration.
 
 Both operations SHALL be surfaced in `InstallResult.migrations` as separate entries. Each entry MAY carry an optional `kind: "move" | "copy"` field to distinguish the semantics (`"move"` for the legacy-dir migration, `"copy"` for the claude-commands mirror). Consumers that ignore `kind` SHALL treat entries the same way — the field is purely diagnostic. Migration failures (permission errors, EBUSY on rename, ENOENT during copy) SHALL be routed to `InstallResult.errors` per file, NOT thrown — a partial migration must not block installing healthy skills.
@@ -166,7 +174,7 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **AND** `CLAUDE.md` is copied from `templates/CLAUDE.md` (CLI-neutral fixture)
 - **AND** no `templates/.claude/…` blind-copy occurs for CLI-specific skill files
 - **WHEN** the user instead selects `agy`
-- **THEN** the antigravity renderer materializes the skill surface at antigravity's declared path (e.g. `.agents/workflows/ithy-opsx/<cmd>.md` per the renderer's nested colon-form output)
+- **THEN** the antigravity renderer materializes each skill as a flat workflow at `.agent/workflows/ithy-opsx-<cmd>.md`
 - **AND** `.claude/commands/` is NOT populated by the renderer (Claude was not selected)
 - **AND** `agents.yaml` writes `manager.command: agy` (unchanged from existing behavior)
 
@@ -190,51 +198,59 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 #### Scenario: init emits every ported ithy-opsx skill per selected CLI
 - **GIVEN** `ithyno/skills/` contains `ithy-opsx-apply` and `ithy-opsx-dispatch` (baseline coverage as of this change)
 - **WHEN** `openspec init` is invoked and the user selects any CLI (e.g. `agy`)
-- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.agents/workflows/ithy-opsx/apply.md` AND `.agents/workflows/ithy-opsx/dispatch.md`)
+- **THEN** the renderer emits BOTH skills at the CLI's declared paths (e.g. `.agent/workflows/ithy-opsx-apply.md` AND `.agent/workflows/ithy-opsx-dispatch.md`)
 - **AND** the emitted files each carry the `GENERATED FILE — do not hand-edit` banner sourcing back to `ithyno/skills/<id>/`
 
-#### Scenario: agy init migrates legacy .agent/workflows/ output into .agents/workflows/
-- **GIVEN** a project that was previously scaffolded by `openspec init --tools antigravity` and has `.agent/workflows/opsx-propose.md`, `.agent/workflows/opsx-apply.md` on disk (openspec's own outdated-adapter output)
-- **AND** `.agents/workflows/` does not yet exist
+#### Scenario: agy init migrates legacy .agents/workflows/ output into .agent/workflows/
+- **GIVEN** a project previously scaffolded by an older ithyno build with `.agents/workflows/opsx-propose.md`, `.agents/workflows/opsx-apply.md` on disk
+- **AND** `.agent/workflows/` does not yet exist
 - **WHEN** the user re-runs init through openspec-ui with the antigravity renderer selected
 - **THEN** `installSkills` invokes the migration BEFORE the render loop
-- **AND** every `.agent/workflows/*.md` file is moved to `.agents/workflows/<same-name>` (renderer's own output at `.agents/workflows/ithy-opsx/<cmd>.md` then lands alongside them)
-- **AND** the empty `.agent/workflows/` directory is removed
-- **AND** the empty `.agent/` directory is removed (only if truly empty — user files under `.agent/` outside `workflows/` are respected)
-- **AND** `InstallResult.migrations` contains at least one entry with `cli: "antigravity"`, `moved: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md"]`, and (if `kind` is present) `kind: "move"`
+- **AND** every `.agents/workflows/*.md` file is moved to `.agent/workflows/<same-name>` (renderer's own output at `.agent/workflows/ithy-opsx-<cmd>.md` then lands alongside them)
+- **AND** the empty `.agents/workflows/` directory is removed
+- **AND** the empty `.agents/` directory is removed (only if truly empty — user files under `.agents/` outside `workflows/` are respected)
+- **AND** `InstallResult.migrations` contains at least one entry with `cli: "antigravity"`, `moved: [".agents/workflows/opsx-propose.md", ".agents/workflows/opsx-apply.md"]`, and (if `kind` is present) `kind: "move"`
 
 #### Scenario: migration skips on target-file conflict rather than clobbering
-- **GIVEN** a project has BOTH `.agent/workflows/opsx-apply.md` (stale, from a prior openspec init) AND `.agents/workflows/opsx-apply.md` (newer, from a subsequent scaffold that already handled the migration once)
+- **GIVEN** a project has BOTH `.agents/workflows/opsx-apply.md` (stale, from an older ithyno build) AND `.agent/workflows/opsx-apply.md` (newer, canonical output)
 - **WHEN** the antigravity migration runs
-- **THEN** the file at `.agent/workflows/opsx-apply.md` is NOT moved (it would overwrite the newer target)
+- **THEN** the file at `.agents/workflows/opsx-apply.md` is NOT moved (it would overwrite the newer target)
 - **AND** the migration reports it in `InstallResult.migrations[].skipped[]` with reason `"target exists"`
-- **AND** the newer `.agents/workflows/opsx-apply.md` is untouched (byte-identical to before the migration ran)
+- **AND** the newer `.agent/workflows/opsx-apply.md` is untouched (byte-identical to before the migration ran)
 
 #### Scenario: migration is idempotent — second run is a clean no-op
-- **GIVEN** the migration has already run once against a project (all `.agent/workflows/*.md` have moved and `.agent/` was removed)
+- **GIVEN** the migration has already run once against a project (all `.agents/workflows/*.md` have moved and `.agents/` was removed)
 - **WHEN** `installSkills` is re-invoked (e.g., the user re-runs init)
-- **THEN** the migration helper finds no `.agent/workflows/` directory
+- **THEN** the migration helper finds no `.agents/workflows/` directory
 - **AND** returns `{ moved: [], skipped: [] }` without error
 - **AND** `InstallResult.migrations[0]` still carries the antigravity entry (with the empty arrays), so callers can distinguish "ran and found nothing" from "was not invoked at all"
 
 #### Scenario: migration honors dry-run
-- **GIVEN** a project with `.agent/workflows/opsx-propose.md` present
+- **GIVEN** a project with `.agents/workflows/opsx-propose.md` present
 - **WHEN** `installSkills` is invoked with `dryRun: true` and antigravity selected
 - **THEN** the migration reports the planned move in `moved[]` (as if it had happened)
-- **AND** `.agent/workflows/opsx-propose.md` remains on disk unmodified
-- **AND** `.agents/workflows/opsx-propose.md` is NOT created
+- **AND** `.agents/workflows/opsx-propose.md` remains on disk unmodified
+- **AND** `.agent/workflows/opsx-propose.md` is NOT created
 
-#### Scenario: agy init copies legacy .claude/commands/ithy-opsx/ into .agents/workflows/ithy-opsx/
+#### Scenario: agy init flattens nested ithyno workflows
+- **GIVEN** an older ithyno install wrote `.agent/workflows/ithy-opsx/dispatch.md` or `.agents/workflows/ithy-opsx/dispatch.md`
+- **WHEN** `installSkills` runs with antigravity selected
+- **THEN** the workflow is moved to `.agent/workflows/ithy-opsx-dispatch.md`
+- **AND** the empty nested source directory is removed
+- **AND** the generated workflow uses Agy command references such as `/opsx-apply` and `/ithy-opsx-review`, not Claude colon syntax
+
+#### Scenario: agy init copies legacy Claude commands into flat workflows
 - **GIVEN** a project has `.claude/commands/ithy-opsx/dispatch.md` and `.claude/commands/ithy-opsx/merge.md` on disk (either hand-authored legacy or renderer output from a previous `[claude]` install)
-- **AND** `.agents/workflows/ithy-opsx/` does not yet exist
+- **AND** the corresponding flat Agy workflow files do not yet exist
 - **WHEN** the user runs `installSkills` with antigravity selected
 - **THEN** `installSkills` invokes the copy helper alongside the existing legacy-dir migration
-- **AND** every `.claude/commands/ithy-opsx/*.md` file is COPIED to `.agents/workflows/ithy-opsx/<same-basename>`
+- **AND** every `.claude/commands/ithy-opsx/*.md` file is COPIED to `.agent/workflows/ithy-opsx-<same-basename>`
 - **AND** the source files at `.claude/commands/ithy-opsx/*` are unchanged (COPY, not move — Claude users of the same project unaffected)
+- **AND** each target omits Claude's `name:` field and is recognized by its flat `/ithy-opsx-<command>` filename
 - **AND** `InstallResult.migrations` gains a SECOND entry with `cli: "antigravity"`, `copied: [".claude/commands/ithy-opsx/dispatch.md", ".claude/commands/ithy-opsx/merge.md"]`, and `kind: "copy"`
 
 #### Scenario: copy-from-claude skips on target-file conflict
-- **GIVEN** `.claude/commands/ithy-opsx/dispatch.md` exists AND `.agents/workflows/ithy-opsx/dispatch.md` also already exists (e.g., because the antigravity renderer wrote it in the same install, or a prior copy step ran)
+- **GIVEN** `.claude/commands/ithy-opsx/dispatch.md` exists AND `.agent/workflows/ithy-opsx-dispatch.md` also already exists (e.g., because the antigravity renderer wrote it in the same install, or a prior copy step ran)
 - **WHEN** the copy helper runs
 - **THEN** the source file is NOT copied
 - **AND** it appears in the entry's `skipped[]` with reason `"target exists"`
@@ -244,6 +260,118 @@ The set of ported universal skills under `ithyno/skills/` grows over time as ith
 - **GIVEN** a project has `.claude/commands/ithy-opsx/dispatch.md` present
 - **WHEN** `installSkills` is invoked with only `[claude]` selected
 - **THEN** the copy helper is NOT invoked
-- **AND** `.agents/workflows/ithy-opsx/` is NOT created
+- **AND** `.agent/workflows/ithy-opsx-dispatch.md` is NOT created
 - **AND** `InstallResult.migrations` contains no entry with `kind: "copy"` (nor any antigravity entry at all)
 
+### Requirement: Codex Review and Verify Worker Entrypoints
+
+The installer SHALL materialize discoverable Codex Skills when ithyno review and verify Prompts are installed. The Skills are named `ithy-opsx-review` and
+`ithy-opsx-verify`. Each Skill SHALL direct Codex to the corresponding generated
+Prompt and SHALL preserve an absolute artifact path supplied by the dispatcher.
+
+#### Scenario: Codex review worker is installed
+- **GIVEN** `.codex/prompts/ithy-opsx-review.md` is generated
+- **WHEN** ithyno skills are installed for Codex
+- **THEN** `.codex/skills/ithy-opsx-review/SKILL.md` is generated
+- **AND** invoking `ithy-opsx-review <change-id>` resolves an exact Skill
+- **AND** the Skill executes the review Prompt for that change
+
+#### Scenario: Codex verify worker is installed
+- **GIVEN** `.codex/prompts/ithy-opsx-verify.md` is generated
+- **WHEN** ithyno skills are installed for Codex
+- **THEN** `.codex/skills/ithy-opsx-verify/SKILL.md` is generated
+- **AND** the Skill executes the verify Prompt for the supplied change
+
+#### Scenario: Prompt is missing
+- **GIVEN** a generated worker Skill is present but its referenced Prompt is missing
+- **WHEN** Codex invokes the Skill
+- **THEN** it stops with an actionable missing-Prompt message
+- **AND** it does not invent a review or verify procedure
+
+### Requirement: Project-local Agent Skill Status Inspection
+
+The system SHALL provide an API that independently inspects OpenSpec and
+ithyno skills for every supported Agent CLI in the current project. For each
+component, the result MUST include one of
+`missing | partial | installed | update-available | unsupported`, diagnostics,
+inspected paths, and an inspection timestamp.
+
+ithyno state SHALL be determined by comparing project files with expected
+content rendered from the universal sources. OpenSpec state SHALL be determined
+by inspecting the expected paths for the selected tool adapter.
+
+#### Scenario: ithyno output matches expected content
+- **GIVEN** every ithyno skill output for the selected CLI exists and matches expected content
+- **WHEN** skill state is inspected
+- **THEN** the ithyno component is reported as installed
+
+#### Scenario: Only some expected files exist
+- **GIVEN** only some expected skill outputs for the selected CLI exist
+- **WHEN** skill state is inspected
+- **THEN** the affected component is reported as partial
+- **AND** diagnostics identify the missing relative paths
+
+#### Scenario: ithyno output is outdated
+- **GIVEN** every expected path exists but at least one file differs from current renderer output
+- **WHEN** skill state is inspected
+- **THEN** the ithyno component is reported as update-available
+
+#### Scenario: Inspect an unsupported CLI
+- **WHEN** a request specifies an unsupported CLI identifier
+- **THEN** the API returns HTTP 400
+- **AND** it does not inspect arbitrary paths
+
+### Requirement: Settings-triggered Per-CLI Skill Installation
+
+The system SHALL provide an authenticated local API that installs skills for
+one selected Agent CLI. The API accepts one or more of the `openspec` and
+`ithyno` components from Settings and writes them into the current project.
+
+The OpenSpec component MUST use the bundled OpenSpec CLI's official tool
+adapter, and the ithyno component MUST pass one renderer CLI to the existing
+`installSkills()` implementation. Processing SHALL continue independently for
+each component and stream progress and final results over SSE.
+
+#### Scenario: Install OpenSpec and ithyno for Codex
+- **GIVEN** the request specifies `codex` and `[openspec, ithyno]`
+- **WHEN** installation runs
+- **THEN** the OpenSpec Codex tool adapter writes into the current project
+- **AND** the ithyno Codex renderer and required Codex migrations write into the same project
+- **AND** no renderer for another CLI runs
+
+#### Scenario: Repeat the same installation
+- **GIVEN** OpenSpec and ithyno skills for the selected CLI are already current
+- **WHEN** the same installation runs again
+- **THEN** the operation succeeds
+- **AND** byte-identical ithyno files are not modified unnecessarily
+
+#### Scenario: Continue after one component fails
+- **GIVEN** the OpenSpec subprocess exits with a non-zero status
+- **AND** ithyno is also selected
+- **WHEN** installation runs
+- **THEN** the ithyno renderer still runs
+- **AND** the final result reports the OpenSpec failure and ithyno result separately
+
+#### Scenario: Reject a duplicate install for the same CLI
+- **GIVEN** a Codex installation is already running in the current project
+- **WHEN** a second Codex installation request arrives
+- **THEN** the API returns HTTP 409
+- **AND** it neither interrupts the active operation nor starts a duplicate
+
+### Requirement: Agent Skill Installation Stays Within Project Boundary
+
+Settings-triggered Agent skill inspection and installation MUST target only
+the current project root held by the server. Requests MUST NOT supply an
+arbitrary project path, output path, or executable, and the operation SHALL NOT
+write to global Agent configuration or skill directories.
+
+#### Scenario: Attempt to inject a path through the request
+- **WHEN** a client sends a project path or output path in addition to CLI and components
+- **THEN** the server does not use the supplied path
+- **AND** every inspected and written path resolves from the current project root
+
+#### Scenario: Install skills for Codex
+- **GIVEN** the current project is `/work/project`
+- **WHEN** Codex OpenSpec and ithyno installation completes
+- **THEN** output exists under `/work/project/.codex/`
+- **AND** `$CODEX_HOME`, `~/.codex/`, and all other global skill locations remain unchanged

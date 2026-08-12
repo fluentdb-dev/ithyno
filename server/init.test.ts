@@ -151,6 +151,29 @@ describe("updateGitignore — append-only-if-missing (both .worktrees/ and .ithy
 });
 
 describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () => {
+  it("scaffolds the CLI-neutral AGENTS.md contract", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const res = await runInit({ targetDir: dir, quiet: true });
+    expect(res.ok).toBe(true);
+    const agents = await readFile(join(dir, "AGENTS.md"), "utf8");
+    expect(agents).toContain("Before implementing any spec-level change, propose first.");
+    expect(agents).toContain("npx openspec validate <id>");
+  });
+
+  it("preserves an existing AGENTS.md unless force is requested", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    await writeFile(join(dir, "AGENTS.md"), "user instructions\n");
+    const skipped = await runInit({ targetDir: dir, quiet: true });
+    expect(skipped.ok).toBe(true);
+    expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toBe("user instructions\n");
+
+    const forced = await runInit({ targetDir: dir, force: true, quiet: true });
+    expect(forced.ok).toBe(true);
+    expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toContain(
+      "Project instructions for AGENTS.md-compatible assistants",
+    );
+  });
+
   it("autoCreateDir: true creates the missing target dir recursively before scaffolding", async () => {
     const nested = join(dir, "nested", "child");
     const res = await runInit({
@@ -304,6 +327,96 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("verify treats undefined npm scripts as not-applicable without hiding required checks", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/commands/ithy-opsx/verify.md"),
+      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/verify.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("An undefined script is `not-applicable`");
+      expect(content).toContain("Every applicable check exited 0");
+      expect(content).toContain("explicitly require that check");
+      expect(content).toContain("No automated npm checks were");
+    }
+  });
+
+  it("review and verify honor the resolved execution root and absolute artifact contract", async () => {
+    for (const command of ["review", "verify"]) {
+      const copies = [
+        join(REPO_ROOT, `.claude/commands/ithy-opsx/${command}.md`),
+        join(REPO_ROOT, `templates/.claude/commands/ithy-opsx/${command}.md`),
+      ];
+      for (const path of copies) {
+        const content = await readFile(path, "utf8");
+        expect(content).toContain("Do not blindly run `cd .worktrees/<change-id>`");
+        expect(content).toContain("exact absolute `$REVIEW_MD_PATH`");
+        expect(content).toContain("The absolute artifact contract wins");
+        expect(content).not.toContain("\n   cd .worktrees/<change-id>\n");
+      }
+    }
+  });
+
+  it("dispatch-multi keeps per-change stages sequential without a global phase barrier", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("Workers for the same change MUST run sequentially");
+      expect(content).toContain("Workers for different changes MAY run concurrently regardless of");
+      expect(content).toContain("POST every currently available AgentRunner job with `wait: false`");
+      expect(content).toContain("Poll `GET /api/agents/jobs/<job_id>`");
+      expect(content).toContain("`wait: true` serially inside the per-change fan-out loop");
+    }
+  });
+
+  it("ithyno API commands never embed a default-port fallback", async () => {
+    const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
+    for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {
+      const content = await readFile(join(commandsDir, name), "utf8");
+      expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
+      expect(content, `${name}: authoritative base missing`).toContain("ITHYNO_BASE");
+      expect(content, `${name}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${name}: session token guard missing`).toContain(
+        "ITHYNO_SESSION_TOKEN",
+      );
+      expect(content, `${name}: per-request environment refresh missing`).toContain(
+        name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
+      );
+    }
+
+    const multiCopies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of multiCopies) {
+      const content = await readFile(path, "utf8");
+      expect(content, `${path}: default-port fallback`).not.toContain(
+        "ITHYNO_PORT:-4321",
+      );
+      expect(content, `${path}: authoritative base missing`).toContain(
+        "authoritative base URL",
+      );
+      expect(content, `${path}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${path}: token fail-closed guard missing`).toContain(
+        "authoritative ithyno session context is missing",
+      );
+      expect(content, `${path}: freshness checkpoint missing`).toContain(
+        "before every ithyno HTTP",
+      );
+    }
+    const multiContents = await Promise.all(
+      multiCopies.map((path) => readFile(path, "utf8")),
+    );
+    expect(new Set(multiContents).size, "dispatch-multi template drift").toBe(1);
+  });
+
   it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {
     const devSkillsRoot = join(REPO_ROOT, ".claude/skills");
     const tmplSkillsRoot = join(REPO_ROOT, "templates/.claude/skills");
@@ -429,11 +542,10 @@ describe("ithy-opsx package shape smoke", () => {
   // (distribute-ithy-opsx-via-init-templates) removed bare
   // .claude/commands/ithy-opsx and .claude/skills/ithy-opsx-*/**
   // from package.json `files`. This test locks that in: `npm pack
-  // --dry-run --json` MUST show ithy-opsx only under templates/, and
-  // MUST NOT show it under a bare .claude/ prefix. A regression that
-  // re-adds either would silently double-ship the dev-copy to
-  // consumers.
-  it("npm pack --dry-run ships ithy-opsx only under templates/", async () => {
+  // --dry-run --json` MUST show generated Claude assets only under templates/
+  // and portable renderer input under ithyno/skills/. It MUST NOT show a bare
+  // .claude/ prefix, which would silently double-ship the dev copy.
+  it("npm pack --dry-run ships templates plus universal ithyno skill sources", async () => {
     // ~2-3s in isolation, but a real `npm pack` subprocess competing
     // with the rest of the suite's own spawn-heavy tests under full
     // parallel `npm test` load has been observed spiking well past
@@ -469,10 +581,17 @@ describe("ithy-opsx package shape smoke", () => {
     const ithyOpsxEntries = entries.filter((f) => /ithy-opsx/.test(f.path));
     expect(ithyOpsxEntries.length).toBeGreaterThan(0);
 
+    expect(entries.some((entry) =>
+      entry.path === "ithyno/skills/ithy-opsx-test-probe/manifest.yaml"
+    )).toBe(true);
+
     for (const entry of ithyOpsxEntries) {
-      if (!entry.path.startsWith("templates/.claude/")) {
+      if (
+        !entry.path.startsWith("templates/.claude/") &&
+        !entry.path.startsWith("ithyno/skills/")
+      ) {
         throw new Error(
-          `package shape regression: '${entry.path}' does not sit under 'templates/.claude/'. distribute-ithy-opsx-via-init-templates removed bare .claude/ shipping; something re-added it. Check root package.json 'files' array.`,
+          `package shape regression: '${entry.path}' is neither a generated template nor a universal ithyno skill source.`,
         );
       }
       if (/^\.claude\/commands\/ithy-opsx/.test(entry.path)) {
@@ -630,15 +749,15 @@ describe("runInit + writeAgentsYaml integration (expand-init-to-scaffold-agents)
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  it("agents.yaml is written at <projectRoot>/agents.yaml with the correct command", async () => {
+  it("Codex selection is written to the new project's Manager entry", async () => {
     const initResult = await runInit({ targetDir: dir, quiet: true });
     expect(initResult.ok).toBe(true);
 
     const pkgRoot = process.cwd();
-    await writeAgentsYaml(dir, "claude", pkgRoot);
+    await writeAgentsYaml(dir, "codex", pkgRoot);
 
     const agentsYaml = await readFile(join(dir, "agents.yaml"), "utf8");
-    expect(agentsYaml).toContain("command: claude");
+    expect(agentsYaml).toContain("command: codex");
     expect(agentsYaml).toContain("roles: [manager]");
     expect(agentsYaml).toContain("mode: live-shell");
   });

@@ -21,6 +21,7 @@
 import { readdir, lstat } from "node:fs/promises";
 import { join, resolve, extname, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { commandForManagerCommand } from "./manager-command.js";
 
 // ---- Config -----------------------------------------------------------------
 const SIZE_CAP_BYTES = 50 * 1024 * 1024; // 50 MB default
@@ -162,7 +163,7 @@ export async function preflight(
 }
 
 /**
- * Inject `/ithy-opsx:import <targetPath>` into the Manager PTY.
+ * Inject the Manager-native Import command into the Manager PTY.
  *
  * Returns ok: true on success, ok: false with a reason when the PTY is not
  * running, the inject fails, or targetPath contains characters that would
@@ -174,6 +175,7 @@ export async function preflight(
 export function injectImportCommand(
   targetPath: string,
   inject: (data: string, terminate: boolean) => { ok: true } | { ok: false; reason: string },
+  managerCommand?: string,
 ): { ok: true } | { ok: false; reason: string; status?: 400 } {
   // Guard against shell / PTY injection via embedded control characters.
   // A path containing \n or \r would cause two separate lines to be written
@@ -187,6 +189,6 @@ export function injectImportCommand(
       status: 400,
     };
   }
-  const cmd = `/ithy-opsx:import ${targetPath}`;
+  const cmd = commandForManagerCommand(managerCommand, "ithy-opsx", "import", targetPath);
   return inject(cmd, true);
 }

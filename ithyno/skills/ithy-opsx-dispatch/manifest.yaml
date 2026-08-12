@@ -9,8 +9,9 @@ description: >-
   Advances the change through proposed → coded → reviewed → done by
   resolving execution mode, setting up the worktree if needed,
   dispatching each stage's worker via the Dispatch helper protocol
-  (Task tool for command == claude, agmsg spawn for live-shell,
-  subprocess -p otherwise), judging review / verify by the 3-stage
+  (agmsg for eligible live-shell workers, same-CLI native delegation
+  through Claude Task/Agent or Agy invoke_subagent, and AgentRunner
+  otherwise), judging review / verify by the 3-stage
   success contract, and looping code↔review until pass or
   MAX_REWORK_ROUNDS.
 supports:

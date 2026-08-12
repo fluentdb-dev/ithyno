@@ -1,0 +1,15 @@
+agents:
+  - name: codex-probe
+    command: codex
+    mode: single-prompt
+    roles: [probe]
+    args: [--sandbox, workspace-write]
+    prompts:
+      probe: Use the ithy-opsx-test-probe skill with nonce ${change_id}.
+  - name: claude-probe
+    command: claude
+    mode: single-prompt
+    roles: [probe]
+    args: [--dangerously-skip-permissions]
+    prompts:
+      probe: Use the ithy-opsx-test-probe skill with nonce ${change_id}.

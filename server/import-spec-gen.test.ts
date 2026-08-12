@@ -177,6 +177,21 @@ describe("injectImportCommand", () => {
     expect(injected[0].terminate).toBe(true);
   });
 
+  it("uses the Codex-native command for a Codex Manager", () => {
+    const injected: string[] = [];
+    const result = injectImportCommand(
+      "/path/to/target",
+      (data, _terminate) => {
+        injected.push(data);
+        return { ok: true as const };
+      },
+      "codex",
+    );
+
+    expect(result.ok).toBe(true);
+    expect(injected).toEqual(["ithy-opsx-import /path/to/target"]);
+  });
+
   it("propagates failure when PTY relay is not running", () => {
     const mockInject = (_data: string, _terminate: boolean) => ({
       ok: false as const,

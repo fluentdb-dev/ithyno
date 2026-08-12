@@ -10,6 +10,8 @@
 // Landed by add-new-project-onboarding-window (2026-07-19).
 
 import { spawn } from "node:child_process";
+import { access, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { runInit } from "./init.js";
 
 /**
@@ -58,14 +60,14 @@ function splitLines(chunk, tail) {
  * @param {(e: ChainEvent) => void} onEvent
  * @returns {Promise<{ ok: boolean, code: number, message: string }>}
  */
-function spawnStreamed(cmd, args, cwd, step, onEvent) {
+function spawnStreamed(cmd, args, cwd, step, onEvent, extraEnv = {}) {
   return new Promise((resolve) => {
     const winCmd = process.platform === "win32" ? `${cmd}.cmd` : cmd;
     let child;
     try {
       child = spawn(winCmd, args, {
         cwd,
-        env: process.env,
+        env: { ...process.env, ...extraEnv },
         shell: process.platform === "win32",
       });
     } catch (err) {
@@ -109,6 +111,28 @@ function spawnStreamed(cmd, args, cwd, step, onEvent) {
   });
 }
 
+export async function normalizeCodexPromptNames(projectRoot) {
+  const prompts = join(projectRoot, ".codex", "prompts");
+  let entries;
+  try {
+    entries = await readdir(prompts);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const match = /^opsx-([a-z0-9-]+)\.md$/i.exec(name);
+    if (!match) continue;
+    const target = join(prompts, `openspec-${match[1]}.md`);
+    try {
+      await access(target);
+      await unlink(join(prompts, name));
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code !== "ENOENT") throw err;
+      await rename(join(prompts, name), target);
+    }
+  }
+}
+
 /**
  * Map an ithyno CLI key (from `Cli` in server/doctor.ts) to the tool
  * name recognized by `openspec init --tools <t>`. openspec's tool list
@@ -145,10 +169,11 @@ export function openspecToolForCli(cli) {
 /**
  * @param {string} target
  * @param {(e: ChainEvent) => void} onEvent
- * @param {{ managerCli?: string }} [options]
+ * @param {{ managerCli?: string, spawnImpl?: typeof spawnStreamed }} [options]
  * @returns {Promise<{ ok: boolean, target: string }>}
  */
 export async function runNewProjectChain(target, onEvent, options = {}) {
+  const runSpawn = options.spawnImpl ?? spawnStreamed;
   // Step 1 — scaffold via runInit. quiet: false so per-file
   // create/skip/overwrite lines flow through the log callback; the
   // trailing "Next steps" hints are ignored by the onboarding UI
@@ -202,7 +227,7 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   // package.json if one doesn't exist yet.
   onEvent({ type: "step-start", step: "openspec-init" });
   const finalTarget = initResult.target ?? target;
-  const npmResult = await spawnStreamed(
+  const npmResult = await runSpawn(
     "npm",
     ["install", "--save-dev", "@fission-ai/openspec@latest"],
     finalTarget,
@@ -226,12 +251,17 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   // "claude" — an agy / codex / etc pick still got a Claude scaffold
   // and the picked CLI had no AGENTS.md to read.
   const openspecTool = openspecToolForCli(options.managerCli);
-  const result = await spawnStreamed(
+  let agentsContract;
+  if (options.managerCli === "codex") {
+    try { agentsContract = await readFile(join(finalTarget, "AGENTS.md"), "utf8"); } catch { /* optional */ }
+  }
+  const result = await runSpawn(
     "npx",
     ["openspec", "init", finalTarget, "--tools", openspecTool],
     finalTarget,
     "openspec-init",
     onEvent,
+    options.managerCli === "codex" ? { CODEX_HOME: join(finalTarget, ".codex") } : {},
   );
   if (!result.ok) {
     onEvent({
@@ -240,6 +270,11 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
       message: result.message,
     });
     return { ok: false, target: finalTarget };
+  }
+
+  if (options.managerCli === "codex") {
+    if (agentsContract !== undefined) await writeFile(join(finalTarget, "AGENTS.md"), agentsContract, "utf8");
+    await normalizeCodexPromptNames(finalTarget);
   }
 
   onEvent({ type: "step-done", step: "openspec-init" });

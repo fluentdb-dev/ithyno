@@ -6,6 +6,7 @@ import type { Change } from "../types";
 import { CommandModal } from "../components/CommandModal";
 import { isVsCodeShell } from "../runtime/shell";
 import { ERR } from "../lib/errorMessages";
+import { dispatchCommandForManager } from "../lib/managerCommand";
 
 /**
  * Unified Start-implementation flow, shared between Kanban Start button and
@@ -35,6 +36,7 @@ export function useStartFlow() {
   const pushToast = useStore((s) => s.pushToast);
   const parallelExecution = useStore((s) => s.parallelExecution);
   const lock = useStore((s) => s.state?.lock ?? null);
+  const agents = useStore((s) => s.agents);
 
   const [applyPending, setApplyPending] = useState<{ change: Change } | null>(null);
 
@@ -77,8 +79,8 @@ export function useStartFlow() {
       {applyPending && (
         <CommandModal
           title={`Dispatch this change`}
-          build={() => `/ithy-opsx:dispatch ${applyPending.change.id}`}
-          submitLabel="Send /ithy-opsx:dispatch"
+          build={() => dispatchCommandForManager(agents, applyPending.change.id)}
+          submitLabel={`Send ${dispatchCommandForManager(agents, applyPending.change.id).split(" ")[0]}`}
           onCancel={() => setApplyPending(null)}
           onSubmit={runApplyInject}
         />

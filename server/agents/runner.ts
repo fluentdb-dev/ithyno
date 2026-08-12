@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { EventEmitter } from "node:events";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
 import type { AgentRegistry } from "./registry.js";
 import { startWorktreeProgressWatcher, type WorktreeProgressHandle } from "./worktree-progress.js";
@@ -10,6 +12,7 @@ import { parseReview, type ReviewArtifact } from "./review-parser.js";
 import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
 import { parseTasks } from "../parser/tasks.js";
+import { isSafeChangeId } from "../util/change-id.js";
 
 const execFile = promisify(execFileCb);
 
@@ -19,7 +22,11 @@ const execFile = promisify(execFileCb);
  * in a ring buffer and broadcast over the dashboard's WebSocket.
  */
 
-export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned";
+export type JobStatus = "running" | "completed" | "cancelled" | "crashed" | "orphaned" | "timed-out";
+
+/** Controls the execution-root policy for dispatcher-initiated runs.
+ *  Landed by route-dispatch-by-manager-worker-cli (Task 2.2). */
+export type RunnerExecutionMode = "worktree" | "main-tree";
 
 export type JobSummary = {
   id: string;
@@ -78,6 +85,7 @@ export class AgentRunner {
   private processes = new Map<string, ChildProcess>();
   private locks = new Map<string, string>(); // changeId -> jobId
   private seq = 0;
+  private readonly eventEmitter = new EventEmitter();
 
   constructor(
     private readonly projectRoot: string,
@@ -235,6 +243,113 @@ export class AgentRunner {
     return stripOutput(all[0]);
   }
 
+  // ---------------------------------------------------------------------------
+  // Execution-root policy — route-dispatch-by-manager-worker-cli (Task 2.2)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Derive and validate the execution root for a dispatcher-initiated run.
+   *
+   * - `"worktree"`: use `.worktrees/<changeId>`. If the directory already
+   *   exists it must belong to this repo AND track `agent/<changeId>`;
+   *   anything else is rejected with diagnostics rather than overwritten.
+   * - `"main-tree"`: use the project root as-is (no worktree created).
+   *
+   * Returns `{ ok: true; cwd; branch; created }` on success,
+   * or `{ ok: false; status; reason }` on failure.
+   */
+  async resolveExecutionRoot(
+    changeId: string,
+    mode: RunnerExecutionMode,
+  ): Promise<
+    | { ok: true; cwd: string; branch: string; created: boolean }
+    | { ok: false; status: number; reason: string }
+  > {
+    // Defense in depth: AgentRunner also has non-HTTP callers. Never let a
+    // change id become more than one worktree path / branch component.
+    if (!isSafeChangeId(changeId)) {
+      return { ok: false, status: 400, reason: "Invalid change id" };
+    }
+    if (mode === "main-tree") {
+      return { ok: true, cwd: this.projectRoot, branch: "", created: false };
+    }
+    // worktree mode
+    const worktreePath = join(this.projectRoot, ".worktrees", changeId);
+    const branch = `agent/${changeId}`;
+    if (existsSync(worktreePath)) {
+      // Validate the existing worktree: must belong to this repo and branch.
+      try {
+        const [listOut, currentBranch] = await Promise.all([
+          execFile("git", ["worktree", "list", "--porcelain"], { cwd: this.projectRoot }).then(
+            (r) => r.stdout,
+          ),
+          execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktreePath }).then(
+            (r) => r.stdout.trim(),
+          ),
+        ]);
+        // Parse worktree paths from porcelain output and compare canonically.
+        // git resolves symlinks when recording worktree paths (e.g. macOS
+        // /var → /private/var), so we must do the same for worktreePath.
+        // We also normalize separators and case for Windows where git outputs
+        // forward slashes but path.join() produces backslashes.
+        // realpathSync.native uses the OS-level call (GetFinalPathNameByHandle
+        // on Windows) which expands 8.3 short names (RUNNER~1 → RunnerAdmin)
+        // and resolves symlinks (macOS /var → /private/var). Plain realpathSync
+        // is JS-only and skips short-name expansion, causing mismatches on CI.
+        const normPath = (p: string) => {
+          try {
+            return realpathSync.native(p).toLowerCase().replace(/\\/g, "/");
+          } catch {
+            return p.toLowerCase().replace(/[/\\]+/g, "/");
+          }
+        };
+        const knownPaths = listOut
+          .split(/\n/)
+          .filter((l) => l.startsWith("worktree "))
+          .map((l) => l.slice("worktree ".length).trim());
+        if (!knownPaths.some((p) => normPath(p) === normPath(worktreePath))) {
+          return {
+            ok: false,
+            status: 409,
+            reason:
+              `${worktreePath} exists but belongs to a different repository. ` +
+              `Remove it manually before retrying.`,
+          };
+        }
+        if (currentBranch !== branch) {
+          return {
+            ok: false,
+            status: 409,
+            reason:
+              `${worktreePath} exists on branch '${currentBranch}', expected '${branch}'. ` +
+              `Merge or discard the previous run before starting another.`,
+          };
+        }
+        // Existing worktree is valid — reuse it.
+        return { ok: true, cwd: worktreePath, branch, created: false };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          status: 409,
+          reason: `${worktreePath} exists but could not be validated: ${msg}. Remove it manually before retrying.`,
+        };
+      }
+    }
+    // Create a fresh worktree.
+    try {
+      console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
+      await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
+        cwd: this.projectRoot,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runner] git worktree add failed: ${msg}`);
+      return { ok: false, status: 500, reason: `git worktree add failed: ${msg}` };
+    }
+    return { ok: true, cwd: worktreePath, branch, created: true };
+  }
+
   /** Spawn an agent for a change.
    *
    *  `role` is the dispatch role — set by the caller (Manager, or an
@@ -242,11 +357,20 @@ export class AgentRunner {
    *  the agent's first declared role (`def.roles[0]`), which is the
    *  legacy behavior. Phase view uses this to bucket the change into
    *  the correct role lane. Added by
-   *  reshape-phase-view-to-active-agent-state. */
+   *  reshape-phase-view-to-active-agent-state.
+   *
+   *  `executionMode` controls the execution-root policy
+   *  (route-dispatch-by-manager-worker-cli Task 2.2):
+   *  - `"worktree"` (default): create / reuse `.worktrees/<changeId>`.
+   *  - `"main-tree"`: use the project root as cwd; no worktree created. */
   async run(
     changeId: string,
     agentName: string,
     role?: string,
+    executionMode: RunnerExecutionMode = "worktree",
+    /** Dispatcher-supplied prompt with artifact contract. When set, overrides
+     *  both `agents.yaml` prompts and the built-in default for this run. */
+    promptOverride?: string,
   ): Promise<
     | { ok: true; job: JobSummary }
     | { ok: false; status: number; reason: string }
@@ -259,30 +383,12 @@ export class AgentRunner {
     if (!def) {
       return { ok: false, status: 400, reason: `Unknown agent "${agentName}". Check agents.yaml.` };
     }
-    // Dedicated per-change worktree.
-    const worktreePath = join(this.projectRoot, ".worktrees", changeId);
-    const branch = `agent/${changeId}`;
-    if (existsSync(worktreePath)) {
-      return {
-        ok: false,
-        status: 409,
-        reason: `${worktreePath} already exists. Merge or discard the previous run before starting another.`,
-      };
-    }
-    try {
-      console.log(`[runner] git worktree add ${worktreePath} -b ${branch}`);
-      await execFile("git", ["worktree", "add", worktreePath, "-b", branch], {
-        cwd: this.projectRoot,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[runner] git worktree add failed: ${msg}`);
-      return {
-        ok: false,
-        status: 500,
-        reason: `git worktree add failed: ${msg}`,
-      };
-    }
+    const dispatchRole = role ?? def.roles[0];
+
+    // Derive and validate the execution root (Task 2.2).
+    const rootResult = await this.resolveExecutionRoot(changeId, executionMode);
+    if (!rootResult.ok) return rootResult;
+    const { cwd: worktreePath, branch, created } = rootResult;
 
     let resolved;
     try {
@@ -293,17 +399,39 @@ export class AgentRunner {
           worktree_path: worktreePath,
           branch,
         },
-        def.roles[0],
+        dispatchRole,
+        promptOverride,
       );
     } catch (err) {
-      // Clean up before returning — otherwise a misconfigured runtime
-      // leaks a worktree on every dispatch attempt.
-      await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
+      // Clean up only when the worktree was freshly created by this call.
+      // In main-tree mode or when reusing an existing worktree, we must
+      // not remove anything.
+      if (created) await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
       return {
         ok: false,
         status: 400,
         reason: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    // A review artifact is a per-launch success signal, not durable evidence
+    // that any later review/verify worker completed. Remove the prior artifact
+    // before spawning so finalize() cannot parse stale output when the current
+    // worker exits 0 without writing its contract file.
+    if (dispatchRole === "review" || dispatchRole === "verify") {
+      const artifactPath = join(worktreePath, "openspec", "changes", changeId, "review.md");
+      try {
+        await unlink(artifactPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          if (created) await this.cleanupWorktreeOnEarlyReturn(worktreePath, branch);
+          return {
+            ok: false,
+            status: 500,
+            reason: `Unable to invalidate prior review artifact at ${artifactPath}: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      }
     }
     // registry.resolve() inlines cli-arg prompts into `args` at resolve
     // time (so the runner doesn't need to know about promptFlag).
@@ -325,7 +453,6 @@ export class AgentRunner {
     // Dispatch role — caller-supplied (Manager, /api/agents/run) takes
     // precedence; fall back to the agent's first declared role for legacy
     // callers. Phase view reads this via jobByChange in the store.
-    const dispatchRole = role ?? def.roles[0];
     const job: Job = {
       id,
       changeId,
@@ -350,7 +477,10 @@ export class AgentRunner {
     // otherwise it stays "ignore" (the reverted PTY chain's decision).
     const child = spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
-      env: { ...process.env, ...resolved.env },
+      env: {
+        ...process.env,
+        ...resolved.env,
+      },
       stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });
     this.processes.set(id, child);
@@ -439,6 +569,7 @@ export class AgentRunner {
       // and the Kanban card returns to TODO without a server restart.
       // Disposal happens in removeJobExternally itself.
       // Landed by add-worktree-external-discard-detection.
+      this.eventEmitter.emit(`finished:${id}`, { status, exitCode });
       this.emit({ type: "agent-job-finished", jobId: id, status, exitCode });
       // Release the lock LAST — a concurrent runner.run(changeId, ...)
       // must see either "job in progress" or a fully-populated finished
@@ -493,7 +624,74 @@ export class AgentRunner {
     }
   }
 
+  /**
+   * Synchronously await job completion without HTTP polling.
+   * Resolves when the job reaches a terminal state (completed/crashed/cancelled).
+   * Times out after `timeoutMs` if specified, killing the process and throwing.
+   */
+  async waitForCompletion(
+    jobId: string,
+    options?: { timeoutMs?: number },
+  ): Promise<{ status: JobStatus; exitCode: number | null }> {
+    const timeoutMs = options?.timeoutMs;
+    // Repeat the bound at the timer sink so direct/internal callers cannot
+    // allocate an arbitrarily long timer by bypassing HTTP validation.
+    if (
+      timeoutMs !== undefined &&
+      (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30 * 60 * 1000)
+    ) {
+      throw new Error("timeoutMs must be a positive integer no greater than 1800000");
+    }
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error(`Unknown job id "${jobId}"`);
+    if (job.status !== "running") {
+      return { status: job.status, exitCode: job.exitCode ?? null };
+    }
+
+    return new Promise((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+      let timeoutError: Error | undefined;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.eventEmitter.removeListener(`finished:${jobId}`, onFinished);
+      };
+
+      const onFinished = (data: { status: JobStatus; exitCode: number | null }) => {
+        cleanup();
+        if (timeoutError) reject(timeoutError);
+        else resolve(data);
+      };
+
+      this.eventEmitter.once(`finished:${jobId}`, onFinished);
+
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          // Mark and terminate now, but do not return control to the caller
+          // until the child has actually emitted exit and finalize() has run.
+          // Windows keeps cwd/worktree handles locked between SIGTERM and exit;
+          // rejecting immediately lets callers tear down the directory during
+          // that window and produces EBUSY. onFinished performs the rejection.
+          timeoutError = new Error(`Execution timed out after ${timeoutMs}ms`);
+          const result = this.timeoutJob(jobId);
+          if (!result.ok) {
+            cleanup();
+            reject(new Error(`${timeoutError.message}: ${result.reason ?? "termination failed"}`));
+          }
+        }, timeoutMs);
+      }
+    });
+  }
+
   cancel(id: string): { ok: boolean; reason?: string } {
+    return this.terminateJobWithStatus(id, "cancelled");
+  }
+
+  timeoutJob(id: string): { ok: boolean; reason?: string } {
+    return this.terminateJobWithStatus(id, "timed-out");
+  }
+
+  private terminateJobWithStatus(id: string, status: "cancelled" | "timed-out"): { ok: boolean; reason?: string } {
     const job = this.jobs.get(id);
     if (!job) return { ok: false, reason: "Unknown job id" };
     if (job.status === "orphaned") {
@@ -505,7 +703,7 @@ export class AgentRunner {
     if (job.status !== "running") return { ok: false, reason: "Job is not running" };
     const proc = this.processes.get(id);
     if (!proc) return { ok: false, reason: "Process handle missing" };
-    job.status = "cancelled";
+    job.status = status;
     proc.kill("SIGTERM");
     return { ok: true };
   }
