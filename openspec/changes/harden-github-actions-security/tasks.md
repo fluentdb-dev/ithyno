@@ -21,4 +21,4 @@
 - [x] 4.2 Validate workflow YAML and run the workflow security regression tests.
 - [x] 4.3 Run `npm run typecheck && npm test && npm run build`.
 - [x] 4.4 Run `npm run openspec -- validate harden-github-actions-security --strict` and validate affected specifications.
-- [ ] 4.5 Observe the new checks on a pushed branch before making them required, then write `outcome.md`.
+- [x] 4.5 Observe the new checks on a pushed branch before making them required, then write `outcome.md`.

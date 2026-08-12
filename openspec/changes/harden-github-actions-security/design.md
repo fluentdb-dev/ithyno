@@ -116,7 +116,6 @@ least-privilege permissions, which are independently safe improvements.
 
 ## Open Questions
 
-- Confirm whether `fluentdb-dev/ithyno` is public or has GitHub Code Security
-  enabled before enforcing CodeQL and Dependency Review as required checks.
+- The repository is public, so CodeQL and Dependency Review are available.
 - Decide whether artifact attestations should be a follow-up release-hardening
   change after this baseline is stable.
