@@ -82,7 +82,7 @@
     "png2icons": "^2.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.2.0",
+    "react-router-dom": "^7.18.2",
     "semver": "^7.7.2",
     "sharp": "^0.35.3",
     "typescript": "^5.7.3",
