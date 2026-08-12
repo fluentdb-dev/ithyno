@@ -286,9 +286,13 @@ export class AgentRunner {
         // /var → /private/var), so we must do the same for worktreePath.
         // We also normalize separators and case for Windows where git outputs
         // forward slashes but path.join() produces backslashes.
+        // realpathSync.native uses the OS-level call (GetFinalPathNameByHandle
+        // on Windows) which expands 8.3 short names (RUNNER~1 → RunnerAdmin)
+        // and resolves symlinks (macOS /var → /private/var). Plain realpathSync
+        // is JS-only and skips short-name expansion, causing mismatches on CI.
         const normPath = (p: string) => {
           try {
-            return realpathSync(p).toLowerCase().replace(/\\/g, "/");
+            return realpathSync.native(p).toLowerCase().replace(/\\/g, "/");
           } catch {
             return p.toLowerCase().replace(/[/\\]+/g, "/");
           }
