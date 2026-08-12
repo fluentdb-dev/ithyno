@@ -4380,8 +4380,6 @@ CI SHALL enforce this position via a spec-lint test that walks `openspec/specs/*
 
 Ithyno's Init flow SHALL scaffold every ithyno-authored `/ithy-opsx:*` command file and every backing `ithy-opsx-*` skill directory into the target project's `.claude/` tree, alongside the upstream `/opsx:*` output that `openspec init` produces.
 
-> ⚠️ **PENDING MODIFIED** by [revert-skill-e2e-live-mode](../../changes/revert-skill-e2e-live-mode/): reshapes the skill-e2e harness paragraph and scenarios from "exercises every skill end-to-end" to "structural coverage only". Live semantic verification is documented as a manual procedure via `docs/skill-e2e-manual-verification.md` (Electron + VSCode paths). Rationale: `claude -p` non-determinism + interactive commit-approval traps in `/ithy-opsx:apply` and `:archive` make live-mode automation unreliable.
-
 The scaffold SHALL be delivered via the existing `templates/` mechanism used for `agents.yaml.tmpl`, `CLAUDE.md`, and `templates/.claude/skills/openspec-flow/` — that is, files placed under `templates/.claude/commands/ithy-opsx/` and `templates/.claude/skills/ithy-opsx-*/` in the ithyno distribution. `bin/init.js`'s existing `walkTemplates` picks them up without dedicated copy logic.
 
 Distribution SHALL NOT include any user-global install step. The ithyno server SHALL NOT write into `~/.claude/` on startup, and no `/api/doctor/install/ithy-opsx` / `/api/doctor/uninstall/ithy-opsx` endpoints SHALL exist. The ithyno CLI SHALL NOT expose `install-skills` / `uninstall-skills` subcommands. The Doctor report SHALL NOT include an `ithyOpsx` field. Settings › Prerequisites SHALL NOT render an ithy-opsx install row.
@@ -4393,7 +4391,7 @@ The Vitest suite SHALL additionally include two smoke assertions guarding the in
 - **Scaffold reachability**: `runInit()` invoked against a `mkdtemp()` target with `autoGitInit: true` SHALL leave every file present under the repo's `.claude/commands/ithy-opsx/` and every file under each `.claude/skills/ithy-opsx-*/` present at the matching `<target>/.claude/…` path, byte-identical. This is orthogonal to the drift guard: drift compares dev-copy to `templates/`; scaffold reachability compares dev-copy to what actually lands post-Init in a target. An edit to `bin/init.js` or `walkTemplates` that stops copying the ithy-opsx trees fails this test even if the drift guard still passes.
 - **Package shape**: `npm pack --dry-run --json` SHALL be parsed and every ithy-opsx entry in the tarball's file list SHALL live under `templates/.claude/…`. No entry SHALL match `^\.claude/commands/ithy-opsx` or `^\.claude/skills/ithy-opsx-`. A future edit that re-adds bare `.claude/…` entries to `package.json` `files` fails this test.
 
-The project SHALL additionally ship a scaffolded-target skill-e2e harness (added by `add-skill-e2e-harness`) that exercises every `/ithy-opsx:*` skill end-to-end in a `mkdtemp()` scaffolded target. The harness SHALL be invoked via `npm run e2e:skills`, SHALL be gated behind `E2E=1` (not part of `npm test`), and SHALL exit non-zero if any covered skill fails to resolve or fails to produce its documented success artifact / phase transition. The harness SHALL cover — at minimum — every skill named in Phase D of `docs/ideas/2026-07-26-comprehensive-skill-test-plan.md`: `apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`. Coverage SHALL be one representative flow per skill, not a permutation matrix — the harness is a smoke, not a certification suite.
+The project SHALL additionally ship a scaffolded-target skill-e2e harness (added by `add-skill-e2e-harness`, reshaped by `revert-skill-e2e-live-mode`) that provides **structural coverage** of every `/ithy-opsx:*` skill in a `mkdtemp()` scaffolded target. The harness SHALL be invoked via `npm run e2e:skills`, SHALL be gated behind `E2E=1` (not part of `npm test`), and SHALL exit non-zero if any covered skill's command file fails to resolve, if fixture setup fails, or if the harness's ithyno server fails to boot against the scaffolded target on port 4321. The harness SHALL cover — at minimum — every skill named in Phase D of `docs/ideas/2026-07-26-comprehensive-skill-test-plan.md`: `apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`. Coverage SHALL be structural (does the surface scaffold and resolve?) — semantic verification (does each skill actually apply / review / commit / etc?) is manual, per `docs/skill-e2e-manual-verification.md`. Rationale: `claude -p` mode interacts non-deterministically with slash commands that have interactive commit-approval steps (`/ithy-opsx:apply` and `:archive` both hang waiting for user input), producing false positives / negatives that make live-mode automation unreliable; manual verification via the Electron .app or VSCode extension surface is the load-bearing coverage for semantics.
 
 #### Scenario: Fresh target through Init has ithy-opsx alongside opsx
 - **GIVEN** a project directory with no `openspec/`, no `.claude/`, no `agents.yaml`
@@ -4452,25 +4450,25 @@ The project SHALL additionally ship a scaffolded-target skill-e2e harness (added
 - **THEN** the package-shape test fails and names the offending tarball entry path
 - **AND** the message points the reader at both this scenario and the distribute-ithy-opsx contract so the fix is obvious
 
-#### Scenario: Skill-e2e harness runs every `/ithy-opsx:*` skill in a scaffolded target
-- **GIVEN** the developer invokes `npm run e2e:skills` on a clean HEAD
-- **WHEN** the harness creates a `mkdtemp()` scaffolded target via `runInit()` and boots an ithyno server against it
-- **THEN** the harness exercises every skill named in Phase D of the idea-doc (`apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`) at least once
-- **AND** each skill's success signal is asserted: `apply` produces an `agent/<change-id>` branch with an `impl:` commit; `review` / `verify` write `review.md` at the absolute `$REVIEW_MD_PATH` with parseable `verdict:` frontmatter; `merge` produces a merge commit on the target's default branch; `archive` moves the change into `openspec/changes/archive/<date>-<id>/` and updates the spec; `escalate` transitions the phase to `needs-human` and writes `needs-human.md`; `answer` transitions out of `needs-human`; `revert` produces a `revert-<scope>` change dir with valid `proposal.md` / `design.md` / `specs/<capability>/spec.md` / `tasks.md` and PENDING annotations in the current spec; `import` produces a first-draft `openspec/specs/` set plus `openspec/GENERATED.md`; `dispatch-multi` advances two in-flight changes concurrently with correct `change:<id>` message routing
-- **AND** the harness completes in under 3 minutes wall-clock on a reasonable developer machine
-- **AND** the harness exits 0 on full success, non-zero with a per-skill pass / fail summary otherwise
+#### Scenario: Skill-e2e harness verifies structural resolution of every `/ithy-opsx:*` skill in a scaffolded target
+- **GIVEN** the developer invokes `E2E=1 npm run e2e:skills` on a clean HEAD
+- **WHEN** the harness creates a `mkdtemp()` scaffolded target via `runInit()` + `openspec init`, seeds each flow's fixture, and boots an ithyno server against it on port 4321
+- **THEN** the harness asserts that every skill named in Phase D of the idea-doc (`apply`, `review`, `verify`, `merge`, `archive`, `revert`, `import`, `escalate`, `answer`, `dispatch`, `dispatch-multi`) has its command file resolvable at `.claude/commands/ithy-opsx/<skill>.md` in the scaffolded target
+- **AND** the harness exits 0 on all-structural-pass, non-zero with a per-skill pass / fail summary otherwise
+- **AND** the harness completes in under 30 seconds wall-clock on a reasonable developer machine
 
-#### Scenario: Skill-e2e harness fails when a scaffolded skill is missing or non-resolving
+#### Scenario: Skill-e2e harness fails when a scaffolded skill file is missing
 - **GIVEN** a hypothetical regression that removes `templates/.claude/commands/ithy-opsx/apply.md` (or breaks `runInit`'s walk of it)
-- **WHEN** `npm run e2e:skills` runs
-- **THEN** Flow A (happy-path dispatch chain) fails at the first `/ithy-opsx:apply` invocation with a "command not found" / "skill not resolved" error naming the specific missing surface
-- **AND** the harness prints the scaffolded target's `.claude/commands/ithy-opsx/` listing in the failure block so the diagnosis is one glance, not a bisection
+- **WHEN** `E2E=1 npm run e2e:skills` runs
+- **THEN** Flow A fails at the `assertIthyOpsxCommandResolves("apply")` step with an error naming the specific missing surface
+- **AND** the harness's exit code is non-zero and the per-skill summary shows `apply FAIL` with the reason
 
-#### Scenario: Skill-e2e harness fails when an artifact contract is broken
-- **GIVEN** a hypothetical regression that changes the `review.md` frontmatter key from `verdict:` to `result:`
-- **WHEN** `npm run e2e:skills` runs
-- **THEN** Flow A fails at the `/ithy-opsx:review` step with a "parseable-frontmatter" error naming the absolute `$REVIEW_MD_PATH` and the offending frontmatter block
-- **AND** the drift-guard and scaffold-reachability smoke tests (from `add-init-scaffold-smoke-test`) still pass, demonstrating the e2e harness catches contract regressions that byte-identity checks cannot
+#### Scenario: Live semantic verification of `/ithy-opsx:*` skills is documented as a manual procedure
+- **GIVEN** a maintainer preparing a release cut
+- **WHEN** they consult `docs/skill-e2e-manual-verification.md`
+- **THEN** the doc names both an Electron .app path (A) and a VSCode extension path (B) as the two supported test surfaces
+- **AND** the doc provides a per-skill checklist (11 skills × prep + type + expect + fail-mode) with a shared reporting template
+- **AND** the doc explains why live automation is not attempted: `claude -p` non-determinism + interactive commit-approval traps in `/ithy-opsx:apply` and `:archive`
 
 #### Scenario: Skill-e2e harness is not part of `npm test`
 - **GIVEN** a developer runs `npm test` without setting `E2E=1`
@@ -4542,13 +4540,11 @@ The dispatch function `resolveManagerStartup(command, projectRoot)` SHALL be exp
 
 ### Requirement: Manager picker filters to Manager-eligible CLIs with unverified label
 
-The Init flow's Manager-CLI picker (`web/src/components/InitDialog.tsx`) SHALL offer only Manager-eligible CLIs. The eligibility set is the union of two constants: `MANAGER_VERIFIED` (currently `["claude"]`) and `MANAGER_UNVERIFIED` (currently `["codex", "agy"]`).
+The Init flow's Manager-CLI picker (`web/src/components/InitDialog.tsx`) SHALL offer only Manager-eligible CLIs. The eligibility set is the union of two constants: `MANAGER_VERIFIED` (currently `["claude", "agy"]`) and `MANAGER_UNVERIFIED` (currently `["codex", "opencode"]`).
 
-Non-eligible CLIs (`copilot`, `gemini`, `opencode`, `cursor`, `antigravity`) SHALL be hidden from the Manager picker. They MAY still appear in the Prerequisites list and MAY still be spawned as agmsg workers — the filter applies only to the Manager role.
+Non-eligible CLIs (`copilot`, `gemini`, `cursor`, `antigravity`) SHALL be hidden from the Manager picker. They MAY still appear in the Prerequisites list and MAY still be spawned as agmsg workers — the filter applies only to the Manager role.
 
-Entries in `MANAGER_UNVERIFIED` SHALL render with a trailing `(unverified)` label. A CLI SHALL be moved from `MANAGER_UNVERIFIED` to `MANAGER_VERIFIED` (removing the label) once both: (a) it has a startup strategy registered in `MANAGER_STARTUP_STRATEGIES`, AND (b) its dispatch skill resolves in that CLI's command surface (currently blocked pending `generalize-skills-cross-cli` renderer follow-ups for non-Claude CLIs).
-
-> ⚠️ **PENDING MODIFIED** by [align-codex-init-instructions](../../changes/align-codex-init-instructions/): expose detected Codex as an unverified New Project Manager.
+Entries in `MANAGER_UNVERIFIED` SHALL render with a trailing `(unverified)` label. A CLI SHALL be moved from `MANAGER_UNVERIFIED` to `MANAGER_VERIFIED` (removing the label) once both: (a) it has a startup strategy registered in `MANAGER_STARTUP_STRATEGIES`, AND (b) its dispatch skill resolves in that CLI's command surface.
 
 `readyForManager` SHALL be derived from `managerChoices.length > 0` (installed ∩ candidates), not from the raw doctor report's field — a project with only non-eligible CLIs installed correctly reports "no Manager-eligible CLI" and blocks Init.
 
@@ -4564,8 +4560,8 @@ The preselect logic SHALL respect the candidate filter: the stored `defaultManag
 - **GIVEN** doctor reports `claude`, `codex`, `agy` as installed
 - **WHEN** the Init dialog renders
 - **THEN** the Manager picker shows all three
-- **AND** the `codex` and `agy` entries render with a `(unverified)` suffix
-- **AND** the `claude` entry renders without the suffix
+- **AND** the `codex` entry renders with a `(unverified)` suffix
+- **AND** the `claude` and `agy` entries render without the suffix
 
 #### Scenario: no eligible CLI installed blocks Init
 - **GIVEN** doctor reports only `copilot` and `gemini` as installed
@@ -4662,3 +4658,98 @@ Consumers (skills, tools, user commands run inside the PTY) MAY rely on `ITHYNO_
 - **GIVEN** ithyno is running at project A on port `57703`, and a `POST /api/project/switch` respawns onto project B on port `57811`
 - **WHEN** the new PTY spawns
 - **THEN** the fresh Manager's `ITHYNO_PORT == "57811"` (matches the new server, NOT the stale `57703`)
+
+### Requirement: Copy Change ID from Kanban Card
+
+Every Kanban card SHALL provide a copy control that writes the card's exact
+change ID to the system clipboard. The control SHALL reuse the CLI command
+copy interaction and SHALL not activate the card's Change Detail navigation.
+
+#### Scenario: User copies a change ID
+- **GIVEN** a Kanban card for change `add-search`
+- **WHEN** the user activates the card's copy control
+- **THEN** the clipboard receives exactly `add-search`
+- **AND** the control temporarily displays the shared copied-state indicator
+- **AND** the current route does not change
+
+#### Scenario: Clipboard permission is unavailable
+- **WHEN** writing the change ID to the clipboard fails
+- **THEN** the dashboard displays the same clipboard-permission error toast used by the CLI command copy control
+
+#### Scenario: Copy control is accessible
+- **WHEN** assistive technology inspects the card copy control
+- **THEN** the control identifies that it copies the card's change ID
+- **AND** the full ID is available in its tooltip
+
+### Requirement: Settings Agent CLI Skill Controls
+
+The Settings Prerequisites table SHALL display project-local OpenSpec and
+ithyno skill state on every supported Agent CLI row. A `Manage skills` button
+SHALL be available when that Agent CLI executable is installed. When the
+executable is missing, both skill components SHALL be displayed as unsupported.
+
+These controls SHALL be attached to the existing Agent CLI rows and SHALL NOT
+add separate OpenSpec or ithyno prerequisite rows.
+
+#### Scenario: Skill state appears on every Agent CLI row
+- **GIVEN** Settings has loaded doctor results and Agent skill state
+- **WHEN** the Prerequisites table renders
+- **THEN** every Agent CLI row displays separate OpenSpec and ithyno states
+- **AND** each row whose Agent CLI executable is installed displays a `Manage skills` button
+- **AND** a row whose Agent CLI executable is missing does not display the button
+- **AND** tmux, agmsg, git, and node rows do not display Agent skill controls
+
+#### Scenario: CLI and skill state remain distinct
+- **GIVEN** the Codex CLI is installed but the current project lacks Codex-specific ithyno skills
+- **WHEN** Settings renders
+- **THEN** the CLI executable is displayed as installed
+- **AND** ithyno skills are independently displayed as missing
+
+#### Scenario: Skill inspection fails
+- **GIVEN** the Agent skill inspection API fails
+- **WHEN** Settings renders
+- **THEN** Agent CLI doctor results remain visible
+- **AND** skill state is displayed as unknown with a refresh action
+
+### Requirement: Agent CLI Skill Install Dialog
+
+Clicking `Manage skills` SHALL open a dialog dedicated to the selected Agent
+CLI. The dialog MUST display the CLI, current project root, separate OpenSpec
+and ithyno states, component selection, planned project-local output locations,
+and Install and Cancel actions.
+
+The dialog SHALL display progress and per-component results and SHALL identify
+a single-component failure as a partial result.
+
+#### Scenario: Open the dialog from an Agent row
+- **GIVEN** the user is viewing the Codex row
+- **WHEN** the user clicks `Manage skills`
+- **THEN** a dialog opens with Codex as its target
+- **AND** OpenSpec and ithyno are selected by default
+- **AND** the dialog states that output remains under the current project
+
+#### Scenario: Install only one component
+- **GIVEN** the user deselects OpenSpec and leaves only ithyno selected
+- **WHEN** the user clicks Install
+- **THEN** the request contains the selected CLI and ithyno component only
+- **AND** OpenSpec initialization does not run
+
+#### Scenario: Skills are unavailable before the CLI executable
+- **GIVEN** doctor reports that the selected Agent CLI executable is missing
+- **WHEN** Settings renders the Agent CLI row
+- **THEN** OpenSpec and ithyno skill state are displayed as unsupported
+- **AND** the `Manage skills` button is not displayed
+- **AND** project-local skill installation cannot be started for that CLI
+
+#### Scenario: Display a per-component partial failure
+- **GIVEN** OpenSpec installation succeeds and the ithyno renderer fails
+- **WHEN** SSE execution completes
+- **THEN** the dialog displays the aggregate result as partial
+- **AND** it displays OpenSpec as successful and ithyno as failed
+- **AND** it displays the failure reason and a retry action
+
+#### Scenario: Refresh Settings state after completion
+- **GIVEN** at least one selected component installs successfully
+- **WHEN** dialog execution completes
+- **THEN** the client refetches Agent skill state
+- **AND** the selected row updates without a full-page reload

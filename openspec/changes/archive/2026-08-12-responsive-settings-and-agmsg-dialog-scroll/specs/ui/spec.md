@@ -1,6 +1,6 @@
 # Capability: UI Layout & Dialogs
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Settings Page Responsive Container
 The Settings page SHALL restrict its maximum container width and center itself horizontally within the main viewport on wide displays, matching the responsive layout structure of other main dashboard tabs.
@@ -20,4 +20,3 @@ All modal dialogs, including AGMSG configuration and prerequisite installation m
 - **THEN** the modal's maximum height is capped relative to the viewport height
 - **AND** the modal contents become vertically scrollable
 - **AND** all action buttons and form fields remain accessible
-
