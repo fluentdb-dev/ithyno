@@ -36,6 +36,7 @@ function statusLabel(s: AgentSkillStatus): string {
     case "installed": return "✓ Installed";
     case "partial": return "⚠ Partial";
     case "update-available": return "↑ Update available";
+    case "conflict": return "⚠ Global conflict";
     case "missing": return "✗ Missing";
     case "unsupported": return "— Unsupported";
   }
@@ -46,6 +47,7 @@ function statusClass(s: AgentSkillStatus): string {
     case "installed": return "prereq-ok";
     case "partial": return "prereq-warn";
     case "update-available": return "prereq-warn";
+    case "conflict": return "prereq-warn";
     case "missing": return "prereq-missing";
     case "unsupported": return "prereq-muted";
   }
@@ -237,6 +239,17 @@ export function AgentSkillInstallDialog({ cli, skillInfo, cliStatus, onClose }: 
             </tr>
           </tbody>
         </table>
+
+        {skillInfo?.ithyno.diagnostics && skillInfo.ithyno.diagnostics.length > 0 && (
+          <div className="info-banner agent-skill-warning" role="alert">
+            <strong>ithyno configuration diagnostics</strong>
+            <ul>
+              {skillInfo.ithyno.diagnostics.map((diagnostic) => (
+                <li key={diagnostic}>{diagnostic}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Component selection */}
         {phase !== "done" && (

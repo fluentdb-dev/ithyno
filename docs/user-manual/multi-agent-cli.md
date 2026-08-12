@@ -105,26 +105,39 @@ agy の `--conversation <id>` は agy 独自 ID フォーマットを期待す�
 ithyno の `${session_id}` (UUID) をそのまま渡すのは非推奨です。使う場合は
 `agy --conversation` の受入形式を確認してから。
 
-### codex (要 workaround)
+### codex
 
 codex は他 CLI と違い **`-p` フラグを持たず**、`codex exec [PROMPT]` の
-サブコマンド + 位置引数で prompt を渡します。ithyno runner の auto-append は
-`-p <prompt>` を末尾に付ける仕様なので、そのままだと codex は unknown flag として
-はじきます。
+サブコマンド + 位置引数で prompt を渡します。ithyno は `command: codex` を
+専用処理し、解決したプロンプトを自動的に `codex exec <prompt>` へ変換します。
+Codex以外のCLIにはClaudeと同じ `-p <prompt>` 形式を使用します。
 
-回避策は 2 通り:
+通常は `agents.yaml` に `exec` やプロンプトを明記する必要はありません。
 
-#### A. `runtimes:` block を使う (推奨)
+```yaml
+- name: codex-worker
+  mode: single-prompt
+  roles: [code]
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+```
+
+ビルトインの `code` プロンプトを使う場合、次のように起動されます。
+
+```text
+codex --dangerously-bypass-approvals-and-sandbox exec "openspec-apply-change <change_id>"
+```
+
+`runtimes:` blockを使う場合も同じ変換が適用されます。
 
 ```yaml
 runtimes:
   codex:
     command: codex
     baseArgs:
-      - exec
       - --dangerously-bypass-approvals-and-sandbox
     promptStyle: cli-arg
-    # promptFlag を敢えて設定しない → runner は末尾に prompt をそのまま追加
     supports:
       interactive: false
       artifactOutput: true
@@ -139,10 +152,7 @@ agents:
       code: /opsx:apply ${change_id}
 ```
 
-これで `codex exec --dangerously-bypass-approvals-and-sandbox "/opsx:apply <change_id>"`
-として起動されます (`-p` なし)。
-
-#### B. prompt を args に埋め込む
+プロンプトを `args` に直接埋め込む既存設定も重複挿入されず、そのまま維持されます。
 
 ```yaml
 - name: codex-worker
@@ -153,7 +163,7 @@ agents:
     - exec
     - --dangerously-bypass-approvals-and-sandbox
     - /opsx:apply ${change_id}   # ← 位置引数として prompt を埋め込む
-  # prompts.code を **設定しない** — 未設定なら auto-append されない
+  # 既存のプロンプト引数が検出されるため、ビルトインは重複挿入されない
 ```
 
 `${change_id}` は args template でも置換されます。
@@ -244,4 +254,3 @@ Settings の Prerequisites テーブルで各 Agent CLI の `Manage skills` を�
 ## 関連ページ
 
 - [エージェントのロール](./agents-and-roles.md) — code / review / verify / manager の使い分け (未整備)
-

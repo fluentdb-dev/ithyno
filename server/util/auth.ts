@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
+export const LAUNCHER_SESSION_TOKEN_ENV = "ITHYNO_LAUNCHER_SESSION_TOKEN";
+const LAUNCHER_SESSION_TOKEN_RE = /^[a-f0-9]{64}$/i;
+
 /**
  * Per-process session token + Origin allow-list + content-type enforcement.
  *
@@ -8,10 +11,33 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
  * required for every mutating endpoint (POST/PATCH/PUT/DELETE) and every
  * WebSocket upgrade. A new server process means a new token; stale browser
  * tabs from a previous run lose access until they reload from the freshly
- * printed launch URL.
+ * printed launch URL. When the launcher supplies a valid token via
+ * `ITHYNO_LAUNCHER_SESSION_TOKEN`, the server uses that value for the full
+ * dashboard session rather than generating a fresh one.
  */
 
-export const SESSION_TOKEN = randomBytes(32).toString("hex");
+export function resolveSessionToken(env: NodeJS.ProcessEnv = process.env): string {
+  if (!Object.prototype.hasOwnProperty.call(env, LAUNCHER_SESSION_TOKEN_ENV)) {
+    return randomBytes(32).toString("hex");
+  }
+
+  const supplied = env[LAUNCHER_SESSION_TOKEN_ENV];
+  if (typeof supplied !== "string" || supplied.length === 0) {
+    throw new Error(
+      `${LAUNCHER_SESSION_TOKEN_ENV} must be exactly 64 hexadecimal characters when provided`,
+    );
+  }
+
+  if (!LAUNCHER_SESSION_TOKEN_RE.test(supplied)) {
+    throw new Error(
+      `${LAUNCHER_SESSION_TOKEN_ENV} must be exactly 64 hexadecimal characters when provided`,
+    );
+  }
+
+  return supplied.toLowerCase();
+}
+
+export const SESSION_TOKEN = resolveSessionToken();
 
 /** Constant-time comparison; returns false for any mismatch including length. */
 export function verifyToken(supplied: string | undefined | null): boolean {

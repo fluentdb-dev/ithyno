@@ -327,6 +327,96 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("verify treats undefined npm scripts as not-applicable without hiding required checks", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/commands/ithy-opsx/verify.md"),
+      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/verify.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("An undefined script is `not-applicable`");
+      expect(content).toContain("Every applicable check exited 0");
+      expect(content).toContain("explicitly require that check");
+      expect(content).toContain("No automated npm checks were");
+    }
+  });
+
+  it("review and verify honor the resolved execution root and absolute artifact contract", async () => {
+    for (const command of ["review", "verify"]) {
+      const copies = [
+        join(REPO_ROOT, `.claude/commands/ithy-opsx/${command}.md`),
+        join(REPO_ROOT, `templates/.claude/commands/ithy-opsx/${command}.md`),
+      ];
+      for (const path of copies) {
+        const content = await readFile(path, "utf8");
+        expect(content).toContain("Do not blindly run `cd .worktrees/<change-id>`");
+        expect(content).toContain("exact absolute `$REVIEW_MD_PATH`");
+        expect(content).toContain("The absolute artifact contract wins");
+        expect(content).not.toContain("\n   cd .worktrees/<change-id>\n");
+      }
+    }
+  });
+
+  it("dispatch-multi keeps per-change stages sequential without a global phase barrier", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of copies) {
+      const content = await readFile(path, "utf8");
+      expect(content).toContain("Workers for the same change MUST run sequentially");
+      expect(content).toContain("Workers for different changes MAY run concurrently regardless of");
+      expect(content).toContain("POST every currently available AgentRunner job with `wait: false`");
+      expect(content).toContain("Poll `GET /api/agents/jobs/<job_id>`");
+      expect(content).toContain("`wait: true` serially inside the per-change fan-out loop");
+    }
+  });
+
+  it("ithyno API commands never embed a default-port fallback", async () => {
+    const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
+    for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {
+      const content = await readFile(join(commandsDir, name), "utf8");
+      expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
+      expect(content, `${name}: authoritative base missing`).toContain("ITHYNO_BASE");
+      expect(content, `${name}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${name}: session token guard missing`).toContain(
+        "ITHYNO_SESSION_TOKEN",
+      );
+      expect(content, `${name}: per-request environment refresh missing`).toContain(
+        name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
+      );
+    }
+
+    const multiCopies = [
+      join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+    ];
+    for (const path of multiCopies) {
+      const content = await readFile(path, "utf8");
+      expect(content, `${path}: default-port fallback`).not.toContain(
+        "ITHYNO_PORT:-4321",
+      );
+      expect(content, `${path}: authoritative base missing`).toContain(
+        "authoritative base URL",
+      );
+      expect(content, `${path}: injected port derivation missing`).toContain(
+        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${path}: token fail-closed guard missing`).toContain(
+        "authoritative ithyno session context is missing",
+      );
+      expect(content, `${path}: freshness checkpoint missing`).toContain(
+        "before every ithyno HTTP",
+      );
+    }
+    const multiContents = await Promise.all(
+      multiCopies.map((path) => readFile(path, "utf8")),
+    );
+    expect(new Set(multiContents).size, "dispatch-multi template drift").toBe(1);
+  });
+
   it("every .claude/skills/ithy-opsx-*/** file is byte-identical to templates/.claude/skills/ithy-opsx-*/**", async () => {
     const devSkillsRoot = join(REPO_ROOT, ".claude/skills");
     const tmplSkillsRoot = join(REPO_ROOT, "templates/.claude/skills");

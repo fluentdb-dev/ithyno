@@ -63,7 +63,7 @@ export function expectedProbeSkillPath(command: string | undefined): string {
   if (command === "claude") return ".claude/commands/ithy-opsx/test-probe.md";
   if (command === "codex") return ".codex/prompts/ithy-opsx-test-probe.md";
   if (command === "agy" || command === "antigravity") {
-    return ".agents/workflows/ithy-opsx/test-probe.md";
+    return ".agent/workflows/ithy-opsx-test-probe.md";
   }
   if (command === "cursor") return ".cursor/commands/ithy-opsx-test-probe.md";
   if (command === "gemini") return ".gemini/commands/ithy-opsx/test-probe.toml";

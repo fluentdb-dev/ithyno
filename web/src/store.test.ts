@@ -7,12 +7,23 @@
  * connectWs's onmessage handler without mounting React.
  */
 import { describe, it, expect } from "vitest";
-import type { ImportedProjectNotification } from "./store";
+import { shouldBlockForWorkspaceLoad, type ImportedProjectNotification } from "./store";
 import type {
   ImportCompletedEvent,
   ManagerActivity,
   ManagerActivityUpdatedEvent,
+  WorkspaceState,
 } from "./types";
+
+describe("workspace refresh loading mode", () => {
+  it("blocks the application shell before the initial workspace load", () => {
+    expect(shouldBlockForWorkspaceLoad(null)).toBe(true);
+  });
+
+  it("keeps mounted routes and dialogs during a background refresh", () => {
+    expect(shouldBlockForWorkspaceLoad({} as WorkspaceState)).toBe(false);
+  });
+});
 
 // ---- Route logic (extracted from store for unit-testability) ---------------
 

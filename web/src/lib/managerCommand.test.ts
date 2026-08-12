@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commandForAgentRole, commandForManager, commandForManagerCommand, dispatchCommandForManager } from "./managerCommand";
+import { CODEX_CODE_SCOPE_CONTRACT, commandForAgentRole, commandForManager, commandForManagerCommand, dispatchCommandForManager } from "./managerCommand";
 import type { AgentPublic } from "../types";
 
 function agent(command: string, roles: string[]): AgentPublic {
@@ -24,7 +24,7 @@ describe("commandForManager", () => {
 
   it.each([
     ["opsx", "propose", "'test function helloworld'", "openspec-propose 'test function helloworld'"],
-    ["opsx", "apply", "add-hello", "openspec-apply add-hello"],
+    ["opsx", "apply", "add-hello", "openspec-apply-change add-hello"],
     ["ithy-opsx", "archive", "add-hello", "ithy-opsx-archive add-hello"],
     ["ithy-opsx", "merge", "add-hello", "ithy-opsx-merge add-hello"],
     ["ithy-opsx", "import", "/tmp/project", "ithy-opsx-import /tmp/project"],
@@ -51,7 +51,7 @@ describe("commandForManagerCommand", () => {
 
 describe("commandForAgentRole", () => {
   it.each([
-    ["codex", "code", "openspec-apply ${change_id}"],
+    ["codex", "code", `openspec-apply-change \${change_id}\n\n${CODEX_CODE_SCOPE_CONTRACT}`],
     ["codex", "review", "ithy-opsx-review ${change_id}"],
     ["codex", "verify", "ithy-opsx-verify ${change_id}"],
     ["codex", "manager", "ithy-opsx-dispatch"],

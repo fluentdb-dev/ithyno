@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import {
+  LAUNCHER_SESSION_TOKEN_ENV,
   SESSION_TOKEN,
+  resolveSessionToken,
   verifyToken,
   buildOriginAllowList,
   isOriginAllowed,
@@ -9,6 +11,24 @@ import {
   checkAuthHttp,
   checkAuthWs,
 } from "./auth.js";
+
+describe("resolveSessionToken", () => {
+  it("generates a random token when no launcher token is provided", () => {
+    const token = resolveSessionToken({});
+    expect(token).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("uses a launcher-provided token when it is valid", () => {
+    const supplied = "a".repeat(64);
+    expect(resolveSessionToken({ [LAUNCHER_SESSION_TOKEN_ENV]: supplied })).toBe(supplied);
+  });
+
+  it("rejects an invalid launcher token instead of weakening auth", () => {
+    expect(() => resolveSessionToken({ [LAUNCHER_SESSION_TOKEN_ENV]: "not-a-token" })).toThrow(
+      /must be exactly 64 hexadecimal characters/i,
+    );
+  });
+});
 
 describe("verifyToken", () => {
   it("returns true for the real token", () => {

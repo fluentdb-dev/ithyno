@@ -79,6 +79,16 @@ export type TerminalSize = "fullscreen" | "half" | "default" | "hidden";
  *  value on `<html data-theme=…>`. Landed by add-light-dark-mode. */
 export type ThemePreference = "system" | "light" | "dark";
 
+/**
+ * Only the first workspace fetch should replace the application shell with a
+ * blocking loader. Refreshes caused by focus/visibility recovery must leave
+ * the mounted route intact; otherwise route-local UI such as open dialogs is
+ * destroyed and recreated in its closed state.
+ */
+export function shouldBlockForWorkspaceLoad(state: WorkspaceState | null): boolean {
+  return state === null;
+}
+
 type Store = {
   state: WorkspaceState | null;
   connected: boolean;
@@ -591,7 +601,8 @@ export const useStore = create<Store>((set, get) => ({
     }),
 
   load: async () => {
-    set({ loading: true, error: null });
+    const blockUi = shouldBlockForWorkspaceLoad(get().state);
+    set(blockUi ? { loading: true, error: null } : { error: null });
     try {
       const [state, health] = await Promise.all([
         fetchState(),

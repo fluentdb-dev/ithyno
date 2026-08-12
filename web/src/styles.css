@@ -1160,6 +1160,7 @@ a.modal-btn:hover {
   font-size: 12px;
 }
 .kanban-card {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1182,7 +1183,7 @@ a.modal-btn:hover {
 }
 .kanban-card-link {
   display: block;
-  padding: 12px 14px;
+  padding: 12px 46px 12px 14px;
   color: var(--text);
   text-decoration: none;
 }
@@ -2988,10 +2989,7 @@ a.modal-btn:hover {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.modal-preview-copy {
-  position: absolute;
-  top: 28px;
-  right: 6px;
+.clipboard-copy-button {
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -3004,14 +3002,25 @@ a.modal-btn:hover {
   border-radius: 4px;
   cursor: pointer;
 }
-.modal-preview-copy:hover:not(:disabled) {
+.clipboard-copy-button:hover:not(:disabled) {
   color: var(--fg);
   background: var(--panel);
   border-color: var(--border);
 }
-.modal-preview-copy:disabled {
+.clipboard-copy-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.modal-preview-copy {
+  position: absolute;
+  top: 28px;
+  right: 6px;
+}
+.kanban-card-id-copy {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
 }
 .modal-actions {
   display: flex;

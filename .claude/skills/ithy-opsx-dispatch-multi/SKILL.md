@@ -1,6 +1,6 @@
 ---
 name: ithy-opsx-dispatch-multi
-description: Parallel N-change dispatcher for ithyno. Fans out code / review / verify workers across multiple in-flight changes concurrently, with per-change queue + combined poll loop + `change:<id>` message routing. Invoked via `/ithy-opsx:dispatch-multi <id1> [id2] ...`. Landed by add-multi-dispatch-orchestrator.
+description: Parallel N-change dispatcher for ithyno. Fans out code, review, and verify workers across multiple in-flight changes with a per-change queue, combined completion loop, and change-tagged message routing. Use when invoking `/ithy-opsx:dispatch-multi` with two or more change IDs.
 ---
 
 # `/ithy-opsx:dispatch-multi <id1> [id2] …` — parallel dispatcher
@@ -51,17 +51,42 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
-- `ITHYNO_BASE` — phase API base URL. Exported into the Manager PTY
-  by the ithyno server (Electron / VSCode each spawn on an ephemeral
-  per-project port and set `ITHYNO_PORT` + `ITHYNO_BASE` accordingly).
-  Fall back to `${ITHYNO_BASE:-http://localhost:${ITHYNO_PORT:-4321}}`
-  when neither is set. Do NOT hardcode 4321 — dispatch will
-  connection-refuse under Electron.
-- `ITHYNO_SESSION_TOKEN` — session token for the token-gated
-  `POST /api/manager/activity` endpoint. Exported into the Manager
-  PTY's environment by the ithyno server, so normally already set.
-  Warn once when absent and continue — activity publication is
-  best-effort telemetry, never a dispatch blocker.
+- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
+  The Electron shell and VSCode extension export the resolved,
+  per-project endpoint into the Manager PTY. If only the injected
+  `ITHYNO_PORT` is available, derive the base URL from that exact
+  value. Never use a remembered or default port.
+- `ITHYNO_SESSION_TOKEN` — the current dashboard session token.
+  Validate the injected context before preflight or worker routing:
+
+  ```bash
+  if [ -z "${ITHYNO_BASE:-}" ]; then
+    if [ -n "${ITHYNO_PORT:-}" ]; then
+      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
+    else
+      echo "[dispatch-multi] ITHYNO_BASE and ITHYNO_PORT are unset."
+      echo "[dispatch-multi] Restart this Manager from the active dashboard; do not guess a port."
+      exit 1
+    fi
+  fi
+  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
+    echo "[dispatch-multi] authoritative ithyno session context is missing."
+    echo "[dispatch-multi] ITHYNO_BASE=$ITHYNO_BASE"
+    echo "[dispatch-multi] ITHYNO_SESSION_TOKEN is unset."
+    echo "[dispatch-multi] Restart this Manager from the active dashboard."
+    exit 1
+  fi
+  ```
+
+  Never print the token itself. Immediately before every ithyno HTTP
+  request, reconsider whether the dashboard or server restarted and
+  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
+  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
+  re-read them once and retry only if the request values demonstrably
+  changed. Otherwise stop; a control-plane failure must not enter a
+  worker, Manager-execution, or guessed-endpoint fallback. Activity
+  publication remains best-effort only after this initial session-
+  context validation succeeds.
 
 ## Manager activity publication (per change)
 
@@ -148,9 +173,9 @@ card was posted last.
      parallel. The Manager awaits all of them together, then
      proceeds to review / verify per change.
 
-   Only the subprocess-only branch (non-claude workers with no
-   agmsg) is strictly sequential — that path degrades to a
-   for-loop with a warning.
+   - **AgentRunner branch** (cross-CLI or no native adapter): submit
+     every available worker without blocking on an earlier change,
+     then track its job id in the combined completion loop.
 
 ### 2. Capacity resolution
 
@@ -158,6 +183,21 @@ card was posted last.
    Cap invalid values at the range bounds and log.
 2. `ACTIVE = min(len(ids), maxParallel)`.
 3. Split ids into `RUNNING` (first `ACTIVE`) and `QUEUE` (rest).
+
+### Concurrency invariant
+
+Workers for the same change MUST run sequentially:
+
+`code completed → review starts → review passed → verify starts`
+
+Never start a change's next stage merely because a launch returned a
+job id. Start it only after the current stage reaches a successful
+terminal state and its required artifact or commit contract passes.
+
+Workers for different changes MAY run concurrently regardless of
+stage, subject to `maxParallel`. For example, `review(add-a)` may run
+while `code(add-b)` is still running. Do not impose a global phase
+barrier that waits for every code worker before starting any review.
 
 ### 3. Per-change worktree setup
 
@@ -219,8 +259,26 @@ state[id] = {
   iterations: 1,
   PRE_HEAD: <git rev-parse agent/<id>>,
   start_ts: <now>,
+  transport: "agmsg" | "native" | "agent-runner",
+  job_id: <AgentRunner job id or null>,
 }
 ```
+
+**AgentRunner completion contract**: the single-change dispatch uses
+`wait: true` as its per-stage barrier. Multi-dispatch MUST NOT call
+`wait: true` serially inside the per-change fan-out loop because that
+would block the remaining changes from launching. Instead:
+
+1. POST every currently available AgentRunner job with `wait: false`.
+2. Store each returned job id in its owning `state[id].job_id`.
+3. Poll `GET /api/agents/jobs/<job_id>` in the combined completion
+   loop.
+4. Advance only that owning change when the job reaches a successful
+   terminal state and its stage contract passes.
+
+Launching all `wait: true` requests concurrently and awaiting them
+collectively is also valid, but `wait: false` plus the combined loop is
+preferred because changes can advance independently.
 
 ### 6. Combined poll loop
 
@@ -239,8 +297,11 @@ while true; do
   fi
   sleep $POLL_INTERVAL
 
-  # Read all unread messages once per tick.
+  # Read all unread agmsg messages once per tick.
   MESSAGES=$(~/.agents/skills/agmsg/scripts/inbox.sh "$AGMSG_TEAM" manager 2>/dev/null)
+
+  # Also inspect each non-terminal AgentRunner state by its job_id.
+  # Route a terminal job to the owning change; never advance another id.
 
   # For each line matching `[<ts>] <sender>: stage:<S> status:done change:<id>`
   # OR the legacy `[<ts>] <sender>: stage:<S> status:done` (fall back to
@@ -338,6 +399,13 @@ Same 3-step ladder as `/ithy-opsx:dispatch`:
 - **maxParallel is the concurrency cap for THIS invocation, not
   globally**. A parallel `/ithy-opsx:dispatch <single>` invocation
   running in a different Manager session is independent.
+- **Same change sequential; different changes concurrent.** Never
+  overlap code/review/verify workers for one change. Different changes
+  may run at different stages concurrently within `maxParallel`; do not
+  add a global phase barrier.
+- **Fan out before waiting.** Never make a serial `wait: true`
+  AgentRunner call inside the per-change submission loop. Submit all
+  available jobs first and retain their change-to-job ownership.
 - **`change:<id>` matching is strict**. Legacy `stage:$S
   status:done` (no `change:<id>`) is accepted ONLY when exactly
   one in-flight change uses that `entry_name`. Ambiguous legacy

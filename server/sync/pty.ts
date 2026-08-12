@@ -131,7 +131,7 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * `registry.agmsg()` is non-null (workspace opted into the
  * PTY→tmux→agmsg flavor via `add-agmsg-config-block`) — the resolved
  * manager command is further wrapped in
- * `tmux new-session -A -s <name> -- <cmd> <args…>` where `<name>` is
+ * `tmux new-session -A -s <name> -e ITHYNO_*=... -- <cmd> <args…>` where `<name>` is
  * `$ITHYNO_TMUX_SESSION` when set (non-empty) else `ithyno`. `agmsg`
  * being configured implies tmux unconditionally (there is no way to
  * configure agmsg without tmux); the `tmux` toggle is independent and
@@ -276,7 +276,20 @@ export function ptyStartup(
       : { startup: baseStartup, initialInput };
   }
   const session = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
-  const startup = `tmux new-session -A -s ${shellQuote(session)} -- ${baseStartup}`;
+  // A tmux server outlives the PTY client that created it. Explicitly put the
+  // dashboard identity in a new session and register those names with
+  // update-environment before `-A` attaches to an existing session. The shell
+  // expands values only when executing this line, so startup logging contains
+  // variable references rather than the token itself.
+  const ithynoEnvNames = "ITHYNO_PORT ITHYNO_BASE ITHYNO_SESSION_TOKEN";
+  const ensureTmuxEnvUpdate =
+    `(tmux show-options -gv update-environment 2>/dev/null | ` +
+    `grep -qw ITHYNO_SESSION_TOKEN || ` +
+    `tmux set-option -ag update-environment ${shellQuote(` ${ithynoEnvNames}`)} 2>/dev/null || true)`;
+  const explicitSessionEnv = ["ITHYNO_PORT", "ITHYNO_BASE", "ITHYNO_SESSION_TOKEN"]
+    .map((name) => `-e ${name}=\"$${name}\"`)
+    .join(" ");
+  const startup = `${ensureTmuxEnvUpdate}; exec tmux new-session -A -s ${shellQuote(session)} ${explicitSessionEnv} -- ${baseStartup}`;
   return initialInput === undefined
     ? { startup }
     : { startup, initialInput };
@@ -310,6 +323,22 @@ function tmuxMissingFallback(): string {
   const line2 = "Install tmux (brew install tmux on macOS, apt/pacman/dnf on Linux) and reopen";
   const line3 = "the Terminal panel, or remove the agmsg: block / tmux: true to fall back to direct spawn.\\n";
   return `printf '${line1}\\n${line2}\\n${line3}\\n'`;
+}
+
+export function buildManagerPtyEnv(port: string | number | undefined, token: string): NodeJS.ProcessEnv {
+  const inherited = { ...process.env };
+  delete inherited.ITHYNO_LAUNCHER_SESSION_TOKEN;
+
+  const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
+  const base = `http://localhost:${resolvedPort}`;
+  return {
+    ...inherited,
+    LANG: inherited.LANG || "en_US.UTF-8",
+    TERM: "xterm-256color",
+    ITHYNO_SESSION_TOKEN: token,
+    ITHYNO_PORT: resolvedPort,
+    ITHYNO_BASE: base,
+  };
 }
 
 /** Wrap `s` in single quotes when it contains characters a shell would
@@ -484,29 +513,7 @@ export async function attachPtyToSocket(
     cols: opts.cols ?? 80,
     rows: opts.rows ?? 24,
     cwd: opts.cwd,
-    env: {
-      LANG: process.env.LANG || "en_US.UTF-8",
-      ...process.env,
-      TERM: "xterm-256color",
-      // The Manager (and any CLI it launches from this shell) needs the
-      // session token to reach token-gated endpoints such as
-      // POST /api/manager/activity. The PTY is local-only and already
-      // origin/token gated at the WebSocket upgrade, so exporting it into
-      // the shell environment adds no new exposure surface.
-      // Landed by expose-manager-activity-per-change.
-      ITHYNO_SESSION_TOKEN: SESSION_TOKEN,
-      // The Electron shell (server-spawner.ts) and the VSCode extension
-      // both spawn the server on an ephemeral per-project port. Without
-      // these two vars the Manager's dispatch skill has no way to reach
-      // /api/changes/<id>/phase — it would fall back to the hardcoded
-      // 4321 and hit connection-refused. Set here so any subshell that
-      // needs to curl the server picks up the actual port:
-      //   ITHYNO_PORT — bare port number, e.g. "57703".
-      //   ITHYNO_BASE — full base URL, e.g. "http://localhost:57703".
-      // Falls back to 4321 when PORT isn't set (CLI dev workflow).
-      ITHYNO_PORT: process.env.PORT ?? "4321",
-      ITHYNO_BASE: `http://localhost:${process.env.PORT ?? "4321"}`,
-    },
+    env: buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN),
   });
 
   const entry: LiveTerminal = { term, ws, cwd: opts.cwd };

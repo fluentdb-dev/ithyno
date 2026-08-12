@@ -315,6 +315,7 @@ function PrerequisitesSection(props: {
       installed: "prereq-ok",
       partial: "prereq-warn",
       "update-available": "prereq-warn",
+      conflict: "prereq-warn",
       missing: "prereq-missing",
       unsupported: "prereq-muted",
     };
@@ -322,6 +323,7 @@ function PrerequisitesSection(props: {
       installed: "✓ installed",
       partial: "⚠ partial",
       "update-available": "↑ update available",
+      conflict: "⚠ conflict",
       missing: "✗ not installed",
       unsupported: "— unsupported",
     };
@@ -519,4 +521,3 @@ function PrerequisitesSection(props: {
 // current project's Manager entry. The `defaultManager` store slice + its
 // localStorage persistence remain intact for InitDialog preselect and any
 // future implicit-set path.
-

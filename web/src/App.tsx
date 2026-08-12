@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
@@ -70,6 +70,7 @@ export function App() {
   //   1. No token at all on load (sessionStorage empty AND no ?token=) → banner.
   //   2. Any mutating API call returns 401/403 → banner.
   const [authExpired, setAuthExpired] = useState<boolean>(() => getSessionToken() == null);
+  const recoveryInFlightRef = useRef<Promise<void> | null>(null);
 
   const handleReloadSession = useCallback(() => {
     const w = window as any;
@@ -138,16 +139,27 @@ export function App() {
   // automatically attempt checkAuth(), connectWs(), and load() to restore state seamlessly.
   useEffect(() => {
     const handleAutoRecover = () => {
-      void checkAuth().then((ok) => {
-        if (ok) {
-          setAuthExpired(false);
-          connectWs();
-          void load();
-        } else {
-          // Auth failed — attempt automatic reload via shell handler before showing banner
-          handleReloadSession();
-        }
-      });
+      // Returning to a window commonly emits both `visibilitychange` and
+      // `focus`. Coalesce them so one activation performs one recovery.
+      if (recoveryInFlightRef.current) return;
+
+      const recovery = checkAuth()
+        .then(async (ok) => {
+          if (ok) {
+            setAuthExpired(false);
+            connectWs();
+            await load();
+          } else {
+            // Auth failed — attempt automatic reload via shell handler before showing banner
+            handleReloadSession();
+          }
+        })
+        .finally(() => {
+          if (recoveryInFlightRef.current === recovery) {
+            recoveryInFlightRef.current = null;
+          }
+        });
+      recoveryInFlightRef.current = recovery;
     };
 
     const onVisibilityChange = () => {

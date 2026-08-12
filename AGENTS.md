@@ -96,8 +96,11 @@ You are the reviewer. Given a change id:
      no blockers (bugs / spec violations / security concerns /
      backward-incompat surprises).
    - **`needs-rework`**: any blocker OR missing "What Changes" scope.
-4. Write `openspec/changes/<change-id>/review.md` (repo-root path,
-   NOT the `.worktrees` copy):
+4. Write `review.md` to the exact absolute path in the dispatcher's
+   artifact contract. In worktree mode this is under the resolved
+   worktree; in main-tree mode it is under the project root. For a direct
+   invocation without an artifact contract, write relative to the current
+   execution tree at `openspec/changes/<change-id>/review.md`:
 
    ```markdown
    ---
@@ -158,9 +161,9 @@ sufficient signal.
   are designed around isolated `agent/<change-id>` branches on
   worktrees. Committing on main pollutes the mainline and breaks other
   in-flight changes.
-- **Writing `review.md` inside the worktree** (`.worktrees/<id>/
-  openspec/changes/<id>/review.md`): the dispatcher reads from the
-  repo-root path. Write to `openspec/changes/<id>/review.md`.
+- **Ignoring the absolute artifact contract**: the dispatcher reads only
+  the exact path supplied to the worker. Do not redirect a worktree
+  review to the main tree or a main-tree review to a worktree.
 - **Modifying `tasks.md` from the review or verify role**: those
   roles are read-only WRT the change source. Only the `code` role
   ticks task boxes.
