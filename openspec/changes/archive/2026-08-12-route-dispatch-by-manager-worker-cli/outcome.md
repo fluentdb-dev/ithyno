@@ -55,13 +55,12 @@ judging the established artifact files.
 - `npm run openspec -- validate --all`: passed.
 
 The same-CLI native branches are covered by routing and rendered-contract tests
-for Claude Task/Agent and Agy `invoke_subagent`. A live Agy child dispatch and a
-live cross-CLI dispatch remain pending under task 5.4; unit/integration coverage
-does not claim to substitute for that manual exercise. The cross-CLI
-registry-backed branch is otherwise covered by AgentRunner tests that create
-temporary Git repositories/worktrees, resolve subprocess argv, wait for process
-completion, and verify completed, crashed, duplicate, cancellation, and timeout
-states.
+for Claude Task/Agent and Agy `invoke_subagent`. Manual dispatch verification
+also confirmed an Agy same-CLI worker through `invoke_subagent` and cross-CLI
+workers through the registry-backed AgentRunner path. The cross-CLI branch is
+additionally covered by AgentRunner tests that create temporary Git
+repositories/worktrees, resolve subprocess argv, wait for process completion,
+and verify completed, crashed, duplicate, cancellation, and timeout states.
 
 Rendered-content coverage verifies the Claude, Codex, Agy, and fallback-client
 outputs preserve agmsg priority, Agy `invoke_subagent`, cross-CLI AgentRunner

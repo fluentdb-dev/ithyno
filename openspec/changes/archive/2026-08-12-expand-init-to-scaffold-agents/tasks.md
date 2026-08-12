@@ -53,7 +53,7 @@
 - [x] 6.2 `npm test` passes.
 - [x] 6.3 `npm run typecheck` passes.
 - [x] 6.4 `npm run build` passes.
-- [ ] 6.5 Manual: open ithyno at a fresh dir with only claude installed → Init dialog picks claude, Init produces openspec/ + agents.yaml → terminal auto-launches Manager → ready state.
-- [ ] 6.6 Manual: same but with no agent CLI installed → Init dialog blocks with the Prerequisites link.
-- [ ] 6.7 Manual: change defaultManager to codex in Settings, then run Init on a different dir → Init dialog defaults to codex.
+- [x] 6.5 Manual: open ithyno at a fresh dir with only claude installed → Init dialog picks claude, Init produces openspec/ + agents.yaml → terminal auto-launches Manager → ready state.
+- [x] 6.6 Manual: same but with no agent CLI installed → Init dialog blocks with the Prerequisites link.
+- [x] 6.7 Manual: change defaultManager to codex in Settings, then run Init on a different dir → Init dialog defaults to codex.
 - [x] 6.8 Write `openspec/changes/expand-init-to-scaffold-agents/outcome.md`.

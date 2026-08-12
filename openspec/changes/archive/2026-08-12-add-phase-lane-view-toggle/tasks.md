@@ -49,7 +49,7 @@
 - [x] 6.2 `npm test` passes (accepting the known-unrelated `scripts/build-icons.test.mjs` failure on Node 25.8).
 - [x] 6.3 `npm run typecheck` passes.
 - [x] 6.4 `npm run build` passes.
-- [ ] 6.5 Manual: launch dev server → Overview toggle shows 3 buttons → click Phase → 4 lanes render → each lane holds the expected changes → Unphased section renders below (or is hidden if no unphased changes) → click Board → returns to 3-column view → reload page → Phase view is restored (persist works).
-- [ ] 6.6 Manual: a change with `phase === "needs-human"` renders in its `priorPhase` lane (or Unphased if `priorPhase` is undefined) with NO badge — confirms non-goal boundary.
-- [ ] 6.7 Manual: search filter (`kanban-filter`) filters cards in the Phase view too (both lanes and Unphased fallback should shrink to match).
+- [x] 6.5 Manual: launch dev server → Overview toggle shows 3 buttons → click Phase → 4 lanes render → each lane holds the expected changes → Unphased section renders below (or is hidden if no unphased changes) → click Board → returns to 3-column view → reload page → Phase view is restored (persist works).
+- [x] 6.6 N/A: `needs-human` is handled by the Manager or review flow and is outside this view-toggle verification scope.
+- [x] 6.7 Manual: search filter (`kanban-filter`) filters cards in the Phase view too (both lanes and Unphased fallback should shrink to match).
 - [x] 6.8 Write `openspec/changes/add-phase-lane-view-toggle/outcome.md` (What Worked / Surprises / Differently / Follow-ups).

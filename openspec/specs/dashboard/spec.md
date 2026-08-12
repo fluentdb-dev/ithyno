@@ -4753,3 +4753,168 @@ a single-component failure as a partial result.
 - **WHEN** dialog execution completes
 - **THEN** the client refetches Agent skill state
 - **AND** the selected row updates without a full-page reload
+### Requirement: Init endpoint scaffolds agents.yaml with a Manager choice
+
+`POST /api/init` SHALL, in addition to invoking `openspec init`, write `agents.yaml` at the target project root with the user-chosen Manager CLI. The endpoint SHALL consult the doctor check first and reject cleanly when the prerequisite is missing.
+
+#### Scenario: Doctor gate — no agent CLI installed
+
+- **GIVEN** the doctor reports `readyForManager: false` (no agent CLI installed)
+- **WHEN** a client posts `POST /api/init`
+- **THEN** the endpoint returns 409 with a message pointing at "ithyno doctor" and Settings > Prerequisites
+- **AND** no scaffolding occurs
+
+#### Scenario: Manager pick — invalid choice
+
+- **GIVEN** the request body includes `{ manager: { command: "codex" } }` but doctor reports codex `installed: false`
+- **WHEN** the client posts `POST /api/init`
+- **THEN** the response is 400 with `{ error, installed: [...] }` listing the installed agent CLIs
+- **AND** no scaffolding occurs
+
+#### Scenario: Manager pick — default fallback
+
+- **GIVEN** the request body omits `manager`
+- **AND** the doctor reports claude and codex both installed
+- **WHEN** the client posts `POST /api/init`
+- **THEN** the server picks the priority-order first-installed CLI (claude before codex before agy before others) as the Manager
+
+#### Scenario: Successful scaffolding writes agents.yaml
+
+- **GIVEN** the doctor gate passes and Manager is picked as `claude`
+- **WHEN** the client posts `POST /api/init { dir: "/path/to/fresh" }`
+- **THEN** `openspec init` runs at `/path/to/fresh`
+- **AND** `/path/to/fresh/agents.yaml` is created from the templated `templates/agents.yaml.tmpl` with `{{MANAGER_COMMAND}}` → `claude`
+- **AND** the response is 200 with `{ managerCommand: "claude" }` alongside the existing fields
+
+#### Scenario: agents.yaml scaffolding failure rolls back
+
+- **GIVEN** `openspec init` succeeded but writing `agents.yaml` fails (e.g., disk full, permission denied)
+- **WHEN** the Init endpoint runs
+- **THEN** the server removes the openspec/ directory it just created and returns 500 with the write error
+- **AND** the target directory is left in its pre-Init state
+
+### Requirement: Init dialog shows Prerequisites and Manager picker
+
+The dashboard's Init entry points (NoProjectDecisionPanel + OnboardingProject) SHALL render a shared `<InitDialog />` component that fetches `/api/doctor`, displays a compact Prerequisites summary, and (when ready) presents a Manager type picker limited to installed CLIs.
+
+#### Scenario: Prerequisites block gates the Init button
+
+- **GIVEN** the user opens the Init dialog
+- **WHEN** the doctor reports `readyForManager: false`
+- **THEN** the Init button is disabled
+- **AND** the dialog shows a link "Settings > Prerequisites" that navigates the user to the doctor UI
+
+#### Scenario: Manager picker defaults to the user's saved preference
+
+- **GIVEN** the user's `defaultManager` in Settings is `codex`
+- **AND** the doctor reports both claude and codex installed
+- **WHEN** the Init dialog opens
+- **THEN** the Manager picker is preselected on codex
+
+#### Scenario: Manager picker only lists installed CLIs
+
+- **GIVEN** the doctor reports claude installed and codex missing
+- **WHEN** the Init dialog opens
+- **THEN** the Manager picker only offers claude (not codex, not agy, etc.)
+
+### Requirement: Default Manager preference (Settings)
+
+The Settings page SHALL expose a "Default Manager" radio group listing installed agent CLIs. The chosen CLI SHALL be persisted (localStorage `ithyno.defaultManager`) and used as the default in the Init dialog.
+
+#### Scenario: Default Manager persistence
+
+- **WHEN** the user picks a Manager CLI in Settings
+- **THEN** the choice is written to `localStorage["ithyno.defaultManager"]`
+- **AND** the store's `defaultManager` field updates
+- **AND** a subsequent Init dialog opens with this CLI preselected
+
+#### Scenario: Default Manager falls back to priority order
+
+- **GIVEN** localStorage has no `ithyno.defaultManager` value
+- **AND** claude and codex are installed
+- **WHEN** the store's `defaultManager` is read
+- **THEN** it resolves to `claude` (priority: claude > codex > agy > copilot > gemini > opencode > cursor)
+
+### Requirement: Overview layout toggle exposes phase-lane view
+
+The Overview page's existing 2-state layout toggle (`board` / `cards`, driven by the store field `overviewLayout`) SHALL be extended to 3 states by adding a `phase` option. Selecting `phase` renders the Kanban's change list as swim lanes ordered by workflow phase (see next requirement). The `board` state (3-column progress-derived TODO / IN-PROGRESS / DONE) remains the default. Persistence across reloads uses the existing zustand-persist mechanism that already covers the toggle — no new storage decision.
+
+Legacy persisted values (`board` / `cards`) SHALL continue to resolve unchanged. Unknown persisted values (including any future removal of a state) SHALL fall back to `board`.
+
+The 3-state toggle SHALL render as three peer `<button role="tab">` elements inside a single `role="tablist"` container, in the tabstop order Board → Phase → Cards. Each button carries `aria-selected` matching the current store value and a `title` / `aria-label` describing its layout. The button icons SHALL be visually distinct at 16×16.
+
+#### Scenario: Toggle exposes three options
+- **GIVEN** the Overview page is rendered
+- **WHEN** the user inspects the layout toggle
+- **THEN** three `<button role="tab">` elements are present with `aria-label` values `"Board layout"`, `"Phase lanes layout"`, `"Cards layout"`
+- **AND** exactly one has `aria-selected="true"`, matching the current `overviewLayout` store value
+
+#### Scenario: Default is board
+- **GIVEN** a fresh install with no persisted `overviewLayout` value
+- **WHEN** the Overview page mounts
+- **THEN** the Board button is selected and the 3-column TODO / IN-PROGRESS / DONE view renders
+
+#### Scenario: Persist round-trips the phase value
+- **GIVEN** the user has clicked the Phase toggle
+- **WHEN** the page is reloaded
+- **THEN** the Phase button is still selected and the phase-lane view renders
+
+#### Scenario: Unknown persisted value falls back to board
+- **GIVEN** the persisted `overviewLayout` value is a string not in `{"board", "phase", "cards"}`
+- **WHEN** the Overview page mounts
+- **THEN** the Board button is selected and the 3-column view renders
+
+### Requirement: Phase-lane view renders 4 swim lanes plus Unphased fallback
+
+When `overviewLayout === "phase"`, the Overview page SHALL render a swim-lane layout consisting of:
+
+1. **Four lanes in pipeline order**: `proposed → coded → reviewed → done`. Each lane header displays the phase name and a card count. An empty lane SHALL display a muted placeholder ("No changes at this phase" or equivalent) instead of collapsing.
+
+2. **An Unphased fallback section below the four lanes**, containing changes whose `phase` field is undefined or an unknown value. The fallback SHALL reuse the same 3-column TODO / IN-PROGRESS / DONE grouping as the Board view (via the same `bucketize()` helper). When the Unphased set is empty, the fallback section SHALL NOT render.
+
+Changes whose `phase === "needs-human"` SHALL render in their `priorPhase` lane. If `priorPhase` is also undefined, they SHALL fall through to the Unphased section.
+
+The lane layout SHALL be **display-only**. Cards SHALL NOT be draggable between lanes. The Phase view SHALL NOT show needs-human WaitBadges, phase-transition menus, or any other phase-derived affordance beyond the lane grouping itself — internal processing is unchanged, this is purely a display format.
+
+Individual card rendering SHALL be identical to the Board view — same Start / Apply / Archive / Merge / Discard controls, same progress bar, same tag chips. No additional visual annotations tied to phase state.
+
+#### Scenario: Four lanes render in pipeline order
+- **GIVEN** the Overview page is in phase view
+- **WHEN** the layout renders
+- **THEN** four lane columns appear in left-to-right order: `proposed`, `coded`, `reviewed`, `done`
+- **AND** each lane header shows the phase name and card count
+
+#### Scenario: Empty lane shows placeholder
+- **GIVEN** no active change has `phase === "reviewed"`
+- **WHEN** the phase view renders
+- **THEN** the `reviewed` lane column still appears
+- **AND** its body shows a muted placeholder message instead of being empty
+
+#### Scenario: Unphased fallback holds changes without a phase
+- **GIVEN** at least one active change has `phase === undefined`
+- **WHEN** the phase view renders
+- **THEN** an Unphased section appears below the four lanes
+- **AND** it groups those changes by the same TODO / IN-PROGRESS / DONE buckets as the Board view
+
+#### Scenario: needs-human cards land in priorPhase lane
+- **GIVEN** a change has `phase === "needs-human"` and `priorPhase === "coded"`
+- **WHEN** the phase view renders
+- **THEN** the change appears in the `coded` lane
+- **AND** the card body renders with NO needs-human badge or annotation
+
+#### Scenario: needs-human without priorPhase lands in Unphased
+- **GIVEN** a change has `phase === "needs-human"` and `priorPhase === undefined`
+- **WHEN** the phase view renders
+- **THEN** the change appears in the Unphased fallback section
+
+#### Scenario: No drag interactions in phase view
+- **GIVEN** the phase view is active
+- **WHEN** the user attempts to drag a card
+- **THEN** no drop targets appear
+- **AND** no phase-transition API call is issued
+
+#### Scenario: Search filter narrows lanes and fallback
+- **GIVEN** the phase view is active and the search filter has text
+- **WHEN** the filter matches only a subset of changes
+- **THEN** each lane and the Unphased section render only the matching cards
+- **AND** empty lanes still show the placeholder message

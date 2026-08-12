@@ -47,7 +47,7 @@
 
 ## 8. Manual verification
 
-- [ ] 8.1 Manual Electron launch verification — requires local `npm run --prefix electron dev` (or packaged binary). Cannot execute from this environment. Checklist to run:
+- [x] 8.1 Manual Electron launch verification — requires local `npm run --prefix electron dev` (or packaged binary). Confirmed. Checklist:
   - Delete the ProjectStore state file (or set saved to a nonexistent path) → main BrowserWindow opens with welcome.html loaded (no auto-picker, no second window).
   - Icon + name + version + description + license visible (no `v` / `License:` prefixes).
   - Palette matches the main app's palette when OS theme changes (light OS → light welcome; dark OS → dark welcome).

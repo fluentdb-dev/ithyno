@@ -78,7 +78,7 @@
 - [x] 5.2 Run `npm run typecheck && npm test && npm run build`.
 - [x] 5.3 Run `npm run openspec -- validate route-dispatch-by-manager-worker-cli --strict`
   and `npm run openspec -- validate --all`.
-- [ ] 5.4 Exercise at least one Agy same-CLI `invoke_subagent` dispatch and one
+- [x] 5.4 Exercise at least one Agy same-CLI `invoke_subagent` dispatch and one
   cross-CLI registry-backed dispatch in a temporary project, then record the
   actual results in `outcome.md`.
 - [x] 5.5 Verify the corrected Codex Skill name and scope contract through

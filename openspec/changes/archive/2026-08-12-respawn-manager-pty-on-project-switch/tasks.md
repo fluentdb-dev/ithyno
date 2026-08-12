@@ -32,5 +32,5 @@
 - [x] 6.2 `npm test` passes (pre-existing `build-icons` sharp failure OK — same as develop).
 - [x] 6.3 `npm run typecheck` passes.
 - [x] 6.4 `npm run build` passes.
-- [ ] 6.5 Manual (CLI `npm run dev`): launch from `/path/A` → `curl -X POST localhost:4321/api/project/switch -d '{"projectRoot":"/path/B"}'` → Terminal panel reconnects → `pwd` reports `/path/B` → `/opsx:propose test-change` in Manager PTY creates scaffold at `/path/B/openspec/changes/test-change/`.
+- [x] 6.5 Manual (CLI `npm run dev`): launch from `/path/A` → `curl -X POST localhost:4321/api/project/switch -d '{"projectRoot":"/path/B"}'` → Terminal panel reconnects → `pwd` reports `/path/B` → `/opsx:propose test-change` in Manager PTY creates scaffold at `/path/B/openspec/changes/test-change/`.
 - [x] 6.6 Write `openspec/changes/respawn-manager-pty-on-project-switch/outcome.md` (✅ Worked / ⚠️ Surprises / 🔁 Differently / 🌱 Follow-ups). Follow-ups: Electron `switchProject()` rewrite, VS Code workspace listener, dashboard UI trigger.
