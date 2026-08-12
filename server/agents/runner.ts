@@ -635,6 +635,7 @@ export class AgentRunner {
 
     return new Promise((resolve, reject) => {
       let timer: NodeJS.Timeout | undefined;
+      let timeoutError: Error | undefined;
 
       const cleanup = () => {
         if (timer) clearTimeout(timer);
@@ -643,16 +644,25 @@ export class AgentRunner {
 
       const onFinished = (data: { status: JobStatus; exitCode: number | null }) => {
         cleanup();
-        resolve(data);
+        if (timeoutError) reject(timeoutError);
+        else resolve(data);
       };
 
       this.eventEmitter.once(`finished:${jobId}`, onFinished);
 
       if (options?.timeoutMs && options.timeoutMs > 0) {
         timer = setTimeout(() => {
-          cleanup();
-          this.timeoutJob(jobId);
-          reject(new Error(`Execution timed out after ${options.timeoutMs}ms`));
+          // Mark and terminate now, but do not return control to the caller
+          // until the child has actually emitted exit and finalize() has run.
+          // Windows keeps cwd/worktree handles locked between SIGTERM and exit;
+          // rejecting immediately lets callers tear down the directory during
+          // that window and produces EBUSY. onFinished performs the rejection.
+          timeoutError = new Error(`Execution timed out after ${options.timeoutMs}ms`);
+          const result = this.timeoutJob(jobId);
+          if (!result.ok) {
+            cleanup();
+            reject(new Error(`${timeoutError.message}: ${result.reason ?? "termination failed"}`));
+          }
         }, options.timeoutMs);
       }
     });
