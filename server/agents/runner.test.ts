@@ -144,10 +144,9 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     const run = await runner.run("add-failing", "failing-worker", "code", "worktree");
     expect(run.ok).toBe(true);
     if (run.ok) {
-      await new Promise((r) => setTimeout(r, 500));
-      const summary = runner.getJob(run.job.id);
-      expect(summary?.status).toBe("crashed");
-      expect(summary?.exitCode).toBe(1);
+      const summary = await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+      expect(summary.status).toBe("crashed");
+      expect(summary.exitCode).toBe(1);
     }
   });
 

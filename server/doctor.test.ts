@@ -25,12 +25,6 @@ afterEach(() => {
 // checkCommand
 // ---------------------------------------------------------------------------
 
-// On Windows, a timed-out command may spend up to 2 seconds in the probe and
-// another 3 seconds in taskkill's descendant-tree cleanup. Under full-suite CI
-// load even `node --version` has approached that boundary, so Vitest's 5-second
-// default is too tight for these real-process integration checks.
-const CHECK_COMMAND_TIMEOUT = 10_000;
-
 describe("checkCommand", () => {
   it("returns installed: true for a real command (node --version)", async () => {
     // `node --version` is always available in the test environment.
@@ -38,12 +32,12 @@ describe("checkCommand", () => {
     expect(result.installed).toBe(true);
     expect(result.version).toBeDefined();
     expect(typeof result.version).toBe("string");
-  }, CHECK_COMMAND_TIMEOUT);
+  });
 
   it("extracts a version string from node --version output", async () => {
     const result = await checkCommand("node", "--version");
     expect(result.version).toMatch(/v?\d+\.\d+/);
-  }, CHECK_COMMAND_TIMEOUT);
+  });
 
   it("returns installed: false for a non-existent command", async () => {
     const result = await checkCommand("__ithyno_definitely_not_a_real_cmd__", "--version");
