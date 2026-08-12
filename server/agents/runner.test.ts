@@ -65,6 +65,14 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     }
   });
 
+  it("rejects unsafe change ids before resolving a worktree path", async () => {
+    for (const changeId of ["../escape", "nested/change", ".", "..", "bad id"]) {
+      const res = await runner.resolveExecutionRoot(changeId, "worktree");
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.status).toBe(400);
+    }
+  });
+
   it("valid existing worktree is reused rather than re-created", async () => {
     // First call creates it
     const res1 = await runner.resolveExecutionRoot("add-feat", "worktree");
@@ -201,6 +209,16 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       const summary = runner.getJob(run.job.id);
       expect(summary?.status).toBe("timed-out");
     }
+  });
+
+  it("waitForCompletion rejects an excessive timeout at the timer boundary", async () => {
+    const run = await runner.run("add-feat", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await expect(
+      runner.waitForCompletion(run.job.id, { timeoutMs: MAX_AGENT_TIMEOUT_MS + 1 }),
+    ).rejects.toThrow(/no greater than/);
+    runner.cancel(run.job.id);
   });
 
   it.each(["review", "verify"])(
