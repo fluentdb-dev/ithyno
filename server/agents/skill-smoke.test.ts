@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentDef } from "./registry.js";
 import {
@@ -93,7 +94,7 @@ describe("runAgentSkillSmoke", () => {
 
     expect(result.ok).toBe(true);
     expect(d.pathExists).toHaveBeenCalledWith(
-      "/tmp/probe-project/.codex/prompts/ithy-opsx-test-probe.md",
+      join("/tmp/probe-project", ".codex/prompts/ithy-opsx-test-probe.md"),
     );
     expect(d.run).toHaveBeenCalledWith(expect.objectContaining({
       nonce: "nonce-1",
