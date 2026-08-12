@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
 import { execFile as execFileCb, spawn as spawnChild, type ChildProcess } from "node:child_process";
@@ -273,20 +273,23 @@ export class AgentRunner {
     if (existsSync(worktreePath)) {
       // Validate the existing worktree: must belong to this repo and branch.
       try {
-        const [commonDirRel, currentBranch] = await Promise.all([
-          execFile("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath }).then(
-            (r) => r.stdout.trim(),
+        const [listOut, currentBranch] = await Promise.all([
+          execFile("git", ["worktree", "list", "--porcelain"], { cwd: this.projectRoot }).then(
+            (r) => r.stdout,
           ),
           execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktreePath }).then(
             (r) => r.stdout.trim(),
           ),
         ]);
-        const commonDir = realpathSync(resolve(worktreePath, commonDirRel));
-        const expectedCommonDirRel = await execFile("git", ["rev-parse", "--git-common-dir"], {
-          cwd: this.projectRoot,
-        }).then((r) => r.stdout.trim());
-        const expectedCommonDir = realpathSync(resolve(this.projectRoot, expectedCommonDirRel));
-        if (commonDir !== expectedCommonDir) {
+        // Parse worktree paths from porcelain output; normalize separators and
+        // case for Windows where git may output forward slashes but Node.js
+        // join() produces backslashes.
+        const normSep = (p: string) => p.replace(/[/\\]+/g, "/").toLowerCase();
+        const knownPaths = listOut
+          .split(/\n/)
+          .filter((l) => l.startsWith("worktree "))
+          .map((l) => l.slice("worktree ".length).trim());
+        if (!knownPaths.some((p) => normSep(p) === normSep(worktreePath))) {
           return {
             ok: false,
             status: 409,
