@@ -256,139 +256,150 @@ function saveWindowState(win: BrowserWindow): void {
 /**
  * Create (or reuse) the single main BrowserWindow.
  *
- * - `projectRoot` non-null → spawn the server pinned to that root and load
- *   its URL. This is the standard "open a project" path.
- * - `projectRoot` null → skip server spawn and load welcome.html. Same
- *   BrowserWindow instance; when the user picks a folder from welcome, we
- *   call this function again with the picked path and the SAME window's
- *   URL swaps to localhost. That's the "same-window swap" contract — the
- *   welcome page and the main app share one window, one preload, and one
- *   set of window bounds.
+ * The window is created immediately (before the server starts) and shows
+ * welcome.html as a placeholder so the user sees a window right away — on
+ * Windows, server spawn + module load takes several seconds and without this
+ * the screen stays blank for the entire duration.
  *
- * When `mainWindow` already exists (either a running project or a running
- * welcome view), we reuse it via loadURL / loadFile — no BrowserWindow
- * teardown, no bounds reset, no flicker.
- * (add-electron-welcome-window, same-window swap pivot.)
+ * Once the server is ready, the window navigates from welcome.html to the
+ * server URL in-place (same-window swap). The BrowserWindow instance, its
+ * bounds, its preload, and its menu bar persist across the swap.
+ *
+ * Paths:
+ * - `projectRoot` null → tear down server, show welcome.html.
+ * - `projectRoot` non-null, healthy session → navigate directly to server
+ *   URL (already fast; no welcome flash needed).
+ * - `projectRoot` non-null, new spawn needed → window shows welcome while
+ *   server starts, then navigates to server URL.
+ *
+ * (electron-startup-parallel-window)
  */
 async function createWindowForProject(projectRoot: string | null): Promise<void> {
+  const _t0 = Date.now();
+  console.log(`[startup] createWindowForProject start (projectRoot=${projectRoot ?? 'null'})`);
   const resolvedProjectRoot = projectRoot !== null ? resolve(projectRoot) : null;
   const reuseHealthyServer = shouldReuseHealthySession(resolvedProjectRoot, currentProjectRoot, currentSpawn);
 
-  let spawn: SpawnResult | null = null;
+  // ── Step 1: Ensure BrowserWindow exists before any async server work ──
+  // Creates the window immediately so the user sees something while the
+  // server starts. For the reuse path the window already exists; skip.
+  const savedWs = validateWindowState(store.getWindowState());
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    const _tWin = Date.now();
+    const win = new BrowserWindow({
+      width: savedWs.width,
+      height: savedWs.height,
+      x: savedWs.x,
+      y: savedWs.y,
+      title: 'ithyno',
+      show: false,
+      backgroundColor: DEFAULT_CHROME_COLOR,
+      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: join(__dirname, 'preload.js'),
+      },
+    });
+    console.log(`[startup] new BrowserWindow(): ${Date.now() - _tWin}ms`);
+    mainWindow = win;
+    win.once('ready-to-show', () => {
+      console.log(`[startup] ready-to-show: ${Date.now() - _t0}ms`);
+      win.show();
+    });
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      void shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    win.on('close', () => saveWindowState(win));
+    win.on('resize', () => saveWindowState(win));
+    win.on('move', () => saveWindowState(win));
+    win.on('closed', () => {
+      if (mainWindow === win) mainWindow = null;
+    });
+    // Load welcome.html immediately — the window becomes visible
+    // (ready-to-show fires) before spawnServer returns.
+    const _tWelcome = Date.now();
+    void win.loadFile(resolveWelcomeHtml());
+    console.log(`[startup] loadFile (welcome, initial): ${Date.now() - _tWelcome}ms`);
+  }
+
+  // ── Step 2: Welcome / no-project path ────────────────────────────────
   if (projectRoot === null) {
     await tearDownServer();
     currentDashboardSession = null;
-  } else if (reuseHealthyServer) {
-    spawn = currentSpawn;
-  } else {
-    if (resolvedProjectRoot !== null && currentDashboardSession?.projectRoot === resolvedProjectRoot) {
-      await tearDownServer();
-    } else {
-      await tearDownServer();
-    }
-
-    const binPath = resolveBinPath();
-    if (!existsSync(binPath)) {
-      dialog.showErrorBox(
-        'ithyno',
-        `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
-      );
-      app.quit();
-      return;
-    }
-
-    try {
-      spawn = await spawnServer({
-        binPath,
-        projectRoot: resolvedProjectRoot ?? projectRoot,
-        onLog: (line, stream) => {
-          if (stream === 'stderr') process.stderr.write(line);
-          else process.stdout.write(line);
-        },
-        ...buildSessionRecoveryOptions(resolvedProjectRoot, currentDashboardSession),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const choice = dialog.showMessageBoxSync({
-        type: 'error',
-        title: 'ithyno',
-        message: 'Failed to start the ithyno server',
-        detail: message,
-        buttons: ['Retry', 'Quit'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (choice === 0) {
-        await createWindowForProject(projectRoot);
-      } else {
-        app.quit();
-      }
-      return;
-    }
-  }
-
-  if (spawn) {
-    currentSpawn = spawn;
-    currentProjectRoot = resolvedProjectRoot ?? currentProjectRoot;
-    if (resolvedProjectRoot) {
-      currentDashboardSession = { projectRoot: resolvedProjectRoot, port: spawn.port, token: spawn.token };
-    }
-    store.setProject(projectRoot ?? '');
-    refreshMenu();
-  }
-
-  const savedWs = validateWindowState(store.getWindowState());
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (spawn) {
-      void mainWindow.loadURL(spawn.url);
-    } else {
-      void mainWindow.loadFile(resolveWelcomeHtml());
-    }
+    void mainWindow.loadFile(resolveWelcomeHtml());
     mainWindow.focus();
+    console.log(`[startup] createWindowForProject total (welcome): ${Date.now() - _t0}ms`);
     return;
   }
 
-  const win = new BrowserWindow({
-    width: savedWs.width,
-    height: savedWs.height,
-    x: savedWs.x,
-    y: savedWs.y,
-    title: 'ithyno',
-    show: false,
-    backgroundColor: DEFAULT_CHROME_COLOR,
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: join(__dirname, 'preload.js'),
-    },
-  });
-
-  mainWindow = win;
-
-  win.once('ready-to-show', () => {
-    win.show();
-  });
-
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: 'deny' };
-  });
-
-  win.on('close', () => saveWindowState(win));
-  win.on('resize', () => saveWindowState(win));
-  win.on('move', () => saveWindowState(win));
-  win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null;
-  });
-
-  if (spawn) {
-    await win.loadURL(spawn.url);
-  } else {
-    await win.loadFile(resolveWelcomeHtml());
+  // ── Step 3: Healthy-session fast path ─────────────────────────────────
+  if (reuseHealthyServer) {
+    void mainWindow.loadURL(currentSpawn!.url);
+    mainWindow.focus();
+    console.log(`[startup] createWindowForProject total (reuse): ${Date.now() - _t0}ms`);
+    return;
   }
+
+  // ── Step 4: Spawn new server (window already visible with welcome) ────
+  await tearDownServer();
+
+  const binPath = resolveBinPath();
+  if (!existsSync(binPath)) {
+    dialog.showErrorBox(
+      'ithyno',
+      `Cannot find server entry at:\n${binPath}\n\nThis usually means the app was built without bundling bin/ithyno.js.`,
+    );
+    app.quit();
+    return;
+  }
+
+  const _tSpawn = Date.now();
+  let spawn: SpawnResult;
+  try {
+    spawn = await spawnServer({
+      binPath,
+      projectRoot: resolvedProjectRoot ?? projectRoot,
+      onLog: (line, stream) => {
+        if (stream === 'stderr') process.stderr.write(line);
+        else process.stdout.write(line);
+      },
+      ...buildSessionRecoveryOptions(resolvedProjectRoot, currentDashboardSession),
+    });
+    console.log(`[startup] spawnServer (caller side): ${Date.now() - _tSpawn}ms`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'ithyno',
+      message: 'Failed to start the ithyno server',
+      detail: message,
+      buttons: ['Retry', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice === 0) {
+      await createWindowForProject(projectRoot);
+    } else {
+      app.quit();
+    }
+    return;
+  }
+
+  currentSpawn = spawn;
+  currentProjectRoot = resolvedProjectRoot ?? currentProjectRoot;
+  if (resolvedProjectRoot) {
+    currentDashboardSession = { projectRoot: resolvedProjectRoot, port: spawn.port, token: spawn.token };
+  }
+  store.setProject(projectRoot);
+  refreshMenu();
+
+  // Navigate in-place from welcome.html to the server URL.
+  void mainWindow.loadURL(spawn.url);
+  mainWindow.focus();
+  console.log(`[startup] createWindowForProject total (spawned): ${Date.now() - _t0}ms`);
 }
 
 async function switchProject(projectRoot: string): Promise<void> {
@@ -687,7 +698,10 @@ if (!gotLock) {
 
   registerWelcomeIpc();
 
+  const _tAppStart = Date.now();
+  console.log(`[startup] process start → app.whenReady() registered`);
   void app.whenReady().then(async () => {
+    console.log(`[startup] app.whenReady fired: ${Date.now() - _tAppStart}ms since registration`);
     const aboutConfig = readAboutConfig();
     app.setAboutPanelOptions({
       applicationName: aboutConfig.name,

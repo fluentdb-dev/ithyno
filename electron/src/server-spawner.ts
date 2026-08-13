@@ -91,16 +91,22 @@ export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'se
 }
 
 export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
+  const t0 = Date.now();
   const port = opts.port ?? (await pickFreePort());
+  console.log(`[startup] pickFreePort: ${Date.now() - t0}ms → port ${port}`);
+
   const nodeBin = opts.nodePath ?? process.execPath;
   const env = buildServerSpawnEnv(opts, port);
 
+  const tSpawn = Date.now();
   const child = spawn(
     nodeBin,
     [opts.binPath, '--dir', opts.projectRoot, '--port', String(port), '--no-open'],
     { env, stdio: ['ignore', 'pipe', 'pipe'] },
   ) as ServerChildProcess;
+  console.log(`[startup] child spawn() call: ${Date.now() - tSpawn}ms`);
 
+  const tToken = Date.now();
   const token = await new Promise<string>((resolve, reject) => {
     let stdoutBuf = '';
     let stderrBuf = '';
@@ -147,9 +153,13 @@ export async function spawnServer(opts: SpawnOptions): Promise<SpawnResult> {
       );
     }, 15_000);
   });
+  console.log(`[startup] server token received: ${Date.now() - tToken}ms`);
 
+  const tHealth = Date.now();
   await pollHealth(port);
+  console.log(`[startup] pollHealth: ${Date.now() - tHealth}ms`);
 
   const url = `http://localhost:${port}/?token=${token}`;
+  console.log(`[startup] spawnServer total: ${Date.now() - t0}ms`);
   return { url, token, port, child };
 }

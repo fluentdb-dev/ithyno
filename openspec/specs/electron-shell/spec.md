@@ -273,6 +273,8 @@ The Electron shell SHALL load a static welcome page (`electron/welcome.html`) in
 
 When `ProjectStore.getLastProject()` DOES return a valid directory, the shell SHALL skip the welcome page and open that project directly (unchanged behaviour — daily-driver users see zero friction and no visible flicker).
 
+> ⚠️ **PENDING MODIFIED** by [electron-startup-parallel-window](../../changes/electron-startup-parallel-window/): welcome.html が即座に表示され、サーバー起動中のプレースホルダーとして使用されるよう変更される。
+
 When the user picks a folder from the welcome view, the SAME BrowserWindow's URL SHALL swap to `localhost:<port>` in place via `mainWindow.loadURL(spawn.url)` — the BrowserWindow instance, its bounds, its preload, and its menu bar MUST persist across the swap. A second BrowserWindow MUST NOT be created for the transition.
 
 Closing the window while it displays welcome.html (i.e. no project has been loaded) SHALL quit the app via the standard `window-all-closed` handler.
