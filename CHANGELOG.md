@@ -41,6 +41,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   change's `code → review → verify` stages sequential.
 - Improved Windows worktree path handling, including symlink and 8.3 short-name
   normalization.
+- Resolved vulnerable transitive `js-yaml` versions by pinning compatible
+  patched releases for both the 3.x and 4.x dependency trees.
 
 ## [0.0.1-alpha.0] - 2026-07-20
 
