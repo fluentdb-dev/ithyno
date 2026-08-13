@@ -26,6 +26,12 @@
     "electron",
     "vscode-extension"
   ],
+  "overrides": {
+    "js-yaml": "4.3.1",
+    "gray-matter": {
+      "js-yaml": "3.15.1"
+    }
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "OPENSPEC_DEV=1 tsx watch server/index.ts",
