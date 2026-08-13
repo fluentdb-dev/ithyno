@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Verify that produced release artifacts ship `/ithy-opsx:*` skills and
-// commands ONLY under `templates/.claude/…` — never as bare
+// Verify that produced release artifacts ship `/ithy-opsx:*` definitions
+// only from the init templates or the universal skill source — never as bare
 // `.claude/commands/ithy-opsx/` or `.claude/skills/ithy-opsx-*/` entries.
 //
 // Runs three checks in order:
@@ -77,7 +77,8 @@ function walkFiles(dir) {
 
 /**
  * Apply the two invariants to a walked bundle: every ithy-opsx path must
- * live under `<prefix>templates/.claude/…`, and no bare
+ * live under `<prefix>templates/.claude/…` or the canonical universal source
+ * `<prefix>ithyno/skills/…`, and no bare
  * `<prefix>.claude/commands/ithy-opsx` or `<prefix>.claude/skills/ithy-opsx-`
  * paths may exist.
  *
@@ -94,14 +95,15 @@ function assertNoBareIthyOpsx(paths, prefix, artifactLabel) {
     `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.claude/skills/ithy-opsx-`,
   );
   const templatesPrefix = `${prefix}templates/.claude/`;
+  const universalSkillsPrefix = `${prefix}ithyno/skills/`;
 
   for (const p of paths) {
     if (p.includes("ithy-opsx")) {
-      if (!p.startsWith(templatesPrefix)) {
+      if (!p.startsWith(templatesPrefix) && !p.startsWith(universalSkillsPrefix)) {
         throw new Error(
-          `${artifactLabel}: ithy-opsx path lives outside templates/.claude/\n` +
+          `${artifactLabel}: ithy-opsx path lives outside approved source roots\n` +
             `  offending path: ${p}\n` +
-            `  expected prefix: ${templatesPrefix}\n` +
+            `  expected prefix: ${templatesPrefix} or ${universalSkillsPrefix}\n` +
             `  contract violated: ${CONTRACT}`,
         );
       }

@@ -7,7 +7,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { AgentRegistry } from "./registry.js";
 import { AgentRunner } from "./runner.js";
-import { validateRunPayload } from "./run-validation.js";
+import { MAX_AGENT_TIMEOUT_MS, validateRunPayload } from "./run-validation.js";
 
 const execFile = promisify(execFileCb);
 
@@ -62,6 +62,14 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       expect(res.cwd).toBe(join(dir, ".worktrees", "add-feat"));
       expect(res.branch).toBe("agent/add-feat");
       expect(res.created).toBe(true);
+    }
+  });
+
+  it("rejects unsafe change ids before resolving a worktree path", async () => {
+    for (const changeId of ["../escape", "nested/change", ".", "..", "bad id"]) {
+      const res = await runner.resolveExecutionRoot(changeId, "worktree");
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.status).toBe(400);
     }
   });
 
@@ -203,6 +211,16 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
     }
   });
 
+  it("waitForCompletion rejects an excessive timeout at the timer boundary", async () => {
+    const run = await runner.run("add-feat", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await expect(
+      runner.waitForCompletion(run.job.id, { timeoutMs: MAX_AGENT_TIMEOUT_MS + 1 }),
+    ).rejects.toThrow(/no greater than/);
+    runner.cancel(run.job.id);
+  });
+
   it.each(["review", "verify"])(
     "removes a stale review artifact before a %s worker starts",
     async (role) => {
@@ -246,6 +264,12 @@ describe("API Validation rules for wait & timeoutMs (validateRunPayload)", () =>
     expect(validateRunPayload({ ...base, wait: true, timeoutMs: 5000 }).ok).toBe(true);
     expect(validateRunPayload({ ...base, wait: false }).ok).toBe(true);
 
+    for (const changeId of ["../escape", "nested/change", ".", "..", "bad id"]) {
+      const invalidId = validateRunPayload({ ...base, changeId });
+      expect(invalidId.ok).toBe(false);
+      if (!invalidId.ok) expect(invalidId.error).toMatch(/changeId must contain only/);
+    }
+
     // Invalid wait
     const badWait = validateRunPayload({ ...base, wait: "true" });
     expect(badWait.ok).toBe(false);
@@ -267,5 +291,13 @@ describe("API Validation rules for wait & timeoutMs (validateRunPayload)", () =>
     const badTimeoutString = validateRunPayload({ ...base, timeoutMs: "5000" });
     expect(badTimeoutString.ok).toBe(false);
     if (!badTimeoutString.ok) expect(badTimeoutString.error).toMatch(/timeoutMs must be a positive integer/);
+
+    expect(validateRunPayload({ ...base, timeoutMs: MAX_AGENT_TIMEOUT_MS }).ok).toBe(true);
+    const badTimeoutTooLarge = validateRunPayload({
+      ...base,
+      timeoutMs: MAX_AGENT_TIMEOUT_MS + 1,
+    });
+    expect(badTimeoutTooLarge.ok).toBe(false);
+    if (!badTimeoutTooLarge.ok) expect(badTimeoutTooLarge.error).toMatch(/no greater than/);
   });
 });

@@ -12,6 +12,7 @@ import { parseReview, type ReviewArtifact } from "./review-parser.js";
 import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
 import { parseTasks } from "../parser/tasks.js";
+import { isSafeChangeId } from "../util/change-id.js";
 
 const execFile = promisify(execFileCb);
 
@@ -264,6 +265,11 @@ export class AgentRunner {
     | { ok: true; cwd: string; branch: string; created: boolean }
     | { ok: false; status: number; reason: string }
   > {
+    // Defense in depth: AgentRunner also has non-HTTP callers. Never let a
+    // change id become more than one worktree path / branch component.
+    if (!isSafeChangeId(changeId)) {
+      return { ok: false, status: 400, reason: "Invalid change id" };
+    }
     if (mode === "main-tree") {
       return { ok: true, cwd: this.projectRoot, branch: "", created: false };
     }
@@ -627,6 +633,15 @@ export class AgentRunner {
     jobId: string,
     options?: { timeoutMs?: number },
   ): Promise<{ status: JobStatus; exitCode: number | null }> {
+    const timeoutMs = options?.timeoutMs;
+    // Repeat the bound at the timer sink so direct/internal callers cannot
+    // allocate an arbitrarily long timer by bypassing HTTP validation.
+    if (
+      timeoutMs !== undefined &&
+      (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30 * 60 * 1000)
+    ) {
+      throw new Error("timeoutMs must be a positive integer no greater than 1800000");
+    }
     const job = this.jobs.get(jobId);
     if (!job) throw new Error(`Unknown job id "${jobId}"`);
     if (job.status !== "running") {
@@ -650,20 +665,20 @@ export class AgentRunner {
 
       this.eventEmitter.once(`finished:${jobId}`, onFinished);
 
-      if (options?.timeoutMs && options.timeoutMs > 0) {
+      if (timeoutMs !== undefined) {
         timer = setTimeout(() => {
           // Mark and terminate now, but do not return control to the caller
           // until the child has actually emitted exit and finalize() has run.
           // Windows keeps cwd/worktree handles locked between SIGTERM and exit;
           // rejecting immediately lets callers tear down the directory during
           // that window and produces EBUSY. onFinished performs the rejection.
-          timeoutError = new Error(`Execution timed out after ${options.timeoutMs}ms`);
+          timeoutError = new Error(`Execution timed out after ${timeoutMs}ms`);
           const result = this.timeoutJob(jobId);
           if (!result.ok) {
             cleanup();
             reject(new Error(`${timeoutError.message}: ${result.reason ?? "termination failed"}`));
           }
-        }, options.timeoutMs);
+        }, timeoutMs);
       }
     });
   }

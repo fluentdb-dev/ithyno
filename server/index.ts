@@ -35,6 +35,7 @@ function loadShellEnv(): void {
 
 loadShellEnv();
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";
 import { readFile, writeFile } from "node:fs/promises";
@@ -65,6 +66,7 @@ import {
   extractToken,
   verifyToken,
 } from "./util/auth.js";
+import { isSafeChangeId } from "./util/change-id.js";
 import type { Change, DocsFile, DocsTree, SpecDomain, GitStatus } from "./model.js";
 import { getGitStatus } from "./git/status.js";
 import { readGitConfig, writeLocalConfig } from "./git/config.js";
@@ -82,16 +84,6 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
-
-// Same shape as the change-id validation done implicitly by other endpoints
-// (`openspec/changes/<id>/` in file paths). Kept strict because both handlers
-// below shell out to `git` with `<id>` embedded in the path.
-const SAFE_CHANGE_ID = /^[A-Za-z0-9._-]+$/;
-function isSafeChangeId(id: string): boolean {
-  if (!id) return false;
-  if (id === "." || id === "..") return false;
-  return SAFE_CHANGE_ID.test(id);
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -131,6 +123,7 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
+await fastify.register(rateLimit, { global: false });
 
 // ---- CSRF protection -------------------------------------------------------
 // Built once we know the listening port (see fastify.listen below). Used by
@@ -668,7 +661,9 @@ fastify.post<{ Body: { tool?: unknown } }>("/api/doctor/install", async (req, re
 // POST /api/agent-skills/install — SSE endpoint; body { cli, components }.
 //                            Local-only + session-token gated.
 
-fastify.get("/api/agent-skills", async (req, reply) => {
+fastify.get("/api/agent-skills", {
+  config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+}, async (req, reply) => {
   const token = extractToken({
     headers: req.headers as Record<string, string | string[] | undefined>,
     url: req.url,
@@ -686,6 +681,7 @@ fastify.get("/api/agent-skills", async (req, reply) => {
 
 fastify.post<{ Body: { cli?: unknown; components?: unknown } }>(
   "/api/agent-skills/install",
+  { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
   async (req, reply) => {
     if (!isLocal(req.socket.remoteAddress ?? undefined)) {
       return reply.code(403).send({ error: "local only" });

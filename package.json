@@ -1,6 +1,6 @@
 {
   "name": "ithyno",
-  "version": "0.0.1-alpha.4",
+  "version": "0.8.0-alpha.0",
   "description": "Local dashboard for OpenSpec — dispatches propose / apply / review / verify skills to AI CLI agents.",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -26,6 +26,12 @@
     "electron",
     "vscode-extension"
   ],
+  "overrides": {
+    "js-yaml": "4.3.1",
+    "gray-matter": {
+      "js-yaml": "3.15.1"
+    }
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "OPENSPEC_DEV=1 tsx watch server/index.ts",
@@ -55,6 +61,7 @@
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
+    "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^8.0.4",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0",
     "@xterm/addon-fit": "^0.11.0",

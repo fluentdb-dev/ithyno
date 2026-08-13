@@ -86,7 +86,7 @@ The repository SHALL expose a single root npm script `release:build` that produc
 
 - **GIVEN** the `verify-bundle.mjs` script is invoked from `release:build` (or directly via `npm run release:verify-bundle`)
 - **WHEN** the script runs `npm pack --pack-destination <tmpdir>` on the repo root, extracts the resulting `.tgz`, and walks the extracted `package/` tree
-- **THEN** every path containing `ithy-opsx` MUST live under `package/templates/.claude/…`
+- **THEN** every path containing `ithy-opsx` MUST live under `package/templates/.claude/…` or the canonical universal source `package/ithyno/skills/…`
 - **AND** no path MUST match `^package/\.claude/commands/ithy-opsx` or `^package/\.claude/skills/ithy-opsx-`
 - **AND** on either invariant violation the script exits non-zero with a message naming the offending path AND naming `distribute-ithy-opsx-via-init-templates` as the contract being violated
 
@@ -94,7 +94,7 @@ The repository SHALL expose a single root npm script `release:build` that produc
 
 - **GIVEN** the `verify-bundle.mjs` script inspects `electron/dist/` for produced bundles
 - **WHEN** it finds a Mac bundle at `electron/dist/mac*/ithyno.app/Contents/Resources/app/` or a Windows unpacked bundle at `electron/dist/win-unpacked/resources/app/`
-- **THEN** for each such bundle it MUST assert every path containing `ithy-opsx` lives under `<app>/templates/.claude/…`
+- **THEN** for each such bundle it MUST assert every path containing `ithy-opsx` lives under `<app>/templates/.claude/…` or the canonical universal source `<app>/ithyno/skills/…`
 - **AND** MUST assert `<app>/.claude/commands/ithy-opsx/` and `<app>/.claude/skills/ithy-opsx-*/` do NOT exist
 - **AND** MUST skip (with a logged notice, not a failure) any OS bundle not present in `electron/dist/`, so the host-only `release:build` path (which produces only the host OS bundle) still verifies the bundle it did produce without failing on the absent bundles
 - **AND** Linux AppImage bundle contents SHALL be skipped in this change (documented in `design.md` D3 and reserved for a future extension)
@@ -196,4 +196,3 @@ Before any tag-triggered build step, the workflow SHALL fail loudly if the pushe
 - **THEN** the `publish` job is skipped (its `if: startsWith(github.ref, 'refs/tags/')` guard evaluates false)
 - **AND** no GitHub Release is created
 - **AND** ephemeral CI artifacts (for dispatch runs) or a build-only regression check (for PR events) remain the only workflow outputs for non-tag runs
-
