@@ -94,6 +94,8 @@ let currentSpawn: SpawnResult | null = null;
 let currentProjectRoot: string | null = null;
 let currentDashboardSession: { projectRoot: string; port: number; token: string } | null = null;
 let quitting = false;
+/** Serializes createWindowForProject calls — prevents double-spawn from Windows click-through. */
+let _cwfpQueue: Promise<void> = Promise.resolve();
 
 /**
  * Resolve the path to bin/ithyno.js in both dev (electron/out/main.js →
@@ -173,12 +175,13 @@ function validateWindowState(ws: WindowState): WindowState {
  * welcome-preload path is needed. (add-electron-welcome-window.)
  */
 function resolveWelcomeHtml(): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, 'app', 'electron', 'welcome.html');
-  }
-  // Dev: app.getAppPath() is the electron/ directory (where package.json
-  // lives); welcome.html sits at its root.
-  return resolve(app.getAppPath(), 'welcome.html');
+  // app.getAppPath() returns the electron/ directory in dev (where its
+  // package.json lives) and resources/app[.asar] in packaged mode — both
+  // have welcome.html at their root via the "files" entry in package.json.
+  // The previous packaged path (process.resourcesPath + 'app/electron/…')
+  // had a spurious 'electron/' segment and broke when welcome.html started
+  // being loaded as a startup placeholder. (electron-startup-parallel-window)
+  return join(app.getAppPath(), 'welcome.html');
 }
 
 /**
@@ -200,9 +203,7 @@ function readAppIconDataUrl(): string | null {
   // `..` and resolved to <repo-root>/build/icon.png, which doesn't
   // exist; that made readFileSync throw and the welcome page fell back
   // to `display:none` (icon invisible).
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'app', 'electron', 'build', 'icon.png')
-    : resolve(app.getAppPath(), 'build', 'icon.png');
+  const iconPath = join(app.getAppPath(), 'build', 'icon.png');
   try {
     const buf = readFileSync(iconPath);
     _iconDataUrlCache = `data:image/png;base64,${buf.toString('base64')}`;
@@ -274,7 +275,14 @@ function saveWindowState(win: BrowserWindow): void {
  *
  * (electron-startup-parallel-window)
  */
+/** Public entry — serializes concurrent calls to prevent double-spawn (e.g. Windows click-through). */
 async function createWindowForProject(projectRoot: string | null): Promise<void> {
+  const prev = _cwfpQueue;
+  _cwfpQueue = prev.catch(() => {}).then(() => _createWindowForProjectImpl(projectRoot));
+  await _cwfpQueue;
+}
+
+async function _createWindowForProjectImpl(projectRoot: string | null): Promise<void> {
   const _t0 = Date.now();
   console.log(`[startup] createWindowForProject start (projectRoot=${projectRoot ?? 'null'})`);
   const resolvedProjectRoot = projectRoot !== null ? resolve(projectRoot) : null;
@@ -381,7 +389,7 @@ async function createWindowForProject(projectRoot: string | null): Promise<void>
       cancelId: 1,
     });
     if (choice === 0) {
-      await createWindowForProject(projectRoot);
+      await _createWindowForProjectImpl(projectRoot);
     } else {
       app.quit();
     }
