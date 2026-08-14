@@ -269,50 +269,26 @@ The Electron shell SHALL assign one port and one session token to the active pro
 
 ### Requirement: Electron first launch shows welcome.html in the main window instead of a bare folder picker
 
-The Electron shell SHALL load a static welcome page (`electron/welcome.html`) into the **same BrowserWindow** that will become the main app window when `ProjectStore.getLastProject()` does NOT return a valid directory. The welcome page replaces the current inline `pickProjectDialog()` fallback in the app's first-launch path; the native picker is still available but only fires when the user clicks `Open Folder…` inside the welcome page.
+The Electron shell SHALL load a static welcome page (`electron/welcome.html`) into the **same BrowserWindow** that will become the main app window when `ProjectStore.getLastProject()` does NOT return a valid directory.
 
-When `ProjectStore.getLastProject()` DOES return a valid directory, the shell SHALL skip the welcome page and open that project directly (unchanged behaviour — daily-driver users see zero friction and no visible flicker).
+When `ProjectStore.getLastProject()` DOES return a valid directory, the shell SHALL also show `welcome.html` as an **immediate placeholder** in the BrowserWindow while the server is starting. Once the server is ready, the window SHALL navigate from `welcome.html` to the server URL in-place — the same same-window swap used when the user picks a folder from the welcome view. The BrowserWindow instance, its bounds, its preload, and its menu bar MUST persist across the swap.
 
-> ⚠️ **PENDING MODIFIED** by [electron-startup-parallel-window](../../changes/electron-startup-parallel-window/): welcome.html が即座に表示され、サーバー起動中のプレースホルダーとして使用されるよう変更される。
-
-When the user picks a folder from the welcome view, the SAME BrowserWindow's URL SHALL swap to `localhost:<port>` in place via `mainWindow.loadURL(spawn.url)` — the BrowserWindow instance, its bounds, its preload, and its menu bar MUST persist across the swap. A second BrowserWindow MUST NOT be created for the transition.
-
-Closing the window while it displays welcome.html (i.e. no project has been loaded) SHALL quit the app via the standard `window-all-closed` handler.
+In both cases, the BrowserWindow SHALL be created and made visible before `spawnServer()` completes, so the user sees a window immediately rather than a blank screen during server startup.
 
 #### Scenario: First launch with no saved project loads welcome.html into the main window
 - **GIVEN** the Electron app launches AND `ProjectStore.getLastProject()` returns `null`
 - **WHEN** `app.whenReady()` fires
-- **THEN** `createWindowForProject(null)` runs
-- **AND** the main BrowserWindow is created and loads `welcome.html`
+- **THEN** the main BrowserWindow is created and loads `welcome.html`
 - **AND** the native folder picker does NOT open automatically
 - **AND** no second BrowserWindow is created
 
-#### Scenario: First launch with a stale saved project loads welcome.html
-- **GIVEN** the Electron app launches AND `ProjectStore.getLastProject()` returns a path that is no longer a directory on disk
+#### Scenario: Saved project — window appears before server is ready
+- **GIVEN** the Electron app launches AND `ProjectStore.getLastProject()` returns a valid directory
 - **WHEN** `app.whenReady()` fires
-- **THEN** the stale entry is removed via `ProjectStore.removeFromRecent`
-- **AND** `createWindowForProject(null)` runs
-- **AND** the main BrowserWindow loads `welcome.html`
-
-#### Scenario: Launch with a valid saved project skips welcome.html
-- **GIVEN** `ProjectStore.getLastProject()` returns a valid directory
-- **WHEN** the app launches
-- **THEN** the main window opens directly on `localhost:<port>` with that project
-- **AND** welcome.html is NOT loaded
-
-#### Scenario: Opening a folder from welcome swaps the URL in the same window
-- **GIVEN** the main BrowserWindow currently displays welcome.html
-- **WHEN** the user picks a folder via `Open Folder…` or clicks a valid Recent entry
-- **THEN** `createWindowForProject(picked)` runs
-- **AND** the server spawns for that project root
-- **AND** the SAME `mainWindow` instance's URL swaps to `spawn.url` via `loadURL`
-- **AND** the BrowserWindow instance identity is unchanged (no `.close()` on the welcome-loaded window)
-
-#### Scenario: Closing the window on welcome.html quits the app
-- **GIVEN** the main BrowserWindow displays welcome.html AND no project has been loaded
-- **WHEN** the user closes the window
-- **THEN** `window-all-closed` fires
-- **AND** `app.quit()` is invoked
+- **THEN** the main BrowserWindow is created and shows `welcome.html` immediately
+- **AND** `spawnServer()` runs while the window is already visible
+- **AND** once the server is ready, the window navigates to the server URL in-place
+- **AND** no second BrowserWindow is created
 
 ### Requirement: Welcome view shows app identity sourced from the same AboutConfig as the About panel
 
@@ -406,4 +382,12 @@ The corresponding main-process IPC channels SHALL be exactly: `welcome:get-about
 - **WHEN** the welcome preload issues an IPC call
 - **THEN** the channel name MUST be one of `welcome:get-about`, `welcome:get-recent`, `welcome:open-folder`, `welcome:open-recent`, `welcome:open-external`, `welcome:quit`
 - **AND** the main → renderer push channel MUST be `welcome:recent-updated`
+
+### Requirement: Startup phase timing logs
+
+The Electron shell SHALL emit `[startup] <phase>: <ms>ms` log lines to the main-process stdout for each phase of `spawnServer` (pickFreePort, spawn, token, pollHealth) and `createWindowForProject` (spawnServer total, new BrowserWindow, loadURL, ready-to-show) so that startup bottlenecks can be measured on any platform without attaching a profiler.
+
+#### Scenario: Startup logs emitted
+- **WHEN** the Electron app launches and opens a project
+- **THEN** the main-process stdout contains `[startup]`-prefixed lines for each phase with millisecond durations
 
