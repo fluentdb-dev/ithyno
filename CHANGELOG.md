@@ -3,6 +3,24 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1-alpha.0] - 2026-08-14
+
+### Changed
+
+- Electron now creates and displays its window while the dashboard server is
+  starting, reducing the blank startup delay, especially on Windows.
+- Electron startup reports progress and failure states in the window instead
+  of waiting for server readiness before showing the UI.
+
+### Fixed
+
+- Corrected packaged Electron resource resolution so production builds locate
+  the bundled server and assets reliably.
+- Prevented duplicate dashboard-server processes during Electron startup on
+  Windows.
+- Hardened the local Electron launch helper and workspace settings for paths
+  containing platform-specific separators and characters.
+
 ## [0.8.0-alpha.0] - 2026-08-12
 
 ### Added
