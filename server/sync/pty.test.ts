@@ -331,7 +331,24 @@ function expectedTmuxStartup(session: string, command: string): string {
   return `(tmux show-options -gv update-environment 2>/dev/null | grep -qw ITHYNO_SESSION_TOKEN || tmux set-option -ag update-environment ' ITHYNO_PORT ITHYNO_BASE ITHYNO_SESSION_TOKEN' 2>/dev/null || true); exec tmux new-session -A -s ${session} -e ITHYNO_PORT="$ITHYNO_PORT" -e ITHYNO_BASE="$ITHYNO_BASE" -e ITHYNO_SESSION_TOKEN="$ITHYNO_SESSION_TOKEN" -- ${command}`;
 }
 
+function expectedWinTmuxStartup(session: string, command: string): string {
+  return `tmux new-session -A -s ${session} -e ITHYNO_PORT=$env:ITHYNO_PORT -e ITHYNO_BASE=$env:ITHYNO_BASE -e ITHYNO_SESSION_TOKEN=$env:ITHYNO_SESSION_TOKEN -- ${command}`;
+}
+
+/** Stub process.platform for the duration of a describe block. */
+function usePlatform(platform: string): void {
+  let saved: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    saved = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  });
+  afterEach(() => {
+    if (saved) Object.defineProperty(process, 'platform', saved);
+  });
+}
+
 describe("ptyStartup — tmux wrap (wrap-embedded-pty-in-tmux)", () => {
+  usePlatform('linux');
   it("agmsg absent → direct spawn unchanged (regression lock)", async () => {
     _setTmuxCacheForTest(true); // tmux available but no agmsg → still no wrap
     const reg = await loadWith(
@@ -458,6 +475,8 @@ agents:
 });
 
 describe("ptyStartup — tmux toggle independent of agmsg (decouple-tmux-from-agmsg)", () => {
+  usePlatform('linux');
+
   it("tmux: true + no agmsg + tmux available → wraps in tmux", async () => {
     _setTmuxCacheForTest(true);
     const reg = await loadWith(
@@ -519,6 +538,47 @@ agents:
 `,
     );
     expect(ptyStartup(reg)).toEqual({ startup: "claude --continue" });
+  });
+});
+
+// ---- Windows PowerShell-native tmux wrap (fix-tmux-startup-windows) ----
+describe("ptyStartup — Windows PowerShell-native tmux wrap", () => {
+  usePlatform('win32');
+
+  it("agmsg + tmux available → PowerShell-native tmux new-session with $env:VAR", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `agmsg:
+  team: alpha
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    expect(ptyStartup(reg)).toEqual({
+      startup: expectedWinTmuxStartup("ithyno", "claude --continue"),
+    });
+  });
+
+  it("tmux: true → PowerShell-native startup passes $env:ITHYNO_PORT etc", async () => {
+    _setTmuxCacheForTest(true);
+    const reg = await loadWith(
+      `tmux: true
+agents:
+  - name: primary
+    role: manager
+    command: claude
+    args: [--continue]
+`,
+    );
+    const { startup } = ptyStartup(reg);
+    expect(startup).toContain("$env:ITHYNO_PORT");
+    expect(startup).toContain("$env:ITHYNO_BASE");
+    expect(startup).toContain("$env:ITHYNO_SESSION_TOKEN");
+    expect(startup).not.toContain("2>/dev/null");
+    expect(startup).not.toContain("exec tmux");
   });
 });
 
