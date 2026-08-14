@@ -289,6 +289,18 @@ export function ptyStartup(
   const explicitSessionEnv = ["ITHYNO_PORT", "ITHYNO_BASE", "ITHYNO_SESSION_TOKEN"]
     .map((name) => `-e ${name}=\"$${name}\"`)
     .join(" ");
+  // On Windows, psmux (the Windows-native tmux port) lives on PowerShell PATH.
+  // PowerShell expands $env:VAR at command evaluation time, so pass vars via
+  // -e flags directly — no POSIX update-environment step needed, no bash required.
+  if (process.platform === 'win32') {
+    const winEnv = ['ITHYNO_PORT', 'ITHYNO_BASE', 'ITHYNO_SESSION_TOKEN']
+      .map(name => `-e ${name}=$env:${name}`)
+      .join(' ');
+    const startup = `tmux new-session -A -s ${shellQuote(session)} ${winEnv} -- ${baseStartup}`;
+    return initialInput === undefined
+      ? { startup }
+      : { startup, initialInput };
+  }
   const startup = `${ensureTmuxEnvUpdate}; exec tmux new-session -A -s ${shellQuote(session)} ${explicitSessionEnv} -- ${baseStartup}`;
   return initialInput === undefined
     ? { startup }

@@ -3,6 +3,14 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1-alpha.1] - 2026-08-14
+
+### Fixed
+
+- Fixed tmux-backed Manager PTY startup on Windows by using a
+  PowerShell-native command path, with regression coverage for quoting and
+  environment propagation.
+
 ## [0.8.1-alpha.0] - 2026-08-14
 
 ### Changed
