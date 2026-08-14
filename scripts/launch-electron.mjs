@@ -22,7 +22,16 @@ import electronPath from "electron";
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-const child = spawn(electronPath, ["."], { stdio: "inherit", env });
+// On Windows, electron.exe is a GUI subsystem executable and its stdout/stderr
+// do not reach the terminal when stdio:"inherit" is used. Pipe explicitly and
+// forward so that main-process console.log output (including [startup] timing
+// lines) is visible in the terminal on all platforms.
+const child = spawn(electronPath, ["."], {
+  stdio: ["ignore", "pipe", "pipe"],
+  env,
+});
+child.stdout.pipe(process.stdout);
+child.stderr.pipe(process.stderr);
 child.on("exit", (code) => process.exit(code ?? 0));
 child.on("error", (err) => {
   console.error("[launch-electron] failed to spawn electron:", err);

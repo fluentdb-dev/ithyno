@@ -1,0 +1,11 @@
+{
+  "files.watcherExclude": {
+    "**/electron/dist/**": true,
+    "**/electron/host/**": true,
+    "**/.worktrees/**": true
+  },
+  "files.exclude": {
+    "**/electron/dist/**": true,
+    "**/electron/host/**": true
+  }
+}
