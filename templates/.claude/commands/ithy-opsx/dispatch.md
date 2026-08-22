@@ -97,7 +97,7 @@ The dispatch advances the change through `proposed → coded → reviewed
   demonstrably different from the values used by the failed request;
   otherwise stop and request a fresh Manager session. An auth/transport
   failure is not a worker failure and MUST NOT trigger Manager self-
-  execution, `invoke_subagent`, or another worker-routing fallback.
+  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
 
 ## Manager activity publication
 
@@ -178,9 +178,9 @@ For each stage `S ∈ {code, review, verify}`:
      dispatch, if the Manager is the fallback executor, walk changes
      one at a time.
    - **Distinct from Manager-spawned subagents.** When the Manager
-     invokes the Task tool to spawn a subagent (e.g., the `code`
-     stage's Manager-fallback path spawning a fresh Claude Code
-     instance), that IS a form of ad-hoc agent definition, NOT
+     invokes its native tool to spawn a subagent (e.g., Claude Task,
+     Agy `invoke_subagent`, or Codex `spawn_agent` for the `code`
+     stage), that IS a form of ad-hoc agent definition, NOT
      Manager fallback. Subagent spawn CAN run in parallel — it
      follows the standard dispatch parallelism rules. The key
      distinguisher is *who executes the work*: the Manager itself
@@ -441,14 +441,15 @@ without change:<id>.
    WORKER_CLI  = canonical form of entry.command
    STRATEGY:
      if entry.mode == "live-shell" AND agmsg configured → agmsg (already handled above)
-     elif MANAGER_CLI == WORKER_CLI AND native adapter available for MANAGER_CLI → native
+     elif MANAGER_CLI == WORKER_CLI AND native adapter available for MANAGER_CLI
+          AND the adapter can preserve entry.args and entry.env → native
      else → subprocess (via server AgentRunner)
    ```
 
    - **Native-delegation branch** — Manager and worker share the same
      canonical CLI identity AND the Manager rendering exposes a native
-     child Agent/Tool (currently Claude Task/Agent and Agy 1.1.11
-     `invoke_subagent`; Codex falls through to AgentRunner):
+     child Agent/Tool (Claude Task/Agent, Agy `invoke_subagent`, or
+     Codex `spawn_agent` + `wait_agent`):
 
      **Claude Manager** — use the Task/Agent tool with the resolved
      role prompt and artifact contract:
@@ -494,16 +495,33 @@ exist, create it first.
      through to the AgentRunner subprocess branch instead of assembling
      a direct `agy -p` command.
 
-     **Codex Manager** — Codex has no native sub-agent tool in its
-     current stable surface. Fall through to the subprocess branch for
-     all Codex-to-Codex dispatches. The routing matrix condition
-     `native adapter available for MANAGER_CLI` evaluates to false for
-     Codex.
+     **Codex Manager** — when the runtime exposes `spawn_agent` and
+     `wait_agent`, call `spawn_agent` with one bounded stage task. Put
+     `FULL_PROMPT`, the execution-root contract above, any prior review
+     findings, and the exact artifact contract in the task message.
+     After spawning, call `wait_agent` until that worker reports final
+     completion; only then judge the stage and its artifact. Native
+     completion alone does not replace `review.md` validation.
+
+     Translate model intent from `entry.args`: accept `-m <id>`,
+     `--model <id>`, and `--model=<id>`, then pass the resolved id as
+     `spawn_agent.model`. Use `fork_turns: "none"` when passing a model;
+     the task message already contains the complete worker contract.
+     Approval and sandbox CLI flags are subprocess transport settings;
+     a native child instead inherits the Manager session's permission
+     boundary and they do not disable native delegation.
+
+     Use AgentRunner only when `spawn_agent` / `wait_agent` is
+     unavailable or an entry requires process-only state that native
+     delegation cannot reproduce, such as a worker-specific `entry.env`.
+     Once the native branch is selected, the Manager MUST NOT perform
+     the worker stage itself.
 
    - **Subprocess branch** — cross-CLI workers (e.g. Codex Manager +
-     Agy worker), same-CLI workers without a native adapter (e.g. Codex
-     Manager + Codex worker), an Agy runtime without `invoke_subagent`,
-     or any CLI not in the native-adapter registry:
+     Agy worker), same-CLI workers whose native adapter is unavailable
+     or cannot preserve their process-only configuration (e.g. a Codex
+     worker-specific `entry.env`), an Agy runtime without
+     `invoke_subagent`, or any CLI not in the native-adapter registry:
 
      The server AgentRunner owns all prompt-flag (`-p` / `exec`) and argv
      construction automatically. Manager POSTs to `/api/agents/run` with

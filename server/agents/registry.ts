@@ -162,10 +162,51 @@ export function canonicalCli(command: string | undefined): string {
  *
  * - `claude` → Task-tool subagent.
  * - `agy` → Agy 1.1.11 `invoke_subagent`.
+ * - `codex` → Codex collaboration tools (`spawn_agent` / `wait_agent`).
  * - all others → no adapter; fall back to subprocess.
  */
 export function hasNativeAdapter(canonicalCommand: string): boolean {
-  return canonicalCommand === "claude" || canonicalCommand === "agy";
+  return canonicalCommand === "claude"
+    || canonicalCommand === "agy"
+    || canonicalCommand === "codex";
+}
+
+export type NativeLaunchContext = {
+  /** False when the Manager runtime does not expose its documented native tools. */
+  nativeToolsAvailable?: boolean;
+  /** Worker CLI argv from which native adapters may translate intent. */
+  workerArgs?: readonly string[];
+  /** Worker-specific environment that native delegation would have to preserve. */
+  workerEnv?: Readonly<Record<string, string>>;
+};
+
+/**
+ * Whether a native adapter can preserve the selected worker configuration.
+ *
+ * Codex's `spawn_agent` contract accepts a model override, so CLI model args
+ * are translated by {@link nativeModelFromArgs} instead of forcing a
+ * subprocess. A worker-specific environment still requires a real process
+ * because native children inherit the Manager session environment.
+ */
+export function nativeAdapterCanRepresent(
+  canonicalCommand: string,
+  context: NativeLaunchContext = {},
+): boolean {
+  if (context.nativeToolsAvailable === false) return false;
+  if (canonicalCommand !== "codex") return true;
+  return Object.keys(context.workerEnv ?? {}).length === 0;
+}
+
+/** Resolve Codex `-m` / `--model` argv into the native spawn model field. */
+export function nativeModelFromArgs(args: readonly string[] = []): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if ((arg === "-m" || arg === "--model") && args[i + 1]) return args[i + 1];
+    if (arg.startsWith("--model=") && arg.length > "--model=".length) {
+      return arg.slice("--model=".length);
+    }
+  }
+  return undefined;
 }
 
 /** Strategy returned by {@link selectLaunchStrategy}. */
@@ -177,20 +218,26 @@ export type LaunchStrategy = "agmsg" | "native" | "subprocess";
  * Priority (first match wins):
  *  1. `agmsg`     — worker is `live-shell` AND agmsg is configured.
  *  2. `native`    — same canonical CLI AND the Manager rendering has a
- *                   native child-agent adapter.
- *  3. `subprocess`— all other cases, including same-CLI without an adapter
- *                   (e.g. Codex Manager + Codex worker).
+ *                   native child-agent adapter that can represent the
+ *                   selected worker configuration.
+ *  3. `subprocess`— all other cases, including same-CLI without an available
+ *                   or configuration-compatible adapter.
  */
 export function selectLaunchStrategy(
   managerCommand: string | undefined,
   workerMode: AgentMode,
   agmsgConfigured: boolean,
   workerCommand: string | undefined,
+  nativeContext: NativeLaunchContext = {},
 ): LaunchStrategy {
   if (workerMode === "live-shell" && agmsgConfigured) return "agmsg";
   const mgr = canonicalCli(managerCommand);
   const wkr = canonicalCli(workerCommand);
-  if (mgr === wkr && hasNativeAdapter(mgr)) return "native";
+  if (
+    mgr === wkr
+    && hasNativeAdapter(mgr)
+    && nativeAdapterCanRepresent(mgr, nativeContext)
+  ) return "native";
   return "subprocess";
 }
 

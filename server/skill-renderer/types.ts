@@ -96,6 +96,13 @@ export interface InstallOptions {
   selectedClis: CliId[];
   /** Absolute path to the ithyno/skills/ directory to install from. */
   sourcesDir: string;
+  /**
+   * Absolute path to ithyno's bundled, Claude-shaped canonical source.
+   * The destination project's `.claude/` tree is generated output and MUST
+   * never be used as renderer input. Defaults to the package root inferred
+   * from `sourcesDir`.
+   */
+  canonicalClaudeRoot?: string;
   /** When true, compute the plan but do not write. */
   dryRun?: boolean;
   /** When true, log per-file diffs against on-disk state. */

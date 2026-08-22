@@ -9,9 +9,9 @@
  * flattened filename (`namespace-command.md` rather than `namespace/
  * command.md`) mirrors Codex's flat prompts convention.
  *
- * Capability tokens are expanded to Codex-friendly phrasing (Codex
- * uses subprocess shells rather than a Task-tool subagent, so
- * `<capability:subagent_spawn>` maps to that shape).
+ * Capability tokens are expanded to Codex-friendly phrasing. Current
+ * Codex Managers use collaboration tools for compatible native children and
+ * retain AgentRunner for cross-CLI or configuration-incompatible workers.
  *
  * MVP scope — output fidelity is "the file lands, Codex discovers
  * it as a prompt, invoking it dispatches the ithy-opsx flow". Fuller
@@ -25,7 +25,7 @@ function expandTokens(body: string): string {
   return body
     .replace(
       /<capability:subagent_spawn>/g,
-      () => "invoke via Codex's subprocess shell (or `codex exec ...` for a nested run)",
+      () => "invoke via Codex collaboration tools (`spawn_agent`, then `wait_agent`)",
     )
     .replace(/<capability:file_write>/g, () => "write with your file-write tool")
     .replace(/<capability:bash>/g, () => "run via the shell");
@@ -45,7 +45,7 @@ function codexCommandName(source: SkillSource): string {
   return `${prefix}-${command}`;
 }
 
-/** Codex does not expose Claude's `/namespace:command` grammar. Translate
+/** Codex does not use Claude's `/namespace:command` grammar. Translate
  * command references inside rendered portable skill bodies as well as the
  * prompt filename so a Codex Manager passes native names to child workers. */
 function translateCommandReferences(body: string): string {

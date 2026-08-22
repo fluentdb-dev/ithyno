@@ -7,6 +7,8 @@ import {
   AgentRegistry,
   canonicalCli,
   hasNativeAdapter,
+  nativeAdapterCanRepresent,
+  nativeModelFromArgs,
   selectLaunchStrategy,
 } from "./registry.js";
 
@@ -793,12 +795,56 @@ describe("hasNativeAdapter — native child-agent availability", () => {
     expect(hasNativeAdapter("agy")).toBe(true);
   });
 
-  it("codex has no native adapter", () => {
-    expect(hasNativeAdapter("codex")).toBe(false);
+  it("codex has a spawn_agent/wait_agent native adapter", () => {
+    expect(hasNativeAdapter("codex")).toBe(true);
   });
 
   it("unknown CLI has no native adapter", () => {
     expect(hasNativeAdapter("mycustombot")).toBe(false);
+  });
+});
+
+describe("nativeAdapterCanRepresent — worker configuration compatibility", () => {
+  it("accepts an unconfigured Codex worker", () => {
+    expect(nativeAdapterCanRepresent("codex")).toBe(true);
+  });
+
+  it("accepts Codex model argv because spawn_agent can translate it", () => {
+    expect(nativeAdapterCanRepresent("codex", {
+      workerArgs: ["-m", "gpt-5.6-terra"],
+    })).toBe(true);
+  });
+
+  it("rejects Codex worker environment overrides", () => {
+    expect(nativeAdapterCanRepresent("codex", {
+      workerEnv: { CODEX_PROFILE: "review" },
+    })).toBe(false);
+  });
+
+  it("rejects an adapter whose runtime tools are unavailable", () => {
+    expect(nativeAdapterCanRepresent("codex", {
+      nativeToolsAvailable: false,
+    })).toBe(false);
+  });
+
+  it("retains existing Claude and Agy argument handling", () => {
+    expect(nativeAdapterCanRepresent("claude", { workerArgs: ["--model", "sonnet"] })).toBe(true);
+    expect(nativeAdapterCanRepresent("agy", { workerArgs: ["--model", "gemini-3.1-pro-high"] })).toBe(true);
+  });
+});
+
+describe("nativeModelFromArgs — Codex model intent", () => {
+  it("resolves the short model flag", () => {
+    expect(nativeModelFromArgs(["-m", "gpt-5.6-terra"])).toBe("gpt-5.6-terra");
+  });
+
+  it("resolves long model flag forms", () => {
+    expect(nativeModelFromArgs(["--model", "gpt-5.6-sol"])).toBe("gpt-5.6-sol");
+    expect(nativeModelFromArgs(["--model=gpt-5.6-luna"])).toBe("gpt-5.6-luna");
+  });
+
+  it("returns undefined when no model is configured", () => {
+    expect(nativeModelFromArgs(["--sandbox", "workspace-write"])).toBeUndefined();
   });
 });
 
@@ -837,6 +883,42 @@ describe("selectLaunchStrategy — routing matrix (Tasks 1.3, 1.3.1)", () => {
     expect(
       selectLaunchStrategy("claude", "single-prompt", false, "claude"),
     ).toBe("native");
+  });
+
+  it("Codex Manager + compatible Codex worker → native spawn_agent", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "codex"),
+    ).toBe("native");
+  });
+
+  it("Codex Manager + model-specific Codex worker → native", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "codex", {
+        workerArgs: ["-m", "gpt-5.6-terra"],
+      }),
+    ).toBe("native");
+  });
+
+  it("Codex Manager + worker-specific environment → subprocess", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "codex", {
+        workerEnv: { CODEX_PROFILE: "review" },
+      }),
+    ).toBe("subprocess");
+  });
+
+  it("Codex Manager without collaboration tools → subprocess", () => {
+    expect(
+      selectLaunchStrategy("codex", "single-prompt", false, "codex", {
+        nativeToolsAvailable: false,
+      }),
+    ).toBe("subprocess");
+  });
+
+  it("agmsg priority beats Codex native delegation", () => {
+    expect(
+      selectLaunchStrategy("codex", "live-shell", true, "codex"),
+    ).toBe("agmsg");
   });
 
   // --- subprocess fallback ---

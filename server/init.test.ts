@@ -327,6 +327,24 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("tracked dispatch copies preserve the Codex native collaboration contract", async () => {
+    const copies = [
+      join(REPO_ROOT, ".claude/commands/ithy-opsx/dispatch.md"),
+      join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/dispatch.md"),
+    ];
+    const contents = await Promise.all(copies.map((path) => readFile(path, "utf8")));
+    expect(new Set(contents).size, "dispatch template drift").toBe(1);
+    for (const content of contents) {
+      expect(content).toContain("Codex `spawn_agent` + `wait_agent`");
+      expect(content).toContain("the adapter can preserve entry.args and entry.env");
+      expect(content).toContain("`spawn_agent.model`");
+      expect(content).toContain("worker-specific `entry.env`");
+      expect(content).toContain("Use AgentRunner");
+      expect(content).not.toContain("Codex has no native sub-agent tool");
+      expect(content).not.toContain("Codex falls through to AgentRunner");
+    }
+  });
+
   it("verify treats undefined npm scripts as not-applicable without hiding required checks", async () => {
     const copies = [
       join(REPO_ROOT, ".claude/commands/ithy-opsx/verify.md"),
@@ -538,14 +556,10 @@ describe("ithy-opsx scaffold reachability smoke", () => {
 });
 
 describe("ithy-opsx package shape smoke", () => {
-  // add-init-scaffold-smoke-test: the corrective distribution
-  // (distribute-ithy-opsx-via-init-templates) removed bare
-  // .claude/commands/ithy-opsx and .claude/skills/ithy-opsx-*/**
-  // from package.json `files`. This test locks that in: `npm pack
-  // --dry-run --json` MUST show generated Claude assets only under templates/
-  // and portable renderer input under ithyno/skills/. It MUST NOT show a bare
-  // .claude/ prefix, which would silently double-ship the dev copy.
-  it("npm pack --dry-run ships templates plus universal ithyno skill sources", async () => {
+  // Package the Claude-authoritative source alongside templates and portable
+  // sources. Renderers read this bundled tree; a consumer project's generated
+  // `.claude/` tree is output-only and must never become an implicit source.
+  it("npm pack --dry-run ships templates, universal sources, and bundled Claude-authoritative sources", async () => {
     // ~2-3s in isolation, but a real `npm pack` subprocess competing
     // with the rest of the suite's own spawn-heavy tests under full
     // parallel `npm test` load has been observed spiking well past
@@ -584,24 +598,22 @@ describe("ithy-opsx package shape smoke", () => {
     expect(entries.some((entry) =>
       entry.path === "ithyno/skills/ithy-opsx-test-probe/manifest.yaml"
     )).toBe(true);
+    expect(entries.some((entry) =>
+      entry.path === ".claude/commands/ithy-opsx/dispatch.md"
+    )).toBe(true);
+    expect(entries.some((entry) =>
+      entry.path === ".claude/skills/ithy-opsx-test-probe/SKILL.md"
+    )).toBe(true);
 
     for (const entry of ithyOpsxEntries) {
       if (
         !entry.path.startsWith("templates/.claude/") &&
-        !entry.path.startsWith("ithyno/skills/")
+        !entry.path.startsWith("ithyno/skills/") &&
+        !entry.path.startsWith(".claude/commands/ithy-opsx/") &&
+        !entry.path.startsWith(".claude/skills/ithy-opsx-")
       ) {
         throw new Error(
-          `package shape regression: '${entry.path}' is neither a generated template nor a universal ithyno skill source.`,
-        );
-      }
-      if (/^\.claude\/commands\/ithy-opsx/.test(entry.path)) {
-        throw new Error(
-          `package shape regression: bare '.claude/commands/ithy-opsx' entry '${entry.path}' — should ship only under templates/. See distribute-ithy-opsx-via-init-templates.`,
-        );
-      }
-      if (/^\.claude\/skills\/ithy-opsx-/.test(entry.path)) {
-        throw new Error(
-          `package shape regression: bare '.claude/skills/ithy-opsx-' entry '${entry.path}' — should ship only under templates/. See distribute-ithy-opsx-via-init-templates.`,
+          `package shape regression: '${entry.path}' is not an allowed template, universal source, or bundled Claude-authoritative source.`,
         );
       }
     }

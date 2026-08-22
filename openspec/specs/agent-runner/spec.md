@@ -465,14 +465,16 @@ created by the current launch.
 
 The ithyno dispatcher SHALL select a worker launch strategy from the canonical
 Manager CLI identity, canonical worker CLI identity, worker mode, agmsg
-availability, and native-delegation adapter availability. The strategy priority
-MUST be `agmsg`, then same-CLI native delegation, then registry-backed
-subprocess. CLI aliases that denote the same client, including `agy` and
-`antigravity`, MUST compare as one canonical identity.
+availability, native-delegation adapter availability, and whether the selected
+worker configuration can be represented by that adapter. The strategy priority
+MUST be `agmsg`, then compatible same-CLI native delegation, then
+registry-backed subprocess. CLI aliases that denote the same client, including
+`agy` and `antigravity`, MUST compare as one canonical identity.
 
 #### Scenario: Same CLI uses native delegation
 - **GIVEN** the Manager and selected worker resolve to the same canonical CLI
 - **AND** the Manager rendering provides a native child Agent/Tool adapter
+- **AND** the worker configuration can be represented by that adapter
 - **AND** the worker is not taking the live-shell/agmsg branch
 - **WHEN** the dispatcher starts a stage
 - **THEN** it invokes the native child Agent/Tool with the resolved role prompt
@@ -480,10 +482,20 @@ subprocess. CLI aliases that denote the same client, including `agy` and
 
 #### Scenario: Agy aliases use invoke_subagent
 - **GIVEN** the Manager and worker resolve to canonical CLI `agy`
-- **AND** the Agy 1.1.11 Manager runtime exposes `invoke_subagent`
+- **AND** the Agy Manager runtime exposes `invoke_subagent`
 - **AND** the worker is not taking the live-shell/agmsg branch
 - **WHEN** the dispatcher starts a stage
 - **THEN** it invokes the worker through `invoke_subagent`
+- **AND** it does not call AgentRunner for that same-CLI launch
+
+#### Scenario: Codex uses native collaboration tools
+- **GIVEN** the Manager and worker resolve to canonical CLI `codex`
+- **AND** the Codex Manager runtime exposes `spawn_agent` and `wait_agent`
+- **AND** the selected worker configuration requires no option unsupported by those tools
+- **AND** the worker is not taking the live-shell/agmsg branch
+- **WHEN** the dispatcher starts a stage
+- **THEN** it invokes the worker through `spawn_agent`
+- **AND** it waits for that worker through `wait_agent` before stage judgment
 - **AND** it does not call AgentRunner for that same-CLI launch
 
 #### Scenario: Cross-CLI worker uses subprocess
@@ -499,6 +511,19 @@ subprocess. CLI aliases that denote the same client, including `agy` and
 - **WHEN** the dispatcher starts a stage
 - **THEN** it uses the registry-backed subprocess path
 - **AND** it does not invent or assume an unsupported native tool
+
+#### Scenario: Native adapter preserves configured model intent
+- **GIVEN** a Codex Manager selects a Codex worker with an explicit model override
+- **WHEN** the dispatcher starts the worker
+- **THEN** it translates `-m` or `--model` into the native child model field
+- **AND** it uses the Codex native delegation path
+- **AND** the child runs with the configured model
+
+#### Scenario: Native adapter cannot preserve worker environment
+- **GIVEN** a Codex Manager selects a Codex worker with a worker-specific environment
+- **WHEN** the dispatcher starts the worker
+- **THEN** it uses the registry-backed subprocess path
+- **AND** it preserves the configured environment
 
 #### Scenario: Agmsg retains priority
 - **GIVEN** a worker eligible for the configured live-shell/agmsg branch
@@ -530,6 +555,13 @@ the existing code, review, verify, phase, retry, or commit ownership contracts.
 - **WHEN** the dispatcher resolves worktree or main-tree execution
 - **THEN** the child receives the exact absolute target root
 - **AND** the child is instructed not to modify files outside that root
+
+#### Scenario: Codex native child is restricted to the target root
+- **GIVEN** a Codex Manager launches a same-CLI child with `spawn_agent`
+- **WHEN** the dispatcher resolves worktree or main-tree execution
+- **THEN** the child receives the exact absolute target root
+- **AND** the child is instructed not to modify files outside that root
+- **AND** the Manager waits for the child before inspecting stage artifacts
 
 ### Requirement: Registry Owns Cross-CLI Prompt Arguments
 
@@ -630,11 +662,11 @@ through the universal-source renderer pipeline. Renderers MAY translate command
 syntax and native Agent/Tool instructions, but generated copies MUST preserve
 the launch priority and worker contracts defined by this capability.
 
-#### Scenario: Codex rendering uses registry-backed subprocess fallback
+#### Scenario: Codex rendering uses native collaboration
 - **GIVEN** the canonical dispatch source describes launch strategy selection
-- **WHEN** the Codex rendering evaluates a same-CLI Codex worker
-- **THEN** it falls back to the server Agent runner subprocess path
-- **AND** it does not invent an unsupported native sub-agent tool
+- **WHEN** the Codex rendering evaluates a compatible same-CLI Codex worker
+- **THEN** it directs the Manager to use `spawn_agent` and `wait_agent`
+- **AND** it preserves the AgentRunner fallback for process-only worker configuration or unavailable native tools
 
 #### Scenario: Codex catalog resolves single-change dispatch exactly
 - **GIVEN** ithyno dispatch is installed for Codex

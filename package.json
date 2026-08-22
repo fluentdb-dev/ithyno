@@ -16,6 +16,8 @@
   },
   "files": [
     "bin",
+    ".claude/commands/ithy-opsx",
+    ".claude/skills/ithy-opsx-*/SKILL.md",
     "ithyno/skills",
     "server",
     "templates",
