@@ -3,6 +3,29 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1-alpha.2] - 2026-08-22
+
+### Added
+
+- Added native same-CLI Codex worker delegation through Codex collaboration
+  tools, including configured model forwarding and completion waiting.
+
+### Changed
+
+- Codex and Antigravity compatibility files are now generated from the
+  packaged Claude-authoritative Skill sources instead of project-local output.
+- Updated the README project overview, onboarding links, roadmap status, and
+  Manager-to-Worker compatibility matrix.
+
+### Fixed
+
+- Preserved AgentRunner fallback for cross-CLI and process-only worker
+  configurations while preferring native Codex delegation when compatible.
+- Prevented stale project-local Claude commands from overwriting freshly
+  rendered Codex prompts during Skill installation.
+- Included the canonical dispatch sources in npm, Electron, and VS Code
+  extension packaging inputs.
+
 ## [0.8.1-alpha.1] - 2026-08-14
 
 ### Fixed
