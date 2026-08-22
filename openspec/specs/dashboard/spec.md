@@ -1713,6 +1713,8 @@ evaluated by the persistent Manager (a `claude` live-shell session
 declared in `agents.yaml` with `roles: [manager]`) when the Kanban
 Start button injects the string into the terminal PTY.
 
+> ⚠️ **PENDING MODIFIED** by [split-agent-timeout-semantics](../../changes/split-agent-timeout-semantics/): replace fixed per-stage ceilings with separate startup, first-activity, idle, hard-runtime, native, and artifact-grace timeout semantics.
+
 The skill SHALL:
 
 1. Read `agents.yaml` top-level `parallelExecution: boolean` (default
