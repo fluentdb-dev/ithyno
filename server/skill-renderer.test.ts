@@ -1311,6 +1311,16 @@ describe("copyClaudeIthyOpsxCommandsToAgent — unit", () => {
     expect(result.skipped).toEqual([]);
   });
 
+  it("ignores non-file entries even when their names end in .md", async () => {
+    const sourceDir = join(canonicalRoot, ".claude", "commands", "ithy-opsx");
+    mkdirSync(join(sourceDir, "nested.md"), { recursive: true });
+
+    const result = await copy();
+
+    expect(result).toEqual({ copied: [], skipped: [] });
+    expect(existsSync(join(projectRoot, ".agent/workflows/ithy-opsx-nested.md"))).toBe(false);
+  });
+
   it("dry-run reports the plan without touching disk", async () => {
     seedClaude("dispatch.md");
     const result = await copy({ dryRun: true });

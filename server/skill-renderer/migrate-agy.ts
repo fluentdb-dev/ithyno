@@ -18,9 +18,9 @@
  * Idempotent: a second invocation finds nothing and returns empty `moved`
  * and `skipped` arrays. Non-`.md` files are left untouched.
  */
-import { access, mkdir, readFile, readdir, rename, rmdir, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readdir, rename, rmdir, writeFile } from "node:fs/promises";
 import { constants as fsConstants, type Dirent } from "node:fs";
-import { join, posix } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 
 export interface MigrationResult {
@@ -49,6 +49,34 @@ async function isEmptyDir(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+const SAFE_COMMAND_BASENAME = /^[a-z0-9][a-z0-9._-]*\.md$/i;
+
+/** Resolve a fixed project subpath without allowing any segment to escape. */
+function resolveProjectPath(projectRoot: string, ...segments: string[]): string {
+  if (!isAbsolute(projectRoot)) {
+    throw new Error("projectRoot must be absolute");
+  }
+  const root = resolve(projectRoot);
+  const candidate = resolve(root, ...segments);
+  const rel = relative(root, candidate);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error("resolved path escapes projectRoot");
+  }
+  return candidate;
+}
+
+/** Resolve one allowlisted file directly below a known directory. */
+function resolveWorkflowFile(workflowsDir: string, basename: string): string {
+  if (!SAFE_COMMAND_BASENAME.test(basename)) {
+    throw new Error(`unsafe workflow basename: ${basename}`);
+  }
+  const candidate = resolve(workflowsDir, basename);
+  if (dirname(candidate) !== resolve(workflowsDir)) {
+    throw new Error(`workflow path escapes target directory: ${basename}`);
+  }
+  return candidate;
 }
 
 /** Convert Claude command metadata and references to Agy's flat workflow
@@ -229,19 +257,21 @@ export async function copyClaudeIthyOpsxCommandsToAgent(
   opts: { dryRun?: boolean } = {},
 ): Promise<CopyResult> {
   const sourceDir = join(canonicalRoot, ".claude", "commands", "ithy-opsx");
-  const targetDir = join(projectRoot, ".agent", "workflows");
+  const targetDir = resolveProjectPath(projectRoot, ".agent", "workflows");
   const result: CopyResult = { copied: [], skipped: [] };
 
   if (!(await pathExists(sourceDir))) return result;
 
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = await readdir(sourceDir);
+    entries = await readdir(sourceDir, { withFileTypes: true });
   } catch {
     return result;
   }
 
-  const mdFiles = entries.filter((e) => e.endsWith(".md"));
+  const mdFiles = entries
+    .filter((entry) => entry.isFile() && SAFE_COMMAND_BASENAME.test(entry.name))
+    .map((entry) => entry.name);
 
   if (mdFiles.length > 0 && !opts.dryRun) {
     await mkdir(targetDir, { recursive: true });
@@ -249,7 +279,7 @@ export async function copyClaudeIthyOpsxCommandsToAgent(
 
   for (const basename of mdFiles) {
     const from = join(sourceDir, basename);
-    const to = join(targetDir, `ithy-opsx-${basename}`);
+    const to = resolveWorkflowFile(targetDir, `ithy-opsx-${basename}`);
     // posix.join — see the identical comment in
     // migrateLegacyAntigravityDir above.
     const relFrom = posix.join(".claude", "commands", "ithy-opsx", basename);
@@ -259,9 +289,14 @@ export async function copyClaudeIthyOpsxCommandsToAgent(
       const rendered = claudeCommandToAgyWorkflow(raw);
       let existing: string | null = null;
       try {
+        const targetStat = await lstat(to);
+        if (!targetStat.isFile() || targetStat.isSymbolicLink()) {
+          result.skipped.push({ path: relFrom, reason: "target is not a regular file" });
+          continue;
+        }
         existing = await readFile(to, "utf-8");
-      } catch {
-        // Missing output is created below.
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       }
       if (!opts.dryRun && existing !== rendered) {
         await writeFile(to, rendered, "utf-8");
