@@ -1,5 +1,7 @@
 # ithyno
 
+![ithyno dashboard and Manager terminal running side by side in VS Code](./docs/images/ithyno-overview.png)
+
 > Markdown underneath, a progress dashboard on top.
 > AI agents read and write raw `.md`; humans work in a browser UI to keep spec-driven development (SDD) legible and clickable.
 
@@ -13,29 +15,23 @@
 
 ## What this repo is
 
-A **working MVP** covering roadmap phases 0–2 (with parts of 3 and 4).
+The source repository for the ithyno dashboard, server, VS Code extension,
+Electron app, agent workflows, and project documentation.
 
-- [`idea.md`](./idea.md) — the original brainstorm and rationale.
 - [`docs/architecture.md`](./docs/architecture.md) — architecture, tech choices, data model, and two-way sync design.
 - [`docs/roadmap.md`](./docs/roadmap.md) — phased implementation roadmap.
 
-### Onboarding an existing project
+### Getting started
 
-The fastest way to try ithyno on your own project:
+Use the [Installation guide](https://fluentdb-dev.github.io/ithyno-pages/installation/)
+for the current VS Code extension and Electron app setup. Continue with the
+[first-project walkthrough](https://fluentdb-dev.github.io/ithyno-pages/project-creation-flow/)
+after installation.
 
-```bash
-cd /path/to/your-project
-npx ithyno init .          # scaffolds CLAUDE.md, the openspec-flow skill,
-                            # agents.yaml.example, docs/ideas/, .gitignore
-npx ithyno                  # start the dashboard at http://localhost:4321
-```
+### Development setup
 
-`ithyno init` is idempotent — safe to re-run; existing files are skipped
-unless you pass `--force`. See [`docs/migration-guide.md`](./docs/migration-guide.md)
-for the full walkthrough (OpenSpec install + Claude Code hookup + first
-change).
-
-### Quick Start
+The following commands run this repository from source for development. They
+are not the end-user quick start.
 
 ```bash
 # Repo contains a git submodule (fujibee/agmsg for multi-agent workflows).
@@ -65,11 +61,11 @@ npm run typecheck
 
 The same dashboard ships through three entry points — pick whichever fits your editor setup.
 
-| Channel | Audience | How to launch |
-|---|---|---|
-| **CLI + browser** | Any editor (or none) | `node bin/ithyno.js` → opens your default browser |
-| **VS Code extension** | VS Code / Cursor | `npm --workspace=vscode-extension run package` → install the generated `.vsix` via "Install from VSIX" → command palette `ithyno: Show Dashboard` |
-| **Electron desktop app** | Vim / JetBrains / Sublime / editor-agnostic | Download the DMG / NSIS / AppImage and launch (see [`electron/README.md`](./electron/README.md) for dev setup) |
+| Channel                  | Audience                                    | How to launch                                                                                                                                     |
+| ------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CLI + browser**        | Any editor (or none)                        | `node bin/ithyno.js` → opens your default browser                                                                                                 |
+| **VS Code extension**    | VS Code / Cursor                            | `npm --workspace=vscode-extension run package` → install the generated `.vsix` via "Install from VSIX" → command palette `ithyno: Show Dashboard` |
+| **Electron desktop app** | Vim / JetBrains / Sublime / editor-agnostic | Download the DMG / NSIS / AppImage and launch (see [`electron/README.md`](./electron/README.md) for dev setup)                                    |
 
 All three channels wrap the same `bin/ithyno.js` (Fastify + Vite build). Electron's BrowserWindow just loads the localhost server URL; the VS Code webview panel loads the same URL in an iframe. No implementation branches. VS Code extension details: [`vscode-extension/README.md`](./vscode-extension/README.md).
 
@@ -112,47 +108,14 @@ npm --workspace=vscode-extension run package   # → vscode-extension/ithyno.vsi
 
 **Development loop** for the extension: open `vscode-extension/` as the VS Code workspace root and press **F5** to launch an Extension Development Host. Run `npm --workspace=vscode-extension run watch` in a background terminal so `tsc` recompiles on save. See [`vscode-extension/README.md`](./vscode-extension/README.md) for extension-side details (webview HTML, server spawner, terminal delegation).
 
-### Embedded terminal (right pane of ChangeDetail)
+### Manager terminal
 
-ChangeDetail embeds a **real shell** via xterm.js. The server spawns a PTY and bridges stdin / stdout to the browser terminal. Running `claude` or `/opsx:apply` inside the terminal edits `tasks.md`, and the **Kanban on the same screen follows the change live**.
-
-**Default shell (per OS):**
-
-| OS | Default |
-|---|---|
-| macOS / Linux | `$SHELL` (falls back to `/bin/bash`) |
-| Windows | `pwsh.exe` if on PATH, otherwise `powershell.exe` |
-
-Override with `ITHYNO_SHELL`. Example:
-
-```bash
-# Boot straight into Claude Code
-ITHYNO_SHELL=claude npm start
-```
-
-**Local-only.** Because the terminal bridges a real shell over WebSocket, the server binds to `127.0.0.1` and `/pty` upgrades are **accepted only from localhost** (non-local connections are dropped). Exposing this remotely is not supported by design.
-
-### Security model (CSRF protection)
-
-Binding to `127.0.0.1` alone does not stop a **malicious page in the user's browser** from firing `fetch("http://localhost:<port>/api/pty/inject", ...)` — the TCP endpoint is local, but the browser Origin is a hostile site. Three layered defenses:
-
-1. **Session token** — 32 hex bytes generated on server boot, embedded in the launch URL (`?token=…`). Every mutating endpoint requires a matching token.
-2. **Origin allow-list** — only `http://localhost:<port>` / `http://127.0.0.1:<port>` / `http://[::1]:<port>` / `vscode-webview://*`. The browser cannot forge Origin, so cross-site fetches return 403.
-3. **Content-Type check** — anything other than `application/json` is rejected, killing simple `<form>` CSRF.
-
-Each layer stands on its own; one breaking doesn't defeat the others. See `openspec/specs/csrf-protection/spec.md`.
-
-**Environments without a PTY backend.** If the native module (`@homebridge/node-pty-prebuilt-multiarch`) fails to load, the dashboard still boots, `/api/health` reports `terminal.available: false`, and the terminal pane is hidden. Graceful degradation, no crash.
-
-### Notes for Windows / WSL users
-
-If you use Claude Code on Windows, **run the ithyno server and Claude Code in the same environment**.
-
-- ✅ Both in WSL (recommended)
-- ✅ Both native Windows
-- ❌ One in WSL, one on the Windows side — chokidar's file watching is unreliable across the WSL↔Windows boundary; the Kanban stops tracking Claude's edits.
-
-The PTY uses Windows 10 1809+ **ConPTY**. `@homebridge/node-pty-prebuilt-multiarch` ships prebuilt binaries for common Node versions, so no compile step in most cases; if your Node has no prebuilt, Visual Studio Build Tools are required — or you can just leave the terminal disabled (the PTY-load failure path skips it automatically).
+ithyno can display a project-scoped Manager terminal beside the dashboard. It
+runs locally and lets you operate the configured agent CLI while monitoring
+Changes. See the [first-project guide](https://fluentdb-dev.github.io/ithyno-pages/project-creation-flow/)
+for normal use, the [troubleshooting guide](https://fluentdb-dev.github.io/ithyno-pages/user-manual/troubleshooting/)
+for environment-specific issues, and the [architecture document](./docs/architecture.md#11-manager-terminal-and-local-security)
+for PTY and security details.
 
 ### Dogfooding (developing ithyno with OpenSpec)
 
@@ -176,12 +139,21 @@ The following Manager → Worker combinations have been checked with ithyno's
 dispatcher.
 
 | Manager | Claude worker | Agy worker | Copilot worker | Codex worker | `dispatch-multi` |
-|---|---:|---:|---:|---:|---:|
-| Claude | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Codex | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Agy | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ------- | ------------: | ---------: | -------------: | -----------: | ---------------: |
+| Claude  |             ✅ |          ❌ |              ✅ |            ✅ |                ✅ |
+| Codex   |             ✅ |          ❌ |              ✅ |            ✅ |                ✅ |
+| Agy     |             ✅ |          ✅ |              ✅ |            ✅ |                ✅ |
 
 Legend: ✅ confirmed, ❌ currently not working.
+
+### TODO
+
+- [ ] Expand GitHub Copilot support.
+- [ ] Add a development environment-variable manager powered by dotenvx.
+- [ ] Add management for externally provided skills.
+- [ ] Add argument builders tailored to each agent harness.
+- [ ] Improve tmux configuration and operation through the GUI.
+- [ ] Verify communication between Claude Code sessions.
 
 ---
 
@@ -217,10 +189,14 @@ Full detail: [`docs/architecture.md`](./docs/architecture.md).
 
 ## Roadmap status
 
-- ✅ Phase 0: project scaffolding (CLI / Vite / Fastify)
-- ✅ Phase 1: read-only dashboard (parser, `GET /api/state`, Overview / Detail / Specs)
-- ✅ Phase 2: two-way sync (surgical edits, `expectedText` optimistic locking, chokidar + echo suppression, WebSocket push)
-- 🚧 Phase 3/4: SPA fallback and static serving are done; Kanban, "editing…" indicator, and npm publishing are underway or pending.
+- ✅ Phase 0–2: project foundation, OpenSpec dashboard, and bidirectional file synchronization
+- ✅ Phase 3: core dashboard and Change-management experience
+- 🚧 Phase 4: VS Code / Electron alpha distribution and cross-platform validation
+- 🚧 Phase 5: multi-agent routing and native subagent stabilization
+- 🚧 Phase 6: Manager session, endpoint, timeout, and recovery hardening
+
+See the [implementation roadmap](./docs/roadmap.md) for the detailed checklist
+and next candidates.
 
 ---
 
@@ -237,13 +213,13 @@ For individual files lifted out of those directories, the license attaches per-f
 
 ### What this means in practice
 
-| You want to… | The license you're operating under is… |
-|---|---|
-| Modify or redistribute the ithyno app itself | GPL-3.0-or-later (share modifications back under GPL) |
-| Adopt `templates/CLAUDE.md` / `templates/agents.yaml.example` verbatim in your own project | MIT (do whatever, no obligation flows back to your project) |
-| Adopt or fork `.claude/skills/openspec-flow/SKILL.md` in your own project | MIT (same as above) |
-| Bundle ithyno as a library into a closed-source product | GPL-3.0-or-later applies — likely not the license you want; consider dual-licensing negotiation |
-| Contribute a patch to ithyno itself | GPL-3.0-or-later (implicit under the inbound=outbound convention) |
+| You want to…                                                                               | The license you're operating under is…                                                          |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Modify or redistribute the ithyno app itself                                               | GPL-3.0-or-later (share modifications back under GPL)                                           |
+| Adopt `templates/CLAUDE.md` / `templates/agents.yaml.example` verbatim in your own project | MIT (do whatever, no obligation flows back to your project)                                     |
+| Adopt or fork `.claude/skills/openspec-flow/SKILL.md` in your own project                  | MIT (same as above)                                                                             |
+| Bundle ithyno as a library into a closed-source product                                    | GPL-3.0-or-later applies — likely not the license you want; consider dual-licensing negotiation |
+| Contribute a patch to ithyno itself                                                        | GPL-3.0-or-later (implicit under the inbound=outbound convention)                               |
 
 ### Dependency licenses
 
