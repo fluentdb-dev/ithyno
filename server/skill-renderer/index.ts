@@ -11,7 +11,7 @@
  * per the propose's rollout plan.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
 import { copyClaudeIthyOpsxCommandsToAgent, migrateLegacyAntigravityDir } from "./migrate-agy.js";
 import { copyClaudeIthyOpsxCommandsToCodex } from "./migrate-codex.js";
@@ -40,6 +40,8 @@ function utf8Bytes(s: string): number {
 
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {
   const result: InstallResult = { written: [], skipped: [], errors: [], migrations: [] };
+  const canonicalClaudeRoot = opts.canonicalClaudeRoot
+    ?? resolve(opts.sourcesDir, "..", "..");
 
   // Per-CLI legacy-path migrations run BEFORE the render loop so that
   // any files rescued from the wrong dir land at the correct target
@@ -65,7 +67,7 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
     // Runs BEFORE the render loop so a same-run renderer write at the
     // target correctly takes precedence via target-exists skip.
     try {
-      const copy = await copyClaudeIthyOpsxCommandsToAgent(opts.projectRoot, {
+      const copy = await copyClaudeIthyOpsxCommandsToAgent(canonicalClaudeRoot, opts.projectRoot, {
         dryRun: opts.dryRun,
       });
       result.migrations.push({ cli: "antigravity", kind: "copy", ...copy });
@@ -168,8 +170,14 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
   // portable pilot skill.
   if (opts.selectedClis.includes("codex")) {
     try {
-      const copy = await copyClaudeIthyOpsxCommandsToCodex(opts.projectRoot, {
+      const rendererOwnedPaths = new Set(
+        result.written
+          .filter((entry) => entry.cli === "codex")
+          .map((entry) => entry.path),
+      );
+      const copy = await copyClaudeIthyOpsxCommandsToCodex(canonicalClaudeRoot, opts.projectRoot, {
         dryRun: opts.dryRun,
+        rendererOwnedPaths,
       });
       result.migrations.push({ cli: "codex", kind: "copy", ...copy });
     } catch (err) {

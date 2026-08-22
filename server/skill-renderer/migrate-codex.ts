@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-/** Convert project-local Claude ithy-opsx commands to Codex flat prompts. */
+/** Convert ithyno's bundled Claude-authoritative commands to Codex prompts. */
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -85,16 +85,18 @@ export function translateSkillBody(raw: string): string {
 }
 
 /**
- * Copy the existing Claude command surface rather than maintaining another
- * body copy. This intentionally runs after universal-skill rendering: the
- * project command is the authoritative content for the equivalent Codex
- * prompt as well.
+ * Convert the bundled Claude command surface rather than maintaining another
+ * body copy. This intentionally runs after universal-skill rendering so the
+ * bundled Claude-authoritative command wins over a same-named portable pilot
+ * skill. `projectRoot` is output-only: stale generated files in the consumer
+ * project must never become renderer input.
  */
 export async function copyClaudeIthyOpsxCommandsToCodex(
+  canonicalRoot: string,
   projectRoot: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; rendererOwnedPaths?: ReadonlySet<string> } = {},
 ): Promise<CodexCommandCopyResult> {
-  const sourceDir = join(projectRoot, ".claude", "commands", "ithy-opsx");
+  const sourceDir = join(canonicalRoot, ".claude", "commands", "ithy-opsx");
   const targetDir = join(projectRoot, ".codex", "prompts");
   const result: CodexCommandCopyResult = { copied: [], skipped: [] };
   let entries: string[];
@@ -108,6 +110,10 @@ export async function copyClaudeIthyOpsxCommandsToCodex(
   for (const name of names) {
     const command = name.slice(0, -3);
     const rel = posix.join(".codex", "prompts", `ithy-opsx-${command}.md`);
+    if (opts.rendererOwnedPaths?.has(rel)) {
+      result.skipped.push({ path: rel, reason: "renderer output is authoritative" });
+      continue;
+    }
     try {
       const raw = await readFile(join(sourceDir, name), "utf8");
       if (!opts.dryRun) {
@@ -116,6 +122,10 @@ export async function copyClaudeIthyOpsxCommandsToCodex(
       result.copied.push(rel);
       if (CODEX_WORKER_SKILL_COMMANDS.has(command)) {
         const skillRel = posix.join(".codex", "skills", `ithy-opsx-${command}`, "SKILL.md");
+        if (opts.rendererOwnedPaths?.has(skillRel)) {
+          result.skipped.push({ path: skillRel, reason: "renderer output is authoritative" });
+          continue;
+        }
         try {
           if (!opts.dryRun) {
             const skillDir = join(projectRoot, ".codex", "skills", `ithy-opsx-${command}`);
@@ -142,7 +152,7 @@ export async function copyClaudeIthyOpsxCommandsToCodex(
   // Existing Claude skill directories remain canonical and are mirrored to
   // Codex. The review/verify command exceptions above receive only thin
   // catalog entrypoints; their full procedure bodies remain Prompt files.
-  const claudeSkills = join(projectRoot, ".claude", "skills");
+  const claudeSkills = join(canonicalRoot, ".claude", "skills");
   let skillEntries: string[];
   try {
     skillEntries = await readdir(claudeSkills);
@@ -153,6 +163,10 @@ export async function copyClaudeIthyOpsxCommandsToCodex(
     const source = join(claudeSkills, skill, "SKILL.md");
     const target = join(projectRoot, ".codex", "skills", skill, "SKILL.md");
     const rel = posix.join(".codex", "skills", skill, "SKILL.md");
+    if (opts.rendererOwnedPaths?.has(rel)) {
+      result.skipped.push({ path: rel, reason: "renderer output is authoritative" });
+      continue;
+    }
     try {
       const raw = await readFile(source, "utf8");
       if (!opts.dryRun) {

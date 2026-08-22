@@ -18,9 +18,9 @@
  * Idempotent: a second invocation finds nothing and returns empty `moved`
  * and `skipped` arrays. Non-`.md` files are left untouched.
  */
-import { access, mkdir, readFile, readdir, rename, rmdir, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readdir, rename, rmdir, writeFile } from "node:fs/promises";
 import { constants as fsConstants, type Dirent } from "node:fs";
-import { join, posix } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 
 export interface MigrationResult {
@@ -49,6 +49,34 @@ async function isEmptyDir(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+const SAFE_COMMAND_BASENAME = /^[a-z0-9][a-z0-9._-]*\.md$/i;
+
+/** Resolve a fixed project subpath without allowing any segment to escape. */
+function resolveProjectPath(projectRoot: string, ...segments: string[]): string {
+  if (!isAbsolute(projectRoot)) {
+    throw new Error("projectRoot must be absolute");
+  }
+  const root = resolve(projectRoot);
+  const candidate = resolve(root, ...segments);
+  const rel = relative(root, candidate);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error("resolved path escapes projectRoot");
+  }
+  return candidate;
+}
+
+/** Resolve one allowlisted file directly below a known directory. */
+function resolveWorkflowFile(workflowsDir: string, basename: string): string {
+  if (!SAFE_COMMAND_BASENAME.test(basename)) {
+    throw new Error(`unsafe workflow basename: ${basename}`);
+  }
+  const candidate = resolve(workflowsDir, basename);
+  if (dirname(candidate) !== resolve(workflowsDir)) {
+    throw new Error(`workflow path escapes target directory: ${basename}`);
+  }
+  return candidate;
 }
 
 /** Convert Claude command metadata and references to Agy's flat workflow
@@ -211,40 +239,39 @@ export async function migrateLegacyAntigravityDir(
 }
 
 /**
- * Convert `.claude/commands/ithy-opsx/*.md` into flat
+ * Convert ithyno's bundled `.claude/commands/ithy-opsx/*.md` into flat
  * `.agent/workflows/ithy-opsx-<command>.md` files.
  *
- * Complements `migrateLegacyAntigravityDir` for a different legacy shape:
- * pre-per-CLI-renderer scaffolds hand-authored (or blind-copied) their
- * ithy-opsx commands under `.claude/commands/ithy-opsx/`. agy doesn't
- * read `.claude/`, so those `/ithy-opsx:*` slash-commands are invisible
- * until they're mirrored into Agy's flat workflow directory.
+ * This preserves the Claude-authoritative command bodies while keeping the
+ * destination project output-only. A stale generated `.claude/` tree in the
+ * consumer project must never become renderer input.
  *
- * COPY (not MOVE) semantics — the source `.claude/commands/ithy-opsx/`
- * files are preserved unmodified so Claude users of the same project
- * remain unaffected. Skip-on-conflict guards the target: never
- * overwrite an existing `.agent/workflows/ithy-opsx-<basename>`
- * (which may be renderer output from the same install run).
- * Idempotent, dryRun-aware.
+ * COPY (not MOVE) semantics preserve the bundled source. Existing managed
+ * `.agent/workflows/ithy-opsx-<basename>` output is refreshed from that
+ * source; byte-identical output is left untouched. The universal renderer
+ * runs afterward and remains authoritative for commands it has ported.
  */
 export async function copyClaudeIthyOpsxCommandsToAgent(
+  canonicalRoot: string,
   projectRoot: string,
   opts: { dryRun?: boolean } = {},
 ): Promise<CopyResult> {
-  const sourceDir = join(projectRoot, ".claude", "commands", "ithy-opsx");
-  const targetDir = join(projectRoot, ".agent", "workflows");
+  const sourceDir = join(canonicalRoot, ".claude", "commands", "ithy-opsx");
+  const targetDir = resolveProjectPath(projectRoot, ".agent", "workflows");
   const result: CopyResult = { copied: [], skipped: [] };
 
   if (!(await pathExists(sourceDir))) return result;
 
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = await readdir(sourceDir);
+    entries = await readdir(sourceDir, { withFileTypes: true });
   } catch {
     return result;
   }
 
-  const mdFiles = entries.filter((e) => e.endsWith(".md"));
+  const mdFiles = entries
+    .filter((entry) => entry.isFile() && SAFE_COMMAND_BASENAME.test(entry.name))
+    .map((entry) => entry.name);
 
   if (mdFiles.length > 0 && !opts.dryRun) {
     await mkdir(targetDir, { recursive: true });
@@ -252,24 +279,28 @@ export async function copyClaudeIthyOpsxCommandsToAgent(
 
   for (const basename of mdFiles) {
     const from = join(sourceDir, basename);
-    const to = join(targetDir, `ithy-opsx-${basename}`);
+    const to = resolveWorkflowFile(targetDir, `ithy-opsx-${basename}`);
     // posix.join — see the identical comment in
     // migrateLegacyAntigravityDir above.
     const relFrom = posix.join(".claude", "commands", "ithy-opsx", basename);
 
-    if (await pathExists(to)) {
-      result.skipped.push({ path: relFrom, reason: "target exists" });
-      continue;
-    }
-
-    if (opts.dryRun) {
-      result.copied.push(relFrom);
-      continue;
-    }
-
     try {
       const raw = await readFile(from, "utf-8");
-      await writeFile(to, claudeCommandToAgyWorkflow(raw), "utf-8");
+      const rendered = claudeCommandToAgyWorkflow(raw);
+      let existing: string | null = null;
+      try {
+        const targetStat = await lstat(to);
+        if (!targetStat.isFile() || targetStat.isSymbolicLink()) {
+          result.skipped.push({ path: relFrom, reason: "target is not a regular file" });
+          continue;
+        }
+        existing = await readFile(to, "utf-8");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      if (!opts.dryRun && existing !== rendered) {
+        await writeFile(to, rendered, "utf-8");
+      }
       result.copied.push(relFrom);
     } catch (err) {
       result.skipped.push({

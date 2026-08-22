@@ -110,7 +110,8 @@ node /path/to/openspec-ui/bin/ithyno.js --dir . --port 4321
 > and revisiting will land on the session-expired banner because the token
 > query param is missing. Pin the full URL printed at startup — or just
 > re-open via the CLI / Electron / VS Code entry that regenerates it. This
-> is the tradeoff for the CSRF defense described in the root README.
+> is the tradeoff for the CSRF defense described in
+> [`docs/architecture.md`](./architecture.md#11-manager-terminal-and-local-security).
 
 The Electron and VS Code channels spawn the same `bin/ithyno.js` under
 the hood — the only difference is how the UI is presented (native window vs.

@@ -86,16 +86,16 @@ The repository SHALL expose a single root npm script `release:build` that produc
 
 - **GIVEN** the `verify-bundle.mjs` script is invoked from `release:build` (or directly via `npm run release:verify-bundle`)
 - **WHEN** the script runs `npm pack --pack-destination <tmpdir>` on the repo root, extracts the resulting `.tgz`, and walks the extracted `package/` tree
-- **THEN** every path containing `ithy-opsx` MUST live under `package/templates/.claude/…` or the canonical universal source `package/ithyno/skills/…`
-- **AND** no path MUST match `^package/\.claude/commands/ithy-opsx` or `^package/\.claude/skills/ithy-opsx-`
-- **AND** on either invariant violation the script exits non-zero with a message naming the offending path AND naming `distribute-ithy-opsx-via-init-templates` as the contract being violated
+- **THEN** every path containing `ithy-opsx` MUST live under `package/templates/.claude/…`, the canonical universal source `package/ithyno/skills/…`, the canonical command source `package/.claude/commands/ithy-opsx/…`, or an exact canonical Skill path `package/.claude/skills/ithy-opsx-<name>/SKILL.md`
+- **AND** other bare `.claude` files under an `ithy-opsx-*` Skill directory MUST be rejected
+- **AND** on an invariant violation the script exits non-zero with a message naming the offending path AND naming `enable-codex-native-subagent-dispatch` as the contract being violated
 
 #### Scenario: Bundle verification asserts Electron bundle shape for each produced OS bundle
 
 - **GIVEN** the `verify-bundle.mjs` script inspects `electron/dist/` for produced bundles
 - **WHEN** it finds a Mac bundle at `electron/dist/mac*/ithyno.app/Contents/Resources/app/` or a Windows unpacked bundle at `electron/dist/win-unpacked/resources/app/`
-- **THEN** for each such bundle it MUST assert every path containing `ithy-opsx` lives under `<app>/templates/.claude/…` or the canonical universal source `<app>/ithyno/skills/…`
-- **AND** MUST assert `<app>/.claude/commands/ithy-opsx/` and `<app>/.claude/skills/ithy-opsx-*/` do NOT exist
+- **THEN** for each such bundle it MUST assert every path containing `ithy-opsx` lives under `<app>/templates/.claude/…`, `<app>/ithyno/skills/…`, `<app>/.claude/commands/ithy-opsx/…`, or an exact `<app>/.claude/skills/ithy-opsx-<name>/SKILL.md` path
+- **AND** MUST reject unrelated files placed beside an approved canonical Claude Skill source
 - **AND** MUST skip (with a logged notice, not a failure) any OS bundle not present in `electron/dist/`, so the host-only `release:build` path (which produces only the host OS bundle) still verifies the bundle it did produce without failing on the absent bundles
 - **AND** Linux AppImage bundle contents SHALL be skipped in this change (documented in `design.md` D3 and reserved for a future extension)
 
@@ -117,9 +117,9 @@ The repository SHALL expose a single root npm script `release:build` that produc
 
 #### Scenario: Bundle verification failure surfaces a specific, actionable message
 
-- **GIVEN** a hypothetical regression that reintroduces `.claude/commands/ithy-opsx` to root `package.json` `files` OR to `electron/package.json` `extraResources`
+- **GIVEN** a hypothetical regression that adds an unapproved file such as `.claude/skills/ithy-opsx-dispatch/notes.md` to a release artifact
 - **WHEN** `release:build` runs and reaches the `verify-bundle` step
-- **THEN** the script exits non-zero with a message that (a) names the specific path that violated the invariant, (b) identifies the artifact (tarball, mac bundle, or win bundle), and (c) references `distribute-ithy-opsx-via-init-templates` as the contract being violated
+- **THEN** the script exits non-zero with a message that (a) names the specific path that violated the invariant, (b) identifies the artifact (tarball, mac bundle, or win bundle), and (c) references `enable-codex-native-subagent-dispatch` as the contract being violated
 - **AND** the release build stops before the artifact summary prints, ensuring no unverified bundle is announced as ready
 
 ### Requirement: Changelog and release documentation

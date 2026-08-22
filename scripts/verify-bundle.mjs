@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Verify that produced release artifacts ship `/ithy-opsx:*` definitions
-// only from the init templates or the universal skill source — never as bare
-// `.claude/commands/ithy-opsx/` or `.claude/skills/ithy-opsx-*/` entries.
+// only from the init templates, the universal skill source, or the narrowly
+// scoped Claude-authoritative inputs used to render other clients.
 //
 // Runs three checks in order:
 //   1. npm tarball shape (always) — `npm pack` on repoRoot, extract, walk.
@@ -18,8 +18,8 @@
 //
 // See openspec/changes/archive/…-add-bundle-verification-script/ (Phase B of
 // the 2026-07-26 comprehensive skill test plan) for context; and
-// `distribute-ithy-opsx-via-init-templates` for the contract this script
-// enforces.
+// `enable-codex-native-subagent-dispatch` for the current source-root
+// contract this script enforces.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -38,7 +38,7 @@ const repoRoot = resolve(here, "..");
 
 // Contract this script enforces. Referenced verbatim in every failure
 // message so a reader can grep the archived change in one step.
-const CONTRACT = "distribute-ithy-opsx-via-init-templates";
+const CONTRACT = "enable-codex-native-subagent-dispatch";
 
 function log(msg) {
   console.log(`[verify-bundle] ${msg}`);
@@ -76,44 +76,42 @@ function walkFiles(dir) {
 }
 
 /**
- * Apply the two invariants to a walked bundle: every ithy-opsx path must
- * live under `<prefix>templates/.claude/…` or the canonical universal source
- * `<prefix>ithyno/skills/…`, and no bare
- * `<prefix>.claude/commands/ithy-opsx` or `<prefix>.claude/skills/ithy-opsx-`
- * paths may exist.
+ * Assert that every ithy-opsx path lives under an approved source root:
+ * init templates, universal sources, canonical Claude command sources, or an
+ * exact canonical Claude Skill `SKILL.md`. Other bare `.claude` content stays
+ * forbidden.
  *
  * `paths` is the array of forward-slash relative paths. `prefix` is the
  * leading fragment (e.g., `"package/"` for the tarball, `""` for an already-
  * rooted bundle). `artifactLabel` is the human name of the artifact for the
  * error message.
  */
-function assertNoBareIthyOpsx(paths, prefix, artifactLabel) {
-  const bareCmdRe = new RegExp(
-    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.claude/commands/ithy-opsx`,
-  );
-  const bareSkillRe = new RegExp(
-    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.claude/skills/ithy-opsx-`,
-  );
+function assertApprovedIthyOpsxSources(paths, prefix, artifactLabel) {
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const templatesPrefix = `${prefix}templates/.claude/`;
   const universalSkillsPrefix = `${prefix}ithyno/skills/`;
+  const canonicalCommandsPrefix = `${prefix}.claude/commands/ithy-opsx/`;
+  const canonicalSkillRe = new RegExp(
+    `^${escapedPrefix}\\.claude/skills/ithy-opsx-[^/]+/SKILL\\.md$`,
+  );
 
   for (const p of paths) {
     if (p.includes("ithy-opsx")) {
-      if (!p.startsWith(templatesPrefix) && !p.startsWith(universalSkillsPrefix)) {
+      const approved =
+        p.startsWith(templatesPrefix) ||
+        p.startsWith(universalSkillsPrefix) ||
+        p.startsWith(canonicalCommandsPrefix) ||
+        canonicalSkillRe.test(p);
+      if (!approved) {
         throw new Error(
           `${artifactLabel}: ithy-opsx path lives outside approved source roots\n` +
             `  offending path: ${p}\n` +
-            `  expected prefix: ${templatesPrefix} or ${universalSkillsPrefix}\n` +
+            `  expected: ${templatesPrefix}, ${universalSkillsPrefix}, ` +
+            `${canonicalCommandsPrefix}, or ` +
+            `${prefix}.claude/skills/ithy-opsx-<name>/SKILL.md\n` +
             `  contract violated: ${CONTRACT}`,
         );
       }
-    }
-    if (bareCmdRe.test(p) || bareSkillRe.test(p)) {
-      throw new Error(
-        `${artifactLabel}: bare .claude/ ithy-opsx entry found\n` +
-          `  offending path: ${p}\n` +
-          `  contract violated: ${CONTRACT}`,
-      );
     }
   }
 }
@@ -164,7 +162,7 @@ function assertTarballShape() {
     }
 
     const paths = walkFiles(packageDir).map((p) => `package/${p}`);
-    assertNoBareIthyOpsx(paths, "package/", "npm tarball");
+    assertApprovedIthyOpsxSources(paths, "package/", "npm tarball");
     log(`  ✓ ${paths.length} files scanned in ${tgzName}`);
   } finally {
     try {
@@ -246,7 +244,7 @@ function assertElectronBundleShape(bundles) {
   }
   for (const b of bundles) {
     const paths = walkFiles(b.appDir);
-    assertNoBareIthyOpsx(paths, "", `electron bundle (${b.label})`);
+    assertApprovedIthyOpsxSources(paths, "", `electron bundle (${b.label})`);
     log(`  ✓ ${paths.length} files scanned in ${b.label}`);
   }
   log(

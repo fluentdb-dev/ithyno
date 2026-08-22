@@ -2,7 +2,7 @@
 // Pre-package: stage the ithyno monorepo assets (bin/, server/,
 // web/dist/, templates/, vendor/agmsg/, top-level package.json, and production node_modules)
 // into electron/host/ so electron-builder bundles them into extraResources.
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
@@ -17,12 +17,20 @@ console.log(`[electron prepack] staging ${repoRoot} → ${stageDir}`);
 rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
-for (const rel of ["bin", "server", "web/dist", "templates", "vendor/agmsg", "ithyno"]) {
+for (const rel of ["bin", "server", "web/dist", "templates", "vendor/agmsg", "ithyno", ".claude/commands/ithy-opsx"]) {
   const src = resolve(repoRoot, rel);
   if (!existsSync(src)) {
     throw new Error(`missing required dir: ${rel} (run "npm run build" at repo root first)`);
   }
   const dst = resolve(stageDir, rel);
+  mkdirSync(dirname(dst), { recursive: true });
+  cpSync(src, dst, { recursive: true });
+}
+
+const claudeSkillsRoot = resolve(repoRoot, ".claude", "skills");
+for (const name of readdirSync(claudeSkillsRoot).filter((entry) => entry.startsWith("ithy-opsx-"))) {
+  const src = resolve(claudeSkillsRoot, name);
+  const dst = resolve(stageDir, ".claude", "skills", name);
   mkdirSync(dirname(dst), { recursive: true });
   cpSync(src, dst, { recursive: true });
 }
