@@ -1,100 +1,186 @@
-# 実装ロードマップ
+# Implementation Roadmap
 
-ithyno を設計フェーズから実装へ移すための、フェーズ分割した計画。各フェーズは独立して動作確認できる単位に区切る。
-
----
-
-## フェーズ 0 — プロジェクト基盤
-
-ゴール: `npx openspec-ui` で空のサーバーが立ち、ブラウザが開く。
-
-- [ ] リポジトリ初期化（pnpm workspace: `server` / `web` / ルート `bin`）
-- [ ] TypeScript・ESLint・Prettier 設定
-- [ ] Fastify サーバー雛形（ヘルスチェック `GET /api/health`）
-- [ ] Vite + React + Tailwind の `web` 雛形
-- [ ] CLI（`commander`）: ポート解決・サーバー起動・ブラウザ起動（`open`）
-- [ ] 開発スクリプト（Vite dev + サーバー並走、プロキシ設定）
-
-**完了条件**: ローカルで起動し、空のダッシュボードが表示される。
+This is the implementation plan for ithyno. The current baseline version is
+`0.8.1-alpha.1`. Detailed specifications and progress for individual features
+are tracked in `openspec/changes/`; this document presents the overall product
+status by phase.
 
 ---
 
-## フェーズ 1 — 読み取り専用ダッシュボード（MVPの土台）
+## Phase 0 — Project Foundation
 
-ゴール: `openspec/` をパースして進捗を**閲覧**できる。
+Goal: Start the local server and display the dashboard in a browser.
 
-- [ ] ドメインモデル（`model.ts`）定義
-- [ ] パーサ: `tasks.md`（remark + position による行番号取得）
-- [ ] パーサ: `proposal.md` / `design.md` / delta `spec.md` / `specs/`
-- [ ] ワークスペーススキャナ（`changes/` 優先、`archive/` は遅延）
-- [ ] `GET /api/state` 実装
-- [ ] Overview画面（changeカード + 進捗バー + 全体サマリ）
-- [ ] Change詳細画面（Tasks/Proposal/Design/Delta タブ、閲覧のみ）
-- [ ] Specsブラウザ（Given-When-Then整形表示）
-- [ ] パース失敗時の生テキストフォールバック
+- [x] npm workspace project structure (server / web / Electron / VS Code Extension)
+- [x] TypeScript and ESLint configuration
+- [x] Fastify server and health check
+- [x] Vite + React web client
+- [x] CLI port resolution, server startup, and browser launch
+- [x] Development scripts for the Vite development server and API server
 
-**完了条件**: 実在するOpenSpecプロジェクトを開き、進捗が正しく可視化される。
+**Completion criteria**: The application starts locally and displays the dashboard. — **Complete**
 
 ---
 
-## フェーズ 2 — 双方向同期（プロジェクトの核心）
+## Phase 1 — Read-only Dashboard
 
-ゴール: UIのチェックボックスでファイルが書き換わり、外部編集がUIに反映される。
+Goal: Parse `openspec/` and display specifications and progress.
 
-- [ ] `surgicalEdit.ts`: 状態1文字のみ置換する厳格な正規表現（`/^(\s*[-*]\s*\[)[ xX](\]\s+)/`）
-- [ ] `surgicalEdit.ts` 単体テスト（マルチラインタスク／タブインデント／`*` マーカー／大文字 `X` を網羅）
-- [ ] 楽観的ロック（baseHash 照合）＋ `expectedText` フォールバック（行ズレ自動補正、真の競合のみ 409）
-- [ ] `POST /api/tasks/toggle` 実装（`baseHash` + `expectedText` ペイロード）
-- [ ] chokidar watcher（`awaitWriteFinish` 有効化）
-- [ ] エコー抑制（書き込み後ハッシュ記録 → 自己発火無視）
-- [ ] 外部編集の差分パース → WebSocket push
-- [ ] クライアント: Zustand ストア + WSハンドラ（state-replaced / change-updated）
-- [ ] UI: 楽観的更新 + 409時の局所再確認（インライン「もう一度チェック」）、外部更新の点滅表示
+- [x] Domain model
+- [x] `tasks.md` parser and task-progress calculation
+- [x] Parsing for proposals, designs, delta specs, and current specs
+- [x] Workspace scanning for active changes and archives
+- [x] Workspace state API
+- [x] Overview page with change cards, progress bars, and overall summary
+- [x] Change details with Tasks / Proposal / Design / Specs views
+- [x] Specs browser
+- [x] Archive, Tags, and Docs views
+- [x] Fallback display for parse failures
 
-**完了条件**: UI操作 → Markdownに最小diff。AIがファイルを編集 → UIが即追従。同時編集で競合が安全に処理される。
-
----
-
-## フェーズ 3 — カンバン & 体験向上
-
-ゴール: 視覚的な進捗管理体験を仕上げる。
-
-- [ ] Tasksカンバン（Todo/Done 2列、`@dnd-kit`、ドロップ=toggle）
-- [ ] セクション折りたたみ・フィルタ（未完のみ表示 等）
-- [ ] 「AIが編集中（Writing…）」軽量WSイベント + バッジ表示（architecture 6.5）
-- [ ] Archive一覧（遅延ロード）
-- [ ] キーボード操作・アクセシビリティ
-- [ ] ダーク/ライトテーマ
-
-**完了条件**: 日常の進捗管理がUIだけで快適に回る。
+**Completion criteria**: Open an OpenSpec project and accurately visualize its specifications and progress. — **Complete**
 
 ---
 
-## フェーズ 4 — 配布と仕上げ
+## Phase 2 — Bidirectional Synchronization
 
-ゴール: 誰でも `npx openspec-ui` で使える。
+Goal: Update Markdown from UI actions and reflect external edits in the UI.
 
-- [ ] サーバーが `web` のビルド成果物を静的配信（単一プロセス起動）
-- [ ] SPAフォールバック: `/api/*` 以外の GET を `index.html` に返す（`/change/:id` 直アクセス・リロードで404を出さない）
-- [ ] npm パッケージ化（`bin` 登録・`files` 絞り込み）
-- [ ] README の使い方更新・スクリーンショット
-- [ ] エラーハンドリング（`openspec/` 不在時の案内など）
-- [ ] ライセンス決定
+- [x] Surgical editing that replaces only the checkbox state
+- [x] Unit tests protecting multiline tasks, indentation, and list markers
+- [x] Optimistic locking with `baseHash` and `expectedText`
+- [x] Task-update API
+- [x] chokidar watcher with `awaitWriteFinish`
+- [x] Echo suppression for server-originated writes
+- [x] Incremental parsing and WebSocket notification for external edits
+- [x] Client state and WebSocket event synchronization
+- [x] Conflict handling that does not overwrite unrelated Markdown
 
-**完了条件**: 公開可能な npm パッケージとして動作する。
-
----
-
-## 将来検討（v1スコープ外）
-
-- Git連携: change/タスクごとに最終コミット・担当者を表示。
-- 仕様本文（requirement/scenario）の編集。
-- VS Code / Cursor 拡張版（同じサーバーロジックを WebView から利用）。
-- マルチリポジトリ / リモート閲覧。
+**Completion criteria**: UI actions produce minimal Markdown diffs, and the UI follows external edits made by AI agents or other tools. — **Complete**
 
 ---
 
-## マイルストーン判断
+## Phase 3 — Dashboard UX
 
-最小で価値が出るのは **フェーズ2完了時点**（双方向同期が動く＝idea.mdのコア体験）。
-まずは フェーズ0→1→2 を最優先で通し、3・4は利用しながら調整する。
+Goal: Handle everyday Change management from the dashboard.
+
+- [x] Kanban, lane, and list views
+- [x] Change search and filtering
+- [x] Change creation, dispatch, archive, merge, and discard actions
+- [x] Diff viewer
+- [x] Archive list
+- [x] External-edit and agent-execution status
+- [x] Dark and light themes
+- [ ] Comprehensive keyboard-navigation and accessibility review
+- [ ] Additional validation of dialogs across window focus loss and recovery
+
+**Completion criteria**: Core operations are implemented. Accessibility and window-state transitions remain under validation. — **Partially ongoing**
+
+---
+
+## Phase 4 — Distribution Clients
+
+Goal: Use ithyno through either the VS Code Extension or Electron App,
+depending on the user's environment.
+
+- [x] Static serving of web build artifacts from the server
+- [x] SPA fallback
+- [x] VS Code Extension
+- [x] Electron App
+- [x] Project initialization UI and prerequisite detection
+- [x] Build configuration for macOS, Windows, and Linux artifacts
+- [x] GitHub Releases workflow
+- [x] GitHub Pages documentation for installation, onboarding, and troubleshooting
+- [ ] Continuous installation testing with release artifacts on each operating system
+- [ ] Decide whether npm should become a supported end-user distribution channel
+
+**Completion criteria**: Alpha artifacts can be produced. Validation on each operating system continues. — **Alpha available**
+
+---
+
+## Phase 5 — Multi-agent Execution
+
+Goal: Allow a Manager to delegate an OpenSpec Change safely to role-specific
+Workers.
+
+- [x] Manager / code / review / verify configuration in `agents.yaml`
+- [x] Manager terminal and single-prompt Worker execution
+- [x] Change isolation through Git worktrees
+- [x] Ordered code → review → verify execution and artifact contracts
+- [x] Cross-CLI Worker execution through AgentRunner
+- [x] Concurrent execution of different Changes in the same phase
+- [x] CLI-specific Skill / Command / Workflow rendering from Claude-authoritative sources
+- [x] OpenSpec and ithyno Skill management from Settings
+- [ ] Final validation of native Codex subagent delegation and model selection
+- [ ] Finalize the Agy `invoke_subagent` route and unsupported Manager → Agy routes
+- [ ] Continuous regression tests for the Manager / Worker compatibility matrix
+
+**Completion criteria**: Every route documented in the README is reproducible, and unsupported routes are rejected clearly before execution. — **Stabilizing**
+
+---
+
+## Phase 6 — Session and Execution Reliability
+
+Goal: Preserve Manager and Worker state across reloads, project switches, and
+long-running operations.
+
+- [x] Manager PTY recreation when switching projects
+- [x] Dashboard session port and token propagation
+- [x] ithyno environment propagation when starting tmux
+- [x] Worker completion waiting and artifact evaluation
+- [x] Worktree-aware review and verify artifacts
+- [ ] Continue validating credential boundaries between same-session recovery and new sessions
+- [ ] Complete the separation of startup/no-response timeouts from Worker execution timeouts
+- [ ] Improve UI diagnostics for cancellation, abnormal termination, and transport failures
+
+**Completion criteria**: The system never uses a stale port or token, and the UI and logs distinguish running, timed-out, and failed states. — **Stabilizing**
+
+---
+
+## Next Candidates
+
+- [ ] Expand GitHub Copilot support
+- [ ] Add a development environment-variable manager powered by dotenvx
+- [ ] Discover, install, update, and remove external Skills
+- [ ] Add argument builders for individual agent harnesses
+- [ ] Improve tmux configuration and operation through the GUI
+- [ ] Verify and document communication between Claude Code sessions
+- [ ] Assist with model, approval, and sandbox configuration for each agent CLI
+- [ ] Add a test mechanism for Skill and agent-environment compatibility
+
+---
+
+## Future Considerations (After 1.0)
+
+> **AI-drafted ideas:** This section was generated by AI from the current
+> design and lessons learned during development. It does not represent accepted
+> specifications or release commitments. Every item requires human review of
+> its need, priority, and safety, followed by an OpenSpec proposal before
+> implementation.
+
+- Multi-repository dashboards and remote viewing.
+- Multi-user collaboration with stronger concurrent-edit coordination.
+- Editing requirement and scenario bodies.
+- Visibility into agent execution history, models, cost, and duration.
+- Extension points for external workflow providers and agent harnesses.
+- Snapshots of the CLI, model, Skills, and configuration used for an execution,
+  improving reproducibility and auditing at the Change level.
+- Optional remote Workers and self-hosted runners while preserving local
+  execution as the default.
+- Shareable workflow templates with verified source, signature, and version
+  metadata.
+
+---
+
+## 1.0 Decision Criteria
+
+For 1.0, stability takes priority over the number of new features.
+
+- The compatibility contracts for `agents.yaml`, Skills, artifacts, and
+  Manager → Worker routing are stable.
+- The documented initialization and multi-agent workflows can be reproduced in
+  end-to-end tests.
+- Installation and core operations are validated with macOS, Windows, and Linux
+  artifacts.
+- Migration instructions exist for configuration and generated files.
+- Unsupported CLI routes and missing prerequisites are explained before
+  execution.

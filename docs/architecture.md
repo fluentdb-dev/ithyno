@@ -1,47 +1,55 @@
-# アーキテクチャ設計
+# Architecture Design
 
-ithyno の技術設計。**ローカルブラウザダッシュボード** 形態・**OpenSpec準拠** を前提とする。
-
----
-
-## 1. ゴールと非ゴール
-
-### ゴール
-- OpenSpecの `openspec/` ディレクトリを唯一の真実とし、進捗を**可視化**する。
-- `tasks.md` のチェックボックスをUIから**双方向に編集**できる（UI↔ファイル）。
-- AIエージェントによる外部編集を**即座にUIへ反映**する。
-- Markdownを汚さない（独自HTMLコメントや方言を埋め込まない）。
-
-### 非ゴール（v1では扱わない）
-- 複数リポジトリ / リモート同期 / マルチユーザー同時編集の厳密な排他制御。
-- OpenSpecそのもののCLI機能（`openspec change` 等）の置き換え。
-- 仕様本文（requirement / scenario）のリッチなWYSIWYG編集。v1は**閲覧**のみ、編集はチェックボックスに限定。
+Technical design for ithyno, based on a **local browser dashboard** and
+**OpenSpec compatibility**.
 
 ---
 
-## 2. 対象とするOpenSpecの構造
+## 1. Goals and Non-goals
+
+### Goals
+
+- Treat the OpenSpec `openspec/` directory as the single source of truth and
+  **visualize** progress.
+- Support **bidirectional editing** of checkboxes in `tasks.md` from the UI
+  (UI ↔ file).
+- Reflect external edits made by AI agents in the UI **immediately**.
+- Keep Markdown clean by avoiding custom HTML comments or proprietary syntax.
+
+### Non-goals (not covered in v1)
+
+- Strict exclusion control for multiple repositories, remote synchronization,
+  or concurrent multi-user editing.
+- Replacing OpenSpec's own CLI functionality, such as `openspec change`.
+- Rich WYSIWYG editing of requirement or scenario text. In v1, specifications
+  are **read-only**, and editing is limited to checkboxes.
+
+---
+
+## 2. Target OpenSpec Structure
 
 ```
 openspec/
 ├── specs/
 │   └── [domain]/
-│       └── spec.md              # 現行仕様（source of truth）
+│       └── spec.md              # Current specification (source of truth)
 └── changes/
     ├── [change-name]/
-    │   ├── proposal.md          # なぜ・何を変えるか (## Intent / ## Scope / ## Approach)
-    │   ├── design.md            # 技術アプローチ
-    │   ├── tasks.md             # 実装チェックリスト（進捗の本体）
-    │   ├── .openspec.yaml       # メタデータ
+    │   ├── proposal.md          # Why and what to change (## Intent / ## Scope / ## Approach)
+    │   ├── design.md            # Technical approach
+    │   ├── tasks.md             # Implementation checklist (source of progress)
+    │   ├── .openspec.yaml       # Metadata
     │   └── specs/
     │       └── [domain]/
-    │           └── spec.md      # デルタ仕様（## ADDED/MODIFIED/REMOVED）
+    │           └── spec.md      # Delta specification (## ADDED/MODIFIED/REMOVED)
     └── archive/
-        └── [YYYY-MM-DD-change-name]/   # 完了済み
+        └── [YYYY-MM-DD-change-name]/   # Completed changes
 ```
 
-### パース対象フォーマット
+### Parsed formats
 
-**tasks.md（進捗の中核）**
+**tasks.md (the core progress document)**
+
 ```markdown
 # Tasks
 
@@ -52,10 +60,13 @@ openspec/
 ## 2. UI Components
 - [ ] 2.1 Create ThemeToggle component
 ```
-- `## N. <section>` で論理グルーピング。
-- `- [ ] N.M <text>` / `- [x] N.M <text>` が個々のタスク。階層番号（1, 1.1, 1.2）。
+
+- `## N. <section>` defines a logical group.
+- `- [ ] N.M <text>` and `- [x] N.M <text>` define individual tasks with
+  hierarchical numbering such as 1, 1.1, and 1.2.
 
 **spec.md / delta spec**
+
 ```markdown
 ## Purpose
 ...
@@ -66,62 +77,72 @@ The system SHALL ...
 - WHEN ...
 - THEN ...
 ```
-delta は `## ADDED Requirements` / `## MODIFIED Requirements` / `## REMOVED Requirements`。
 
-**proposal.md** — `## Intent` / `## Scope` / `## Approach`。
+Delta specifications use `## ADDED Requirements`,
+`## MODIFIED Requirements`, and `## REMOVED Requirements`.
 
----
-
-## 3. システム構成
-
-3層構成。すべてローカルで完結する。
-
-| 層 | 役割 | 主な技術 |
-|----|------|----------|
-| **クライアント** | ダッシュボード描画・操作 | Vite + React + TypeScript |
-| **サーバー** | パース・サージカル編集・ファイル監視 | Node.js + Fastify + chokidar |
-| **ストア** | 真実のソース | `openspec/` 配下の `.md` ファイル |
-
-クライアントとサーバーは単一プロセス（Fastify が静的アセットも配信）でも、開発時は Vite dev server + プロキシでも動かせる構成にする。
-
-### データフロー
-
-1. **初期ロード** — サーバーが `openspec/` を再帰スキャン → ドメインモデルへパース → REST `GET /api/state` で返却。
-2. **UI→ファイル（toggle）** — チェックボックス操作 → `POST /api/tasks/toggle` → サーバーが該当 `tasks.md` の**該当行だけ**を書き換え → 書き込み。
-3. **ファイル→UI（外部編集）** — chokidar が変更検知 → 差分パース → WebSocket で全クライアントへ push。
+**proposal.md** uses `## Intent`, `## Scope`, and `## Approach`.
 
 ---
 
-## 4. 技術選定と根拠
+## 3. System Architecture
 
-| 領域 | 採用 | 理由 / 代替案 |
-|------|------|---------------|
-| フロント | **React + TypeScript + Vite** | 型安全・HMR・エコシステム。代替: Svelte（軽量だが採用者の慣れを優先）。 |
-| サーバー | **Node.js + Fastify** | フロントと言語統一、軽量・高速。代替: Express（枯れているが遅い）、Vite plugin単体（監視ロジックが複雑化するため不採用）。 |
-| MDパース | **unified / remark + remark-gfm** | GFMのタスクリストをASTで安全に扱える。位置情報（`position`）が取れるため行特定が正確。代替: 自前正規表現（脆い、不採用）。 |
-| ファイル監視 | **chokidar** | クロスプラットフォームで安定。`awaitWriteFinish` で書き込み途中の検知を防げる。 |
-| リアルタイム通信 | **WebSocket（`ws`）** | 双方向・低レイテンシ。代替: SSE（サーバー→クライアント片方向で十分なら可、但しシンプルさでWS採用）。 |
-| 状態管理(client) | **Zustand** | 軽量。WSイベントで丸ごと差し替えやすい。代替: Redux（過剰）。 |
-| UI | **Tailwind CSS + 最小限の自前コンポーネント** | 素早い。カンバンのD&Dは `@dnd-kit`。 |
-| CLI | **Node bin + `commander`** | `npx openspec-ui` で起動。 |
-| 配布 | **npm パッケージ** | `npx openspec-ui` で即実行。 |
+The system has three layers and runs entirely on the local machine.
+
+| Layer | Responsibility | Primary technology |
+|---|---|---|
+| **Client** | Dashboard rendering and interaction | Vite + React + TypeScript |
+| **Server** | Parsing, surgical editing, and file watching | Node.js + Fastify + chokidar |
+| **Store** | Source of truth | `.md` files under `openspec/` |
+
+The client and server can run in a single process, with Fastify serving the
+static assets. During development, they can instead run as a Vite development
+server with a proxy.
+
+### Data flow
+
+1. **Initial load** — The server recursively scans `openspec/`, parses it into
+   the domain model, and returns it from `GET /api/state`.
+2. **UI → file (toggle)** — A checkbox action calls
+   `POST /api/tasks/toggle`. The server rewrites **only the corresponding
+   line** in the relevant `tasks.md` file.
+3. **File → UI (external edit)** — chokidar detects the change, the server
+   parses the affected difference, and WebSocket pushes it to every client.
 
 ---
 
-## 5. ドメインモデル（サーバー内部表現）
+## 4. Technology Choices and Rationale
 
-パース結果は以下の正規化された読み取り専用モデルにする。**このモデルからMarkdownへ全文シリアライズし直すことはしない**（後述の同期方針のため）。
+| Area | Choice | Rationale / alternatives |
+|---|---|---|
+| Frontend | **React + TypeScript + Vite** | Type safety, HMR, and ecosystem. Alternative: Svelte, which is lighter but less familiar to the intended contributors. |
+| Server | **Node.js + Fastify** | A shared language with the frontend, with a lightweight and fast runtime. Alternatives: Express, which is mature but slower; or a Vite plugin alone, which would complicate file-watching logic. |
+| Markdown parsing | **unified / remark + remark-gfm** | Safely handles GFM task lists as an AST. Position data enables accurate line identification. A custom regular-expression parser would be brittle. |
+| File watching | **chokidar** | Stable and cross-platform. `awaitWriteFinish` prevents reading a file while it is still being written. |
+| Real-time communication | **WebSocket (`ws`)** | Bidirectional and low-latency. SSE would be sufficient for server-to-client communication, but WebSocket is selected for overall simplicity. |
+| Client state | **Zustand** | Lightweight and easy to replace wholesale in response to WebSocket events. Redux would be excessive. |
+| UI | **Tailwind CSS + minimal custom components** | Fast to develop. Kanban drag and drop uses `@dnd-kit`. |
+| CLI | **Node bin + `commander`** | Starts through `npx openspec-ui`. |
+| Distribution | **npm package** | Runs immediately through `npx openspec-ui`. |
+
+---
+
+## 5. Domain Model (Internal Server Representation)
+
+The parsed result uses the following normalized, read-only model. **The system
+does not serialize this model back into a complete Markdown document**, due to
+the synchronization strategy described later.
 
 ```ts
 type WorkspaceState = {
-  root: string;                 // openspec/ の絶対パス
-  specs: SpecDomain[];          // 現行仕様
-  changes: Change[];            // アクティブな変更
-  archive: ChangeSummary[];     // 完了済み（一覧のみ）
+  root: string;                 // Absolute path to openspec/
+  specs: SpecDomain[];          // Current specifications
+  changes: Change[];            // Active changes
+  archive: ChangeSummary[];     // Completed changes (summary only)
 };
 
 type Change = {
-  id: string;                   // ディレクトリ名 = change-name
+  id: string;                   // Directory name = change-name
   proposal: ProposalDoc | null; // Intent/Scope/Approach
   design: RawDoc | null;
   tasks: TaskList;
@@ -137,185 +158,257 @@ type TaskList = {
 type TaskSection = { title: string; tasks: Task[] };
 
 type Task = {
-  id: string;        // "1.2" など
+  id: string;        // For example, "1.2"
   text: string;
   checked: boolean;
-  line: number;      // tasks.md内の0始まり行番号（編集対象の特定に使う）
+  line: number;      // Zero-based line number in tasks.md, used to locate edits
   filePath: string;
 };
 ```
 
-`line` を保持することが双方向同期の鍵。UIからのtoggleは「ファイルパス + 行番号 + 期待状態」で送られ、サーバーはその行だけを編集する。
+Retaining `line` is the key to bidirectional synchronization. A toggle from the
+UI sends the file path, line number, and expected state, and the server edits
+only that line.
 
 ---
 
-## 6. 双方向同期の設計（プロジェクトの核心）
+## 6. Bidirectional Synchronization Design (Core of the Project)
 
-idea.md が挙げた最大のトレードオフ「同時編集の競合」と「Markdownの方言化」へ正面から答える部分。
+This section directly addresses the main trade-offs identified by the original
+design: concurrent editing conflicts and the risk of introducing a Markdown
+dialect.
 
-### 6.1 基本原則: フルシリアライズせず「サージカル編集」する
+### 6.1 Basic principle: use surgical edits instead of full serialization
 
-UIからの更新で `tasks.md` を**モデルから再生成して上書きしない**。理由:
-- 全文再生成は、AIが書いたコメント・空行・書式の揺れを破壊し、不要なdiffを生む。
-- 「Markdownの可読性を保つ」という設計目標に反する。
+An update from the UI must **not regenerate and overwrite** `tasks.md` from the
+model. Full regeneration would:
 
-代わりに、**該当行のチェックボックス1文字だけ**を置換する。
+- Destroy comments, blank lines, and formatting variations written by an AI,
+  producing unnecessary diffs.
+- Conflict with the design goal of keeping Markdown readable.
+
+Instead, replace **only the single checkbox state character** on the target
+line.
 
 ```
-編集前: - [ ] 1.2 Add CSS custom properties for colors
-編集後: - [x] 1.2 Add CSS custom properties for colors
-        ↑ この1箇所のみ変更。他のバイトは1文字も触らない。
+Before: - [ ] 1.2 Add CSS custom properties for colors
+After:  - [x] 1.2 Add CSS custom properties for colors
+          ↑ Only this character changes. Every other byte remains untouched.
 ```
 
-実装: 対象ファイルを読み込み、`line` 行目の `- [ ]` ⇄ `- [x]` を**厳格な正規表現**で1回だけ置換し、書き戻す。インデント・タスク番号・本文は不変。
+The implementation reads the target file, performs exactly one strict regular-
+expression replacement of `- [ ]` ⇄ `- [x]` on the `line` entry, and writes
+the file back. Indentation, task number, and task text remain unchanged.
 
-**正規表現は「マーカー部分だけ」をキャプチャする厳格な形にする**。行全体を再構築すると、複数行にまたがるタスク（インデントされた継続行）を壊す危険がある。
+**The regular expression must strictly capture only the marker portion.**
+Reconstructing the whole line risks damaging multiline tasks with indented
+continuation lines.
 
 ```markdown
 - [ ] 1.2 Add CSS custom properties for colors
-      (Note: Use OKLCH color space)        ← 継続行。絶対に触らない
+      (Note: Use OKLCH color space)        ← Continuation line; never modify it
 ```
 
-採用パターン（チェック状態の1文字のみ置換、本文は後方参照で温存）:
+Selected pattern, which replaces only the checkbox state and preserves the
+text through capture groups:
+
 ```
 /^(\s*[-*]\s*\[)[ xX](\]\s+)/
-→ 置換後の状態文字（' ' または 'x'）だけを差し込む
+→ Insert only the replacement state character (' ' or 'x')
 ```
-- 行頭の空白・リストマーカー（`-`/`*`）・`[` … `]` 後の空白を捕捉し、その間の1文字だけを書き換える。
-- 大文字 `X` も既存表記として許容して読み取る（書き込みは小文字 `x` に統一）。
-- 継続行・タスク本文・末尾コメントには一切触れない。
-- この厳格性は `surgicalEdit.ts` の**単体テスト必須ケース**として担保する（マルチラインタスク／タブインデント／`*` マーカー／大文字 `X` を網羅）。
 
-### 6.2 競合検知（楽観的ロック）
+- Capture leading whitespace, the list marker (`-` or `*`), `[`, and the
+  whitespace following `]`; rewrite only the character between the brackets.
+- Accept uppercase `X` when reading existing content, but normalize writes to
+  lowercase `x`.
+- Never touch continuation lines, task text, or trailing comments.
+- Enforce this strict behavior with required unit-test cases in
+  `surgicalEdit.ts`, covering multiline tasks, tab indentation, `*` markers,
+  and uppercase `X`.
 
-toggleリクエストに、UIが最後に観測したそのファイルの**ハッシュ（または mtime）**に加えて、**対象行の元テキスト（`expectedText`）**を含める。
+### 6.2 Conflict detection (optimistic locking)
+
+In addition to the **hash (or mtime)** last observed by the UI for the file, a
+toggle request includes the **original target-line text (`expectedText`)**.
 
 ```
 POST /api/tasks/toggle
 { filePath, line, expectedChecked: true, baseHash: "sha1:...", expectedText: "- [ ] 1.2 Add CSS custom properties for colors" }
 ```
 
-サーバーは書き込み直前にファイルを再読込し、**2段階で判定**する:
+Immediately before writing, the server rereads the file and makes a two-stage
+decision:
 
-1. **ハッシュ一致** → そのままサージカル編集を実行（高速パス）。
-2. **ハッシュ不一致**（＝間に外部編集があった） → ただちに弾かず、**行ズレ吸収のフォールバック**を試みる:
-   - `line` 行目が `expectedText` と完全一致 → その行をそのまま編集（行番号は同じ、内容も無傷）。
-   - 一致しなければ、ファイル全体から `expectedText` に**完全一致する行を1つだけ**探す → 見つかればその行を編集（**行ズレを自動補正**）。
-   - 一致行が0個、または2個以上（曖昧）の場合のみ → **書き込まず 409 Conflict** を返し、最新stateを同梱。
+1. **Hash matches** → Perform the surgical edit directly (fast path).
+2. **Hash does not match**, meaning an external edit occurred in the meantime
+   → Do not reject immediately. Attempt a fallback that absorbs line shifts:
+   - If the line at `line` exactly matches `expectedText`, edit it directly.
+   - Otherwise, search the entire file for exactly one line that matches
+     `expectedText`. If found, edit that line and **automatically correct the
+     line shift**.
+   - Only when there are zero matches or more than one ambiguous match, do not
+     write. Return **409 Conflict** with the latest state.
 
-この設計の意図: AIがドキュメント上部に行を挿入しただけ（＝対象タスク行の中身は不変）のケースは、ハッシュは変わるが `expectedText` で本人を特定できるため**409を出さずに成功させる**。これにより「チェックするたびに弾かれる」ストレスを排除する。真に409となるのは、**チェック対象のタスク行そのものがAIに書き換えられた**稀なケースに限定される。
+The intent is to avoid a 409 when an AI merely inserts lines near the top of a
+document. Although the hash changes, the target task can still be identified
+by `expectedText`. A real 409 is therefore limited to the rare case where the
+AI has modified **the target task line itself**.
 
-これによりロストアップデートを防ぐ。ファイルロック等のOS機構には依存しない（堅牢性とポータビリティ優先）。
+This prevents lost updates without depending on OS-level file locking, in
+favor of robustness and portability.
 
-### 6.3 エコー抑制（書き込みループ防止）
+### 6.3 Echo suppression (preventing write loops)
 
-サーバー自身の書き込みも chokidar が検知してしまうと、不要な再パース＆pushが起きる。対策:
-- サーバーが書いた直後の**新ハッシュを記録**しておき、watcherイベントのハッシュがそれと一致したら**無視**する（自己発火の抑制）。
-- chokidar は `awaitWriteFinish`（安定するまで待つ）を有効化し、書き込み途中の半端な内容を読まない。
+If chokidar observes the server's own writes, it causes unnecessary reparsing
+and pushes. To prevent this:
 
-### 6.4 外部編集の反映フロー
+- Record the **new hash immediately after a server write**. Ignore a watcher
+  event whose hash matches it.
+- Enable chokidar's `awaitWriteFinish` so the server never reads a partially
+  written file.
+
+### 6.4 External-edit update flow
 
 ```
-AIが tasks.md を編集
-  → chokidar change イベント (awaitWriteFinish 後)
-  → ハッシュ照合: 自己発火なら無視 / 外部編集なら続行
-  → 当該ファイルだけ再パース（全スキャンしない）
-  → WebSocket で { type: "change-updated", changeId, ... } を全クライアントへ
-  → UIが該当部分を更新（進捗バー・チェック状態が即追従）
+AI edits tasks.md
+  → chokidar change event (after awaitWriteFinish)
+  → Compare hashes: ignore a self-triggered write / continue for an external edit
+  → Reparse only the affected file instead of rescanning everything
+  → Push { type: "change-updated", changeId, ... } to every client over WebSocket
+  → The UI updates the affected progress bar and checkbox state immediately
 ```
 
-### 6.5 AIのストリーミング書き込みと「編集中」表示
+### 6.5 AI streaming writes and the “Writing…” indicator
 
-`awaitWriteFinish`（6.3）は、書き込みが安定するまで再パースを遅らせる正しい設計だが、副作用がある: **CursorやClaudeはファイルを一括上書きせず、数秒〜数十秒かけて逐次追記する**ことが多い。その間UIは沈黙し、AIの出力が静止して初めて画面が切り替わる。
+`awaitWriteFinish` in section 6.3 correctly delays reparsing until a write has
+settled, but it has a side effect: **Cursor and Claude often append content
+incrementally over several seconds or tens of seconds instead of overwriting a
+file in one operation**. The UI remains quiet during that period and updates
+only after the AI output stops changing.
 
-- **v1（フェーズ1・2）の方針**: このバッチ更新挙動で問題ない。データの整合性は保たれ、最終結果は正しく反映される。
-- **将来拡張（フェーズ3以降）**: chokidar の `add`/初回 `change` イベント（＝`awaitWriteFinish` 確定前）を捉え、**「AIが編集中（Writing…）」のステータスだけ**を軽量WSイベントで流す。本文はパースせず、対象 change/ファイルに「編集中」バッジを出すのみ。確定後に通常の `change-updated` で本体を反映する。これによりユーザーは「いま裏でAIがこのファイルを触っている」と把握でき、不要な操作（その最中のtoggle）を避けられる。
+- **v1 (phases 1 and 2)**: This batched update behavior is acceptable. Data
+  remains consistent and the final result appears correctly.
+- **Future extension (phase 3 and later)**: Observe chokidar's `add` or initial
+  `change` event before `awaitWriteFinish` settles and send only a lightweight
+  **“AI is writing…”** status over WebSocket. Do not parse the content; show a
+  writing badge for the affected change or file. Once the write settles, send
+  the normal `change-updated` event. Users can then see that an AI is modifying
+  a file and avoid conflicting actions such as toggling it mid-write.
 
-### 6.6 パースの堅牢性
+### 6.6 Parser robustness
 
-- `remark` の AST `position` から各タスクの行番号を取得。正規表現スキャンより堅牢で、ネストしたリストやコードブロック内の `- [ ]` 誤検知を避けられる。
-- パース失敗（不正なMarkdown）時はそのファイルを `parseError` 付きで返し、UIは生テキスト表示にフォールバック。**UIが落ちない**ことを保証する。
+- Obtain each task's line number from the remark AST `position`. This is more
+  robust than scanning with regular expressions and avoids false positives
+  from nested lists or `- [ ]` inside code blocks.
+- If parsing fails because of malformed Markdown, return that file with a
+  `parseError` and let the UI fall back to raw-text display. A broken file must
+  **never crash the UI**.
 
 ---
 
-## 7. REST / WebSocket API（v1）
+## 7. REST / WebSocket API (v1)
 
 ### REST
-| メソッド | パス | 用途 |
-|----------|------|------|
-| `GET` | `/api/state` | ワークスペース全体の正規化stateを返す |
-| `GET` | `/api/changes/:id` | 単一changeの詳細（本文含む） |
-| `POST` | `/api/tasks/toggle` | チェックボックスのサージカル編集（`baseHash` + `expectedText` による楽観ロック／行ズレ自動補正、6.2参照） |
-| `GET` | `/api/file?path=` | 任意 `.md` の生テキスト（閲覧フォールバック用） |
 
-### WebSocket（サーバー→クライアント push）
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/state` | Return normalized state for the entire workspace |
+| `GET` | `/api/changes/:id` | Return one change in detail, including document bodies |
+| `POST` | `/api/tasks/toggle` | Surgically edit a checkbox with optimistic locking and automatic line-shift correction using `baseHash` and `expectedText`; see section 6.2 |
+| `GET` | `/api/file?path=` | Return raw text for any `.md` file as a viewing fallback |
+
+### WebSocket (server → client push)
+
 ```ts
 type ServerEvent =
-  | { type: "state-replaced"; state: WorkspaceState }      // 大きな変更時
+  | { type: "state-replaced"; state: WorkspaceState }      // Large change
   | { type: "change-updated"; changeId: string; change: Change }
   | { type: "spec-updated"; domain: string; spec: SpecDomain }
-  | { type: "file-writing"; filePath: string; changeId?: string }  // AIが編集中（6.5、フェーズ3以降）
-  | { type: "conflict"; filePath: string };                // 競合通知
+  | { type: "file-writing"; filePath: string; changeId?: string }  // AI is writing (section 6.5, phase 3+)
+  | { type: "conflict"; filePath: string };                // Conflict notification
 ```
 
 ---
 
-## 8. UI設計
+## 8. UI Design
 
-### 画面構成
-1. **Overview（トップ）**
-   - アクティブな change をカード表示。各カードに **進捗バー（done/total）**・タイトル・Intent要約。
-   - 全体サマリ（合計タスク数・完了率）。
-2. **Change詳細**
-   - タブ: `Tasks` / `Proposal` / `Design` / `Delta Specs`。
-   - `Tasks` タブは **プログレスツリー**（セクション→タスクの階層）と、任意で **カンバン**（Todo / Done の2列、`@dnd-kit` でドラッグ。ドロップ＝toggle）。
-   - チェックボックスはクリックで即 toggle。競合時はトースト表示。
-3. **Specsブラウザ**
-   - `openspec/specs/` のドメイン一覧 → requirement / scenario をGiven-When-Thenで整形表示（**閲覧のみ**）。
-4. **Archive（任意 / 後フェーズ）**
-   - 完了済みchangeの一覧。
+### Screens
 
-### 同期UXの原則
-- 外部編集が来たら、操作中でない箇所は**滑らかに更新**（行を点滅させて変化を示す）。
-- 競合（409）は破壊的に上書きせず、必ずユーザーに気づかせてから再取得。
+1. **Overview (home)**
+   - Display active changes as cards. Each card contains a **progress bar
+     (done/total)**, title, and Intent summary.
+   - Display an overall summary with total task count and completion rate.
+2. **Change details**
+   - Tabs: `Tasks`, `Proposal`, `Design`, and `Delta Specs`.
+   - The `Tasks` tab contains a **progress tree** with a section-to-task
+     hierarchy and, optionally, a two-column **Kanban** board (Todo / Done)
+     using `@dnd-kit`. Dropping a task toggles it.
+   - Clicking a checkbox toggles it immediately. Show a toast on conflict.
+3. **Specs browser**
+   - List the domains under `openspec/specs/`, then display requirements and
+     scenarios formatted as Given-When-Then. This view is **read-only**.
+4. **Archive (optional / later phase)**
+   - List completed changes.
 
-### 競合（409）からのリカバリーUX
+### Synchronization UX principles
 
-前提として、6.2の `expectedText` フォールバックにより**409は「チェック対象のタスク行そのものがAIに書き換えられた」稀なケースに限定される**。したがって、画面全体を暗くする・強制リロードといった**大域的で破壊的な対応は採らない**（頻度が低く影響範囲も局所的な事象に対して過剰で、ユーザーの作業文脈を奪う）。
+- When an external edit arrives, smoothly update areas that the user is not
+  currently manipulating and briefly flash the changed row.
+- Never destructively overwrite a 409 conflict. Make the user aware of it
+  before fetching the latest state.
 
-採用するのは **「楽観的更新 + バックグラウンド静的和解 + 局所的な再確認プロンプト」** の3段構え:
+### Recovery UX for conflicts (409)
 
-1. **楽観的更新**: クリック即座にUIのチェック状態を反転（レイテンシ体感ゼロ）。
-2. **バックグラウンド和解**: 409時、レスポンス同梱の最新stateで画面を**静かに差し替える**。トーストは出さず、変化した箇所だけ点滅でハイライト。ユーザーが触っていない他タスクの更新はこれだけで完結。
-3. **局所的な再確認**: ユーザーが操作した**まさにそのタスク行**が競合していた場合のみ、楽観的更新をロールバックし、その行にインライン表示を出す:
-   - 「この項目はAIにより更新されました」＋ **更新後の新しいテキスト**を提示。
-   - ワンクリックの **「もう一度チェックする」** ボタン（＝新 `expectedText`/`baseHash` で再送）。
-   - 補助として控えめなトースト（自動で消える）。**モーダルや画面ロックは使わない。**
+The `expectedText` fallback in section 6.2 limits a **409 to the rare case
+where an AI has modified the target task line itself**. The UI should therefore
+avoid global and destructive responses such as dimming the entire screen or
+forcing a reload. Those responses would be disproportionate to a rare,
+localized event and would disrupt the user's context.
 
-設計原則: **ユーザーの意図（チェックしたかった）を捨てない／全画面を奪わない／競合の局所性を保ったまま、最小の摩擦で再適用に導く**。
+Use a three-stage strategy: **optimistic update + silent background
+reconciliation + localized confirmation prompt**.
+
+1. **Optimistic update**: Immediately flip the checkbox in the UI when it is
+   clicked, creating zero perceived latency.
+2. **Background reconciliation**: On a 409, **silently replace** the relevant
+   state with the latest state included in the response. Do not show a toast;
+   briefly highlight only the changed areas. This fully handles updates to
+   tasks that the user did not touch.
+3. **Localized confirmation**: Only when the conflict affects **the exact task
+   line the user operated on**, roll back the optimistic update and show an
+   inline message on that row:
+   - Show “This item was updated by an AI” together with the **new text**.
+   - Provide a one-click **“Check again”** button that resubmits with the new
+     `expectedText` and `baseHash`.
+   - Optionally show a subtle, automatically dismissing toast. **Do not use a
+     modal or lock the screen.**
+
+Design principle: **Preserve the user's intent to check the item, do not take
+over the entire screen, and guide the user toward reapplying the operation with
+minimal friction while keeping the conflict localized.**
 
 ---
 
-## 9. プロジェクトのディレクトリ構成（実装時）
+## 9. Project Directory Structure (Implementation)
 
 ```
 openspec-ui/
 ├── package.json
 ├── bin/
-│   └── ithyno.js          # CLIエントリ（commander）
+│   └── ithyno.js          # CLI entry point (commander)
 ├── server/
-│   ├── index.ts                # Fastify起動・静的配信・WS
-│   ├── parser/                 # remarkベースのパーサ群
+│   ├── index.ts                # Fastify startup, static serving, and WebSocket
+│   ├── parser/                 # remark-based parsers
 │   │   ├── tasks.ts
 │   │   ├── spec.ts
 │   │   └── proposal.ts
 │   ├── sync/
-│   │   ├── watcher.ts          # chokidar + エコー抑制
-│   │   └── surgicalEdit.ts     # 行単位チェックボックス編集 + 楽観ロック
-│   └── model.ts                # ドメイン型
+│   │   ├── watcher.ts          # chokidar + echo suppression
+│   │   └── surgicalEdit.ts     # Line-level checkbox editing + optimistic locking
+│   └── model.ts                # Domain types
 ├── web/                        # Vite + React
 │   ├── src/
-│   │   ├── store.ts            # Zustand + WSハンドラ
+│   │   ├── store.ts            # Zustand + WebSocket handlers
 │   │   ├── pages/{Overview,ChangeDetail,Specs}.tsx
 │   │   └── components/{ProgressBar,Kanban,TaskTree}.tsx
 │   └── index.html
@@ -327,15 +420,72 @@ openspec-ui/
 
 ---
 
-## 10. リスクと対策（idea.md のトレードオフへの回答）
+## 10. Risks and Mitigations
 
-| リスク | 対策 |
-|--------|------|
-| 同時編集の競合（ロストアップデート） | 楽観的ロック（baseHash照合）＋ 409で再取得。フルシリアライズしない。 |
-| 行番号ズレによる409多発（UX劣化） | `expectedText` フォールバックで対象行を内容一致から再特定し、行ズレは自動補正。真の409のみ局所的に再確認（6.2 / 8章）。 |
-| マルチラインタスク・タブ/`*`マーカーの破壊 | 状態1文字のみ置換する厳格な正規表現＋単体テスト網羅（6.1）。 |
-| AIストリーミング書き込み中のUI沈黙 | v1はバッチ更新で許容。フェーズ3で「編集中」軽量WSイベント（6.5）。 |
-| 書き込みループ（自己発火） | 書き込み後ハッシュ記録 + watcherでの自己発火無視 + `awaitWriteFinish`。 |
-| Markdownの方言化 | UIメタデータを `.md` に埋め込まない。番号・順序など必要な情報はすべて素のOpenSpec記法から導出。 |
-| パース崩れでUIが死ぬ | ファイル単位の `parseError` フォールバック（生テキスト表示）。1ファイルの破損が全体を巻き込まない。 |
-| 大規模リポジトリでの初期スキャン遅延 | 起動時は `changes/`（アクティブ）優先で段階ロード。`archive/` は遅延ロード。 |
+| Risk | Mitigation |
+|---|---|
+| Concurrent-edit conflicts and lost updates | Use optimistic locking with `baseHash`, then refetch on 409. Never fully reserialize the file. |
+| Frequent 409 responses due to shifted line numbers, degrading UX | Use the `expectedText` fallback to relocate the target line by exact content and correct line shifts automatically. Require localized reconfirmation only for a real 409; see sections 6.2 and 8. |
+| Damage to multiline tasks, tab indentation, or `*` markers | Replace only the single state character with a strict regular expression and comprehensive unit tests; see section 6.1. |
+| Silent UI while an AI streams writes | Accept batched updates in v1. Add lightweight “Writing…” WebSocket events in phase 3; see section 6.5. |
+| Write loops caused by the server observing itself | Record the post-write hash, ignore matching watcher events, and use `awaitWriteFinish`. |
+| Introducing a Markdown dialect | Do not embed UI metadata in `.md` files. Derive numbering, order, and other required data from standard OpenSpec syntax. |
+| A parse failure crashes the UI | Fall back to per-file `parseError` raw-text display. One damaged file must not affect the rest of the workspace. |
+| Slow initial scans in large repositories | Prioritize active `changes/` during startup and lazy-load `archive/`. |
+
+---
+
+## 11. Manager Terminal and Local Security
+
+ithyno provides a project-scoped Manager terminal, but the transport depends on
+the client:
+
+- **Electron and direct browser clients** render xterm.js inside the dashboard.
+  The server creates the shell through a PTY and bridges input and output over
+  the authenticated `/pty` WebSocket.
+- **VS Code Extension** hides the embedded xterm.js surface and uses a native
+  VS Code Terminal. Dashboard commands cross the webview bridge as `pty.*`
+  messages and are inserted into that terminal by the extension host. The VSIX
+  intentionally does not package the server's native PTY dependency.
+
+The Manager terminal is not tied to the internal `ChangeDetail` component. Its
+presentation follows the client: a dashboard pane in Electron/browser and a
+native editor terminal in VS Code.
+
+### Shell selection and graceful degradation
+
+- For the Electron/browser server PTY, macOS and Linux use `$SHELL` with
+  `/bin/bash` as a fallback. Windows prefers `pwsh.exe` and otherwise uses
+  `powershell.exe` through Windows 10 1809+ ConPTY.
+- `ITHYNO_SHELL` overrides that server-PTY shell. It does not select the shell
+  of the native VS Code Terminal.
+- If `@homebridge/node-pty-prebuilt-multiarch` cannot load, `/api/health`
+  reports `terminal.available: false` and Electron/browser hide the embedded
+  terminal. The dashboard continues running. VS Code remains able to use its
+  native terminal because it does not depend on this module.
+
+The server and agent CLI must operate in the same filesystem environment. In
+particular, a Windows-native server must not watch files edited by an agent
+running inside WSL, or vice versa. Both processes may run natively or both may
+run inside WSL. This also applies when a VS Code terminal profile launches a
+different environment from the extension host.
+
+### Local security boundary
+
+The PTY exposes a real local shell, so remote exposure is not supported. The
+server binds to `127.0.0.1`, and PTY WebSocket upgrades are accepted only from
+local clients. Local binding alone does not protect the server from a hostile
+web page, so mutating endpoints use three additional controls:
+
+1. **Session token** — resolved once for the server process and included in its
+   launch URL. A direct launch generates a token; Electron or VS Code may inject
+   an authoritative token for the Dashboard session. Mutating requests and
+   WebSocket upgrades must provide the matching token.
+2. **Origin allow-list** — accepts the active localhost origins and the VS Code
+   webview origin while rejecting unrelated browser origins.
+3. **Content-Type validation** — mutating requests reject an explicitly
+   incompatible content type, preventing simple cross-origin form submissions.
+
+These controls protect separate parts of the request boundary and should not be
+collapsed into a single check. User-facing recovery instructions belong in the
+Pages troubleshooting guide rather than in this architecture document.
