@@ -4439,18 +4439,18 @@ The project SHALL additionally ship a scaffolded-target skill-e2e harness (added
 - **THEN** the scaffold-reachability test fails and names at least one specific `<target>/.claude/skills/ithy-opsx-*/SKILL.md` path that failed to land
 - **AND** the drift-guard test still passes (dev-copy ≡ templates is unchanged), demonstrating the two tests catch distinct regressions
 
-#### Scenario: Package shape smoke — npm pack ships ithy-opsx only via templates
+#### Scenario: Package shape smoke — npm pack ships only approved ithy-opsx sources
 - **GIVEN** the repo at a clean HEAD
 - **WHEN** `npm pack --dry-run --json` is run and its `files` array is parsed
-- **THEN** every entry whose path contains `ithy-opsx` sits under `templates/.claude/…`
-- **AND** no entry matches the pattern `^\.claude/commands/ithy-opsx` or `^\.claude/skills/ithy-opsx-`
+- **THEN** every entry whose path contains `ithy-opsx` sits under `templates/.claude/…`, `ithyno/skills/…`, `.claude/commands/ithy-opsx/…`, or an exact `.claude/skills/ithy-opsx-<name>/SKILL.md` path
+- **AND** the packaged Claude-authoritative inputs remain limited to files required by the client renderers
 - **AND** the test fails loudly if either invariant is violated
 
-#### Scenario: Package shape smoke fails when files re-add bare `.claude/` entry
-- **GIVEN** a hypothetical edit to root `package.json` that re-adds `.claude/commands/ithy-opsx` to the `files` array (regression, matching what `distribute-ithy-opsx-via-init-templates` removed)
+#### Scenario: Package shape smoke fails for an unapproved canonical-source neighbor
+- **GIVEN** a hypothetical edit that packages `.claude/skills/ithy-opsx-dispatch/notes.md` beside the approved `SKILL.md`
 - **WHEN** `npm test` runs
 - **THEN** the package-shape test fails and names the offending tarball entry path
-- **AND** the message points the reader at both this scenario and the distribute-ithy-opsx contract so the fix is obvious
+- **AND** the message points the reader at the canonical-source packaging contract so the fix is obvious
 
 #### Scenario: Skill-e2e harness verifies structural resolution of every `/ithy-opsx:*` skill in a scaffolded target
 - **GIVEN** the developer invokes `E2E=1 npm run e2e:skills` on a clean HEAD
