@@ -53,12 +53,17 @@ The bridge is enabled only in the VS Code shell. Browser and Electron inputs kee
 
 Pure recovery-decision and authentication-result helpers will receive unit tests. Webview HTML and Extension Host routing will be tested for the clipboard message contract. A UI-level regression test will verify that a dialog remains mounted and retains typed text when healthy focus recovery is requested.
 
+### 6. Normalize executable modes before creating the VSIX
+
+The release workflow creates the cross-platform VSIX on Ubuntu. npm can stage a foreign-platform esbuild binary without its POSIX execute bits, and VSIX preserves that incorrect mode. After production dependencies are installed, the prepack step will set bundled macOS and Linux esbuild binaries to `0755` before `vsce package` runs. Windows `.exe` files remain unchanged.
+
 ## Risks / Trade-offs
 
 - **A connection flag can be briefly stale after wake-up.** → WebSocket close/error handlers remain responsible for marking the connection offline; visibility recovery runs when that state is false.
 - **A paste shortcut could insert text twice where native paste already works.** → The VS Code-specific bridge owns the handled shortcut and suppresses the native path only after confirming that it is using the bridge; non-VS Code shells are untouched.
 - **The focused element can change before an asynchronous clipboard response arrives.** → Associate the request with the original editable element and ignore the response if that element is no longer connected or the request is no longer current.
 - **A genuine token change may not reload on a network error.** → An explicit later `401`/`403`, authenticated API failure, or WebSocket auth rejection still invokes session recovery.
+- **A cross-platform native helper can lose its executable mode on the release host.** → Normalize known POSIX esbuild binaries during prepack and cover direct and nested npm layouts with a regression test.
 
 ## Migration Plan
 

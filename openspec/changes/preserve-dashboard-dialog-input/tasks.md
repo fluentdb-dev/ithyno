@@ -31,3 +31,8 @@
 - [x] 5.2 Run `npm run typecheck`, `npm test`, and `npm run build`.
 - [ ] 5.3 Build a VSIX from the fresh web bundle and manually verify that switching windows leaves an Agent configuration dialog and its typed values intact.
 - [ ] 5.4 In the packaged VSIX, paste a model argument into the Agent dialog with `Cmd+V` on macOS and `Ctrl+V` on Windows or Linux as available.
+
+## 6. Cross-platform VSIX Runtime
+
+- [x] 6.1 Normalize bundled macOS and Linux esbuild binaries to executable mode after staging dependencies and before creating the VSIX.
+- [x] 6.2 Add regression coverage for direct and nested esbuild package layouts while leaving Windows executables unchanged, and fail prepack if expected POSIX packages are absent.
