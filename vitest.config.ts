@@ -5,7 +5,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   root: ".",
   test: {
-    include: ["server/**/*.test.ts", "web/src/**/*.test.ts", "scripts/**/*.test.mjs"],
+    include: [
+      "server/**/*.test.ts",
+      "web/src/**/*.test.ts",
+      "scripts/**/*.test.mjs",
+      "vscode-extension/src/webview-html.test.ts",
+    ],
     environment: "node",
     // Several suites exercise real chokidar/fs.watch instances. Capping
     // concurrency prevents macOS FSEvents descriptor exhaustion (EMFILE)

@@ -4,6 +4,8 @@ import { Routes, Route, NavLink } from "react-router-dom";
 import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
 import { clearSessionToken, getSessionToken } from "./runtime";
+import { recoverDecision } from "./focusRecovery";
+import { insertTextIntoField, type VsCodeClipboardResponse } from "./clipboardBridge";
 import { Overview } from "./pages/Overview";
 import { ChangeDetail } from "./pages/ChangeDetail";
 import { Specs } from "./pages/Specs";
@@ -22,7 +24,7 @@ import { NoProjectDecisionPanel } from "./components/NoProjectDecisionPanel";
 import { ImportProjectFlow } from "./components/ImportProjectFlow";
 import { ImportedProjectNotification } from "./components/ImportedProjectNotification";
 import { useAppliedTheme } from "./hooks/useAppliedTheme";
-import { isVsCodeShell } from "./runtime/shell";
+import { isVsCodeShell, postToVsCode } from "./runtime/shell";
 import { isElectronMac, isElectronShell, setTitleBarColor } from "./runtime/electron";
 
 export function App() {
@@ -71,6 +73,9 @@ export function App() {
   //   2. Any mutating API call returns 401/403 → banner.
   const [authExpired, setAuthExpired] = useState<boolean>(() => getSessionToken() == null);
   const recoveryInFlightRef = useRef<Promise<void> | null>(null);
+  // Always-current copy of `connected` for use inside stable effect callbacks.
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
 
   const handleReloadSession = useCallback(() => {
     const w = window as any;
@@ -111,12 +116,12 @@ export function App() {
   }, [appliedTheme]);
 
   // Detect a stale token at first mount (e.g. after a server restart) by
-  // hitting the lightweight check endpoint. If the token is missing or no
-  // longer recognized, surface the banner or auto-reload for desktop shells.
+  // hitting the lightweight check endpoint. Only an explicit 401/403 triggers
+  // a reload or banner — a transient network failure leaves the UI mounted.
   useEffect(() => {
     if (authExpired) return;
-    void checkAuth().then((ok) => {
-      if (!ok) {
+    void checkAuth().then((result) => {
+      if (result === "unauthorized") {
         clearSessionToken();
         const w = window as any;
         if (w.ithyno?.reloadSession || isVsCodeShell()) {
@@ -125,6 +130,7 @@ export function App() {
           setAuthExpired(true);
         }
       }
+      // "unavailable" → leave current UI mounted; WebSocket retry will recover.
     });
   }, [authExpired, handleReloadSession]);
 
@@ -135,24 +141,27 @@ export function App() {
   }, [load, connectWs, authExpired]);
 
   // Automated wake-up / focus session recovery:
-  // When system wakes up from sleep or gains focus (visibilitychange → visible, or focus),
-  // automatically attempt checkAuth(), connectWs(), and load() to restore state seamlessly.
+  // Only runs when the dashboard is actually disconnected. Healthy focus events
+  // are a no-op so open dialogs and unsaved form state are preserved.
   useEffect(() => {
     const handleAutoRecover = () => {
       // Returning to a window commonly emits both `visibilitychange` and
       // `focus`. Coalesce them so one activation performs one recovery.
       if (recoveryInFlightRef.current) return;
+      // No recovery needed while the WebSocket connection is healthy.
+      if (connectedRef.current) return;
 
       const recovery = checkAuth()
-        .then(async (ok) => {
-          if (ok) {
+        .then(async (result) => {
+          const decision = recoverDecision(connectedRef.current, result);
+          if (decision === "reconnect") {
             setAuthExpired(false);
             connectWs();
             await load();
-          } else {
-            // Auth failed — attempt automatic reload via shell handler before showing banner
+          } else if (decision === "reload-shell") {
             handleReloadSession();
           }
+          // "no-op" (unavailable or connected) → leave UI untouched
         })
         .finally(() => {
           if (recoveryInFlightRef.current === recovery) {
@@ -175,6 +184,62 @@ export function App() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [connectWs, load, handleReloadSession]);
+
+  // VS Code clipboard bridge: intercept Cmd/Ctrl+V on focused input/textarea
+  // controls and route the paste through the Extension Host clipboard API.
+  // Browser and Electron shells use native paste and are not affected.
+  useEffect(() => {
+    if (!isVsCodeShell()) return;
+
+    let pendingRequestId: string | null = null;
+    let pendingElement: HTMLInputElement | HTMLTextAreaElement | null = null;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = typeof navigator !== "undefined" &&
+        (navigator.platform.startsWith("Mac") || navigator.platform === "MacIntel");
+      const isPaste = isMac ? (e.metaKey && e.key === "v") : (e.ctrlKey && e.key === "v");
+      if (!isPaste) return;
+
+      const target = document.activeElement;
+      if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const requestId = Math.random().toString(36).slice(2);
+      pendingRequestId = requestId;
+      pendingElement = target;
+
+      postToVsCode({ type: "ithyno:clipboard-read-request", requestId });
+    };
+
+    const handleMessage = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== "object") return;
+      const msg = e.data as Partial<VsCodeClipboardResponse>;
+      if (msg.type !== "ithyno:clipboard-read-response") return;
+      if (typeof msg.requestId !== "string" || typeof msg.text !== "string") return;
+
+      const el = pendingElement;
+      const shouldApply =
+        msg.requestId === pendingRequestId &&
+        el !== null &&
+        el.isConnected &&
+        document.activeElement === el;
+
+      pendingRequestId = null;
+      pendingElement = null;
+
+      if (!shouldApply || el === null) return;
+      insertTextIntoField(el, msg.text);
+    };
+
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    window.addEventListener("message", handleMessage);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("message", handleMessage);
+    };
+  }, []);
 
   // Cmd/Ctrl+Shift+K — restart terminal, but only when focus is inside
   // `.terminal-host` or on the `.terminal-reconnect` button.
@@ -334,9 +399,11 @@ export function App() {
           </div>
         )}
 
-        {loading && <p className="empty">Loading…</p>}
+        {/* Only show the initial-load spinner while state has never been fetched.
+            Background recovery reloads do not unmount the active route or dialog. */}
+        {loading && !state && <p className="empty">Loading…</p>}
         {error && <div className="parse-error">⚠ Failed to load: {error}</div>}
-        {!loading && state && !state.exists && !importFlowActive && !browseMode && (
+        {state && !state.exists && !importFlowActive && !browseMode && (
           <NoProjectDecisionPanel
             projectRoot={state.root || ""}
             hasClaudeMd={state.hasClaudeMd ?? false}
@@ -356,7 +423,7 @@ export function App() {
             }}
           />
         )}
-        {!loading && (state?.exists || browseMode) && (
+        {(state?.exists || browseMode) && (
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/change/:id" element={<ChangeDetail />} />

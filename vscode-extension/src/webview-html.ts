@@ -62,6 +62,9 @@ export function renderWebviewHtml(serverUrl: string): string {
           if (typeof data.type === 'string' && data.type.indexOf('pty.') === 0) {
             vscode.postMessage(data);
           }
+          if (data.type === 'ithyno:clipboard-read-request' && typeof data.requestId === 'string') {
+            vscode.postMessage(data);
+          }
           return;
         }
         if (app.contentWindow) {

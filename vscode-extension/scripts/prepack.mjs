@@ -11,6 +11,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, readFileSync, write
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { normalizeEsbuildBinaryPermissions } from "./esbuild-permissions.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extRoot = resolve(here, "..");
@@ -95,6 +96,19 @@ execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts --force",
   cwd: stageDir,
   stdio: "inherit",
 });
+
+// npm installs packages for platforms other than the current host because the
+// VSIX is cross-platform. On Ubuntu, foreign POSIX binaries can be written
+// without execute bits; VS Code then extracts them as 0644 and tsx cannot
+// spawn esbuild on macOS. Normalize the archive mode before vsce packages it.
+const normalizedEsbuildBinaries = normalizeEsbuildBinaryPermissions(resolve(stageDir, "node_modules"));
+const expectedPosixEsbuilds = Object.keys(platformEsbuilds).filter((name) => !name.includes("win32")).length;
+if (normalizedEsbuildBinaries.length < expectedPosixEsbuilds) {
+  throw new Error(
+    `expected at least ${expectedPosixEsbuilds} POSIX esbuild binaries, found ${normalizedEsbuildBinaries.length}`,
+  );
+}
+console.log(`[prepack] normalized ${normalizedEsbuildBinaries.length} esbuild executable(s)`);
 
 // Copy the repo-root LICENSE next to package.json so `vsce` finds it
 // (it looks for LICENSE / LICENSE.md / LICENSE.txt in the package root

@@ -34,3 +34,14 @@ When the nested webview cannot reliably perform native paste, the extension SHAL
 - **WHEN** the user uses the platform paste shortcut in a text control
 - **THEN** the browser's native paste behavior is used
 - **AND** no VS Code clipboard request is emitted
+
+### Requirement: Packaged Runtime Helpers Remain Executable
+
+The VS Code extension packaging flow SHALL preserve executable permissions for bundled POSIX runtime helpers regardless of the operating system used to build the VSIX.
+
+#### Scenario: Ubuntu packages a cross-platform VSIX
+
+- **GIVEN** the release workflow stages macOS and Linux esbuild packages on an Ubuntu runner
+- **WHEN** the extension VSIX is created
+- **THEN** each bundled `@esbuild/*/bin/esbuild` entry has executable permission
+- **AND** installing the VSIX on macOS or Linux does not fail to spawn esbuild with `EACCES`
