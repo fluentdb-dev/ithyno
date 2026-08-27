@@ -11,7 +11,13 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, readFileSync, write
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
-import { normalizeEsbuildBinaryPermissions } from "./esbuild-permissions.mjs";
+import {
+  PLATFORM_ESBUILD_PACKAGES,
+  assertEsbuildRuntimeVersions,
+  createEsbuildRuntimeDependencies,
+  normalizeEsbuildBinaryPermissions,
+  resolveAuthoritativeEsbuildVersion,
+} from "./esbuild-permissions.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extRoot = resolve(here, "..");
@@ -55,26 +61,11 @@ for (const name of readdirSync(claudeSkillsRoot).filter((entry) => entry.startsW
 const rootPkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
 const { "@homebridge/node-pty-prebuilt-multiarch": _dropPty, ...depsMinusPty } = rootPkg.dependencies;
 
-// Read the actual installed esbuild version to keep it synced
-const esbuildPkgPath = resolve(repoRoot, "node_modules", "esbuild", "package.json");
-let esbuildVersion = "0.28.1"; // fallback
-try {
-  const esbuildPkg = JSON.parse(readFileSync(esbuildPkgPath, "utf8"));
-  esbuildVersion = esbuildPkg.version;
-} catch {
-  /* ignore */
-}
-
-// Add the platform-specific esbuild packages to dependencies so they are always installed
-// regardless of the packaging host platform.
-const platformEsbuilds = {
-  "@esbuild/darwin-arm64": esbuildVersion,
-  "@esbuild/darwin-x64": esbuildVersion,
-  "@esbuild/linux-x64": esbuildVersion,
-  "@esbuild/linux-arm64": esbuildVersion,
-  "@esbuild/win32-x64": esbuildVersion,
-  "@esbuild/win32-arm64": esbuildVersion,
-};
+// Pin both the JavaScript host and every cross-platform binary to the exact
+// version installed from the repository lockfile. Leaving `esbuild` itself
+// transitive lets this fresh staging install resolve a newer host version.
+const esbuildVersion = resolveAuthoritativeEsbuildVersion(repoRoot);
+const esbuildRuntimeDependencies = createEsbuildRuntimeDependencies(esbuildVersion);
 
 const stagedPkg = {
   name: rootPkg.name,
@@ -84,7 +75,7 @@ const stagedPkg = {
   bin: rootPkg.bin,
   dependencies: {
     ...depsMinusPty,
-    ...platformEsbuilds,
+    ...esbuildRuntimeDependencies,
   },
 };
 writeFileSync(resolve(stageDir, "package.json"), JSON.stringify(stagedPkg, null, 2));
@@ -97,12 +88,18 @@ execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts --force",
   stdio: "inherit",
 });
 
+const stagedNodeModules = resolve(stageDir, "node_modules");
+const validatedEsbuildPackages = assertEsbuildRuntimeVersions(stagedNodeModules, esbuildVersion);
+console.log(
+  `[prepack] validated ${validatedEsbuildPackages.length} esbuild package(s) at ${esbuildVersion}`,
+);
+
 // npm installs packages for platforms other than the current host because the
 // VSIX is cross-platform. On Ubuntu, foreign POSIX binaries can be written
 // without execute bits; VS Code then extracts them as 0644 and tsx cannot
 // spawn esbuild on macOS. Normalize the archive mode before vsce packages it.
-const normalizedEsbuildBinaries = normalizeEsbuildBinaryPermissions(resolve(stageDir, "node_modules"));
-const expectedPosixEsbuilds = Object.keys(platformEsbuilds).filter((name) => !name.includes("win32")).length;
+const normalizedEsbuildBinaries = normalizeEsbuildBinaryPermissions(stagedNodeModules);
+const expectedPosixEsbuilds = PLATFORM_ESBUILD_PACKAGES.filter((name) => !name.includes("win32")).length;
 if (normalizedEsbuildBinaries.length < expectedPosixEsbuilds) {
   throw new Error(
     `expected at least ${expectedPosixEsbuilds} POSIX esbuild binaries, found ${normalizedEsbuildBinaries.length}`,
