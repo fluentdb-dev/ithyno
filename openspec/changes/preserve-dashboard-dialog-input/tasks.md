@@ -29,8 +29,8 @@
 
 - [x] 5.1 Run the focused web and VS Code extension test suites.
 - [x] 5.2 Run `npm run typecheck`, `npm test`, and `npm run build`.
-- [ ] 5.3 Build a VSIX from the fresh web bundle and manually verify that switching windows leaves an Agent configuration dialog and its typed values intact.
-- [ ] 5.4 In the packaged VSIX, paste a model argument into the Agent dialog with `Cmd+V` on macOS and `Ctrl+V` on Windows or Linux as available.
+- [x] 5.3 Build a VSIX from the fresh web bundle and manually verify that switching windows leaves an Agent configuration dialog and its typed values intact.
+- [x] 5.4 In the packaged VSIX, paste a model argument into the Agent dialog with `Cmd+V` on macOS and `Ctrl+V` on Windows or Linux as available.
 
 ## 6. Cross-platform VSIX Runtime
 
