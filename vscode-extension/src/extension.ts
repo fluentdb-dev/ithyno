@@ -220,6 +220,16 @@ export function activate(context: vscode.ExtensionContext): void {
       if (msg.type === "ithyno:reload-session") {
         panel.webview.html = renderWebviewHtml(s.server.url);
       }
+      if (msg.type === "ithyno:clipboard-read-request" && typeof msg.requestId === "string") {
+        const reqId = msg.requestId as string;
+        void vscode.env.clipboard.readText().then((text) => {
+          void s.panel.webview.postMessage({
+            type: "ithyno:clipboard-read-response",
+            requestId: reqId,
+            text,
+          });
+        });
+      }
     });
 
     panel.onDidDispose(() => {

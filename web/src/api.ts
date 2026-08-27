@@ -45,19 +45,29 @@ export function triggerAuthExpired(): void {
 }
 
 /**
+ * Authentication probe outcome:
+ *   "valid"        — server accepted the token.
+ *   "unauthorized" — server explicitly returned 401 or 403.
+ *   "unavailable"  — network error, timeout, or non-auth server failure.
+ */
+export type AuthProbeResult = "valid" | "unauthorized" | "unavailable";
+
+/**
  * Verify the stored session token against the server. Used at App mount to
  * detect a stale token without waiting for a mutating action.
  */
-export async function checkAuth(): Promise<boolean> {
+export async function checkAuth(): Promise<AuthProbeResult> {
   const token = getSessionToken();
-  if (!token) return false;
+  if (!token) return "unauthorized";
   try {
     const res = await fetch("/api/auth/check", {
       headers: { "X-Session-Token": token },
     });
-    return res.ok;
+    if (res.ok) return "valid";
+    if (res.status === 401 || res.status === 403) return "unauthorized";
+    return "unavailable";
   } catch {
-    return false;
+    return "unavailable";
   }
 }
 
