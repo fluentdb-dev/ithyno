@@ -3,11 +3,10 @@ agents:
     mode: live-shell
     roles:
       - code
-    description: Implements the change using Claude Code via /opsx:apply
-      (apply only). Manager commits the resulting tree on the agent
-      branch after receiving the worker's stage:code status:done
-      message, so the worker never enters an interactive commit
-      prompt.
+    description: Implements the change using Claude Code via /opsx:apply (apply
+      only). Manager commits the resulting tree on the agent branch after
+      receiving the worker's stage:code status:done message, so the worker never
+      enters an interactive commit prompt.
     command: claude
     args:
       - --dangerously-skip-permissions
@@ -20,6 +19,8 @@ agents:
     roles:
       - manager
     command: claude
+    args:
+      - --resume
   - name: copilot-review
     mode: live-shell
     roles:
