@@ -1,6 +1,6 @@
 {
   "name": "ithyno",
-  "version": "0.8.1-alpha.3",
+  "version": "0.8.1-alpha.4",
   "description": "Local dashboard for OpenSpec — dispatches propose / apply / review / verify skills to AI CLI agents.",
   "license": "GPL-3.0-or-later",
   "repository": {

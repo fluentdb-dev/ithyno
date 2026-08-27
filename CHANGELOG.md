@@ -3,6 +3,16 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1-alpha.4] - 2026-08-27
+
+### Fixed
+
+- Pinned the staged `esbuild` JavaScript runtime and every bundled platform
+  binary to one exact version, preventing the VS Code extension server from
+  failing with a host/binary version mismatch.
+- Added prepack validation that stops VSIX creation when an esbuild package is
+  missing or has drifted from the authoritative lockfile-backed version.
+
 ## [0.8.1-alpha.3] - 2026-08-27
 
 ### Changed
