@@ -21,16 +21,27 @@ panel, using the active workspace folder as the OpenSpec project root.
 - **THEN** the extension uses the first workspace folder as the project root (multi-root selection is future work)
 
 ### Requirement: Lazy Server Activation
-The system SHALL NOT start the dashboard server on extension activation; the
-server SHALL start only when the user first invokes `openspecUI.show`.
 
-#### Scenario: Activation is cheap
-- **WHEN** the extension activates (e.g. VS Code launches with it installed)
-- **THEN** no server process is spawned and no port is bound
+The server process spawned on first `ithyno.show` SHALL receive a `PATH`
+environment that includes the common Windows user-level CLI installation
+directories (`%APPDATA%\npm`, `%USERPROFILE%\.local\bin`) in addition to
+the extension host's inherited `PATH`, so that agent CLIs installed via npm
+global are discoverable by `commandExistsOnPath`. On non-Windows platforms
+the environment is passed through unchanged.
 
-#### Scenario: First show triggers spawn
-- **WHEN** the user invokes `openspecUI.show` for the first time in the session
-- **THEN** the extension picks a free port, spawns the server, and waits for `/api/health` to succeed before opening the webview
+#### Scenario: Agent CLI installed via npm global on Windows
+
+- **GIVEN** the user has `claude` installed at `%APPDATA%\npm\claude.cmd`
+- **AND** `%APPDATA%\npm` is not in the VS Code extension host's `process.env.PATH`
+- **WHEN** the ithyno server is spawned by `spawnServer()`
+- **THEN** the server process's `PATH` includes `%APPDATA%\npm`
+- **AND** `commandExistsOnPath("claude")` returns `true`
+
+#### Scenario: Non-Windows platform
+
+- **GIVEN** the host OS is macOS or Linux
+- **WHEN** `spawnServer()` is called
+- **THEN** the server process receives `process.env` unchanged (no PATH augmentation)
 
 ### Requirement: Server Lifecycle Bound to Extension
 The system SHALL terminate the spawned server when the extension deactivates
@@ -391,4 +402,25 @@ The VS Code extension packaging flow SHALL preserve executable permissions for b
 - **WHEN** the extension VSIX is created
 - **THEN** each bundled `@esbuild/*/bin/esbuild` entry has executable permission
 - **AND** installing the VSIX on macOS or Linux does not fail to spawn esbuild with `EACCES`
+
+### Requirement: Onboarding Webview Respects VS Code Theme
+
+The system SHALL forward the active VS Code theme (`"light"` or `"dark"`) to
+the onboarding iframe on load and on every subsequent theme change. The parent
+webview document MUST respond to `vscode:get-theme` messages from the iframe
+by calling `sendTheme()`, which posts `{ type: "vscode:theme-changed", theme }`
+back into the iframe.
+
+#### Scenario: Onboarding opens in dark VS Code theme
+
+- **GIVEN** VS Code is using a dark theme (`vscode-dark` class on body)
+- **WHEN** the `ithyno.newProject` onboarding webview opens
+- **THEN** the React app inside the iframe receives `vscode:theme-changed` with `theme: "dark"`
+- **AND** `document.documentElement.dataset.theme` is set to `"dark"`
+
+#### Scenario: VS Code theme changes while onboarding is open
+
+- **GIVEN** the onboarding webview is open
+- **WHEN** the VS Code theme changes (body class changes)
+- **THEN** the MutationObserver fires `sendTheme()` and the iframe receives the updated theme
 
