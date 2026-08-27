@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { shouldBlockForWorkspaceLoad, type ImportedProjectNotification } from "./store";
+import { recoverDecision } from "./focusRecovery";
 import type {
   ImportCompletedEvent,
   ManagerActivity,
@@ -15,13 +16,69 @@ import type {
   WorkspaceState,
 } from "./types";
 
-describe("workspace refresh loading mode", () => {
+// ---- Focus recovery decisions (preserve-dashboard-dialog-input) -------------
+//
+// shouldBlockForWorkspaceLoad gates the initial-load spinner but is NOT the
+// complete picture of focus-recovery behavior. recoverDecision (below) covers
+// the runtime event → action mapping that prevents unnecessary workspace
+// reloads on healthy focus events.
+
+describe("shouldBlockForWorkspaceLoad — initial load gate", () => {
   it("blocks the application shell before the initial workspace load", () => {
     expect(shouldBlockForWorkspaceLoad(null)).toBe(true);
   });
 
   it("keeps mounted routes and dialogs during a background refresh", () => {
     expect(shouldBlockForWorkspaceLoad({} as WorkspaceState)).toBe(false);
+  });
+});
+
+describe("recoverDecision — focus/visibility event → action mapping", () => {
+  it("healthy connected dashboard: all auth outcomes are no-ops", () => {
+    expect(recoverDecision(true, "valid")).toBe("no-op");
+    expect(recoverDecision(true, "unauthorized")).toBe("no-op");
+    expect(recoverDecision(true, "unavailable")).toBe("no-op");
+  });
+
+  it("disconnected + auth valid: reconnect without shell reload", () => {
+    expect(recoverDecision(false, "valid")).toBe("reconnect");
+  });
+
+  it("disconnected + auth unauthorized: reload the containing shell", () => {
+    expect(recoverDecision(false, "unauthorized")).toBe("reload-shell");
+  });
+
+  it("disconnected + auth unavailable: no-op (leave UI mounted)", () => {
+    expect(recoverDecision(false, "unavailable")).toBe("no-op");
+  });
+});
+
+describe("dialog continuity on healthy focus restoration", () => {
+  it("healthy focus does not trigger a workspace reload", () => {
+    // When connected, recoverDecision returns "no-op", so neither load()
+    // nor connectWs() is called. An open dialog and its typed values survive.
+    let loadCalled = false;
+    const decision = recoverDecision(true, "valid");
+    if (decision === "reconnect") loadCalled = true;
+    expect(loadCalled).toBe(false);
+  });
+
+  it("disconnected valid-auth recovery reconnects but does not reload the shell", () => {
+    let shellReloaded = false;
+    const decision = recoverDecision(false, "valid");
+    if (decision === "reload-shell") shellReloaded = true;
+    expect(decision).toBe("reconnect");
+    expect(shellReloaded).toBe(false);
+  });
+
+  it("unavailable auth during recovery leaves the dialog intact", () => {
+    let loadCalled = false;
+    let shellReloaded = false;
+    const decision = recoverDecision(false, "unavailable");
+    if (decision === "reconnect") loadCalled = true;
+    if (decision === "reload-shell") shellReloaded = true;
+    expect(loadCalled).toBe(false);
+    expect(shellReloaded).toBe(false);
   });
 });
 

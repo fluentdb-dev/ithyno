@@ -80,17 +80,26 @@ jobs:
       - name: Release build
         run: npm run release:build
 
-      - name: Upload artifacts
+      - name: Upload platform artifacts
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ithyno-${{ matrix.os }}-${{ github.sha }}
           path: |
-            vscode-extension/ithyno-*.vsix
             electron/dist/ithyno-*.dmg
             electron/dist/ithyno-*.exe
             electron/dist/ithyno-*.AppImage
           if-no-files-found: warn
+
+      # release:build produces the same VSIX on every matrix runner. Upload it
+      # once so the publish job never sends duplicate asset names concurrently.
+      - name: Upload VS Code extension
+        if: github.event_name != 'pull_request' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ithyno-vscode-${{ github.sha }}
+          path: vscode-extension/ithyno-*.vsix
+          if-no-files-found: error
 
   # Tag-only: fan-in the three matrix outputs and attach them to a
   # GitHub Release keyed by the pushed tag. Skipped for branch pushes,
@@ -109,7 +118,7 @@ jobs:
     steps:
       - name: Download all matrix artifacts
         # Omitting `name:` pulls every artifact this workflow uploaded
-        # (one per matrix OS). Each lands in its own subdirectory
+        # (one per matrix OS plus one VS Code artifact). Each lands in its own subdirectory
         # under `dist-artifacts/`.
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
