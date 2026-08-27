@@ -23,25 +23,15 @@ panel, using the active workspace folder as the OpenSpec project root.
 ### Requirement: Lazy Server Activation
 
 The server process spawned on first `ithyno.show` SHALL receive a `PATH`
-environment that includes the common Windows user-level CLI installation
-directories (`%APPDATA%\npm`, `%USERPROFILE%\.local\bin`) in addition to
-the extension host's inherited `PATH`, so that agent CLIs installed via npm
-global are discoverable by `commandExistsOnPath`. On non-Windows platforms
-the environment is passed through unchanged.
+environment whose Windows user-level augmentation entries are appended using
+the actual key name found in `process.env` (case-insensitive search for
+`"path"`), so that no duplicate `Path`/`PATH` entry is created.
 
-#### Scenario: Agent CLI installed via npm global on Windows
+#### Scenario: Windows PATH key is title-case
 
-- **GIVEN** the user has `claude` installed at `%APPDATA%\npm\claude.cmd`
-- **AND** `%APPDATA%\npm` is not in the VS Code extension host's `process.env.PATH`
-- **WHEN** the ithyno server is spawned by `spawnServer()`
-- **THEN** the server process's `PATH` includes `%APPDATA%\npm`
-- **AND** `commandExistsOnPath("claude")` returns `true`
-
-#### Scenario: Non-Windows platform
-
-- **GIVEN** the host OS is macOS or Linux
-- **WHEN** `spawnServer()` is called
-- **THEN** the server process receives `process.env` unchanged (no PATH augmentation)
+- **GIVEN** `process.env` contains a key named `Path` (not `PATH`)
+- **WHEN** `buildServerEnv()` augments the PATH
+- **THEN** the augmentation is written to the `Path` key and no separate `PATH` key is created
 
 ### Requirement: Server Lifecycle Bound to Extension
 The system SHALL terminate the spawned server when the extension deactivates
@@ -405,22 +395,30 @@ The VS Code extension packaging flow SHALL preserve executable permissions for b
 
 ### Requirement: Onboarding Webview Respects VS Code Theme
 
-The system SHALL forward the active VS Code theme (`"light"` or `"dark"`) to
-the onboarding iframe on load and on every subsequent theme change. The parent
-webview document MUST respond to `vscode:get-theme` messages from the iframe
-by calling `sendTheme()`, which posts `{ type: "vscode:theme-changed", theme }`
-back into the iframe.
+The onboarding iframe URL SHALL include `?vscode=1` so that `isVsCodeShell()`
+returns `true` inside the React app and `useAppliedTheme()` subscribes to
+`vscode:theme-changed` messages.
 
-#### Scenario: Onboarding opens in dark VS Code theme
+#### Scenario: Onboarding panel opens in VS Code
 
-- **GIVEN** VS Code is using a dark theme (`vscode-dark` class on body)
-- **WHEN** the `ithyno.newProject` onboarding webview opens
-- **THEN** the React app inside the iframe receives `vscode:theme-changed` with `theme: "dark"`
-- **AND** `document.documentElement.dataset.theme` is set to `"dark"`
+- **GIVEN** the extension opens the onboarding webview panel
+- **WHEN** the iframe URL is constructed by `renderOnboardingHtml`
+- **THEN** the URL contains `vscode=1` as a query parameter
 
-#### Scenario: VS Code theme changes while onboarding is open
+### Requirement: Terminal Auto-Launch After Initialization
 
-- **GIVEN** the onboarding webview is open
-- **WHEN** the VS Code theme changes (body class changes)
-- **THEN** the MutationObserver fires `sendTheme()` and the iframe receives the updated theme
+The extension SHALL auto-launch the VS Code terminal when the user clicks
+"Open Project" after completing project initialization from the "No OpenSpec
+project" decision panel, subject to the `ithyno.autoLaunchTerminal` setting
+and the presence of `agents.yaml`, without disrupting the iframe's own
+navigation back to the dashboard.
+
+#### Scenario: Initialization completes in main webview, user clicks Open Project
+
+- **GIVEN** the user opened a folder with no `agents.yaml`
+- **AND** the ithyno dashboard is showing the "No OpenSpec project" panel
+- **AND** the user clicked "Initialize openspec here" and completed initialization
+- **WHEN** the user clicks "Open Project"
+- **THEN** the extension receives `ithyno:init-complete` and auto-launches the terminal
+- **AND** the iframe navigates to the initialized dashboard as before
 

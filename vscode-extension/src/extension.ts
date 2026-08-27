@@ -220,6 +220,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (msg.type === "ithyno:reload-session") {
         panel.webview.html = renderWebviewHtml(s.server.url);
       }
+      if (msg.type === "ithyno:init-complete") {
+        // Initialization finished inside the main iframe (NoProjectDecisionPanel
+        // flow). Auto-launch the terminal now that agents.yaml exists.
+        // The iframe handles its own navigation back to the dashboard.
+        if (autoLaunch && workspaceHasAgentsYaml(workspaceRoot)) {
+          const t = ensureTerminal(s);
+          t.show(true);
+        }
+      }
       if (msg.type === "ithyno:clipboard-read-request" && typeof msg.requestId === "string") {
         const reqId = msg.requestId as string;
         void vscode.env.clipboard.readText().then((text) => {

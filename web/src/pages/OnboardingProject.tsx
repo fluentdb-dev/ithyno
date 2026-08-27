@@ -436,7 +436,15 @@ export function OnboardingProject() {
           <button
             type="button"
             disabled={!canOpen}
-            onClick={() => openProject(channel, target)}
+            onClick={() => {
+              // Notify the VS Code extension that initialization completed so
+              // it can auto-launch the terminal. The iframe then navigates via
+              // openProject() (browser channel) preserving the original transition.
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "ithyno:init-complete" }, "*");
+              }
+              openProject(channel, target);
+            }}
           >
             Open Project
           </button>
