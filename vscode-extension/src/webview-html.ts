@@ -95,6 +95,7 @@ export function renderOnboardingHtml(
   url.pathname = "/onboarding";
   url.searchParams.set("target", target);
   url.searchParams.set("channel", "vscode");
+  url.searchParams.set("vscode", "1");
   const iframeSrc = url.toString();
   return `<!doctype html>
 <html>
@@ -110,10 +111,32 @@ export function renderOnboardingHtml(
     <script>
       const vscode = acquireVsCodeApi();
       const app = document.getElementById('app');
+
+      function sendTheme() {
+        if (!app || !app.contentWindow) return;
+        const isLight = document.body.classList.contains('vscode-light');
+        const theme = isLight ? 'light' : 'dark';
+        app.contentWindow.postMessage({ type: 'vscode:theme-changed', theme }, '*');
+      }
+
+      if (app) {
+        app.addEventListener('load', () => {
+          sendTheme();
+          const t1 = setInterval(sendTheme, 200);
+          setTimeout(() => clearInterval(t1), 3000);
+        });
+      }
+      const observer = new MutationObserver(sendTheme);
+      observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
       window.addEventListener('message', (event) => {
         const data = event && event.data;
         if (!data || typeof data !== 'object') return;
         if (event.source === app.contentWindow) {
+          if (data.type === 'vscode:get-theme') {
+            sendTheme();
+            return;
+          }
           if (
             data.type === 'onboarding-open' ||
             data.type === 'onboarding-close'
