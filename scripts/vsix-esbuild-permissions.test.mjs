@@ -14,7 +14,7 @@ describe("VSIX esbuild executable permissions", () => {
     }
   });
 
-  it("normalizes direct and nested POSIX esbuild binaries without touching Windows executables", () => {
+  it("selects direct and nested POSIX esbuild binaries without selecting Windows executables", () => {
     const root = mkdtempSync(resolve(tmpdir(), "ithyno-esbuild-mode-"));
     tempDirs.push(root);
 
@@ -29,6 +29,12 @@ describe("VSIX esbuild executable permissions", () => {
     }
 
     expect(normalizeEsbuildBinaryPermissions(root)).toEqual([direct, nested]);
+
+    // Windows does not expose POSIX execute bits through chmod/stat. The
+    // release VSIX is produced on Ubuntu, so mode assertions belong only on
+    // POSIX runners; this test still locks discovery behavior on Windows.
+    if (process.platform === "win32") return;
+
     expect(statSync(direct).mode & 0o777).toBe(0o755);
     expect(statSync(nested).mode & 0o777).toBe(0o755);
     expect(statSync(windows).mode & 0o777).toBe(0o644);
