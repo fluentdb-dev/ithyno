@@ -3,6 +3,22 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1-alpha.3] - 2026-08-27
+
+### Changed
+
+- Dashboard focus and visibility recovery now refresh only disconnected
+  sessions, preserving active routes, open dialogs, and unsaved form input
+  during ordinary window switching.
+
+### Fixed
+
+- Added a VS Code Extension Host clipboard bridge so model names and other
+  values can be pasted into dashboard dialog fields inside the packaged VSIX.
+- Preserved executable permissions for bundled macOS and Linux esbuild
+  binaries when the cross-platform VSIX is produced on Ubuntu, preventing
+  runtime `EACCES` failures after installation.
+
 ## [0.8.1-alpha.2] - 2026-08-22
 
 ### Added
