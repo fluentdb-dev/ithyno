@@ -1445,10 +1445,12 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
   const agents = agentRegistry.publicConfig().agents.map(async (agent) => {
-    const supported = agent.command === "claude";
+    const supported = agent.command === "claude" || agent.command === "agy" || agent.command === "antigravity";
     if (!supported || !script) return { agentName: agent.name, supported: false, enabled: false };
     const scriptAbs = join(getProjectRoot(), ".ithyno", script.destRel.replace(/^\.ithyno\//, ""));
-    const state = await init.claudeNotifyHookStatus(getProjectRoot(), scriptAbs);
+    const state = agent.command === "claude"
+      ? await init.claudeNotifyHookStatus(getProjectRoot(), scriptAbs)
+      : await init.agyNotifyHookStatus(getProjectRoot(), scriptAbs);
     return { agentName: agent.name, supported: state.supported, enabled: state.enabled };
   });
   return { hooks: await Promise.all(agents) };
@@ -1461,14 +1463,21 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-h
     return reply.code(400).send({ error: "agentName and enabled are required" });
   }
   const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
-  if (!agent || agent.command !== "claude") return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
+  const command = agent?.command;
+  if (!agent || !command || !["claude", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
   if (!script) return reply.code(400).send({ error: "notification hook is unsupported on this platform" });
   const scaffold = await init.scaffoldNotifyScript(getProjectRoot());
   if (!scaffold) return reply.code(500).send({ error: "notification script could not be installed" });
-  if (enabled) await init.installClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
-  else await init.removeClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
+  if (command === "claude") {
+    if (enabled) await init.installClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
+    else await init.removeClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else if (enabled) {
+    await init.installAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else {
+    await init.removeAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
+  }
   return { ok: true, enabled };
 });
 

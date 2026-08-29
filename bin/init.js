@@ -163,10 +163,50 @@ export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
   return { supported: true, enabled, settingsPath };
 }
 
-/** agy has no documented project hook API yet; leave its config untouched. */
-export async function installAgyNotifyHook(_projectRoot, _scriptAbsPath, _force = false, { log = console.warn } = {}) {
-  log("notification hook: agy not yet supported");
-  return { supported: false };
+/** Merge the notification hook into Agy's project-local hooks.json. */
+export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false) {
+  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  let settings = {};
+  if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
+  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath, timeout: 10 }] };
+  const events = settings["ithyno-notification"] ?? {};
+  const existing = Array.isArray(events.Stop) ? events.Stop : [];
+  const filtered = existing.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
+  if (force || filtered.length === existing.length) filtered.push(entry);
+  settings["ithyno-notification"] = { ...events, Stop: filtered };
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed: true };
+}
+
+export async function removeAgyNotifyHook(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  let changed = false;
+  const block = settings?.["ithyno-notification"];
+  if (block && typeof block === "object") {
+    for (const event of Object.keys(block)) {
+      if (!Array.isArray(block[event])) continue;
+      const filtered = block[event].filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
+      if (filtered.length !== block[event].length) changed = true;
+      block[event] = filtered;
+    }
+  }
+  if (changed) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed };
+}
+
+export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  const block = settings?.["ithyno-notification"];
+  const enabled = Object.values(block && typeof block === "object" ? block : {}).some((items) =>
+    Array.isArray(items) && items.some((entry) => isIthynoHookEntry(entry, scriptAbsPath)),
+  );
+  return { supported: true, enabled, settingsPath };
 }
 
 /**
