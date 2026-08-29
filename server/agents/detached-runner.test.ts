@@ -16,13 +16,13 @@ describe("detached runner", () => {
     const dir = mkdtempSync(join(tmpdir(), "ithyno-detached-runner-"));
     dirs.push(dir);
     const { meta, child } = await startDetached({
-      command: process.execPath,
       args: ["-e", "setTimeout(() => {}, 5000)"],
       cwd: dir,
       env: process.env,
       jobId: "job-test",
       changeId: "add-test",
       agentName: "node",
+      command: process.execPath,
     });
 
     expect(child.pid).toBe(meta.pid);

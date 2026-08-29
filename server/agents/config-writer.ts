@@ -33,6 +33,7 @@ export type UpsertPayload = {
   command?: string;
   args?: string[];
   description?: string;
+  detached?: boolean;
 };
 
 export type DeletePayload = {
@@ -116,6 +117,10 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
     mode: mode as AgentMode,
     prompts,
   };
+  if (o.detached !== undefined) {
+    if (typeof o.detached !== "boolean") return { error: "detached must be a boolean" };
+    payload.detached = o.detached;
+  }
   if (typeof o.description === "string" && o.description.length > 0) {
     payload.description = o.description;
   }
@@ -285,6 +290,7 @@ function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
     roles: p.roles,
   };
   if (p.description !== undefined) entry.description = p.description;
+  if (p.detached !== undefined) entry.detached = p.detached;
   if (p.command !== undefined) {
     entry.command = p.command;
     entry.args = p.args ?? [];
@@ -475,4 +481,3 @@ export async function writeTmux(
   await atomicWrite(path, stringifyYaml(doc));
   return { ok: true };
 }
-

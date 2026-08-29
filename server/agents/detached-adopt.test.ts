@@ -19,6 +19,7 @@ function writeMeta(worktree: string, values: Record<string, unknown>): string {
     jobId: "job-adopt",
     changeId: "add-adopt",
     agentName: "node",
+    command: process.execPath,
     pid: process.pid,
     startedAt: Date.now(),
     logPath: join(worktree, ".agent.log"),
@@ -71,8 +72,8 @@ describe("detached job adoption", () => {
   });
 
   it("rejects a command line that does not identify the configured agent", () => {
-    expect(detachedCommandMatches({ agentName: "claude" }, "/usr/bin/node worker.js")).toBe(false);
-    expect(detachedCommandMatches({ agentName: "claude" }, "/usr/local/bin/claude -p prompt")).toBe(true);
+    expect(detachedCommandMatches({ command: "claude" }, "/usr/bin/node worker.js")).toBe(false);
+    expect(detachedCommandMatches({ command: "claude" }, "/usr/local/bin/claude -p prompt")).toBe(true);
   });
 
   it("ignores an entry whose worktree no longer exists", async () => {

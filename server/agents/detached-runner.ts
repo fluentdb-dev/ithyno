@@ -9,6 +9,7 @@ export type DetachedMeta = {
   jobId: string;
   changeId: string;
   agentName: string;
+  command: string;
   pid: number;
   startedAt: number;
   logPath: string;
@@ -16,8 +17,9 @@ export type DetachedMeta = {
 };
 
 /** Conservative PID-reuse guard used when adopting a detached process. */
-export function detachedCommandMatches(meta: Pick<DetachedMeta, "agentName">, commandLine: string): boolean {
-  return commandLine.includes(meta.agentName);
+export function detachedCommandMatches(meta: Pick<DetachedMeta, "command">, commandLine: string): boolean {
+  const executable = meta.command.split(/[\\/]/).pop() ?? meta.command;
+  return commandLine.includes(meta.command) || commandLine.includes(executable);
 }
 
 export async function startDetached(opts: {
@@ -48,6 +50,7 @@ export async function startDetached(opts: {
     jobId: opts.jobId,
     changeId: opts.changeId,
     agentName: opts.agentName,
+    command: opts.command,
     pid: child.pid!,
     startedAt: Date.now(),
     logPath,
@@ -99,7 +102,8 @@ export async function readDetachedMeta(path: string): Promise<DetachedMeta | nul
     const value = JSON.parse(await readFile(path, "utf8")) as Partial<DetachedMeta>;
     if (typeof value.jobId !== "string" || typeof value.changeId !== "string" ||
         typeof value.agentName !== "string" || !Number.isInteger(value.pid) ||
-        typeof value.startedAt !== "number" || typeof value.logPath !== "string") return null;
+        typeof value.startedAt !== "number" || typeof value.logPath !== "string" ||
+        typeof value.command !== "string") return null;
     return { ...value, metaPath: path } as DetachedMeta;
   } catch {
     return null;
