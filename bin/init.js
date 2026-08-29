@@ -432,12 +432,14 @@ export async function runInit({
     const scriptAbsPath = resolve(notifyScript.destAbs);
     const cliTargets = [];
     if (existsSync(join(target, ".claude")) || managerCli === "claude") cliTargets.push("claude");
+    if (existsSync(join(target, ".codex")) || managerCli === "codex") cliTargets.push("codex");
     // agy currently uses .agent in practice, while older projects used
     // .agents; recognize both and the onboarding selection.
     if (existsSync(join(target, ".agents")) || existsSync(join(target, ".agent")) || managerCli === "agy") cliTargets.push("agy");
     for (const cli of cliTargets) {
       try {
         if (cli === "claude") await installClaudeNotifyHook(target, scriptAbsPath, force, { log });
+        else if (cli === "codex") await installCodexNotifyHook(target, scriptAbsPath, force);
         else await installAgyNotifyHook(target, scriptAbsPath, force, { log });
       } catch (err) {
         log(`notification hook: ${cli} installer failed (${err instanceof Error ? err.message : String(err)})`);
