@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setParallelExecution, setTmux } from "../api";
+import { fetchAgentHooks, setParallelExecution, setTmux, toggleAgentHook, type AgentHookStatus } from "../api";
 import type { AgentSkillInfo, AgentSkillStatus, CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
@@ -40,11 +40,13 @@ export function Settings() {
   const agentSkillsError = useStore((s) => s.agentSkillsError);
   const loadAgentSkills = useStore((s) => s.loadAgentSkills);
   const [busy, setBusy] = useState(false);
+  const [hookStatus, setHookStatus] = useState<AgentHookStatus[]>([]);
 
   // Fetch the doctor report and agent skill state on mount
   useEffect(() => {
     void loadDoctorReport();
     void loadAgentSkills();
+    void fetchAgentHooks().then(setHookStatus).catch(() => undefined);
   }, [loadDoctorReport, loadAgentSkills]);
 
   const onToggleParallel = async (next: boolean) => {
@@ -156,6 +158,21 @@ export function Settings() {
       </section>
 
       <AgmsgSummarySection agmsg={agmsg} disabled={busy} />
+
+      <section className="settings-section">
+        <h3>CLI notifications</h3>
+        <p className="muted">Show a desktop notification when a supported agent finishes and is waiting.</p>
+        {hookStatus.length === 0 ? <p className="muted">No supported agent hooks detected.</p> : hookStatus.filter((hook) => hook.supported).map((hook) => (
+          <label className="settings-toggle" key={hook.agentName}>
+            <input type="checkbox" checked={hook.enabled} onChange={async (event) => {
+              const enabled = event.target.checked;
+              try { await toggleAgentHook(hook.agentName, enabled); setHookStatus((items) => items.map((item) => item.agentName === hook.agentName ? { ...item, enabled } : item)); }
+              catch (err) { pushToast("error", err instanceof Error ? err.message : String(err)); }
+            }} />
+            <span><strong>{hook.agentName}</strong><p className="muted">🔔 Desktop notification</p></span>
+          </label>
+        ))}
+      </section>
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>

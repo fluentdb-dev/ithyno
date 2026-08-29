@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useStore } from "../store";
-import { cancelAgentJob, fetchAgentHooks, saveAgentConfig, toggleAgentHook, type AgentHookStatus } from "../api";
+import { cancelAgentJob, saveAgentConfig } from "../api";
 import type {
   AgentConfigPayload,
   AgentPublic,
@@ -47,7 +47,6 @@ export function Agents() {
   const [addModePrefill, setAddModePrefill] = useState<AgentPublic | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<AgentPublic | null>(null);
   const [busy, setBusy] = useState(false);
-  const [hookStatus, setHookStatus] = useState<Record<string, AgentHookStatus>>({});
 
   const handleSave = async (payload: AgentConfigPayload) => {
     await saveAgentConfig(payload);
@@ -74,7 +73,6 @@ export function Agents() {
     void loadAgents();
     void loadJobs();
     void loadManagerStatus();
-    void fetchAgentHooks().then((items) => setHookStatus(Object.fromEntries(items.map((item) => [item.agentName, item])))).catch(() => undefined);
   }, [loadAgents, loadJobs, loadManagerStatus]);
 
   const sorted = [...jobs].sort((a, b) => b.startedAt - a.startedAt);
@@ -145,8 +143,6 @@ export function Agents() {
               <AgentRow
                 key={a.name}
                 agent={a}
-                hook={hookStatus[a.name]}
-                onHookChange={async (enabled) => { await toggleAgentHook(a.name, enabled); setHookStatus((s) => ({ ...s, [a.name]: { ...s[a.name], enabled } })); }}
                 onEdit={() => setEditing(a)}
                 onDelete={() => setConfirmingDelete(a)}
               />
@@ -351,14 +347,10 @@ function DeleteConfirmDialog({
 
 function AgentRow({
   agent,
-  hook,
-  onHookChange,
   onEdit,
   onDelete,
 }: {
   agent: AgentPublic;
-  hook?: AgentHookStatus;
-  onHookChange: (enabled: boolean) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -378,7 +370,6 @@ function AgentRow({
     <li className="agent-row">
       <span className="agent-name">{agent.name}</span>
       <span className="job-role-badge">{rolesDisplay}</span>
-      {hook?.supported && <button type="button" className="action-btn ghost" title={hook.enabled ? "Disable notification hook" : "Enable notification hook"} aria-label={hook.enabled ? "Disable notification hook" : "Enable notification hook"} onClick={() => void onHookChange(!hook.enabled)}>{hook.enabled ? "🔔" : "🔕"}</button>}
       {agent.description && <span className="muted">— {agent.description}</span>}
       <span className="agent-row-actions">
         <button type="button" className="action-btn ghost" onClick={onEdit}>
