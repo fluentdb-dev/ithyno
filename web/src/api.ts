@@ -289,6 +289,17 @@ export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
+export type AgentHookStatus = { agentName: string; supported: boolean; enabled: boolean };
+export async function fetchAgentHooks(): Promise<AgentHookStatus[]> {
+  const res = await fetch("/api/agent-hooks");
+  if (!res.ok) throw new Error(`GET /api/agent-hooks failed: ${res.status}`);
+  return (await res.json() as { hooks: AgentHookStatus[] }).hooks;
+}
+export async function toggleAgentHook(agentName: string, enabled: boolean): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>("/api/agent-hooks/toggle", { agentName, enabled });
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
 /** Toggle the top-level parallelExecution flag in agents.yaml. Landed by
  *  add-parallel-execution-config. */
 export async function setParallelExecution(value: boolean): Promise<void> {

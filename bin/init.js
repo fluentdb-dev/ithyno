@@ -133,6 +133,36 @@ export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force 
   return { settingsPath, changed: true, hadComments };
 }
 
+/** Remove only ithyno's notification entries, preserving user hooks. */
+export async function removeClaudeNotifyHook(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".claude", "settings.json");
+  if (!existsSync(settingsPath)) return { settingsPath, changed: false };
+  const parsed = parseJsonc(await readFile(settingsPath, "utf8"));
+  const settings = parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value) ? parsed.value : {};
+  let changed = false;
+  if (settings.hooks && typeof settings.hooks === "object") {
+    for (const event of ["Notification", "Stop"]) {
+      const entries = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
+      const filtered = entries.filter((entry) => !isIthynoHookEntry(entry, scriptAbsPath));
+      if (filtered.length !== entries.length) changed = true;
+      settings.hooks[event] = filtered;
+    }
+  }
+  if (changed) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { settingsPath, changed };
+}
+
+export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".claude", "settings.json");
+  if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
+  const parsed = parseJsonc(await readFile(settingsPath, "utf8"));
+  const hooks = parsed.value?.hooks;
+  const enabled = ["Notification", "Stop"].some((event) =>
+    Array.isArray(hooks?.[event]) && hooks[event].some((entry) => isIthynoHookEntry(entry, scriptAbsPath)),
+  );
+  return { supported: true, enabled, settingsPath };
+}
+
 /** agy has no documented project hook API yet; leave its config untouched. */
 export async function installAgyNotifyHook(_projectRoot, _scriptAbsPath, _force = false, { log = console.warn } = {}) {
   log("notification hook: agy not yet supported");

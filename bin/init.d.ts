@@ -26,6 +26,8 @@ export function installClaudeNotifyHook(
   force?: boolean,
   opts?: { log?: (msg: string) => void },
 ): Promise<{ settingsPath: string; changed: boolean; hadComments: boolean }>;
+export function removeClaudeNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ settingsPath: string; changed: boolean }>;
+export function claudeNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
 export function installAgyNotifyHook(
   projectRoot: string,
   scriptAbsPath: string,
