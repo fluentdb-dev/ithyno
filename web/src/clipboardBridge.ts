@@ -39,10 +39,21 @@ function newRequestId(): string {
 
 export type ClipboardWriter = Pick<Clipboard, "writeText">;
 
+let activeWriteRequestId: string | null = null;
+let activeWriteReject: ((reason?: unknown) => void) | null = null;
+let activeWriteCancel: (() => void) | null = null;
+
 /** Write text through the VS Code Extension Host clipboard API. */
 function writeViaVsCode(text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const requestId = newRequestId();
+    // A newer copy supersedes any pending bridge request. Rejecting and
+    // removing the previous listener prevents a delayed response from an
+    // earlier click from affecting the current operation.
+    activeWriteCancel?.();
+    activeWriteReject?.(new Error("Clipboard request superseded"));
+    activeWriteRequestId = requestId;
+    activeWriteReject = reject;
     const handleMessage = (event: MessageEvent) => {
       const msg = event.data as Partial<VsCodeClipboardWriteResponse> | null;
       if (
@@ -51,6 +62,11 @@ function writeViaVsCode(text: string): Promise<void> {
         msg.requestId !== requestId
       ) return;
       window.removeEventListener("message", handleMessage);
+      if (activeWriteRequestId === requestId) {
+        activeWriteRequestId = null;
+        activeWriteReject = null;
+        activeWriteCancel = null;
+      }
       if (typeof msg.error === "string" && msg.error.length > 0) {
         reject(new Error(msg.error));
       } else {
@@ -58,6 +74,7 @@ function writeViaVsCode(text: string): Promise<void> {
       }
     };
     window.addEventListener("message", handleMessage);
+    activeWriteCancel = () => window.removeEventListener("message", handleMessage);
     postToVsCode(
       { type: "ithyno:clipboard-write-request", requestId, text } satisfies VsCodeClipboardWriteRequest,
     );
