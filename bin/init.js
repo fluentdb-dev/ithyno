@@ -258,8 +258,8 @@ export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
   if (settings.version !== 1) settings.version = 1;
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
-  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const bashPath = ".ithyno/scripts/notify-waiting.sh";
+  const powershellPath = ".ithyno/scripts/notify-waiting.ps1";
   const entry = { type: "command", bash: bashPath, powershell: powershellPath, timeoutSec: 10 };
   const existing = Array.isArray(settings.hooks.notification) ? settings.hooks.notification : [];
   const isOwned = (item) => item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath);
@@ -276,8 +276,8 @@ export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
   if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const items = settings?.hooks?.notification;
-  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
-  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const bashPath = ".ithyno/scripts/notify-waiting.sh";
+  const powershellPath = ".ithyno/scripts/notify-waiting.ps1";
   const isOwned = (item) => item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath);
   const filtered = Array.isArray(items) ? items.filter((item) => !isOwned(item)) : items;
   const changed = Array.isArray(items) && filtered.length !== items.length;
@@ -292,8 +292,8 @@ export async function copilotNotifyHookStatus(projectRoot, scriptAbsPath) {
   const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
   if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
-  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
-  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const bashPath = ".ithyno/scripts/notify-waiting.sh";
+  const powershellPath = ".ithyno/scripts/notify-waiting.ps1";
   const enabled = Array.isArray(settings?.hooks?.notification) && settings.hooks.notification.some((item) =>
     item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath),
   );
