@@ -1445,13 +1445,15 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
   const agents = agentRegistry.publicConfig().agents.map(async (agent) => {
-    const supported = agent.command === "claude" || agent.command === "codex" || agent.command === "agy" || agent.command === "antigravity";
+    const supported = agent.command === "claude" || agent.command === "codex" || agent.command === "copilot" || agent.command === "agy" || agent.command === "antigravity";
     if (!supported || !script) return { agentName: agent.name, supported: false, enabled: false };
     const scriptAbs = join(getProjectRoot(), ".ithyno", script.destRel.replace(/^\.ithyno\//, ""));
     const state = agent.command === "claude"
       ? await init.claudeNotifyHookStatus(getProjectRoot(), scriptAbs)
       : agent.command === "codex"
         ? await init.codexNotifyHookStatus(getProjectRoot(), scriptAbs)
+        : agent.command === "copilot"
+        ? await init.copilotNotifyHookStatus(getProjectRoot(), scriptAbs)
         : await init.agyNotifyHookStatus(getProjectRoot(), scriptAbs);
     return { agentName: agent.name, supported: state.supported, enabled: state.enabled };
   });
@@ -1466,7 +1468,7 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-h
   }
   const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
   const command = agent?.command;
-  if (!agent || !command || !["claude", "codex", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
+  if (!agent || !command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
   if (!script) return reply.code(400).send({ error: "notification hook is unsupported on this platform" });
@@ -1478,6 +1480,9 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-h
   } else if (command === "codex") {
     if (enabled) await init.installCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
     else await init.removeCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else if (command === "copilot") {
+    if (enabled) await init.installCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
+    else await init.removeCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else if (enabled) {
     await init.installAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else {

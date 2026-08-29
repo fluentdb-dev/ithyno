@@ -104,7 +104,7 @@ function parseJsonc(raw) {
 }
 
 function isIthynoHookEntry(entry, scriptAbsPath) {
-  return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && h.command === scriptAbsPath);
+  return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (h.command === scriptAbsPath || h.bash === scriptAbsPath || h.powershell === scriptAbsPath));
 }
 
 /** Merge the local notification hook into Claude Code's JSON settings. */
@@ -247,6 +247,56 @@ export async function codexNotifyHookStatus(projectRoot, scriptAbsPath) {
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const entries = settings?.hooks?.Stop;
   const enabled = Array.isArray(entries) && entries.some((entry) => isIthynoHookEntry(entry, scriptAbsPath));
+  return { supported: true, enabled, settingsPath };
+}
+
+/** Install Copilot CLI's repository-level notification hook. */
+export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force = false) {
+  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  let settings = {};
+  if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
+  if (settings.version !== 1) settings.version = 1;
+  if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
+  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
+  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const entry = { type: "command", bash: bashPath, powershell: powershellPath, timeoutSec: 10 };
+  const existing = Array.isArray(settings.hooks.notification) ? settings.hooks.notification : [];
+  const isOwned = (item) => item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath);
+  const indexes = existing.reduce((all, item, index) => (isOwned(item) ? [...all, index] : all), []);
+  if (indexes.length === 0) settings.hooks.notification = [...existing, entry];
+  else if (force) settings.hooks.notification = existing.map((item, index) => index === indexes[0] ? entry : item);
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed: true };
+}
+
+export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  const items = settings?.hooks?.notification;
+  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
+  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const isOwned = (item) => item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath);
+  const filtered = Array.isArray(items) ? items.filter((item) => !isOwned(item)) : items;
+  const changed = Array.isArray(items) && filtered.length !== items.length;
+  if (changed) {
+    settings.hooks.notification = filtered;
+    await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  }
+  return { supported: true, settingsPath, changed };
+}
+
+export async function copilotNotifyHookStatus(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  const bashPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.sh");
+  const powershellPath = join(projectRoot, ".ithyno", "scripts", "notify-waiting.ps1");
+  const enabled = Array.isArray(settings?.hooks?.notification) && settings.hooks.notification.some((item) =>
+    item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath),
+  );
   return { supported: true, enabled, settingsPath };
 }
 
@@ -433,6 +483,7 @@ export async function runInit({
     const cliTargets = [];
     if (existsSync(join(target, ".claude")) || managerCli === "claude") cliTargets.push("claude");
     if (existsSync(join(target, ".codex")) || managerCli === "codex") cliTargets.push("codex");
+    if (existsSync(join(target, ".github")) || managerCli === "copilot") cliTargets.push("copilot");
     // agy currently uses .agent in practice, while older projects used
     // .agents; recognize both and the onboarding selection.
     if (existsSync(join(target, ".agents")) || existsSync(join(target, ".agent")) || managerCli === "agy") cliTargets.push("agy");
@@ -440,6 +491,7 @@ export async function runInit({
       try {
         if (cli === "claude") await installClaudeNotifyHook(target, scriptAbsPath, force, { log });
         else if (cli === "codex") await installCodexNotifyHook(target, scriptAbsPath, force);
+        else if (cli === "copilot") await installCopilotNotifyHook(target, scriptAbsPath, force);
         else await installAgyNotifyHook(target, scriptAbsPath, force, { log });
       } catch (err) {
         log(`notification hook: ${cli} installer failed (${err instanceof Error ? err.message : String(err)})`);

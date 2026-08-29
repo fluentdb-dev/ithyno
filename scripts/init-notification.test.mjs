@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installClaudeNotifyHook, installCodexNotifyHook, codexNotifyHookStatus, removeCodexNotifyHook, platformNotifyScript, scaffoldNotifyScript } from "../bin/init.js";
+import { installClaudeNotifyHook, installCodexNotifyHook, codexNotifyHookStatus, removeCodexNotifyHook, installCopilotNotifyHook, copilotNotifyHookStatus, removeCopilotNotifyHook, platformNotifyScript, scaffoldNotifyScript } from "../bin/init.js";
 
 const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -47,5 +47,17 @@ describe("notification init helpers", () => {
     const removed = JSON.parse(await readFile(join(root, ".codex/hooks.json"), "utf8"));
     expect(removed.hooks.Stop).toHaveLength(1);
     expect(removed.hooks.Stop[0].hooks[0].command).toBe("user-hook");
+  });
+  it("writes Copilot's cross-platform repository hook and preserves user entries", async () => {
+    const root = await tempRoot();
+    await installCopilotNotifyHook(root, join(root, ".ithyno/scripts/notify-waiting.sh"));
+    await installCopilotNotifyHook(root, join(root, ".ithyno/scripts/notify-waiting.sh"));
+    expect((await copilotNotifyHookStatus(root, join(root, ".ithyno/scripts/notify-waiting.sh"))).enabled).toBe(true);
+    const installed = JSON.parse(await readFile(join(root, ".github/hooks/ithyno-notification.json"), "utf8"));
+    expect(installed.version).toBe(1);
+    expect(installed.hooks.notification).toHaveLength(1);
+    expect(installed.hooks.notification[0].bash).toContain("notify-waiting.sh");
+    await removeCopilotNotifyHook(root, join(root, ".ithyno/scripts/notify-waiting.sh"));
+    expect((await copilotNotifyHookStatus(root, join(root, ".ithyno/scripts/notify-waiting.sh"))).enabled).toBe(false);
   });
 });

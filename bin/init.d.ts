@@ -39,6 +39,9 @@ export function agyNotifyHookStatus(projectRoot: string, scriptAbsPath: string):
 export function installCodexNotifyHook(projectRoot: string, scriptAbsPath: string, force?: boolean): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function removeCodexNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function codexNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
+export function installCopilotNotifyHook(projectRoot: string, scriptAbsPath: string, force?: boolean): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
+export function removeCopilotNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
+export function copilotNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
 
 export interface RunInitResult {
   ok: boolean;
