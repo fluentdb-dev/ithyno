@@ -869,6 +869,8 @@ function stripOutput(job: Job): JobSummary {
     output: _output,
     cachedDiff: _cachedDiff,
     worktreeTasksWatcher: _watcher,
+    detachedPoll: _detachedPoll,
+    logTail: _logTail,
     lastWorktreeProgress,
     ...rest
   } = job;
