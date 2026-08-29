@@ -265,6 +265,7 @@ export type AgentConfigPayload =
       command?: string;
       args?: string[];
       description?: string;
+      detached?: boolean;
     }
   | { action: "delete"; name: string };
 
