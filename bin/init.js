@@ -209,6 +209,47 @@ export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
   return { supported: true, enabled, settingsPath };
 }
 
+/** Merge the notification hook into Codex's project-local hooks.json. */
+export async function installCodexNotifyHook(projectRoot, scriptAbsPath, force = false) {
+  const settingsPath = join(projectRoot, ".codex", "hooks.json");
+  let settings = {};
+  if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
+  if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
+  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath, timeout: 10 }] };
+  const existing = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
+  const indexes = existing.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
+  if (indexes.length === 0) settings.hooks.Stop = [...existing, entry];
+  else if (force) settings.hooks.Stop = existing.map((item, index) => index === indexes[0] ? entry : item);
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed: true };
+}
+
+export async function removeCodexNotifyHook(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".codex", "hooks.json");
+  if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  let changed = false;
+  if (settings?.hooks && typeof settings.hooks === "object") {
+    const entries = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
+    const filtered = entries.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
+    changed = filtered.length !== entries.length;
+    settings.hooks.Stop = filtered;
+  }
+  if (changed) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed };
+}
+
+export async function codexNotifyHookStatus(projectRoot, scriptAbsPath) {
+  const settingsPath = join(projectRoot, ".codex", "hooks.json");
+  if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
+  const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
+  const entries = settings?.hooks?.Stop;
+  const enabled = Array.isArray(entries) && entries.some((entry) => isIthynoHookEntry(entry, scriptAbsPath));
+  return { supported: true, enabled, settingsPath };
+}
+
 /**
  * Recursively walk a directory and yield every file's path **relative** to
  * the root. Empty `.gitkeep` files are preserved so target directories survive

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installClaudeNotifyHook, platformNotifyScript, scaffoldNotifyScript } from "../bin/init.js";
+import { installClaudeNotifyHook, installCodexNotifyHook, codexNotifyHookStatus, removeCodexNotifyHook, platformNotifyScript, scaffoldNotifyScript } from "../bin/init.js";
 
 const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -33,5 +33,19 @@ describe("notification init helpers", () => {
     expect(result.hooks.Notification[0].hooks[0].command).toBe("user-hook");
     expect(result.hooks.Stop[0].hooks[0].command).toBe("/tmp/notify.sh");
     expect(warnings).toHaveLength(1);
+  });
+  it("merges, detects, and removes only the Codex project hook", async () => {
+    const root = await tempRoot();
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(join(root, ".codex/hooks.json"), JSON.stringify({ hooks: { Stop: [{ matcher: "*", hooks: [{ type: "command", command: "user-hook" }] }] } }));
+    await installCodexNotifyHook(root, "/tmp/notify.sh");
+    await installCodexNotifyHook(root, "/tmp/notify.sh");
+    expect((await codexNotifyHookStatus(root, "/tmp/notify.sh")).enabled).toBe(true);
+    const installed = JSON.parse(await readFile(join(root, ".codex/hooks.json"), "utf8"));
+    expect(installed.hooks.Stop).toHaveLength(2);
+    await removeCodexNotifyHook(root, "/tmp/notify.sh");
+    const removed = JSON.parse(await readFile(join(root, ".codex/hooks.json"), "utf8"));
+    expect(removed.hooks.Stop).toHaveLength(1);
+    expect(removed.hooks.Stop[0].hooks[0].command).toBe("user-hook");
   });
 });
