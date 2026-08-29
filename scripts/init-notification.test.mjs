@@ -1,0 +1,37 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { installClaudeNotifyHook, platformNotifyScript, scaffoldNotifyScript } from "../bin/init.js";
+
+const roots = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+async function tempRoot() { const root = await mkdtemp(join(tmpdir(), "ithyno-init-")); roots.push(root); return root; }
+
+describe("notification init helpers", () => {
+  it("selects host scripts and skips unknown platforms", () => {
+    expect(platformNotifyScript("darwin")?.destRel).toBe(".ithyno/scripts/notify-waiting.sh");
+    expect(platformNotifyScript("linux")?.destRel).toBe(".ithyno/scripts/notify-waiting.sh");
+    expect(platformNotifyScript("win32")?.destRel).toBe(".ithyno/scripts/notify-waiting.ps1");
+    expect(platformNotifyScript("freebsd")).toBeNull();
+  });
+  it("scaffolds an executable script idempotently", async () => {
+    const root = await tempRoot();
+    expect((await scaffoldNotifyScript(root, false, { platform: "linux", log: () => {} }))?.action).toBe("create");
+    expect((await scaffoldNotifyScript(root, false, { platform: "linux", log: () => {} }))?.action).toBe("skip");
+    expect((await stat(join(root, ".ithyno/scripts/notify-waiting.sh"))).mode & 0o111).toBeTruthy();
+  });
+  it("merges Claude hooks while preserving users and avoiding duplicates", async () => {
+    const root = await tempRoot();
+    await mkdir(join(root, ".claude"), { recursive: true });
+    await writeFile(join(root, ".claude/settings.json"), '{\n // user setting\n "hooks": { "Notification": [{"matcher":"*","hooks":[{"type":"command","command":"user-hook"}]}] }\n}');
+    const warnings = [];
+    await installClaudeNotifyHook(root, "/tmp/notify.sh", false, { log: (m) => warnings.push(m) });
+    await installClaudeNotifyHook(root, "/tmp/notify.sh", false, { log: () => {} });
+    const result = JSON.parse(await readFile(join(root, ".claude/settings.json"), "utf8"));
+    expect(result.hooks.Notification).toHaveLength(2);
+    expect(result.hooks.Notification[0].hooks[0].command).toBe("user-hook");
+    expect(result.hooks.Stop[0].hooks[0].command).toBe("/tmp/notify.sh");
+    expect(warnings).toHaveLength(1);
+  });
+});

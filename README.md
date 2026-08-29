@@ -117,6 +117,16 @@ for normal use, the [troubleshooting guide](https://fluentdb-dev.github.io/ithyn
 for environment-specific issues, and the [architecture document](./docs/architecture.md#11-manager-terminal-and-local-security)
 for PTY and security details.
 
+### CLI response-waiting notifications
+
+`ithyno init` installs a local OS notification hook for Claude Code projects
+(`Notification` and `Stop` events). On macOS and Linux it uses
+`.ithyno/scripts/notify-waiting.sh`; on Windows it uses the PowerShell script.
+The hook never contacts the ithyno server. To disable notifications, delete or
+rename the scaffolded script (or remove its executable bit); re-run `ithyno
+init` to re-enable it. Agy is detected but currently skipped until its project
+hook contract is stable.
+
 ### Dogfooding (developing ithyno with OpenSpec)
 
 This repository is itself developed with **real OpenSpec** (`@fission-ai/openspec`).

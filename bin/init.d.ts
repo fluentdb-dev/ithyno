@@ -14,6 +14,25 @@ export function updateGitignore(
   opts?: { disabled?: boolean },
 ): Promise<"appended" | "already-present" | "created" | "skipped">;
 
+export function platformNotifyScript(platform?: string): { src: string; destRel: string } | null;
+export function scaffoldNotifyScript(
+  projectRoot: string,
+  force?: boolean,
+  opts?: { platform?: string; log?: (msg: string) => void },
+): Promise<{ src: string; destRel: string; destAbs: string; action: "create" | "skip" | "overwrite" } | null>;
+export function installClaudeNotifyHook(
+  projectRoot: string,
+  scriptAbsPath: string,
+  force?: boolean,
+  opts?: { log?: (msg: string) => void },
+): Promise<{ settingsPath: string; changed: boolean; hadComments: boolean }>;
+export function installAgyNotifyHook(
+  projectRoot: string,
+  scriptAbsPath: string,
+  force?: boolean,
+  opts?: { log?: (msg: string) => void },
+): Promise<{ supported: false }>;
+
 export interface RunInitResult {
   ok: boolean;
   exitCode: number;

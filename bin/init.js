@@ -13,7 +13,7 @@
 // ithyno's own commands travel with Init rather than being installed globally
 // (see distribute-ithy-opsx-via-init-templates).
 
-import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, stat, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -29,6 +29,115 @@ const TEMPLATES_DIR = join(PACKAGE_ROOT, "templates");
 const WORKTREES_LINE = ".worktrees/";
 const ITHYNO_LINE = ".ithyno/";
 const REQUIRED_LINES = [WORKTREES_LINE, ITHYNO_LINE];
+const NOTIFY_TEMPLATE_NAMES = new Set([
+  "scripts/notify-waiting.sh",
+  "scripts/notify-waiting.ps1",
+]);
+
+/** Return the notification template for a host platform. */
+export function platformNotifyScript(platform = process.platform) {
+  if (platform === "darwin" || platform === "linux") {
+    return { src: join(TEMPLATES_DIR, "scripts", "notify-waiting.sh"), destRel: ".ithyno/scripts/notify-waiting.sh" };
+  }
+  if (platform === "win32") {
+    return { src: join(TEMPLATES_DIR, "scripts", "notify-waiting.ps1"), destRel: ".ithyno/scripts/notify-waiting.ps1" };
+  }
+  return null;
+}
+
+/** Copy the one host-specific notification script into a project. */
+export async function scaffoldNotifyScript(projectRoot, force = false, { platform = process.platform, log = console.warn } = {}) {
+  const selected = platformNotifyScript(platform);
+  if (!selected) {
+    log("notification hook: unsupported platform, skipping");
+    return null;
+  }
+  const destAbs = join(projectRoot, selected.destRel);
+  const action = await copyFile({ srcAbs: selected.src, destAbs, force });
+  if (platform !== "win32") await chmod(destAbs, 0o755);
+  return { ...selected, destAbs, action };
+}
+
+// JSONC parser kept dependency-free: comments are stripped with a small lexer,
+// while quoted strings (including URLs) are left untouched. A warning is
+// emitted by installClaudeNotifyHook when a comment was found because the
+// JSON serializer cannot preserve their original placement.
+function stripJsonComments(raw) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let hadComments = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    const c = raw[i];
+    const n = raw[i + 1];
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "/" && n === "/") {
+      hadComments = true;
+      while (i < raw.length && raw[i] !== "\n") i += 1;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      hadComments = true;
+      i += 2;
+      while (i < raw.length && !(raw[i] === "*" && raw[i + 1] === "/")) i += 1;
+      i += 1;
+      continue;
+    }
+    out += c;
+  }
+  return { text: out, hadComments };
+}
+
+function parseJsonc(raw) {
+  const stripped = stripJsonComments(raw);
+  // JSONC commonly uses trailing commas; tolerate those as well.
+  const text = stripped.text.replace(/,\s*([}\]])/g, "$1");
+  return { value: text.trim() ? JSON.parse(text) : {}, hadComments: stripped.hadComments };
+}
+
+function isIthynoHookEntry(entry, scriptAbsPath) {
+  return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && h.command === scriptAbsPath);
+}
+
+/** Merge the local notification hook into Claude Code's JSON settings. */
+export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force = false, { log = console.warn } = {}) {
+  const settingsPath = join(projectRoot, ".claude", "settings.json");
+  let settings = {};
+  let hadComments = false;
+  if (existsSync(settingsPath)) {
+    const parsed = parseJsonc(await readFile(settingsPath, "utf8"));
+    settings = parsed.value;
+    hadComments = parsed.hadComments;
+  }
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
+  if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
+  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath }] };
+  for (const event of ["Notification", "Stop"]) {
+    const entries = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
+    const indexes = entries.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
+    if (indexes.length === 0) entries.push(entry);
+    else if (force) entries[indexes[0]] = entry;
+    settings.hooks[event] = entries;
+  }
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  if (hadComments) log("notification hook: JSONC comments may not be preserved in .claude/settings.json");
+  return { settingsPath, changed: true, hadComments };
+}
+
+/** agy has no documented project hook API yet; leave its config untouched. */
+export async function installAgyNotifyHook(_projectRoot, _scriptAbsPath, _force = false, { log = console.warn } = {}) {
+  log("notification hook: agy not yet supported");
+  return { supported: false };
+}
 
 /**
  * Recursively walk a directory and yield every file's path **relative** to
@@ -184,6 +293,7 @@ export async function runInit({
   const templates = await walkTemplates(TEMPLATES_DIR);
   const actions = [];
   for (const relPath of templates) {
+    if (NOTIFY_TEMPLATE_NAMES.has(relPath)) continue;
     const srcAbs = join(TEMPLATES_DIR, relPath);
     const destAbs = join(target, relPath);
     const existed = existsSync(destAbs);
@@ -195,6 +305,32 @@ export async function runInit({
         action === "overwrite" ? "overwrite:" :
         "create:   ";
       log(`${prefix} ${relPath}${existed && action === "skip" ? "" : ""}`);
+    }
+  }
+
+  // Install one host-specific script, then wire it into detected Manager CLIs.
+  // Notification setup is deliberately non-fatal: a permissions issue in a
+  // user's CLI settings must not prevent the rest of init from completing.
+  let notifyScript = null;
+  try {
+    notifyScript = await scaffoldNotifyScript(target, force, { log });
+  } catch (err) {
+    log(`notification hook: failed to scaffold script (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (notifyScript) {
+    const scriptAbsPath = resolve(notifyScript.destAbs);
+    const cliTargets = [];
+    if (existsSync(join(target, ".claude")) || managerCli === "claude") cliTargets.push("claude");
+    // agy currently uses .agent in practice, while older projects used
+    // .agents; recognize both and the onboarding selection.
+    if (existsSync(join(target, ".agents")) || existsSync(join(target, ".agent")) || managerCli === "agy") cliTargets.push("agy");
+    for (const cli of cliTargets) {
+      try {
+        if (cli === "claude") await installClaudeNotifyHook(target, scriptAbsPath, force, { log });
+        else await installAgyNotifyHook(target, scriptAbsPath, force, { log });
+      } catch (err) {
+        log(`notification hook: ${cli} installer failed (${err instanceof Error ? err.message : String(err)})`);
+      }
     }
   }
 
