@@ -24,14 +24,14 @@
 
 ## 4. agy hook installer
 
-- [x] 4.1 Research agy's hook mechanism: which config file, which event names correspond to "response completed" and "awaiting input". Document findings inline in `bin/init.js` (or a `.agents/HOOKS.md` reference).
+- [x] 4.1 Research agy's hook mechanism: which config file, which event names correspond to "response completed" and "awaiting input". Document findings inline in `bin/init.js` (Agy project config is `.agent/hooks.json`).
 - [x] 4.2 If agy exposes equivalent events → add `installAgyNotifyHook(projectRoot, scriptAbsPath, force)` following the same idempotent-merge contract as the Claude installer. If agy does not expose them → skip installer, log a single-line warning ("notification hook: agy not yet supported"), leave rest of init working, and file a follow-up idea in `docs/ideas/`.
 - [x] 4.3 Unit tests for `installAgyNotifyHook` (skip this task if 4.2 concludes agy is out of scope for this change).
 
 ## 5. Init orchestration wiring
 
 - [x] 5.1 In `bin/init.js` `runInit`, after the existing scaffold loop, invoke: `scaffoldNotifyScript` → then for each `MANAGER_VERIFIED` CLI detected in the target project, invoke that CLI's hook installer with the absolute script path.
-- [x] 5.2 Detection rule: for Claude, detect by presence of `.claude/` directory OR planned creation of one during init. For agy, detect by presence of `.agents/` directory OR planned creation. Match `MANAGER_VERIFIED = ["claude", "agy"]` from `web/src/components/InitDialog.tsx` so the two lists stay in sync.
+- [x] 5.2 Detection rule: for Claude, detect by presence of `.claude/` directory OR planned creation of one during init. For agy, detect by presence of `.agent/` directory OR planned creation. Match `MANAGER_VERIFIED = ["claude", "agy"]` from `web/src/components/InitDialog.tsx` so the two lists stay in sync.
 - [x] 5.3 Ensure init exits with the same success semantics when notification-hook installation partially fails (e.g., write-permission error on the settings file) — surface a single-line warning per failed installer, don't fail the whole init.
 - [x] 5.4 Integration test: run `openspec-ui init` on a temp project with `.claude/settings.json` containing a user hook. Verify post-state: notify script exists, user hook preserved, ithyno hook added, re-run is a no-op.
 

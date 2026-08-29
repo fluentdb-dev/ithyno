@@ -84,7 +84,7 @@ target project の `.ithyno/scripts/` 配下に置く。`.ithyno/` は既に .gi
 
 JSONC のコメント保持は `json-source-map` や `jsonc-parser` を使う。または最小手段として「コメント有無を検出、コメントあれば warning を出しつつマージ、コメント無い純 JSON なら安全に書き戻す」の two-track で開始。
 
-agy の hook 設定形式は agy 側の hook 実装を調査した上で決定 (agy は `.agents/` 配下、CLI ごとに独自 shape)。少なくとも Claude Code と同じセマンティクス (Notification + Stop 相当) を再現できることを検証タスクに含める。
+agy の hook 設定形式は agy 側の hook 実装を調査した上で決定 (agy は `.agent/` 配下、CLI ごとに独自 shape)。少なくとも Claude Code と同じセマンティクス (Notification + Stop 相当) を再現できることを検証タスクに含める。
 
 代替: 単純上書き → ユーザ hook を破壊するので却下。
 

@@ -165,7 +165,7 @@ export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
 
 /** Merge the notification hook into Agy's project-local hooks.json. */
 export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false) {
-  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  const settingsPath = join(projectRoot, ".agent", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
@@ -181,7 +181,7 @@ export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = f
 }
 
 export async function removeAgyNotifyHook(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  const settingsPath = join(projectRoot, ".agent", "hooks.json");
   if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   let changed = false;
@@ -199,7 +199,7 @@ export async function removeAgyNotifyHook(projectRoot, scriptAbsPath) {
 }
 
 export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".agents", "hooks.json");
+  const settingsPath = join(projectRoot, ".agent", "hooks.json");
   if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const block = settings?.["ithyno-notification"];
@@ -484,9 +484,9 @@ export async function runInit({
     if (existsSync(join(target, ".claude")) || managerCli === "claude") cliTargets.push("claude");
     if (existsSync(join(target, ".codex")) || managerCli === "codex") cliTargets.push("codex");
     if (existsSync(join(target, ".github")) || managerCli === "copilot") cliTargets.push("copilot");
-    // agy currently uses .agent in practice, while older projects used
-    // .agents; recognize both and the onboarding selection.
-    if (existsSync(join(target, ".agents")) || existsSync(join(target, ".agent")) || managerCli === "agy") cliTargets.push("agy");
+    // Agy's canonical project config directory is .agent; recognize the
+    // legacy .agents directory only for selecting the CLI during migration.
+    if (existsSync(join(target, ".agent")) || existsSync(join(target, ".agents")) || managerCli === "agy") cliTargets.push("agy");
     for (const cli of cliTargets) {
       try {
         if (cli === "claude") await installClaudeNotifyHook(target, scriptAbsPath, force, { log });
