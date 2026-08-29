@@ -239,6 +239,24 @@ export function activate(context: vscode.ExtensionContext): void {
           });
         });
       }
+      if (
+        msg.type === "ithyno:clipboard-write-request" &&
+        typeof msg.requestId === "string" &&
+        typeof msg.text === "string"
+      ) {
+        const reqId = msg.requestId as string;
+        void vscode.env.clipboard.writeText(msg.text as string).then(
+          () => s.panel.webview.postMessage({
+            type: "ithyno:clipboard-write-response",
+            requestId: reqId,
+          }),
+          (err: unknown) => s.panel.webview.postMessage({
+            type: "ithyno:clipboard-write-response",
+            requestId: reqId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
     });
 
     panel.onDidDispose(() => {

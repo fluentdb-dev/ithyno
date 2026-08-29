@@ -6,6 +6,8 @@
  * Message types for the clipboard read request / response protocol between
  * the dashboard iframe and the Extension Host.
  */
+import { isVsCodeShell, postToVsCode } from "./runtime/shell";
+
 export interface VsCodeClipboardRequest {
   type: "ithyno:clipboard-read-request";
   requestId: string;
@@ -15,6 +17,71 @@ export interface VsCodeClipboardResponse {
   type: "ithyno:clipboard-read-response";
   requestId: string;
   text: string;
+}
+
+export interface VsCodeClipboardWriteRequest {
+  type: "ithyno:clipboard-write-request";
+  requestId: string;
+  text: string;
+}
+
+export interface VsCodeClipboardWriteResponse {
+  type: "ithyno:clipboard-write-response";
+  requestId: string;
+  error?: string;
+}
+
+function newRequestId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+}
+
+export type ClipboardWriter = Pick<Clipboard, "writeText">;
+
+/** Write text through the VS Code Extension Host clipboard API. */
+function writeViaVsCode(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const requestId = newRequestId();
+    const handleMessage = (event: MessageEvent) => {
+      const msg = event.data as Partial<VsCodeClipboardWriteResponse> | null;
+      if (
+        !msg ||
+        msg.type !== "ithyno:clipboard-write-response" ||
+        msg.requestId !== requestId
+      ) return;
+      window.removeEventListener("message", handleMessage);
+      if (typeof msg.error === "string" && msg.error.length > 0) {
+        reject(new Error(msg.error));
+      } else {
+        resolve();
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    postToVsCode(
+      { type: "ithyno:clipboard-write-request", requestId, text } satisfies VsCodeClipboardWriteRequest,
+    );
+  });
+}
+
+/**
+ * Write to the system clipboard in the active shell. VS Code webviews use
+ * the Extension Host bridge because nested iframe clipboard permissions are
+ * not reliable; browser and Electron callers retain the native API.
+ */
+export async function writeClipboardText(
+  text: string,
+  clipboard?: ClipboardWriter,
+): Promise<void> {
+  if (clipboard) {
+    await clipboard.writeText(text);
+    return;
+  }
+  if (typeof window !== "undefined" && isVsCodeShell()) {
+    await writeViaVsCode(text);
+    return;
+  }
+  await navigator.clipboard.writeText(text);
 }
 
 /**

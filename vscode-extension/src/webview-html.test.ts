@@ -24,6 +24,12 @@ describe("renderWebviewHtml — clipboard bridge contract", () => {
     expect(html).toContain("app.contentWindow.postMessage(data");
   });
 
+  it("forwards clipboard write requests with validated text to the Extension Host", () => {
+    const html = renderWebviewHtml("http://localhost:12345/");
+    expect(html).toContain("ithyno:clipboard-write-request");
+    expect(html).toContain("typeof data.text === 'string'");
+  });
+
   it("still forwards pty.* messages to the Extension Host", () => {
     const html = renderWebviewHtml("http://localhost:12345/");
     expect(html).toContain("pty.");
