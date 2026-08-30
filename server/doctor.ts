@@ -102,6 +102,8 @@ export type DoctorReport = {
    *  installed would otherwise hit ENOENT deep inside New Project with
    *  no indication why. */
   node: CliStatus;
+  /** macOS-only helper used for clickable desktop notifications. */
+  alerter?: CliStatus;
   /** true when at least one agent CLI has installed === true */
   readyForManager: boolean;
   /** ISO timestamp of when the check was performed */
@@ -322,11 +324,12 @@ export async function runDoctor(): Promise<DoctorReport> {
   const agentDefs = AGENT_CLIS;
 
   // Run all agent CLI checks + tmux + git + node in parallel
-  const [agentResults, tmuxResult, gitResult, nodeResult] = await Promise.all([
+  const [agentResults, tmuxResult, gitResult, nodeResult, alerterResult] = await Promise.all([
     Promise.all(agentDefs.map((def) => checkCommand(def.cmd, def.versionArg))),
     checkCommand("tmux", "-V"),
     checkCommand("git", "--version"),
     checkCommand("node", "--version"),
+    process.platform === "darwin" ? checkCommand("alerter", "--version") : Promise.resolve(undefined),
   ]);
 
   const agents: Record<Cli, CliStatus> = {} as Record<Cli, CliStatus>;
@@ -350,6 +353,7 @@ export async function runDoctor(): Promise<DoctorReport> {
     ...(gitBashResult ? { gitBash: gitBashResult } : {}),
     git: gitResult,
     node: nodeResult,
+    ...(alerterResult ? { alerter: alerterResult } : {}),
     readyForManager,
     checkedAt: new Date().toISOString(),
   };

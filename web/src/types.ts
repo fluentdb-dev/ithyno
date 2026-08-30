@@ -451,6 +451,8 @@ export type DoctorReport = {
   /** All platforms — see server/doctor.ts's DoctorReport doc comment. */
   git: CliStatus;
   node: CliStatus;
+  /** macOS-only helper for clickable desktop notifications. */
+  alerter?: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
 };

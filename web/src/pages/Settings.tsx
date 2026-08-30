@@ -478,6 +478,14 @@ function PrerequisitesSection(props: {
                     : undefined,
                 )}
                 {AGENT_CLI_KEYS.map((key) => renderAgentRow(key, report.agents[key]))}
+                {report.alerter && renderRow(
+                  "alerter (macOS notifications)",
+                  report.alerter,
+                  null,
+                  report.alerter.installed === false
+                    ? "Optional for clickable notifications. Install: brew install vjeantet/tap/alerter"
+                    : undefined,
+                )}
                 {renderRow("tmux", report.tmux, "tmux")}
                 {renderRow(
                   "agmsg",
