@@ -388,6 +388,7 @@ function PrerequisitesSection(props: {
   const renderAgentRow = (key: Cli, status: CliStatus | undefined) => {
     const info = skillInfoFor(key);
     const hook = key !== "copilot" ? hookStatus.find((item) => item.command === key && item.supported) : undefined;
+    const hookAvailable = key !== "copilot" && ["claude", "codex", "agy"].includes(key) && status?.installed === true;
     const unknownSkills = agentSkillsError !== null && agentSkills === null;
 
     return (
@@ -424,7 +425,7 @@ function PrerequisitesSection(props: {
               Manage skills
             </button>
           )}
-          {hook && <button type="button" className="prereq-hook-btn" title={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook.agentName, !hook.enabled)}>{hook.enabled ? "🔔" : "🔕"}</button>}
+          {hookAvailable && <button type="button" className="prereq-hook-btn" title={hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook?.agentName ?? key, !hook?.enabled)}>{hook?.enabled ? "🔔" : "🔕"}</button>}
         </td>
       </tr>
     );
