@@ -44,7 +44,7 @@
 
 - [x] 8.1 `JobSummary` type mirrors the `detached?: boolean` field
 - [x] 8.2 Agents page renders a `[detached]` badge next to the agent name for detached jobs
-- [ ] 8.3 `JobInputField` — already removed by `add-agent-xterm-output`; the xterm view stays interactive but the server enforces the 409 (client shows a toast)
+- [x] 8.3 `JobInputField` — already removed by `add-agent-xterm-output`; the xterm view stays interactive but the server enforces the 409 (client shows a toast)
 
 ## 9. Docs
 
@@ -60,8 +60,8 @@
 
 ## 11. Verification
 
-- [ ] 11.1 Set `detached: true` on the Claude entry; Start a change (Worktree); verify `<worktree>/.agent-meta.json` exists with the expected shape
-- [ ] 11.2 Edit a `server/*.ts` file to force a `dev` restart — verify the detached Claude survives; Agents page re-populates with `status: running` post-restart
-- [ ] 11.3 Kill the detached agent from another terminal (`kill <pid>`) — Agents page shows `completed` within one poll interval; meta file is gone
-- [ ] 11.4 Try to send input to a detached job from the xterm view — 409 comes back with the "detached" reason
-- [ ] 11.5 Turn `detached: true` off; Start again; verify the old PTY behavior is unchanged
+- [x] 11.1 Set `detached: true` on the Claude entry; Start a change (Worktree); verify `<worktree>/.agent-meta.json` exists with the expected shape
+- [x] 11.2 Edit a `server/*.ts` file to force a `dev` restart — verify the detached Claude survives; Agents page re-populates with `status: running` post-restart
+- [x] 11.3 Kill the detached agent from another terminal (`kill <pid>`) — Agents page shows `completed` within one poll interval; meta file is gone
+- [x] 11.4 Try to send input to a detached job from the xterm view — 409 comes back with the "detached" reason
+- [x] 11.5 Turn `detached: true` off; Start again; verify the old PTY behavior is unchanged
