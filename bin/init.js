@@ -104,11 +104,16 @@ function parseJsonc(raw) {
 }
 
 function isIthynoHookEntry(entry, scriptAbsPath) {
-  return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (h.command === scriptAbsPath || h.bash === scriptAbsPath || h.powershell === scriptAbsPath));
+  const matches = (value) => typeof value === "string" && (value === scriptAbsPath || value.startsWith(`${scriptAbsPath} `));
+  return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (matches(h.command) || matches(h.bash) || matches(h.powershell)));
+}
+
+function notificationCommand(scriptAbsPath, context) {
+  return context && ["electron", "vscode", "cli"].includes(context) ? `${scriptAbsPath} ${context}` : scriptAbsPath;
 }
 
 /** Merge the local notification hook into Claude Code's JSON settings. */
-export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force = false, { log = console.warn } = {}) {
+export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force = false, { log = console.warn, context } = {}) {
   const settingsPath = join(projectRoot, ".claude", "settings.json");
   let settings = {};
   let hadComments = false;
@@ -119,7 +124,7 @@ export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force 
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context) }] };
   for (const event of ["Notification", "Stop"]) {
     const entries = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
     const indexes = entries.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
@@ -164,12 +169,12 @@ export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
 }
 
 /** Merge the notification hook into Agy's project-local hooks.json. */
-export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false) {
+export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
   const settingsPath = join(projectRoot, ".agent", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath, timeout: 10 }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context), timeout: 10 }] };
   const events = settings["ithyno-notification"] ?? {};
   const existing = Array.isArray(events.Stop) ? events.Stop : [];
   const filtered = existing.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
@@ -210,13 +215,13 @@ export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
 }
 
 /** Merge the notification hook into Codex's project-local hooks.json. */
-export async function installCodexNotifyHook(projectRoot, scriptAbsPath, force = false) {
+export async function installCodexNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
   const settingsPath = join(projectRoot, ".codex", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: scriptAbsPath, timeout: 10 }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context), timeout: 10 }] };
   const existing = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
   const indexes = existing.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
   if (indexes.length === 0) settings.hooks.Stop = [...existing, entry];
@@ -251,7 +256,7 @@ export async function codexNotifyHookStatus(projectRoot, scriptAbsPath) {
 }
 
 /** Install Copilot CLI's repository-level notification hook. */
-export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force = false) {
+export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
   const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
@@ -469,34 +474,12 @@ export async function runInit({
     }
   }
 
-  // Install one host-specific script, then wire it into detected Manager CLIs.
-  // Notification setup is deliberately non-fatal: a permissions issue in a
-  // user's CLI settings must not prevent the rest of init from completing.
-  let notifyScript = null;
+  // Init owns the host-specific notification script, but hook enablement is
+  // an explicit Settings action and is never changed here.
   try {
-    notifyScript = await scaffoldNotifyScript(target, force, { log });
+    await scaffoldNotifyScript(target, force, { log });
   } catch (err) {
-    log(`notification hook: failed to scaffold script (${err instanceof Error ? err.message : String(err)})`);
-  }
-  if (notifyScript) {
-    const scriptAbsPath = resolve(notifyScript.destAbs);
-    const cliTargets = [];
-    if (existsSync(join(target, ".claude")) || managerCli === "claude") cliTargets.push("claude");
-    if (existsSync(join(target, ".codex")) || managerCli === "codex") cliTargets.push("codex");
-    if (existsSync(join(target, ".github")) || managerCli === "copilot") cliTargets.push("copilot");
-    // Agy's canonical project config directory is .agent; recognize the
-    // legacy .agents directory only for selecting the CLI during migration.
-    if (existsSync(join(target, ".agent")) || existsSync(join(target, ".agents")) || managerCli === "agy") cliTargets.push("agy");
-    for (const cli of cliTargets) {
-      try {
-        if (cli === "claude") await installClaudeNotifyHook(target, scriptAbsPath, force, { log });
-        else if (cli === "codex") await installCodexNotifyHook(target, scriptAbsPath, force);
-        else if (cli === "copilot") await installCopilotNotifyHook(target, scriptAbsPath, force);
-        else await installAgyNotifyHook(target, scriptAbsPath, force, { log });
-      } catch (err) {
-        log(`notification hook: ${cli} installer failed (${err instanceof Error ? err.message : String(err)})`);
-      }
-    }
+    if (!quiet) log(`notification script: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // .gitignore handling.

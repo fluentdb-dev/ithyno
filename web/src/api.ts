@@ -295,8 +295,8 @@ export async function fetchAgentHooks(): Promise<AgentHookStatus[]> {
   if (!res.ok) throw new Error(`GET /api/agent-hooks failed: ${res.status}`);
   return (await res.json() as { hooks: AgentHookStatus[] }).hooks;
 }
-export async function toggleAgentHook(agentName: string, enabled: boolean): Promise<void> {
-  const { status, data } = await postJson<{ ok?: boolean; error?: string }>("/api/agent-hooks/toggle", { agentName, enabled });
+export async function toggleAgentHook(agentName: string, enabled: boolean, context?: "electron" | "vscode" | "cli"): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>("/api/agent-hooks/toggle", { agentName, enabled, context });
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 

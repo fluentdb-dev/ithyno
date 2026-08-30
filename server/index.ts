@@ -1465,12 +1465,13 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
   return { hooks: await Promise.all(agents) };
 });
 
-fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-hooks/toggle", async (req, reply) => {
+fastify.post<{ Body: { agentName?: unknown; enabled?: unknown; context?: unknown } }>("/api/agent-hooks/toggle", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
-  const { agentName, enabled } = req.body ?? {};
+  const { agentName, enabled, context } = req.body ?? {};
   if (typeof agentName !== "string" || typeof enabled !== "boolean") {
     return reply.code(400).send({ error: "agentName and enabled are required" });
   }
+  if (context !== undefined && (typeof context !== "string" || !["electron", "vscode", "cli"].includes(context))) return reply.code(400).send({ error: "invalid notification context" });
   const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
   const command = agent?.command ?? (typeof agentName === "string" ? agentName : undefined);
   if (!agent || !command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
@@ -1480,10 +1481,10 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-h
   const scaffold = await init.scaffoldNotifyScript(getProjectRoot());
   if (!scaffold) return reply.code(500).send({ error: "notification script could not be installed" });
   if (command === "claude") {
-    if (enabled) await init.installClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
+    if (enabled) await init.installClaudeNotifyHook(getProjectRoot(), scaffold.destAbs, false, { context: context as "electron" | "vscode" | "cli" | undefined });
     else await init.removeClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else if (command === "codex") {
-    if (enabled) await init.installCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
+    if (enabled) await init.installCodexNotifyHook(getProjectRoot(), scaffold.destAbs, false, { context: context as "electron" | "vscode" | "cli" | undefined });
     else await init.removeCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else if (command === "copilot") {
     if (enabled) await init.installCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
