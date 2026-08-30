@@ -7,6 +7,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
 import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
 import { AgentSkillInstallDialog } from "../components/AgentSkillInstallDialog";
+import { CommandModal } from "../components/CommandModal";
 import { isAbsolutePath } from "../lib/paths";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
 // Note: the `defaultManager` store slice + localStorage persistence remain
@@ -313,7 +314,8 @@ function PrerequisitesSection(props: {
   onHookChange: (agentName: string, enabled: boolean) => Promise<void>;
 }) {
   const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
-  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | "alerter" | null>(null);
+  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+  const [showAlerterCommand, setShowAlerterCommand] = useState(false);
   const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
 
   const skillInfoFor = (cli: string): AgentSkillInfo | undefined =>
@@ -374,7 +376,7 @@ function PrerequisitesSection(props: {
             <button
               type="button"
               className="prereq-install-btn"
-              onClick={() => setInstallTool(installable)}
+              onClick={() => installable === "alerter" ? setShowAlerterCommand(true) : setInstallTool(installable)}
             >
               Install
             </button>
@@ -479,9 +481,9 @@ function PrerequisitesSection(props: {
                     : undefined,
                 )}
                 {AGENT_CLI_KEYS.map((key) => renderAgentRow(key, report.agents[key]))}
-                {report.alerter && renderRow(
+                {(report.alerter || /Mac/i.test(navigator.platform)) && renderRow(
                   "alerter (macOS notifications)",
-                  report.alerter,
+                  report.alerter ?? { installed: false },
                   "alerter",
                   undefined,
                 )}
@@ -519,6 +521,15 @@ function PrerequisitesSection(props: {
             setInstallTool(null);
             if (didInstall) void onRefresh();
           }}
+        />
+      )}
+      {showAlerterCommand && (
+        <CommandModal
+          title="Install alerter"
+          build={() => "brew install vjeantet/tap/alerter"}
+          submitLabel="Close"
+          onCancel={() => setShowAlerterCommand(false)}
+          onSubmit={() => setShowAlerterCommand(false)}
         />
       )}
 

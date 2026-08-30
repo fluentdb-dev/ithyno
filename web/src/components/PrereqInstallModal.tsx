@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { installPrereq } from "../api";
 
 export function PrereqInstallModal(props: {
-  tool: "tmux" | "agmsg" | "alerter";
+  tool: "tmux" | "agmsg";
   onClose: (didInstall: boolean) => void;
 }) {
   const { tool, onClose } = props;
@@ -27,11 +27,6 @@ export function PrereqInstallModal(props: {
     let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     const run = async () => {
-      if (tool === "alerter") {
-        setLines(["Run this command in a macOS terminal:", "", "brew install vjeantet/tap/alerter"]);
-        setDone(true);
-        return;
-      }
       try {
         const res = await installPrereq(tool);
         if (!res.ok && res.status !== 200) {
@@ -99,7 +94,7 @@ export function PrereqInstallModal(props: {
   return (
     <div className="prereq-modal-backdrop">
       <div className="prereq-modal">
-        <h3>{tool === "alerter" ? "Install alerter" : `Installing ${tool}…`}</h3>
+        <h3>Installing {tool}…</h3>
         <div className="prereq-modal-output" ref={scrollRef}>
           {lines.map((l, i) => (
             <div key={i} className="prereq-output-line">{l}</div>
@@ -108,7 +103,7 @@ export function PrereqInstallModal(props: {
         </div>
         {done && (
           <p className={ok ? "prereq-ok" : "prereq-missing"}>
-            {tool === "alerter" ? "After installation, close this dialog and click Refresh." : ok ? `${tool} installed successfully.` : `Install failed.`}
+            {ok ? `${tool} installed successfully.` : `Install failed.`}
           </p>
         )}
         <div className="prereq-modal-actions">
