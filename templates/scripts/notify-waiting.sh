@@ -28,7 +28,7 @@ if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && command -v osascript >/de
     # alerter supports click callbacks; keep it detached so the hook never
     # blocks the CLI while waiting for the user to click the notification.
     ITHYNO_CWD="$cwd" ITHYNO_TITLE="$title" ITHYNO_BODY="$body" ITHYNO_GROUP="$notification_group" \
-      nohup sh -c 'result=$(alerter --title "$ITHYNO_TITLE" --message "$ITHYNO_BODY" --sender com.microsoft.VSCode --group "$ITHYNO_GROUP" --timeout 86400 2>/dev/null); case "$result" in @CONTENTCLICKED|@ACTIONCLICKED) [ -d "$ITHYNO_CWD" ] && open -a "Visual Studio Code" "$ITHYNO_CWD" ;; esac' \
+      nohup sh -c 'result=$(alerter --title "$ITHYNO_TITLE" --message "$ITHYNO_BODY" --group "$ITHYNO_GROUP" --timeout 86400 2>/dev/null); case "$result" in @CONTENTCLICKED|@ACTIONCLICKED) [ -d "$ITHYNO_CWD" ] && open "$ITHYNO_CWD" ;; esac' \
       >/dev/null 2>&1 </dev/null &
   else
     osascript -e "display notification \"$escaped_body\" with title \"$escaped_title\"" >/dev/null 2>&1 || true
