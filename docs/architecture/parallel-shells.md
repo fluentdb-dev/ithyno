@@ -57,6 +57,15 @@ Consequences:
 - No YOLO / `-p` flags are needed *just to make the CLI run*. Users may
   still add them for permission auto-approval — those are orthogonal.
 
+## Detached agents survive server restarts
+
+Workers may set `detached: true` in `agents.yaml`. The runner uses a detached
+child process with stdout and stderr appended to `.agent.log`, records its PID
+in `.agent-meta.json`, and does not terminate it during server shutdown. On
+startup, live metadata is adopted and output continues to stream from the log.
+Detached workers have no TTY or interactive stdin, so this mode is intended
+for non-interactive commands such as Claude's `-p` mode.
+
 ## Orphan worktrees are adopted on server startup
 
 Restarting the server no longer strands the `.worktrees/` on disk. On

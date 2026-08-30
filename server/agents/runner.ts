@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { existsSync, realpathSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { unlink, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
@@ -13,6 +13,8 @@ import type { Progress } from "../model.js";
 import { statSync, readFileSync } from "node:fs";
 import { parseTasks } from "../parser/tasks.js";
 import { isSafeChangeId } from "../util/change-id.js";
+import { detachedCommandMatches, startDetached, startLogTail, type DetachedMeta } from "./detached-runner.js";
+import { pidAlive, readDetachedMeta, removeMeta } from "./detached-runner.js";
 
 const execFile = promisify(execFileCb);
 
@@ -35,6 +37,7 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  detached?: boolean;
   /** Dispatch role — set by Manager (or the AgentRunner.run caller) at
    *  dispatch time. Standard workflow values: "propose" | "code" | "review"
    *  | "verify". Custom roles are accepted at the type level but filtered
@@ -67,6 +70,9 @@ export type Job = JobSummary & {
   worktreeTasksWatcher?: WorktreeProgressHandle;
   /** Last emitted worktree progress; also used for a final broadcast in finish(). */
   lastWorktreeProgress?: Progress;
+  detachedMeta?: DetachedMeta;
+  detachedPoll?: NodeJS.Timeout;
+  logTail?: { dispose(): void };
 };
 
 export type OutputLine = { stream: "stdout" | "stderr"; chunk: string; ts: number };
@@ -92,6 +98,63 @@ export class AgentRunner {
     private readonly registry: AgentRegistry,
     private readonly emit: (event: RunnerEvent) => void,
   ) {}
+
+  /** Recover detached jobs left running by a previous server process. */
+  async adoptDetached(): Promise<void> {
+    const root = join(this.projectRoot, ".worktrees");
+    let entries: string[];
+    try { entries = await readdir(root); } catch { return; }
+    for (const entry of entries) {
+      const worktreePath = join(root, entry);
+      const metaPath = join(worktreePath, ".agent-meta.json");
+      const meta = await readDetachedMeta(metaPath);
+      if (!meta || !pidAlive(meta.pid) || !existsSync(worktreePath) || this.locks.has(meta.changeId)) {
+        if (metaPath) await removeMeta(metaPath);
+        continue;
+      }
+      try {
+        const { stdout } = await execFile("ps", ["-p", String(meta.pid), "-o", "command="], { cwd: this.projectRoot });
+        if (!detachedCommandMatches(meta, stdout)) { await removeMeta(metaPath); continue; }
+      } catch {
+        // `ps` is unavailable on some platforms; liveness and metadata are
+        // still sufficient there because detached mode is warned on Windows.
+      }
+      const job: Job = {
+        id: meta.jobId, changeId: meta.changeId, agentName: meta.agentName,
+        branch: `agent/${meta.changeId}`, worktreePath, status: "running",
+        startedAt: meta.startedAt, output: [], detached: true, detachedMeta: meta,
+      };
+      this.jobs.set(job.id, job);
+      this.locks.set(job.changeId, job.id);
+      const adoptedProc = { pid: meta.pid, kill: (signal: NodeJS.Signals) => { process.kill(meta.pid, signal); return true; } } as unknown as ChildProcess;
+      this.processes.set(job.id, adoptedProc);
+      job.logTail = startLogTail(meta.logPath, (chunk) => {
+        pushOutput(job, { stream: "stdout", chunk, ts: Date.now() });
+        this.emit({ type: "agent-job-output", jobId: job.id, chunk, stream: "stdout" });
+      });
+      job.worktreeTasksWatcher = startWorktreeProgressWatcher({
+        projectRoot: this.projectRoot, changeId: job.changeId, worktreePath,
+        onProgress: (progress) => { job.lastWorktreeProgress = progress; this.emit({ type: "worktree-progress-updated", jobId: job.id, changeId: job.changeId, progress }); },
+        onUnlink: () => this.removeJobExternally(job.id, job.changeId),
+      });
+      job.detachedPoll = setInterval(() => {
+        if (!pidAlive(meta.pid)) {
+          const status: JobStatus = job.status === "cancelled" ? "cancelled" : "completed";
+          job.status = status;
+          job.finishedAt = Date.now();
+          job.exitCode = null;
+          job.logTail?.dispose();
+          if (job.detachedPoll) clearInterval(job.detachedPoll);
+          this.processes.delete(job.id);
+          void removeMeta(metaPath);
+          this.emit({ type: "agent-job-finished", jobId: job.id, status, exitCode: null });
+          this.eventEmitter.emit(`finished:${job.id}`, { status, exitCode: null });
+          this.locks.delete(job.changeId);
+        }
+      }, 3000);
+      this.emit({ type: "agent-job-started", job: stripOutput(job) });
+    }
+  }
 
   config(): { worktreesDir: string } {
     return { worktreesDir: join(this.projectRoot, ".worktrees") };
@@ -463,6 +526,7 @@ export class AgentRunner {
       role: dispatchRole,
       startedAt: Date.now(),
       output: [],
+      ...(def.detached ? { detached: true } : {}),
     };
     this.jobs.set(id, job);
     this.locks.set(changeId, id);
@@ -475,7 +539,20 @@ export class AgentRunner {
     //
     // stdin is only piped when the runtime declared promptStyle: stdin;
     // otherwise it stays "ignore" (the reverted PTY chain's decision).
-    const child = spawnChild(resolved.command, finalArgs, {
+    const child = def.detached
+      ? await startDetached({
+          command: resolved.command,
+          args: finalArgs,
+          cwd: worktreePath,
+          env: { ...process.env, ...resolved.env },
+          jobId: id,
+          changeId,
+          agentName,
+        }).then((result) => {
+          job.detachedMeta = result.meta;
+          return result.child;
+        })
+      : spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
       env: {
         ...process.env,
@@ -484,7 +561,7 @@ export class AgentRunner {
       stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });
     this.processes.set(id, child);
-    if (useStdinForPrompt && child.stdin) {
+    if (!def.detached && useStdinForPrompt && child.stdin) {
       // The registry.resolve() stdin branch guarantees initialInput is
       // set when useStdinForPrompt is true.
       child.stdin.end(resolved.initialInput ?? "");
@@ -502,17 +579,16 @@ export class AgentRunner {
     pushOutput(job, { stream: "stdout", chunk: spawnLine, ts: Date.now() });
     this.emit({ type: "agent-job-output", jobId: id, chunk: spawnLine, stream: "stdout" });
 
-    child.stdout?.on("data", (buf: Buffer) => {
-      const chunk = buf.toString("utf8");
-      pushOutput(job, { stream: "stdout", chunk, ts: Date.now() });
-      this.emit({ type: "agent-job-output", jobId: id, chunk, stream: "stdout" });
-    });
-    child.stderr?.on("data", (buf: Buffer) => {
-      const chunk = buf.toString("utf8");
-      pushOutput(job, { stream: "stderr", chunk, ts: Date.now() });
-      this.emit({ type: "agent-job-output", jobId: id, chunk, stream: "stderr" });
-    });
-
+    const onOutput = (stream: "stdout" | "stderr") => (buf: Buffer | string) => {
+      const chunk = buf.toString();
+      pushOutput(job, { stream, chunk, ts: Date.now() });
+      this.emit({ type: "agent-job-output", jobId: id, chunk, stream });
+    };
+    if (def.detached) {
+      job.logTail = startLogTail(join(worktreePath, ".agent.log"), onOutput("stdout"));
+    }
+    child.stdout?.on("data", onOutput("stdout"));
+    child.stderr?.on("data", onOutput("stderr"));
     // add-worktree-tasks-watcher: watch the worktree's tasks.md so the
     // Kanban card's progress bar moves even when the agent is running in
     // `-p` mode (silent PTY). The watcher self-debounces + gates on
@@ -544,6 +620,13 @@ export class AgentRunner {
       job.finishedAt = Date.now();
       job.exitCode = exitCode;
       this.processes.delete(id);
+      job.logTail?.dispose();
+      job.logTail = undefined;
+      if (job.detachedPoll) clearInterval(job.detachedPoll);
+      job.detachedPoll = undefined;
+      if (job.detachedMeta) {
+        await unlink(job.detachedMeta.metaPath).catch(() => undefined);
+      }
       // If a review.md landed in the change dir, parse it into a
       // structured verdict. Landed by add-review-artifact. Read from
       // the WORKTREE — the branch is not yet merged so review.md only
@@ -595,6 +678,19 @@ export class AgentRunner {
       console.log(`[runner] exit ${changeId} status=${finalStatus} code=${code} signal=${signal}`);
       void finalize(finalStatus, code);
     });
+
+    if (def.detached) {
+      job.detachedPoll = setInterval(() => {
+        try {
+          process.kill(child.pid!, 0);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ESRCH") {
+            void finalize(job.status === "running" ? "completed" : job.status, null);
+          }
+        }
+      }, 3000);
+      child.removeAllListeners("exit");
+    }
 
     return { ok: true, job: stripOutput(job) };
   }
@@ -687,6 +783,20 @@ export class AgentRunner {
     return this.terminateJobWithStatus(id, "cancelled");
   }
 
+  writeInput(id: string, input: string): { ok: boolean; status?: number; reason?: string } {
+    const job = this.jobs.get(id);
+    if (!job) return { ok: false, status: 404, reason: "Unknown job id" };
+    if (job.detached) {
+      return { ok: false, status: 409, reason: "This job is detached; interactive input is disabled." };
+    }
+    const proc = this.processes.get(id);
+    if (!proc?.stdin || job.status !== "running") {
+      return { ok: false, status: 409, reason: "Job does not accept input" };
+    }
+    proc.stdin.write(input);
+    return { ok: true };
+  }
+
   timeoutJob(id: string): { ok: boolean; reason?: string } {
     return this.terminateJobWithStatus(id, "timed-out");
   }
@@ -718,7 +828,15 @@ export class AgentRunner {
         /* ignore */
       }
     }
-    for (const proc of this.processes.values()) {
+    for (const job of this.jobs.values()) {
+      if (job.detachedPoll) clearInterval(job.detachedPoll);
+      if (job.detached) {
+        job.logTail?.dispose();
+        job.logTail = undefined;
+      }
+    }
+    for (const [id, proc] of this.processes) {
+      if (this.jobs.get(id)?.detached) continue;
       try {
         proc.kill("SIGTERM");
       } catch {
@@ -751,6 +869,8 @@ function stripOutput(job: Job): JobSummary {
     output: _output,
     cachedDiff: _cachedDiff,
     worktreeTasksWatcher: _watcher,
+    detachedPoll: _detachedPoll,
+    logTail: _logTail,
     lastWorktreeProgress,
     ...rest
   } = job;

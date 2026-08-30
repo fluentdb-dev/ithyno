@@ -338,6 +338,7 @@ try {
   );
 }
 const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+await agentRunner.adoptDetached();
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
 // having to shell out. Awaited so that the very first `/api/agents/jobs`
@@ -1535,6 +1536,9 @@ fastify.get("/api/manager/status", async (req, reply) => {
         command: managerEntry.command,
         args: managerEntry.args,
         hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
+        detached: managerEntry.detached,
+        mode: managerEntry.mode,
+        roles: managerEntry.roles,
         initialInput: managerEntry.initialInput,
         prompt: managerEntry.prompt,
         role: managerEntry.role,

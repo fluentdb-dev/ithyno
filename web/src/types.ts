@@ -214,6 +214,7 @@ export type AgentPublic = {
   command?: string;
   args?: string[];
   hasEnv: boolean;
+  detached?: boolean;
   /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
   mode: AgentMode;
   /** Dispatch labels. Always non-empty. Single-role legacy agents have
@@ -264,6 +265,7 @@ export type AgentConfigPayload =
       command?: string;
       args?: string[];
       description?: string;
+      detached?: boolean;
     }
   | { action: "delete"; name: string };
 
@@ -302,6 +304,7 @@ export type JobSummary = {
   branch: string;
   worktreePath: string;
   status: JobStatus;
+  detached?: boolean;
   /** Dispatch role — set at spawn time by Manager (or the /api/agents/run
    *  caller). Standard values: "propose" | "code" | "review" | "verify".
    *  Custom / non-standard values are accepted but the Phase view filters

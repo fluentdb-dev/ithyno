@@ -400,7 +400,7 @@ function JobRow({ job, initialTab }: { job: JobSummary; initialTab?: "output" | 
         <Link to={`/change/${encodeURIComponent(job.changeId)}`} className="job-change">
           {job.changeId}
         </Link>
-        <span className="job-agent">{job.agentName}</span>
+        <span className="job-agent">{job.agentName}{job.detached && <span className="job-role-badge">[detached]</span>}</span>
         <span className={`job-status status-${job.status}`}>{job.status}</span>
         {job.verdict && <JobVerdictBadge verdict={job.verdict} />}
         {job.status === "running" && (
