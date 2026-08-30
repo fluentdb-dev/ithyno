@@ -482,10 +482,8 @@ function PrerequisitesSection(props: {
                 {report.alerter && renderRow(
                   "alerter (macOS notifications)",
                   report.alerter,
-                  null,
-                  report.alerter.installed === false
-                    ? "Optional for clickable notifications. Install: brew install vjeantet/tap/alerter"
-                    : undefined,
+                  "alerter",
+                  undefined,
                 )}
                 {renderRow("tmux", report.tmux, "tmux")}
                 {renderRow(
