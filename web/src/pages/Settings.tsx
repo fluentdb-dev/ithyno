@@ -316,6 +316,7 @@ function PrerequisitesSection(props: {
   const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
   const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
   const [showAlerterCommand, setShowAlerterCommand] = useState(false);
+  const [showBurntToastCommand, setShowBurntToastCommand] = useState(false);
   const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
 
   const skillInfoFor = (cli: string): AgentSkillInfo | undefined =>
@@ -348,7 +349,7 @@ function PrerequisitesSection(props: {
   const renderRow = (
     name: string,
     status: CliStatus | undefined,
-    installable: "tmux" | "agmsg" | "alerter" | null,
+    installable: "tmux" | "agmsg" | "alerter" | "burntToast" | null,
     hint?: string,
   ) => {
     if (!status) {
@@ -376,7 +377,7 @@ function PrerequisitesSection(props: {
             <button
               type="button"
               className="prereq-install-btn"
-              onClick={() => installable === "alerter" ? setShowAlerterCommand(true) : setInstallTool(installable)}
+              onClick={() => installable === "alerter" ? setShowAlerterCommand(true) : installable === "burntToast" ? setShowBurntToastCommand(true) : setInstallTool(installable)}
             >
               Install
             </button>
@@ -391,6 +392,7 @@ function PrerequisitesSection(props: {
     const info = skillInfoFor(key);
     const hook = key !== "copilot" ? hookStatus.find((item) => item.command === key && item.supported) : undefined;
     const hookAvailable = key !== "copilot" && ["claude", "codex", "agy"].includes(key) && status?.installed === true;
+    const alerterMissing = /Mac/i.test(navigator.platform) && report?.alerter?.installed !== true;
     const unknownSkills = agentSkillsError !== null && agentSkills === null;
 
     return (
@@ -427,7 +429,7 @@ function PrerequisitesSection(props: {
               Manage skills
             </button>
           )}
-          {hookAvailable && <button type="button" className="prereq-hook-btn" title={hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook?.agentName ?? key, !hook?.enabled)}>{hook?.enabled ? "🔔" : "🔕"}</button>}
+          {hookAvailable && <button type="button" className="prereq-hook-btn" title={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => alerterMissing ? setShowAlerterCommand(true) : void onHookChange(hook?.agentName ?? key, !hook?.enabled)}>{alerterMissing ? "🔔" : hook?.enabled ? "🔔" : "🔕"}</button>}
         </td>
       </tr>
     );
@@ -487,6 +489,12 @@ function PrerequisitesSection(props: {
                   "alerter",
                   undefined,
                 )}
+                {(report.burntToast || /Win/i.test(navigator.platform)) && renderRow(
+                  "BurntToast (Windows notifications)",
+                  report.burntToast ?? { installed: false },
+                  "burntToast",
+                  undefined,
+                )}
                 {renderRow("tmux", report.tmux, "tmux")}
                 {renderRow(
                   "agmsg",
@@ -530,6 +538,15 @@ function PrerequisitesSection(props: {
           submitLabel="Close"
           onCancel={() => setShowAlerterCommand(false)}
           onSubmit={() => setShowAlerterCommand(false)}
+        />
+      )}
+      {showBurntToastCommand && (
+        <CommandModal
+          title="Install BurntToast"
+          build={() => "Install-Module -Name BurntToast -Scope CurrentUser"}
+          submitLabel="Close"
+          onCancel={() => setShowBurntToastCommand(false)}
+          onSubmit={() => setShowBurntToastCommand(false)}
         />
       )}
 

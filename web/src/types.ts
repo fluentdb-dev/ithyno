@@ -453,6 +453,7 @@ export type DoctorReport = {
   node: CliStatus;
   /** macOS-only helper for clickable desktop notifications. */
   alerter?: CliStatus;
+  burntToast?: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
 };

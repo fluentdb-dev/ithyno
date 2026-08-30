@@ -104,6 +104,8 @@ export type DoctorReport = {
   node: CliStatus;
   /** macOS-only helper used for clickable desktop notifications. */
   alerter?: CliStatus;
+  /** Windows-only optional PowerShell module for richer notifications. */
+  burntToast?: CliStatus;
   /** true when at least one agent CLI has installed === true */
   readyForManager: boolean;
   /** ISO timestamp of when the check was performed */
@@ -255,6 +257,14 @@ export async function checkCommand(
   });
 }
 
+function checkBurntToast(): CliStatus | undefined {
+  if (process.platform !== "win32") return undefined;
+  const shell = commandExistsOnPath("pwsh") ? "pwsh" : commandExistsOnPath("powershell") ? "powershell" : undefined;
+  if (!shell) return { installed: false, error: "PowerShell was not found" };
+  const result = spawnSync(shell, ["-NoProfile", "-Command", "if (Get-Module -ListAvailable -Name BurntToast) { exit 0 } else { exit 1 }"], { stdio: "ignore", timeout: 2000 });
+  return result.status === 0 ? { installed: true, path: shell } : { installed: false, path: shell };
+}
+
 /** Extract the first semver-like token from a string. */
 function parseVersion(output: string): string | undefined {
   // Match patterns like: v1.2.3, 1.2.3, 1.2.3-beta.1
@@ -339,6 +349,7 @@ export async function runDoctor(): Promise<DoctorReport> {
 
   const gitBashResult = process.platform === "win32" ? checkGitBash() : undefined;
   const agmsgResult = checkAgmsg(gitBashResult);
+  const burntToastResult = checkBurntToast();
 
   // readyForManager: at least one NAMED agent CLI is installed.
   // "antigravity" is excluded because it is an alias for "agy" (same binary);
@@ -354,6 +365,7 @@ export async function runDoctor(): Promise<DoctorReport> {
     git: gitResult,
     node: nodeResult,
     ...(alerterResult ? { alerter: alerterResult } : {}),
+    ...(burntToastResult ? { burntToast: burntToastResult } : {}),
     readyForManager,
     checkedAt: new Date().toISOString(),
   };
