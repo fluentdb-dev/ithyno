@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-param([string]$CliName = "CLI")
+param([string]$CliName = "CLI", [ValidateSet("electron", "vscode", "cli")][string]$Context = "cli")
 $title = "ithyno — CLI waiting"
 $body = "$CliName is waiting for your input"
 

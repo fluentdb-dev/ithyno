@@ -3,6 +3,7 @@
 set -u
 
 cli_name=${1:-CLI}
+notification_context=${2:-${ITHYNO_NOTIFICATION_CONTEXT:-cli}}
 title="ithyno — CLI waiting"
 body="$cli_name is waiting for your input"
 
@@ -19,7 +20,6 @@ project_name=${cwd##*/}
 project_name=${project_name:-project}
 project_id=$(printf '%s' "$cwd" | cksum | awk '{print $1}')
 notification_group="ithyno:$cli_name:$project_id"
-notification_context="${ITHYNO_NOTIFICATION_CONTEXT:-cli}"
 body="$cli_name is waiting for your input in $project_name"
 
 if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
