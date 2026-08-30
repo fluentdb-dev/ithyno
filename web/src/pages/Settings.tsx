@@ -99,6 +99,11 @@ export function Settings() {
           await Promise.all([loadDoctorReport(), loadAgentSkills()]);
         }}
         onRefreshSkills={loadAgentSkills}
+        hookStatus={hookStatus}
+        onHookChange={async (agentName, enabled) => {
+          await toggleAgentHook(agentName, enabled);
+          setHookStatus((items) => items.map((item) => item.agentName === agentName ? { ...item, enabled } : item));
+        }}
       />
 
       <section className="settings-section">
@@ -158,21 +163,6 @@ export function Settings() {
       </section>
 
       <AgmsgSummarySection agmsg={agmsg} disabled={busy} />
-
-      <section className="settings-section">
-        <h3>CLI notifications</h3>
-        <p className="muted">Show a desktop notification when a supported agent finishes and is waiting.</p>
-        {hookStatus.filter((hook) => hook.supported && hook.command !== "copilot").length === 0 ? <p className="muted">No supported agent hooks detected.</p> : hookStatus.filter((hook) => hook.supported && hook.command !== "copilot").map((hook) => (
-          <label className="settings-toggle" key={hook.agentName}>
-            <input type="checkbox" checked={hook.enabled} onChange={async (event) => {
-              const enabled = event.target.checked;
-              try { await toggleAgentHook(hook.agentName, enabled); setHookStatus((items) => items.map((item) => item.agentName === hook.agentName ? { ...item, enabled } : item)); }
-              catch (err) { pushToast("error", err instanceof Error ? err.message : String(err)); }
-            }} />
-            <span><strong>{hook.agentName}</strong><p className="muted">🔔 Desktop notification</p></span>
-          </label>
-        ))}
-      </section>
 
       <NewProjectSection disabled={busy} pushToast={pushToast} />
     </div>
@@ -319,8 +309,10 @@ function PrerequisitesSection(props: {
   agentSkillsError: string | null;
   onRefresh: () => Promise<void>;
   onRefreshSkills: () => Promise<void>;
+  hookStatus: AgentHookStatus[];
+  onHookChange: (agentName: string, enabled: boolean) => Promise<void>;
 }) {
-  const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills } = props;
+  const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
   const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
   const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
 
@@ -395,6 +387,7 @@ function PrerequisitesSection(props: {
   /** Render an Agent CLI row with skill state badges + Manage skills button. */
   const renderAgentRow = (key: Cli, status: CliStatus | undefined) => {
     const info = skillInfoFor(key);
+    const hook = key !== "copilot" ? hookStatus.find((item) => item.command === key && item.supported) : undefined;
     const unknownSkills = agentSkillsError !== null && agentSkills === null;
 
     return (
@@ -421,6 +414,7 @@ function PrerequisitesSection(props: {
           )}
         </td>
         <td className="prereq-action">
+          {hook && <button type="button" className="prereq-install-btn" title={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook.agentName, !hook.enabled)}>{hook.enabled ? "🔔" : "🔕"}</button>}
           {status?.installed && (
             <button
               type="button"
