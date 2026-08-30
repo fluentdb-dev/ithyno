@@ -1444,7 +1444,12 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
-  const agents = agentRegistry.publicConfig().agents.map(async (agent) => {
+  const configured = agentRegistry.publicConfig().agents;
+  const doctor = await runDoctor();
+  const hookAgents = ["claude", "codex", "copilot", "agy"]
+    .filter((command) => doctor.agents[command as keyof typeof doctor.agents]?.installed)
+    .map((command) => configured.find((agent) => agent.command === command) ?? { name: command, command });
+  const agents = hookAgents.map(async (agent) => {
     const supported = agent.command === "claude" || agent.command === "codex" || agent.command === "copilot" || agent.command === "agy" || agent.command === "antigravity";
     if (!supported || !script) return { agentName: agent.name, command: agent.command, supported: false, enabled: false };
     const scriptAbs = join(getProjectRoot(), ".ithyno", script.destRel.replace(/^\.ithyno\//, ""));
@@ -1467,7 +1472,7 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown } }>("/api/agent-h
     return reply.code(400).send({ error: "agentName and enabled are required" });
   }
   const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
-  const command = agent?.command;
+  const command = agent?.command ?? (typeof agentName === "string" ? agentName : undefined);
   if (!agent || !command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
