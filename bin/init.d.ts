@@ -32,14 +32,14 @@ export function installAgyNotifyHook(
   projectRoot: string,
   scriptAbsPath: string,
   force?: boolean,
-  opts?: { log?: (msg: string) => void },
+  opts?: { log?: (msg: string) => void; context?: "electron" | "vscode" | "cli" },
 ): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function removeAgyNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function agyNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
 export function installCodexNotifyHook(projectRoot: string, scriptAbsPath: string, force?: boolean, opts?: { context?: "electron" | "vscode" | "cli" }): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function removeCodexNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function codexNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
-export function installCopilotNotifyHook(projectRoot: string, scriptAbsPath: string, force?: boolean): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
+export function installCopilotNotifyHook(projectRoot: string, scriptAbsPath: string, force?: boolean, opts?: { context?: "electron" | "vscode" | "cli" }): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function removeCopilotNotifyHook(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; settingsPath: string; changed: boolean }>;
 export function copilotNotifyHookStatus(projectRoot: string, scriptAbsPath: string): Promise<{ supported: true; enabled: boolean; settingsPath: string }>;
 

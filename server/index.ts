@@ -1487,10 +1487,10 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown; context?: unknown
     if (enabled) await init.installCodexNotifyHook(getProjectRoot(), scaffold.destAbs, false, { context: context as "electron" | "vscode" | "cli" | undefined });
     else await init.removeCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else if (command === "copilot") {
-    if (enabled) await init.installCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
+    if (enabled) await init.installCopilotNotifyHook(getProjectRoot(), scaffold.destAbs, false, { context: context as "electron" | "vscode" | "cli" | undefined });
     else await init.removeCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
   } else if (enabled) {
-    await init.installAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
+    await init.installAgyNotifyHook(getProjectRoot(), scaffold.destAbs, false, { context: context as "electron" | "vscode" | "cli" | undefined });
   } else {
     await init.removeAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
   }
