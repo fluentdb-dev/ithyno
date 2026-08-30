@@ -313,7 +313,7 @@ function PrerequisitesSection(props: {
   onHookChange: (agentName: string, enabled: boolean) => Promise<void>;
 }) {
   const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
-  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+  const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | "alerter" | null>(null);
   const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
 
   const skillInfoFor = (cli: string): AgentSkillInfo | undefined =>
@@ -346,7 +346,7 @@ function PrerequisitesSection(props: {
   const renderRow = (
     name: string,
     status: CliStatus | undefined,
-    installable: "tmux" | "agmsg" | null,
+    installable: "tmux" | "agmsg" | "alerter" | null,
     hint?: string,
   ) => {
     if (!status) {
@@ -464,7 +464,7 @@ function PrerequisitesSection(props: {
                 {renderRow(
                   "git",
                   report.git,
-                  null,
+                  "alerter",
                   report.git.installed === false
                     ? "Required for worktrees and commits. Install: https://git-scm.com/downloads"
                     : undefined,
