@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect } from "vitest";
-import { computeInsertedValue, shouldApplyClipboardResponse } from "./clipboardBridge";
+import { describe, it, expect, vi } from "vitest";
+import { computeInsertedValue, shouldApplyClipboardResponse, writeClipboardText } from "./clipboardBridge";
+
+describe("writeClipboardText", () => {
+  it("uses an injected clipboard writer for non-shell callers", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    await writeClipboardText("copied", { writeText });
+    expect(writeText).toHaveBeenCalledWith("copied");
+  });
+});
 
 // ---- computeInsertedValue (task 4.1) ----------------------------------------
 

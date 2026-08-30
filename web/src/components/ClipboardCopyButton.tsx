@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { writeClipboardText } from "../clipboardBridge";
 
-type ClipboardWriter = Pick<Clipboard, "writeText">;
-
-export async function writeClipboardText(
-  text: string,
-  clipboard: ClipboardWriter = navigator.clipboard,
-): Promise<void> {
-  await clipboard.writeText(text);
-}
+export { writeClipboardText } from "../clipboardBridge";
 
 export function useClipboardCopy(text: string) {
   const [copied, setCopied] = useState(false);

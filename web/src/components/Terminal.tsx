@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { getSessionToken } from "../runtime";
 import { useAppliedTheme, type AppliedTheme } from "../hooks/useAppliedTheme";
 import { useStore } from "../store";
+import { writeClipboardText } from "../clipboardBridge";
 
 /**
  * Browser terminal pane. Streams bytes over a dedicated /pty WebSocket to a
@@ -93,7 +94,7 @@ export function Terminal() {
       if (ev.type !== "keydown" || !ev.ctrlKey || !ev.shiftKey || ev.altKey) return true;
       if (ev.key === "C" || ev.code === "KeyC") {
         if (!term.hasSelection()) return true;
-        void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        void writeClipboardText(term.getSelection()).catch(() => {});
         return false;
       }
       if (ev.key === "V" || ev.code === "KeyV") {
