@@ -289,7 +289,7 @@ export async function saveAgentConfig(payload: AgentConfigPayload): Promise<void
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
 }
 
-export type AgentHookStatus = { agentName: string; supported: boolean; enabled: boolean };
+export type AgentHookStatus = { agentName: string; command?: string; supported: boolean; enabled: boolean };
 export async function fetchAgentHooks(): Promise<AgentHookStatus[]> {
   const res = await fetch("/api/agent-hooks");
   if (!res.ok) throw new Error(`GET /api/agent-hooks failed: ${res.status}`);

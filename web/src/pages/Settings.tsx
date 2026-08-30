@@ -162,7 +162,7 @@ export function Settings() {
       <section className="settings-section">
         <h3>CLI notifications</h3>
         <p className="muted">Show a desktop notification when a supported agent finishes and is waiting.</p>
-        {hookStatus.length === 0 ? <p className="muted">No supported agent hooks detected.</p> : hookStatus.filter((hook) => hook.supported).map((hook) => (
+        {hookStatus.filter((hook) => hook.supported && hook.command !== "copilot").length === 0 ? <p className="muted">No supported agent hooks detected.</p> : hookStatus.filter((hook) => hook.supported && hook.command !== "copilot").map((hook) => (
           <label className="settings-toggle" key={hook.agentName}>
             <input type="checkbox" checked={hook.enabled} onChange={async (event) => {
               const enabled = event.target.checked;

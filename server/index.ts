@@ -1446,7 +1446,7 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
   const script = init.platformNotifyScript(process.platform);
   const agents = agentRegistry.publicConfig().agents.map(async (agent) => {
     const supported = agent.command === "claude" || agent.command === "codex" || agent.command === "copilot" || agent.command === "agy" || agent.command === "antigravity";
-    if (!supported || !script) return { agentName: agent.name, supported: false, enabled: false };
+    if (!supported || !script) return { agentName: agent.name, command: agent.command, supported: false, enabled: false };
     const scriptAbs = join(getProjectRoot(), ".ithyno", script.destRel.replace(/^\.ithyno\//, ""));
     const state = agent.command === "claude"
       ? await init.claudeNotifyHookStatus(getProjectRoot(), scriptAbs)
@@ -1455,7 +1455,7 @@ fastify.get("/api/agent-hooks", async (req, reply) => {
         : agent.command === "copilot"
         ? await init.copilotNotifyHookStatus(getProjectRoot(), scriptAbs)
         : await init.agyNotifyHookStatus(getProjectRoot(), scriptAbs);
-    return { agentName: agent.name, supported: state.supported, enabled: state.enabled };
+    return { agentName: agent.name, command: agent.command, supported: state.supported, enabled: state.enabled };
   });
   return { hooks: await Promise.all(agents) };
 });
