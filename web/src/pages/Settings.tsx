@@ -414,7 +414,6 @@ function PrerequisitesSection(props: {
           )}
         </td>
         <td className="prereq-action">
-          {hook && <button type="button" className="prereq-install-btn" title={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook.agentName, !hook.enabled)}>{hook.enabled ? "🔔" : "🔕"}</button>}
           {status?.installed && (
             <button
               type="button"
@@ -425,6 +424,7 @@ function PrerequisitesSection(props: {
               Manage skills
             </button>
           )}
+          {hook && <button type="button" className="prereq-hook-btn" title={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={hook.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => void onHookChange(hook.agentName, !hook.enabled)}>{hook.enabled ? "🔔" : "🔕"}</button>}
         </td>
       </tr>
     );
