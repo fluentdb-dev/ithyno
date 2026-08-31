@@ -105,6 +105,7 @@ function parseJsonc(raw) {
 
 function isIthynoHookEntry(entry, scriptAbsPath) {
   const matches = (value) => typeof value === "string" && (value === scriptAbsPath || value.startsWith(`${scriptAbsPath} `));
+  if (entry?.type === "command" && (matches(entry.command) || matches(entry.bash) || matches(entry.powershell))) return true;
   return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (matches(h.command) || matches(h.bash) || matches(h.powershell)));
 }
 
@@ -181,7 +182,9 @@ export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = f
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName), timeout: 10 }] };
+  // Agy Stop is a flat lifecycle event: handlers are placed directly in the
+  // array. Grouped matcher/hooks entries are only valid for tool-use events.
+  const entry = { type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName), timeout: 10 };
   const events = settings["ithyno-notification"] ?? {};
   const existing = Array.isArray(events.Stop) ? events.Stop : [];
   const filtered = existing.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
