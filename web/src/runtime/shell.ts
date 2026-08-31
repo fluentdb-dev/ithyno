@@ -26,6 +26,8 @@ function urlSaysVsCode(): boolean {
     if (hasParam) {
       try {
         sessionStorage.setItem("ithyno_is_vscode", "1");
+        const hostAppName = new URL(window.location.href).searchParams.get("hostAppName");
+        if (hostAppName) sessionStorage.setItem("ithyno_vscode_host_app", hostAppName);
       } catch {
         /* ignore */
       }
@@ -53,7 +55,12 @@ export function isVsCodeShell(): boolean {
 export function vscodeHostAppName(): string | undefined {
   if (!isVsCode || typeof window === "undefined") return undefined;
   try {
-    return new URL(window.location.href).searchParams.get("hostAppName") || undefined;
+    const fromUrl = new URL(window.location.href).searchParams.get("hostAppName");
+    if (fromUrl) {
+      sessionStorage.setItem("ithyno_vscode_host_app", fromUrl);
+      return fromUrl;
+    }
+    return sessionStorage.getItem("ithyno_vscode_host_app") || undefined;
   } catch {
     return undefined;
   }
