@@ -104,7 +104,12 @@ function parseJsonc(raw) {
 }
 
 function isIthynoHookEntry(entry, scriptAbsPath) {
-  const matches = (value) => typeof value === "string" && (value === scriptAbsPath || value.startsWith(`${scriptAbsPath} `));
+  const matches = (value) => typeof value === "string" && (
+    value === scriptAbsPath ||
+    value.startsWith(`${scriptAbsPath} `) ||
+    value === `'${scriptAbsPath}'` ||
+    value.startsWith(`'${scriptAbsPath}' `)
+  );
   if (entry?.type === "command" && (matches(entry.command) || matches(entry.bash) || matches(entry.powershell))) return true;
   return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (matches(h.command) || matches(h.bash) || matches(h.powershell)));
 }
