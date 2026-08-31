@@ -103,8 +103,8 @@ export function Settings() {
         }}
         onRefreshSkills={loadAgentSkills}
         hookStatus={hookStatus}
-        onHookChange={async (agentName, enabled) => {
-          await toggleAgentHook(agentName, enabled);
+        onHookChange={async (agentName, enabled, context) => {
+          await toggleAgentHook(agentName, enabled, context);
           setHookStatus((items) => items.map((item) => item.agentName === agentName ? { ...item, enabled } : item));
         }}
       />
