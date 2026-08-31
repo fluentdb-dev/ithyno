@@ -188,7 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] },
     );
-    panel.webview.html = renderWebviewHtml(server.url);
+    panel.webview.html = renderWebviewHtml(server.url, vscode.env.appName);
 
     const s: PanelSession = { panel, server, terminal: null, workspaceRoot };
     session = s;
@@ -218,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
         t.show(true);
       }
       if (msg.type === "ithyno:reload-session") {
-        panel.webview.html = renderWebviewHtml(s.server.url);
+        panel.webview.html = renderWebviewHtml(s.server.url, vscode.env.appName);
       }
       if (msg.type === "ithyno:init-complete") {
         // Initialization finished inside the main iframe (NoProjectDecisionPanel
@@ -289,7 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
           t.show(true);
         }
         if (msg.type === "ithyno:reload-session" && session) {
-          webviewView.webview.html = renderWebviewHtml(session.server.url);
+          webviewView.webview.html = renderWebviewHtml(session.server.url, vscode.env.appName);
         }
       });
     }

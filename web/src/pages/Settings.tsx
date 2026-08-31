@@ -9,7 +9,7 @@ import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
 import { AgentSkillInstallDialog } from "../components/AgentSkillInstallDialog";
 import { CommandModal } from "../components/CommandModal";
 import { isAbsolutePath } from "../lib/paths";
-import { isVsCodeShell } from "../runtime/shell";
+import { isVsCodeShell, vscodeHostAppName } from "../runtime/shell";
 import { isElectronShell } from "../runtime/electron";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
 // Note: the `defaultManager` store slice + localStorage persistence remain
@@ -103,8 +103,8 @@ export function Settings() {
         }}
         onRefreshSkills={loadAgentSkills}
         hookStatus={hookStatus}
-        onHookChange={async (agentName, enabled, context) => {
-          await toggleAgentHook(agentName, enabled, context);
+        onHookChange={async (agentName, enabled, context, hostAppName) => {
+          await toggleAgentHook(agentName, enabled, context, hostAppName);
           setHookStatus((items) => items.map((item) => item.agentName === agentName ? { ...item, enabled } : item));
         }}
       />
@@ -313,10 +313,11 @@ function PrerequisitesSection(props: {
   onRefresh: () => Promise<void>;
   onRefreshSkills: () => Promise<void>;
   hookStatus: AgentHookStatus[];
-  onHookChange: (agentName: string, enabled: boolean, context?: "electron" | "vscode" | "cli") => Promise<void>;
+  onHookChange: (agentName: string, enabled: boolean, context?: "electron" | "vscode" | "cli", hostAppName?: string) => Promise<void>;
 }) {
   const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
   const notificationContext = isVsCodeShell() ? "vscode" : isElectronShell() ? "electron" : "cli";
+  const notificationHostApp = notificationContext === "vscode" ? vscodeHostAppName() : undefined;
   const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
   const [showAlerterCommand, setShowAlerterCommand] = useState(false);
   const [showBurntToastCommand, setShowBurntToastCommand] = useState(false);
@@ -432,7 +433,7 @@ function PrerequisitesSection(props: {
               Manage skills
             </button>
           )}
-          {hookAvailable && <button type="button" className="prereq-hook-btn" title={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => alerterMissing ? setShowAlerterCommand(true) : void onHookChange(hook?.agentName ?? key, !hook?.enabled, notificationContext)}>{alerterMissing ? "🔔" : hook?.enabled ? "🔔" : "🔕"}</button>}
+          {hookAvailable && <button type="button" className="prereq-hook-btn" title={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => alerterMissing ? setShowAlerterCommand(true) : void onHookChange(hook?.agentName ?? key, !hook?.enabled, notificationContext, notificationHostApp)}>{alerterMissing ? "🔔" : hook?.enabled ? "🔔" : "🔕"}</button>}
         </td>
       </tr>
     );

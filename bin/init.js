@@ -108,12 +108,19 @@ function isIthynoHookEntry(entry, scriptAbsPath) {
   return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (matches(h.command) || matches(h.bash) || matches(h.powershell)));
 }
 
-function notificationCommand(scriptAbsPath, context) {
-  return context && ["electron", "vscode", "cli"].includes(context) ? `${scriptAbsPath} ${context}` : scriptAbsPath;
+function shellArg(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function notificationCommand(scriptAbsPath, cliName, context, hostAppName) {
+  if (!context || !["electron", "vscode", "cli"].includes(context)) return scriptAbsPath;
+  const args = [scriptAbsPath, cliName, context];
+  if (hostAppName) args.push(hostAppName);
+  return args.map(shellArg).join(" ");
 }
 
 /** Merge the local notification hook into Claude Code's JSON settings. */
-export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force = false, { log = console.warn, context } = {}) {
+export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force = false, { log = console.warn, context, hostAppName } = {}) {
   const settingsPath = join(projectRoot, ".claude", "settings.json");
   let settings = {};
   let hadComments = false;
@@ -124,7 +131,7 @@ export async function installClaudeNotifyHook(projectRoot, scriptAbsPath, force 
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context) }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, "claude", context, hostAppName) }] };
   for (const event of ["Notification", "Stop"]) {
     const entries = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
     const indexes = entries.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
@@ -169,12 +176,12 @@ export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
 }
 
 /** Merge the notification hook into Agy's project-local hooks.json. */
-export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
+export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false, { context, hostAppName } = {}) {
   const settingsPath = join(projectRoot, ".agent", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context), timeout: 10 }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName), timeout: 10 }] };
   const events = settings["ithyno-notification"] ?? {};
   const existing = Array.isArray(events.Stop) ? events.Stop : [];
   const filtered = existing.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
@@ -215,13 +222,13 @@ export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
 }
 
 /** Merge the notification hook into Codex's project-local hooks.json. */
-export async function installCodexNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
+export async function installCodexNotifyHook(projectRoot, scriptAbsPath, force = false, { context, hostAppName } = {}) {
   const settingsPath = join(projectRoot, ".codex", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, context), timeout: 10 }] };
+  const entry = { matcher: "", hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, "codex", context, hostAppName), timeout: 10 }] };
   const existing = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
   const indexes = existing.reduce((all, item, index) => (isIthynoHookEntry(item, scriptAbsPath) ? [...all, index] : all), []);
   if (indexes.length === 0) settings.hooks.Stop = [...existing, entry];

@@ -50,6 +50,15 @@ export function isVsCodeShell(): boolean {
   return isVsCode;
 }
 
+export function vscodeHostAppName(): string | undefined {
+  if (!isVsCode || typeof window === "undefined") return undefined;
+  try {
+    return new URL(window.location.href).searchParams.get("hostAppName") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Post a message to the VS Code extension host. When called from the nested
  * iframe (the normal case), we go via `window.parent` — the outer webview
