@@ -1476,7 +1476,7 @@ fastify.post<{ Body: { agentName?: unknown; enabled?: unknown; context?: unknown
   const notifyOptions = { context: context as "electron" | "vscode" | "cli" | undefined, hostAppName: hostAppName as string | undefined };
   const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
   const command = agent?.command ?? (typeof agentName === "string" ? agentName : undefined);
-  if (!agent || !command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
+  if (!command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
   const init = await import("../bin/init.js");
   const script = init.platformNotifyScript(process.platform);
   if (!script) return reply.code(400).send({ error: "notification hook is unsupported on this platform" });
