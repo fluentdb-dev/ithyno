@@ -19,7 +19,8 @@ describe("notification init helpers", () => {
     const root = await tempRoot();
     expect((await scaffoldNotifyScript(root, false, { platform: "linux", log: () => {} }))?.action).toBe("create");
     expect((await scaffoldNotifyScript(root, false, { platform: "linux", log: () => {} }))?.action).toBe("skip");
-    expect((await stat(join(root, ".ithyno/scripts/notify-waiting.sh"))).mode & 0o111).toBeTruthy();
+    const scriptStat = await stat(join(root, ".ithyno/scripts/notify-waiting.sh"));
+    if (process.platform !== "win32") expect(scriptStat.mode & 0o111).toBeTruthy();
   });
   it("merges Claude hooks while preserving users and avoiding duplicates", async () => {
     const root = await tempRoot();
