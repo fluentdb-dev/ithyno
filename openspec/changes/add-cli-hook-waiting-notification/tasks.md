@@ -30,14 +30,14 @@
 
 ## 5. Init orchestration wiring
 
-- [x] 5.1 In `bin/init.js` `runInit`, after the existing scaffold loop, invoke: `scaffoldNotifyScript` → then for each `MANAGER_VERIFIED` CLI detected in the target project, invoke that CLI's hook installer with the absolute script path.
-- [x] 5.2 Detection rule: for Claude, detect by presence of `.claude/` directory OR planned creation of one during init. For agy, detect by presence of `.agent/` directory OR planned creation. Match `MANAGER_VERIFIED = ["claude", "agy"]` from `web/src/components/InitDialog.tsx` so the two lists stay in sync.
-- [x] 5.3 Ensure init exits with the same success semantics when notification-hook installation partially fails (e.g., write-permission error on the settings file) — surface a single-line warning per failed installer, don't fail the whole init.
-- [x] 5.4 Integration test: run `openspec-ui init` on a temp project with `.claude/settings.json` containing a user hook. Verify post-state: notify script exists, user hook preserved, ithyno hook added, re-run is a no-op.
+- [x] 5.1 Keep notification hook installation out of `bin/init.js` `runInit`; init scaffolds the host-specific notification script, while notification hooks are an explicit Settings opt-in.
+- [x] 5.2 The Settings installer detects installed supported CLIs independently of `agents.yaml` and installs only the selected CLI hook.
+- [x] 5.3 Ensure Settings installation preserves init success semantics when a hook write fails; surface a warning without failing unrelated project initialization.
+- [x] 5.4 Integration coverage verifies init scaffolds the host-specific notification script without creating hook configuration; Settings installation remains idempotent and preserves user hooks.
 
 ## 6. Documentation
 
-- [x] 6.1 Update `README.md` (or `docs/`) with a short section: "CLI response-waiting notifications" — how to disable (delete/rename `.ithyno/scripts/notify-waiting.*`), how to re-enable (re-run init), which CLIs are covered.
+- [x] 6.1 Update `README.md` (or `docs/`) with a short section: "CLI response-waiting notifications" — init scaffolds the script, while hooks are enabled/disabled from Settings.
 - [x] 6.2 Update `CLAUDE.md` if the new hook affects any workflow guidance for Claude sessions.
 - [x] 6.3 Add `outcome.md` template with the four sections (✅ Worked / ⚠️ Surprises / 🔁 Differently / 🌱 Follow-ups) capturing what was learned during implementation. Fill in during archive.
 

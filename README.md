@@ -119,13 +119,13 @@ for PTY and security details.
 
 ### CLI response-waiting notifications
 
-`ithyno init` installs a local OS notification hook for Claude Code projects
-(`Notification` and `Stop` events). On macOS and Linux it uses
-`.ithyno/scripts/notify-waiting.sh`; on Windows it uses the PowerShell script.
-The hook never contacts the ithyno server. To disable notifications, delete or
-rename the scaffolded script (or remove its executable bit); re-run `ithyno
-init` to re-enable it. Agy is detected but currently skipped until its project
-hook contract is stable.
+Notifications are opt-in. `ithyno init` scaffolds the host-specific notification
+script under `.ithyno/scripts/`, but it does not create or update CLI hook
+configuration. Enable a notification from Settings → Prerequisites by
+selecting the bell beside an installed CLI. That action updates only the
+selected CLI's project hook configuration. The hook never contacts the ithyno
+server. Disable it with the same control; running `ithyno init` will not
+re-enable the hook.
 
 ### Dogfooding (developing ithyno with OpenSpec)
 

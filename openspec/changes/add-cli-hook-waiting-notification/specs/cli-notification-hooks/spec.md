@@ -1,24 +1,30 @@
 ## ADDED Requirements
 
-### Requirement: Init installs OS notification hook into supported CLIs
+### Requirement: Notifications are explicitly enabled per CLI
 
-`openspec-ui init` SHALL install a "response-waiting" notification hook into each supported Manager CLI's configuration (`MANAGER_VERIFIED = ["claude", "agy"]`) present in the target project. The hook SHALL invoke a locally-scaffolded notification script when the CLI enters a waiting-for-user state, without contacting the ithyno server.
+The Settings → Prerequisites notification control SHALL install a
+"response-waiting" notification hook only for the selected installed CLI. The
+hook SHALL invoke a locally-scaffolded notification script when the CLI enters
+a waiting-for-user state, without contacting the ithyno server. `openspec-ui
+init` SHALL scaffold the host-specific notification script but SHALL NOT create,
+update, or remove CLI hook configuration.
 
-#### Scenario: Claude Code hook installed on init
-- **WHEN** the user runs `openspec-ui init` in a project directory that contains `.claude/settings.json` (or where init creates one)
+#### Scenario: Claude Code hook installed from Settings
+- **WHEN** the user enables the Claude notification control in Settings
 - **THEN** `.claude/settings.json` includes an entry under both `hooks.Notification` and `hooks.Stop` whose `command` is the absolute path to the scaffolded notification script
 
-#### Scenario: agy hook installed on init
-- **WHEN** the user runs `openspec-ui init` in a project targeting agy as a Manager candidate
+#### Scenario: agy hook installed from Settings
+- **WHEN** the user enables the agy notification control in Settings
 - **THEN** agy's hook configuration file includes an entry that fires the scaffolded notification script on agy's response-completed / awaiting-input event (equivalent semantics to Claude Code's Notification+Stop)
 
-#### Scenario: Unsupported Manager CLIs are skipped without error
-- **WHEN** the user runs `openspec-ui init` and the target project has no `MANAGER_VERIFIED` CLI configured
-- **THEN** init completes successfully and no hook configuration is modified
+#### Scenario: Init scaffolds scripts without enabling hooks
+- **WHEN** the user runs `openspec-ui init`
+- **THEN** the host-specific notification script is scaffolded and CLI hook configuration is not created or modified
 
 ### Requirement: Notification script is host-OS specific
 
-Init SHALL scaffold exactly one notification script matching the host operating system into `.ithyno/scripts/`, and SHALL make it executable.
+Init SHALL scaffold exactly one notification script matching the host operating
+system into `.ithyno/scripts/`, and SHALL make it executable.
 
 #### Scenario: macOS scaffolds sh script only
 - **WHEN** init runs on macOS
@@ -54,18 +60,20 @@ The scaffolded notification script SHALL display a desktop notification via the 
 
 ### Requirement: Hook installation preserves existing user hooks
 
-Init SHALL merge the ithyno hook entry into the CLI's existing hook configuration without discarding or overwriting user-authored hook entries.
+The Settings installer SHALL merge the ithyno hook entry into the CLI's
+existing hook configuration without discarding or overwriting user-authored
+hook entries.
 
 #### Scenario: Existing user hook is preserved
-- **WHEN** init runs in a project whose `.claude/settings.json` already contains a user-authored entry under `hooks.Notification`
+- **WHEN** the Settings installer runs in a project whose `.claude/settings.json` already contains a user-authored entry under `hooks.Notification`
 - **THEN** after init, both the user's entry AND the ithyno entry are present in `hooks.Notification`
 
 #### Scenario: Re-running init is idempotent
-- **WHEN** init runs a second time in a project where the ithyno hook entry is already present
+- **WHEN** the Settings installer runs a second time where the ithyno hook entry is already present
 - **THEN** no duplicate ithyno entry is added and the configuration file is left semantically unchanged
 
 #### Scenario: --force replaces the ithyno entry only
-- **WHEN** the user runs `openspec-ui init --force` in a project where the ithyno hook entry is already present
+- **WHEN** the user explicitly re-enables the notification where the ithyno hook entry is already present
 - **THEN** the ithyno entry is rewritten with the currently-scaffolded script path and any other user-authored entries are preserved
 
 ### Requirement: Hook path is absolute at install time
@@ -73,7 +81,7 @@ Init SHALL merge the ithyno hook entry into the CLI's existing hook configuratio
 The `command` value written into the CLI's hook configuration SHALL be the absolute filesystem path of the scaffolded notification script at the moment init runs.
 
 #### Scenario: Absolute path in Claude Code hook
-- **WHEN** init writes a hook entry into `.claude/settings.json`
+- **WHEN** the Settings installer writes a hook entry into `.claude/settings.json`
 - **THEN** the entry's `command` field is an absolute path (starts with `/` on POSIX, drive-letter on Windows) pointing at the scaffolded script under the target project's `.ithyno/scripts/`
 
 ### Requirement: No dependency on ithyno server state
@@ -85,7 +93,7 @@ The notification pathway SHALL function entirely without the ithyno server proce
 - **THEN** the OS notification is still produced
 
 #### Scenario: No server env vars in scaffold or execution
-- **WHEN** init installs the hook, and later when the hook executes
+- **WHEN** the Settings installer installs the hook, and later when the hook executes
 - **THEN** neither operation reads or writes `ITHYNO_LAUNCHER_SESSION_TOKEN`, `ITHYNO_PORT`, or the equivalent auth/port variables
 
 ### Requirement: User can disable notifications by removing the script
