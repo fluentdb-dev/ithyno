@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { setParallelExecution, setTmux } from "../api";
+import { fetchAgentHooks, setParallelExecution, setTmux, toggleAgentHook, type AgentHookStatus } from "../api";
 import type { AgentSkillInfo, AgentSkillStatus, CliStatus } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { PrereqInstallModal } from "../components/PrereqInstallModal";
 import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
 import { AgentSkillInstallDialog } from "../components/AgentSkillInstallDialog";
+import { CommandModal } from "../components/CommandModal";
 import { isAbsolutePath } from "../lib/paths";
+import { isVsCodeShell, vscodeHostAppName } from "../runtime/shell";
+import { isElectronShell } from "../runtime/electron";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
 // Note: the `defaultManager` store slice + localStorage persistence remain
 // in place. The Settings-side radio group was removed by
@@ -40,11 +43,13 @@ export function Settings() {
   const agentSkillsError = useStore((s) => s.agentSkillsError);
   const loadAgentSkills = useStore((s) => s.loadAgentSkills);
   const [busy, setBusy] = useState(false);
+  const [hookStatus, setHookStatus] = useState<AgentHookStatus[]>([]);
 
   // Fetch the doctor report and agent skill state on mount
   useEffect(() => {
     void loadDoctorReport();
     void loadAgentSkills();
+    void fetchAgentHooks().then(setHookStatus).catch(() => undefined);
   }, [loadDoctorReport, loadAgentSkills]);
 
   const onToggleParallel = async (next: boolean) => {
@@ -97,6 +102,11 @@ export function Settings() {
           await Promise.all([loadDoctorReport(), loadAgentSkills()]);
         }}
         onRefreshSkills={loadAgentSkills}
+        hookStatus={hookStatus}
+        onHookChange={async (agentName, enabled, context, hostAppName) => {
+          await toggleAgentHook(agentName, enabled, context, hostAppName);
+          setHookStatus((items) => items.map((item) => item.agentName === agentName ? { ...item, enabled } : item));
+        }}
       />
 
       <section className="settings-section">
@@ -302,9 +312,15 @@ function PrerequisitesSection(props: {
   agentSkillsError: string | null;
   onRefresh: () => Promise<void>;
   onRefreshSkills: () => Promise<void>;
+  hookStatus: AgentHookStatus[];
+  onHookChange: (agentName: string, enabled: boolean, context?: "electron" | "vscode" | "cli", hostAppName?: string) => Promise<void>;
 }) {
-  const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills } = props;
+  const { report, agentSkills, agentSkillsError, onRefresh, onRefreshSkills, hookStatus, onHookChange } = props;
+  const notificationContext = isVsCodeShell() ? "vscode" : isElectronShell() ? "electron" : "cli";
+  const notificationHostApp = notificationContext === "vscode" ? vscodeHostAppName() : undefined;
   const [installTool, setInstallTool] = useState<"tmux" | "agmsg" | null>(null);
+  const [showAlerterCommand, setShowAlerterCommand] = useState(false);
+  const [showBurntToastCommand, setShowBurntToastCommand] = useState(false);
   const [skillDialogCli, setSkillDialogCli] = useState<string | null>(null);
 
   const skillInfoFor = (cli: string): AgentSkillInfo | undefined =>
@@ -337,7 +353,7 @@ function PrerequisitesSection(props: {
   const renderRow = (
     name: string,
     status: CliStatus | undefined,
-    installable: "tmux" | "agmsg" | null,
+    installable: "tmux" | "agmsg" | "alerter" | "burntToast" | null,
     hint?: string,
   ) => {
     if (!status) {
@@ -365,7 +381,7 @@ function PrerequisitesSection(props: {
             <button
               type="button"
               className="prereq-install-btn"
-              onClick={() => setInstallTool(installable)}
+              onClick={() => installable === "alerter" ? setShowAlerterCommand(true) : installable === "burntToast" ? setShowBurntToastCommand(true) : setInstallTool(installable)}
             >
               Install
             </button>
@@ -378,6 +394,9 @@ function PrerequisitesSection(props: {
   /** Render an Agent CLI row with skill state badges + Manage skills button. */
   const renderAgentRow = (key: Cli, status: CliStatus | undefined) => {
     const info = skillInfoFor(key);
+    const hook = key !== "copilot" ? hookStatus.find((item) => item.command === key && item.supported) : undefined;
+    const hookAvailable = key !== "copilot" && ["claude", "codex", "agy"].includes(key) && status?.installed === true;
+    const alerterMissing = /Mac/i.test(navigator.platform) && report?.alerter?.installed !== true;
     const unknownSkills = agentSkillsError !== null && agentSkills === null;
 
     return (
@@ -414,6 +433,7 @@ function PrerequisitesSection(props: {
               Manage skills
             </button>
           )}
+          {hookAvailable && <button type="button" className="prereq-hook-btn" title={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} aria-label={alerterMissing ? "Install alerter for desktop notifications" : hook?.enabled ? "Disable desktop notification" : "Enable desktop notification"} onClick={() => alerterMissing ? setShowAlerterCommand(true) : void onHookChange(hook?.agentName ?? key, !hook?.enabled, notificationContext, notificationHostApp)}>{alerterMissing ? "🔔" : hook?.enabled ? "🔔" : "🔕"}</button>}
         </td>
       </tr>
     );
@@ -453,7 +473,7 @@ function PrerequisitesSection(props: {
                 {renderRow(
                   "git",
                   report.git,
-                  null,
+                  "alerter",
                   report.git.installed === false
                     ? "Required for worktrees and commits. Install: https://git-scm.com/downloads"
                     : undefined,
@@ -467,6 +487,18 @@ function PrerequisitesSection(props: {
                     : undefined,
                 )}
                 {AGENT_CLI_KEYS.map((key) => renderAgentRow(key, report.agents[key]))}
+                {(report.alerter || /Mac/i.test(navigator.platform)) && renderRow(
+                  "alerter (macOS notifications)",
+                  report.alerter ?? { installed: false },
+                  "alerter",
+                  undefined,
+                )}
+                {(report.burntToast || /Win/i.test(navigator.platform)) && renderRow(
+                  "BurntToast (Windows notifications)",
+                  report.burntToast ?? { installed: false },
+                  "burntToast",
+                  undefined,
+                )}
                 {renderRow("tmux", report.tmux, "tmux")}
                 {renderRow(
                   "agmsg",
@@ -501,6 +533,24 @@ function PrerequisitesSection(props: {
             setInstallTool(null);
             if (didInstall) void onRefresh();
           }}
+        />
+      )}
+      {showAlerterCommand && (
+        <CommandModal
+          title="Install alerter"
+          build={() => "brew install vjeantet/tap/alerter"}
+          submitLabel="Close"
+          onCancel={() => setShowAlerterCommand(false)}
+          onSubmit={() => setShowAlerterCommand(false)}
+        />
+      )}
+      {showBurntToastCommand && (
+        <CommandModal
+          title="Install BurntToast"
+          build={() => "Install-Module -Name BurntToast -Scope CurrentUser"}
+          submitLabel="Close"
+          onCancel={() => setShowBurntToastCommand(false)}
+          onSubmit={() => setShowBurntToastCommand(false)}
         />
       )}
 

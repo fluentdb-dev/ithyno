@@ -12,9 +12,10 @@
  * not the iframe. We flag the iframe URL with `vscode=1` so the React app
  * knows to route messages via `window.parent.postMessage` instead.
  */
-export function renderWebviewHtml(serverUrl: string): string {
+export function renderWebviewHtml(serverUrl: string, hostAppName?: string): string {
   const url = new URL(serverUrl);
   url.searchParams.set("vscode", "1");
+  if (hostAppName) url.searchParams.set("hostAppName", hostAppName);
   const iframeSrc = url.toString();
   return `<!doctype html>
 <html>

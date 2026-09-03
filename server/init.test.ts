@@ -516,6 +516,26 @@ describe("ithy-opsx scaffold reachability smoke", () => {
     }
   });
 
+  it("runInit() scaffolds the host notification script but leaves CLI hooks opt-in", async () => {
+    const res = await runInit({
+      targetDir: scaffoldDir,
+      autoGitInit: true,
+      quiet: true,
+    });
+    expect(res.ok).toBe(true);
+    const expectedScript = process.platform === "win32"
+      ? ".ithyno/scripts/notify-waiting.ps1"
+      : ".ithyno/scripts/notify-waiting.sh";
+    const unexpectedScript = process.platform === "win32"
+      ? ".ithyno/scripts/notify-waiting.sh"
+      : ".ithyno/scripts/notify-waiting.ps1";
+    expect(existsSync(join(scaffoldDir, expectedScript))).toBe(true);
+    expect(existsSync(join(scaffoldDir, unexpectedScript))).toBe(false);
+    expect(existsSync(join(scaffoldDir, ".claude/settings.json"))).toBe(false);
+    expect(existsSync(join(scaffoldDir, ".agent/hooks.json"))).toBe(false);
+    expect(existsSync(join(scaffoldDir, ".codex/hooks.json"))).toBe(false);
+  });
+
   it("runInit() copies every .claude/skills/ithy-opsx-*/** into the target", async () => {
     const res = await runInit({
       targetDir: scaffoldDir,

@@ -3833,6 +3833,20 @@ a.modal-btn:hover {
   background: var(--accent-hover);
 }
 
+.prereq-hook-btn {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prereq-hook-btn:hover {
+  background: transparent;
+  opacity: 0.75;
+}
+
 .prereq-ready {
   margin-top: 8px;
   font-size: 13px;

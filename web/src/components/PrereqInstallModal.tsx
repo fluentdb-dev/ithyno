@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * PrereqInstallModal — shared install-progress modal for tmux and agmsg.
+ * PrereqInstallModal — shared install-progress modal for prerequisites.
  *
  * Consumers: Settings > Prerequisites (add-doctor-and-installer) and
  * InitDialog (expand-init-to-scaffold-agents + inline install UX).

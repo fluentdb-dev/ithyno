@@ -117,6 +117,16 @@ for normal use, the [troubleshooting guide](https://fluentdb-dev.github.io/ithyn
 for environment-specific issues, and the [architecture document](./docs/architecture.md#11-manager-terminal-and-local-security)
 for PTY and security details.
 
+### CLI response-waiting notifications
+
+Notifications are opt-in. `ithyno init` scaffolds the host-specific notification
+script under `.ithyno/scripts/`, but it does not create or update CLI hook
+configuration. Enable a notification from Settings → Prerequisites by
+selecting the bell beside an installed CLI. That action updates only the
+selected CLI's project hook configuration. The hook never contacts the ithyno
+server. Disable it with the same control; running `ithyno init` will not
+re-enable the hook.
+
 ### Dogfooding (developing ithyno with OpenSpec)
 
 This repository is itself developed with **real OpenSpec** (`@fission-ai/openspec`).
