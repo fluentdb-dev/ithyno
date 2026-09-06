@@ -38,6 +38,73 @@ function utf8Bytes(s: string): number {
   return Buffer.byteLength(s, "utf8");
 }
 
+// ---------------------------------------------------------------------------
+// Antigravity isolation bridge files
+// ---------------------------------------------------------------------------
+
+interface BridgeJsonEntry {
+  path: string;
+  [key: string]: unknown;
+}
+
+interface BridgeJson {
+  entries: BridgeJsonEntry[];
+  [key: string]: unknown;
+}
+
+const ITHYNO_AG_SKILLS_PATH = ".ithyno/antigravity/skills";
+const ITHYNO_AG_PLUGIN_PATH = ".ithyno/antigravity";
+
+/**
+ * Merge an ithyno entry into a bridge JSON file (.agents/skills.json or
+ * .agents/plugins.json), preserving any user-authored entries.
+ */
+async function mergeBridgeJson(
+  filePath: string,
+  entryPath: string,
+): Promise<void> {
+  let existing: BridgeJson = { entries: [] };
+  const raw = await readIfExists(filePath);
+  if (raw) {
+    try {
+      existing = JSON.parse(raw) as BridgeJson;
+      if (!Array.isArray(existing.entries)) existing.entries = [];
+    } catch {
+      existing = { entries: [] };
+    }
+  }
+  // Check if entry already exists
+  if (existing.entries.some((e) => e.path === entryPath)) return;
+  existing.entries.push({ path: entryPath });
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * Emit .agents/skills.json, .agents/plugins.json, and
+ * .ithyno/antigravity/plugin.json so Antigravity discovers ithyno
+ * skills and hooks from the isolated .ithyno/antigravity/ subtree.
+ */
+async function emitAntigravityBridgeFiles(projectRoot: string): Promise<void> {
+  await mergeBridgeJson(
+    join(projectRoot, ".agents", "skills.json"),
+    ITHYNO_AG_SKILLS_PATH,
+  );
+  await mergeBridgeJson(
+    join(projectRoot, ".agents", "plugins.json"),
+    ITHYNO_AG_PLUGIN_PATH,
+  );
+
+  // plugin.json identity file
+  const pluginJsonPath = join(projectRoot, ITHYNO_AG_PLUGIN_PATH, "plugin.json");
+  const pluginContent = JSON.stringify({ name: "ithyno" }, null, 2) + "\n";
+  const existingPlugin = await readIfExists(pluginJsonPath);
+  if (existingPlugin !== pluginContent) {
+    await mkdir(dirname(pluginJsonPath), { recursive: true });
+    await writeFile(pluginJsonPath, pluginContent, "utf-8");
+  }
+}
+
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {
   const result: InstallResult = { written: [], skipped: [], errors: [], migrations: [] };
   const canonicalClaudeRoot = opts.canonicalClaudeRoot
@@ -161,6 +228,19 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
         await writeFile(abs, file.content, "utf-8");
         result.written.push({ cli, path: file.path, bytes: contentBytes });
       }
+    }
+  }
+
+  // Antigravity isolation: emit bridge files so Antigravity discovers
+  // skills and hooks from .ithyno/antigravity/ instead of .agents/.
+  if (opts.selectedClis.includes("antigravity") && !opts.dryRun) {
+    try {
+      await emitAntigravityBridgeFiles(opts.projectRoot);
+    } catch (err) {
+      result.errors.push({
+        cli: "antigravity",
+        message: `bridge file emission failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }
 

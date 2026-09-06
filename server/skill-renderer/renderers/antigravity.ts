@@ -2,14 +2,14 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.agent/workflows/<namespace>-<command>.md` — agy reads
- * `.agent/workflows/` and derives the slash-command name from the
- * file's path shape:
+ * Emits `.ithyno/antigravity/workflows/<namespace>-<command>.md`.
+ * Antigravity discovers the isolated path via `.agents/skills.json`
+ * and `.agents/plugins.json` bridge files (emitted by installSkills).
+ * Agy derives the slash-command name from the file's path shape:
  *   - flat `<name>.md`                → `/<name>`   (openspec's opsx-*)
- * Agy discovers only flat files in this directory. OpenSpec's own Agy
- * adapter follows the same convention with `opsx-<id>.md`; ithyno therefore
- * emits `ithy-opsx-<command>.md`. Frontmatter shape (description only)
- * matches OpenSpec's adapter.
+ * OpenSpec's own Agy adapter follows the same convention with
+ * `opsx-<id>.md`; ithyno therefore emits `ithy-opsx-<command>.md`.
+ * Frontmatter shape (description only) matches OpenSpec's adapter.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
@@ -17,7 +17,7 @@
  * renderer resolution.
  *
  * The dispatch skill additionally emits a project rule at
- * `.agent/rules/ithy-opsx-dispatch.md`. Agy loads rules more eagerly than
+ * `.ithyno/antigravity/rules/ithy-opsx-dispatch.md`. Agy loads rules more eagerly than
  * workflow bodies, so this small guard prevents the Manager from silently
  * implementing a selected worker stage itself instead of calling
  * `invoke_subagent`.
@@ -77,7 +77,7 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "# Ithy OpenSpec Dispatch Execution Rules",
     "",
     "When performing `/ithy-opsx-dispatch`, `/ithy-opsx-dispatch-multi`, or evaluating",
-    "either corresponding workflow under `.agent/workflows/` as an Agy/Antigravity Manager:",
+    "either corresponding workflow under `.ithyno/antigravity/workflows/` as an Agy/Antigravity Manager:",
     "",
     "1. **Delegate selected Agy workers.** After the dispatcher selects a",
     "   single-prompt Agy/Antigravity worker from `agents.yaml`, you MUST call",
@@ -116,7 +116,7 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
   ].join("\n");
 
   return {
-    path: ".agent/rules/ithy-opsx-dispatch.md",
+    path: ".ithyno/antigravity/rules/ithy-opsx-dispatch.md",
     content,
     mode: "create",
   };
@@ -127,7 +127,7 @@ export const antigravityRenderer: Renderer = {
   render(source: SkillSource): RenderedFile[] {
     // Agy discovers flat workflow files. A nested namespace directory is
     // silently ignored, so encode the namespace into the basename.
-    const path = `.agent/workflows/${source.manifest.namespace}-${source.manifest.command}.md`;
+    const path = `.ithyno/antigravity/workflows/${source.manifest.namespace}-${source.manifest.command}.md`;
     const body = translateCommandReferences(
       expandTokens(fillPlaceholders(source.body.trimEnd(), source)),
     );

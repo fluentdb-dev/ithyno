@@ -108,7 +108,7 @@ function claudeCommandToAgyWorkflow(raw: string): string {
 
 /**
  * Migrate plural-root and nested workflow output into flat
- * `.agent/workflows/*.md` files.
+ * `.ithyno/antigravity/workflows/*.md` files.
  *
  * Returned `moved[]` and `skipped[]` paths are project-root-relative
  * so logs/tests can compare them without leaking absolute host paths.
@@ -121,7 +121,7 @@ export async function migrateLegacyAntigravityDir(
   opts: { dryRun?: boolean } = {},
 ): Promise<MigrationResult> {
   const legacyDir = join(projectRoot, ".agents", "workflows");
-  const targetDir = join(projectRoot, ".agent", "workflows");
+  const targetDir = join(projectRoot, ".ithyno", "antigravity", "workflows");
   const result: MigrationResult = { moved: [], skipped: [] };
 
   type Candidate = { from: string; to: string; relFrom: string; sourceDir: string };
@@ -155,8 +155,8 @@ export async function migrateLegacyAntigravityDir(
     }
   }
 
-  // Prefer files already under the singular root if both old layouts exist.
-  await collectNested(targetDir, ".agent/workflows");
+  // Prefer files already under the isolated root if both old layouts exist.
+  await collectNested(targetDir, ".ithyno/antigravity/workflows");
 
   let legacyEntries: Dirent[];
   try {
@@ -240,7 +240,7 @@ export async function migrateLegacyAntigravityDir(
 
 /**
  * Convert ithyno's bundled `.claude/commands/ithy-opsx/*.md` into flat
- * `.agent/workflows/ithy-opsx-<command>.md` files.
+ * `.ithyno/antigravity/workflows/ithy-opsx-<command>.md` files.
  *
  * This preserves the Claude-authoritative command bodies while keeping the
  * destination project output-only. A stale generated `.claude/` tree in the
@@ -257,7 +257,7 @@ export async function copyClaudeIthyOpsxCommandsToAgent(
   opts: { dryRun?: boolean } = {},
 ): Promise<CopyResult> {
   const sourceDir = join(canonicalRoot, ".claude", "commands", "ithy-opsx");
-  const targetDir = resolveProjectPath(projectRoot, ".agent", "workflows");
+  const targetDir = resolveProjectPath(projectRoot, ".ithyno", "antigravity", "workflows");
   const result: CopyResult = { copied: [], skipped: [] };
 
   if (!(await pathExists(sourceDir))) return result;

@@ -16,7 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rmdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import {
   getRenderer,
@@ -103,7 +103,7 @@ export const CLI_ADAPTERS: Record<string, CliAdapter> = {
   agy: {
     openspecTool: "antigravity",
     rendererCli: "antigravity",
-    openspecPaths: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md"],
+    openspecPaths: [".ithyno/antigravity/workflows/opsx-propose.md", ".ithyno/antigravity/workflows/opsx-apply.md"],
   },
   copilot: {
     openspecTool: "github-copilot",
@@ -167,15 +167,15 @@ export const CLI_LAYOUTS: Record<string, OpenspecLayout[]> = {
     {
       name: "skills-v1",
       required: [
-        ".agent/skills/openspec-propose/SKILL.md",
-        ".agent/skills/openspec-apply-change/SKILL.md",
+        ".ithyno/antigravity/skills/openspec-propose/SKILL.md",
+        ".ithyno/antigravity/skills/openspec-apply-change/SKILL.md",
       ],
     },
     {
       name: "legacy-workflows",
       required: [
-        ".agent/workflows/opsx-propose.md",
-        ".agent/workflows/opsx-apply.md",
+        ".ithyno/antigravity/workflows/opsx-propose.md",
+        ".ithyno/antigravity/workflows/opsx-apply.md",
       ],
     },
   ],
@@ -577,6 +577,61 @@ function releaseLock(projectRoot: string, cli: string): void {
  * Run `npx openspec init <projectRoot> --tools <tool>` for the OpenSpec
  * component, streaming output via `onProgress`.
  */
+/**
+ * After `openspec init --tools antigravity` writes to .agent/, relocate
+ * those files to .ithyno/antigravity/ so the isolated layout is consistent.
+ */
+async function relocateAntigravityOpenspecOutput(
+  projectRoot: string,
+  onProgress: (event: string, data: unknown) => void,
+): Promise<void> {
+  const moves: Array<{ from: string; to: string }> = [];
+
+  // Relocate .agent/skills/openspec-* → .ithyno/antigravity/skills/openspec-*
+  const skillsDir = join(projectRoot, ".agent", "skills");
+  try {
+    const entries = await readdir(skillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith("openspec-")) {
+        moves.push({
+          from: join(".agent", "skills", entry.name),
+          to: join(".ithyno", "antigravity", "skills", entry.name),
+        });
+      }
+    }
+  } catch { /* .agent/skills/ may not exist */ }
+
+  // Relocate .agent/workflows/opsx-* → .ithyno/antigravity/workflows/opsx-*
+  const workflowsDir = join(projectRoot, ".agent", "workflows");
+  try {
+    const entries = await readdir(workflowsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.startsWith("opsx-") && entry.name.endsWith(".md")) {
+        moves.push({
+          from: join(".agent", "workflows", entry.name),
+          to: join(".ithyno", "antigravity", "workflows", entry.name),
+        });
+      }
+    }
+  } catch { /* .agent/workflows/ may not exist */ }
+
+  for (const { from, to } of moves) {
+    const absFrom = join(projectRoot, from);
+    const absTo = join(projectRoot, to);
+    await mkdir(join(projectRoot, ...to.split(/[\\/]/).slice(0, -1)), { recursive: true });
+    await rename(absFrom, absTo);
+    onProgress("progress", { line: `Relocated ${from} → ${to}` });
+  }
+
+  // Clean up empty source directories
+  for (const dir of [skillsDir, workflowsDir]) {
+    try {
+      const remaining = await readdir(dir);
+      if (remaining.length === 0) await rmdir(dir);
+    } catch { /* ignore */ }
+  }
+}
+
 async function runOpenspecInit(
   projectRoot: string,
   adapter: CliAdapter,
@@ -588,8 +643,10 @@ async function runOpenspecInit(
       : {};
 
     // Use npx to resolve the locally-installed openspec package.
-    // Never use shell: true — argument array only.
-    const cmd = process.platform === "win32" ? "npx.cmd" : "npx";
+    // On Windows, .cmd files require shell: true (Node.js CVE-2024-27980
+    // tightened argument validation for .cmd/.bat without a shell).
+    const isWin = process.platform === "win32";
+    const cmd = isWin ? "npx.cmd" : "npx";
     let child: ReturnType<typeof spawn>;
     try {
       child = _test_exports.spawn(
@@ -599,6 +656,7 @@ async function runOpenspecInit(
           cwd: projectRoot,
           env: { ...process.env, ...extraEnv },
           stdio: ["ignore", "pipe", "pipe"],
+          ...(isWin ? { shell: true } : {}),
         },
       );
     } catch (err) {
@@ -667,6 +725,15 @@ export async function installAgentSkills(
     if (components.includes("openspec")) {
       onProgress("progress", { line: `Installing OpenSpec skills for ${cli}…` });
       openspecResult = await runOpenspecInit(projectRoot, adapter, onProgress);
+      // Antigravity post-init fixup: relocate openspec output from .agent/
+      // to .ithyno/antigravity/ for isolation.
+      if (openspecResult.status === "success" && cli === "agy") {
+        try {
+          await relocateAntigravityOpenspecOutput(projectRoot, onProgress);
+        } catch (err) {
+          onProgress("progress", { line: `Relocation warning: ${err instanceof Error ? err.message : String(err)}` });
+        }
+      }
       if (openspecResult.status === "success") {
         const verify = inspectOpenspecPaths(projectRoot, cli);
         if (verify.status !== "installed") {
