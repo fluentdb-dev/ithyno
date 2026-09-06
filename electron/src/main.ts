@@ -670,11 +670,43 @@ function extractFolderFromArgv(argv: string[], cwd: string): string | null {
   return null;
 }
 
+// Register ithyno:// protocol so BurnToast notification clicks can
+// bring the app to the foreground via Protocol Activation.
+if (process.defaultApp) {
+  // Dev mode: electron.exe needs the script path as extra arg
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('ithyno', process.execPath, [resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('ithyno');
+}
+
+function handleProtocolUrl(url: string): void {
+  // ithyno://file/C:\path\to\project → focus or switch to project
+  const match = /^ithyno:\/\/file\/(.+)$/.exec(url);
+  if (match) {
+    const folder = decodeURIComponent(match[1]);
+    if (isDirectory(folder) && folder !== currentProjectRoot) {
+      void switchProject(folder);
+    }
+  }
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv, workingDirectory) => {
+    // On Windows, protocol URLs arrive as the last argv element
+    const lastArg = argv[argv.length - 1];
+    if (lastArg && lastArg.startsWith('ithyno://')) {
+      handleProtocolUrl(lastArg);
+      return;
+    }
     const folder = extractFolderFromArgv(argv, workingDirectory ?? process.cwd());
     if (folder && folder !== currentProjectRoot) {
       void switchProject(folder);
@@ -684,6 +716,11 @@ if (!gotLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+  });
+
+  // macOS: protocol URL arrives via open-url event
+  app.on('open-url', (_event, url) => {
+    handleProtocolUrl(url);
   });
 
   ipcMain.on(

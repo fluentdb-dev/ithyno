@@ -35,6 +35,14 @@ describe("notification init helpers", () => {
     expect(result.hooks.Stop[0].hooks[0].command).toBe("/tmp/notify.sh");
     expect(warnings).toHaveLength(1);
   });
+  it("prefixes powershell.exe for .ps1 scripts in Claude hooks", async () => {
+    const root = await tempRoot();
+    await installClaudeNotifyHook(root, "C:\\project\\.ithyno\\scripts\\notify-waiting.ps1", false, { log: () => {}, context: "electron" });
+    const result = JSON.parse(await readFile(join(root, ".claude/settings.json"), "utf8"));
+    const cmd = result.hooks.Notification[0].hooks[0].command;
+    expect(cmd).toMatch(/^powershell\.exe -File /);
+    expect(cmd).toContain("notify-waiting.ps1");
+  });
   it("merges, detects, and removes only the Codex project hook", async () => {
     const root = await tempRoot();
     await mkdir(join(root, ".codex"), { recursive: true });

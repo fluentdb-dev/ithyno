@@ -122,7 +122,11 @@ function notificationCommand(scriptAbsPath, cliName, context, hostAppName) {
   if (!context || !["electron", "vscode", "cli"].includes(context)) return scriptAbsPath;
   const args = [scriptAbsPath, cliName, context];
   if (hostAppName) args.push(hostAppName);
-  return args.map(shellArg).join(" ");
+  const cmd = args.map(shellArg).join(" ");
+  // Claude Code runs hook commands via bash even on Windows.
+  // .ps1 scripts must be invoked through powershell.exe.
+  if (scriptAbsPath.endsWith(".ps1")) return `powershell.exe -File ${cmd}`;
+  return cmd;
 }
 
 /** Merge the local notification hook into Claude Code's JSON settings. */
