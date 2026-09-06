@@ -547,7 +547,7 @@ function PrerequisitesSection(props: {
       {showBurntToastCommand && (
         <CommandModal
           title="Install BurntToast"
-          build={() => "Install-Module -Name BurntToast -Scope CurrentUser"}
+          build={() => "Install-PSResource -Name BurntToast -Scope CurrentUser -TrustRepository"}
           submitLabel="Close"
           onCancel={() => setShowBurntToastCommand(false)}
           onSubmit={() => setShowBurntToastCommand(false)}

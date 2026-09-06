@@ -168,7 +168,9 @@ export async function checkCommand(
   cmd: string,
   versionArg: string,
 ): Promise<CliStatus> {
-  const timeout = 2000;
+  // Windows spawns cmd.exe wrappers (shell: true) for each CLI check;
+  // when many run in parallel the overhead can exceed 2 s on cold start.
+  const timeout = process.platform === "win32" ? 5000 : 2000;
 
   // Resolve the path FIRST and only spawn the version command if the
   // probe actually found something. This has to happen sequentially,
@@ -261,7 +263,7 @@ function checkBurntToast(): CliStatus | undefined {
   if (process.platform !== "win32") return undefined;
   const shell = commandExistsOnPath("pwsh") ? "pwsh" : commandExistsOnPath("powershell") ? "powershell" : undefined;
   if (!shell) return { installed: false, error: "PowerShell was not found" };
-  const result = spawnSync(shell, ["-NoProfile", "-Command", "if (Get-Module -ListAvailable -Name BurntToast) { exit 0 } else { exit 1 }"], { stdio: "ignore", timeout: 2000 });
+  const result = spawnSync(shell, ["-NoProfile", "-Command", "if (Get-Module -ListAvailable -Name BurntToast) { exit 0 } else { exit 1 }"], { stdio: "ignore", timeout: 5000 });
   return result.status === 0 ? { installed: true, path: shell } : { installed: false, path: shell };
 }
 
