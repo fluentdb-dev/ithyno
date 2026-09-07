@@ -16,5 +16,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["server", "web/src", "bin"]
+  "include": ["server", "web/src", "bin", "shared", "hub"]
 }

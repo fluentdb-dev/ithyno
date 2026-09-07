@@ -78,6 +78,8 @@ import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js
 import { getAboutInfo } from "./about.js";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
+import { startHubRelay } from "./hub-relay.js";
+import type { HubEventEnvelope } from "@ithyno/shared";
 import {
   getAllManagerActivities,
   parseManagerActivityBody,
@@ -161,6 +163,14 @@ const wss = new WebSocketServer({ noServer: true });
 // Dedicated WS for the embedded terminal. Separate from /ws so terminal bytes
 // never mix with structured dashboard events.
 const ptyWss = new WebSocketServer({ noServer: true });
+const hubRelay = startHubRelay({
+  hubUrl: process.env.ITHYNO_HUB_URL,
+  hubCredential: process.env.ITHYNO_HUB_CREDENTIAL,
+  onEvent: (event) => broadcast({ type: "hub-event-relayed", event }),
+});
+fastify.addHook("onClose", async () => {
+  hubRelay.close();
+});
 
 type ServerEvent =
   | { type: "state-replaced" }
@@ -187,6 +197,7 @@ type ServerEvent =
       warnings: string[];
     }
   | { type: "doctor-updated"; report: DoctorReport }
+  | { type: "hub-event-relayed"; event: HubEventEnvelope }
   // expose-manager-activity-per-change: `activity: null` means the entry was
   // cleared (the Manager posted `idle` for that change).
   | { type: "manager-activity-updated"; changeId: string; activity: ManagerActivity | null };

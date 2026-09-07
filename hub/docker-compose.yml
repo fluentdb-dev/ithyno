@@ -1,0 +1,18 @@
+services:
+  hub:
+    build:
+      context: ..
+      dockerfile: hub/Dockerfile
+    image: ithyno-hub:dev
+    environment:
+      ITHYNO_HUB_HOST: 0.0.0.0
+      ITHYNO_HUB_PORT: 4322
+      ITHYNO_GITLAB_ORIGIN: https://gitlab.example.com
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: group/project
+      ITHYNO_HUB_BOT_IDENTITY: ithyno-hub
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: change-me
+      ITHYNO_HUB_STATE_PATH: /data/hub-state
+    volumes:
+      - ./data:/data
+    ports:
+      - "4322:4322"

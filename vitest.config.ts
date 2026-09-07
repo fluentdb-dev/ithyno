@@ -7,6 +7,8 @@ export default defineConfig({
   test: {
     include: [
       "server/**/*.test.ts",
+      "shared/**/*.test.ts",
+      "hub/**/*.test.ts",
       "web/src/**/*.test.ts",
       "scripts/**/*.test.mjs",
       "vscode-extension/src/webview-html.test.ts",

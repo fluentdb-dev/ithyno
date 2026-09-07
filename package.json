@@ -26,7 +26,9 @@
   ],
   "workspaces": [
     "electron",
-    "vscode-extension"
+    "vscode-extension",
+    "shared",
+    "hub"
   ],
   "overrides": {
     "js-yaml": "4.3.1",
@@ -47,6 +49,10 @@
     "clean:worktrees": "bin/clean-worktrees.sh",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit",
+    "shared:typecheck": "npm run --workspace @ithyno/shared typecheck",
+    "hub:typecheck": "npm run --workspace @ithyno/hub typecheck",
+    "hub:test": "npm run --workspace @ithyno/hub test",
+    "hub:build": "npm run --workspace @ithyno/hub build",
     "electron:dev": "npm run --workspace ithyno-electron dev",
     "electron:package": "npm run --workspace ithyno-electron package:mac",
     "electron:package:mac": "npm run --workspace ithyno-electron package:mac",
