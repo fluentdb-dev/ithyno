@@ -146,13 +146,15 @@ export function parseSpecContent(domain: string, filePath: string, content: stri
         current.scenarios.push({ name: heading.text.replace(/^scenario:\s*/i, "").trim(), steps });
       }
     }
+    const deltaFromHeading = /##\s*(ADDED|MODIFIED|REMOVED)\s+Requirements\b/i.exec(content);
+    const inferredDelta = deltaFromHeading ? (deltaFromHeading[1].toUpperCase() as OpenSpecDeltaKind) : null;
     const hasDelta = requirements.some((requirement) => requirement.delta);
     return {
       domain,
       filePath,
       purpose,
       requirements,
-      delta: hasDelta ? "MODIFIED" : null,
+      delta: inferredDelta ?? (hasDelta ? "MODIFIED" : null),
     };
   } catch (error) {
     return {

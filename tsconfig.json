@@ -14,6 +14,10 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false,
     "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@ithyno/shared": ["./shared/src/index.ts"]
+    },
     "noEmit": true
   },
   "include": ["server", "web/src", "bin", "shared", "hub"]

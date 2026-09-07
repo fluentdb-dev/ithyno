@@ -166,6 +166,10 @@ const ptyWss = new WebSocketServer({ noServer: true });
 const hubRelay = startHubRelay({
   hubUrl: process.env.ITHYNO_HUB_URL,
   hubCredential: process.env.ITHYNO_HUB_CREDENTIAL,
+  projectIds: (process.env.ITHYNO_GITLAB_PROJECT_ALLOWLIST ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean),
   onEvent: (event) => broadcast({ type: "hub-event-relayed", event }),
 });
 fastify.addHook("onClose", async () => {

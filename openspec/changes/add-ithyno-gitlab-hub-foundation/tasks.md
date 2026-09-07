@@ -24,15 +24,15 @@
 
 ## 4. Durable Event Intake
 
-- [ ] 4.1 Define the operational persistence interface for deliveries, attempts, retry schedules, terminal errors, notification retention, and job leases
-- [ ] 4.2 Implement the single-writer SQLite adapter with migrations, uniqueness constraints, lease expiry, retention cleanup, and mounted-volume diagnostics
-- [ ] 4.3 Implement raw-body signing-token verification and replay-window checks for supported GitLab versions
-- [ ] 4.4 Implement explicitly enabled legacy `X-Gitlab-Token` verification using constant-time comparison
-- [ ] 4.5 Implement instance/project allowlisting before enqueue and redacted security audit records for rejected projects
-- [ ] 4.6 Implement supported-event classification, failed-pipeline filtering, bot-loop suppression, and no-op acknowledgement for unsupported events
-- [ ] 4.7 Persist the strongest available GitLab delivery identity before acknowledgement and add deterministic fallback identity tests
-- [ ] 4.8 Implement bounded retry/backoff, expired-lease recovery, terminal failure reporting, and refusal of unsupported multi-replica SQLite operation
-- [ ] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
+- [x] 4.1 Define the operational persistence interface for deliveries, attempts, retry schedules, terminal errors, notification retention, and job leases
+- [x] 4.2 Implement the single-writer SQLite adapter with migrations, uniqueness constraints, lease expiry, retention cleanup, and mounted-volume diagnostics
+- [x] 4.3 Implement raw-body signing-token verification and replay-window checks for supported GitLab versions
+- [x] 4.4 Implement explicitly enabled legacy `X-Gitlab-Token` verification using constant-time comparison
+- [x] 4.5 Implement instance/project allowlisting before enqueue and redacted security audit records for rejected projects
+- [x] 4.6 Implement supported-event classification, failed-pipeline filtering, bot-loop suppression, and no-op acknowledgement for unsupported events
+- [x] 4.7 Persist the strongest available GitLab delivery identity before acknowledgement and add deterministic fallback identity tests
+- [x] 4.8 Implement bounded retry/backoff, expired-lease recovery, terminal failure reporting, and refusal of unsupported multi-replica SQLite operation
+- [x] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
 
 ## 5. Issue to Draft OpenSpec Merge Request
 

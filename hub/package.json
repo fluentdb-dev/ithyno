@@ -6,11 +6,12 @@
   "scripts": {
     "build": "npm run --workspace @ithyno/shared build && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config ../vitest.config.ts --root .. --include hub/**/*.test.ts"
+    "test": "cd .. && vitest run --config vitest.config.ts hub/**/*.test.ts"
   },
   "dependencies": {
     "@ithyno/shared": "file:../shared",
     "fastify": "^5.2.1",
+    "sqlite3": "^6.0.1",
     "ws": "^8.18.1"
   }
 }

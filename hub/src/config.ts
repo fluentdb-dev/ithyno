@@ -6,6 +6,7 @@ export interface HubConfig {
   projectAllowlist: string[];
   botIdentity: string;
   webhookVerificationMode: "signed" | "legacy" | "none";
+  webhookSecret: string;
   statePath: string;
   workstationSubscriptionCredential: string;
 }
@@ -23,7 +24,8 @@ export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig 
     projectAllowlist: splitCsv(env.ITHYNO_GITLAB_PROJECT_ALLOWLIST ?? "group/project"),
     botIdentity: env.ITHYNO_HUB_BOT_IDENTITY ?? "ithyno-hub",
     webhookVerificationMode: parseVerificationMode(env.ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE),
-    statePath: env.ITHYNO_HUB_STATE_PATH ?? "/tmp/ithyno-hub",
+    webhookSecret: env.ITHYNO_HUB_WEBHOOK_SECRET ?? "",
+    statePath: env.ITHYNO_HUB_STATE_PATH ?? "/var/lib/ithyno-hub",
     workstationSubscriptionCredential: env.ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL ?? "change-me",
   };
 }
@@ -32,7 +34,10 @@ export function validateHubConfig(config: HubConfig): string[] {
   const errors: string[] = [];
   if (!config.gitlabOrigin.startsWith("http")) errors.push("gitlab origin must be an absolute http(s) URL");
   if (config.projectAllowlist.length === 0) errors.push("project allowlist must include at least one project");
-  if (!config.botIdentity || config.botIdentity === "ithyno-hub") errors.push("bot identity must be explicitly configured");
+  if (!config.botIdentity.trim()) errors.push("bot identity must be explicitly configured");
+  if (config.webhookVerificationMode !== "none" && !config.webhookSecret.trim()) {
+    errors.push("webhook secret must be configured when verification is enabled");
+  }
   if (!config.workstationSubscriptionCredential || config.workstationSubscriptionCredential === "change-me") {
     errors.push("workstation subscription credential must be set to a non-default value");
   }
@@ -47,6 +52,7 @@ export function redactHubConfig(config: HubConfig): Record<string, unknown> {
     projectAllowlist: config.projectAllowlist,
     botIdentity: config.botIdentity,
     webhookVerificationMode: config.webhookVerificationMode,
+    webhookSecret: "[REDACTED]",
     statePath: config.statePath,
     workstationSubscriptionCredential: "[REDACTED]",
   };
