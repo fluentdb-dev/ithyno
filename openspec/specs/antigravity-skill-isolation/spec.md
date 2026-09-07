@@ -25,42 +25,35 @@ AI tools scan for their own skills.
 - **THEN** the dispatch execution rule is written to `.ithyno/antigravity/rules/ithy-opsx-dispatch.md`
 - **AND** no file is written to `.agent/rules/`
 
-### Requirement: Discovery bridge files connect .agents/ to the isolated root
+### Requirement: Global skills.json connects Antigravity to the isolated root
 
-The skill installer SHALL emit `.agents/skills.json` and `.agents/plugins.json`
-when Antigravity is among the selected CLIs, directing Antigravity's discovery
-mechanism to the isolated `.ithyno/antigravity/` subtree.
+The skill installer SHALL emit `~/.gemini/config/skills.json` with an absolute
+path entry pointing to `<projectRoot>/.ithyno/antigravity/skills` when
+Antigravity is among the selected CLIs. This MUST use absolute paths because
+Antigravity's global config cannot resolve project-relative paths.
 
-#### Scenario: skills.json created on Antigravity install
+#### Scenario: Global skills.json created on Antigravity install
 - **GIVEN** `installSkills()` is called with `antigravity` in the selected CLIs
 - **WHEN** rendering completes
-- **THEN** `.agents/skills.json` exists and contains an entry with `"path": ".ithyno/antigravity/skills"`
-
-#### Scenario: plugins.json and plugin.json created on Antigravity install
-- **GIVEN** `installSkills()` is called with `antigravity` in the selected CLIs
-- **WHEN** rendering completes
-- **THEN** `.agents/plugins.json` exists and contains an entry with `"path": ".ithyno/antigravity"`
-- **AND** `.ithyno/antigravity/plugin.json` exists with `{"name": "ithyno"}`
+- **THEN** `~/.gemini/config/skills.json` exists and contains an entry whose `"path"` is the absolute path to `.ithyno/antigravity/skills`
 
 #### Scenario: Existing user entries in skills.json are preserved
-- **GIVEN** `.agents/skills.json` already contains a user-authored entry `{"path": "custom/skills"}`
+- **GIVEN** `~/.gemini/config/skills.json` already contains a user-authored entry
 - **WHEN** `installSkills()` runs with `antigravity` selected
-- **THEN** the resulting `.agents/skills.json` contains both the user's entry and the ithyno entry
+- **THEN** the resulting `skills.json` contains both the user's entry and the ithyno entry
 
-### Requirement: Post-init fixup relocates OpenSpec output
+#### Scenario: Stale relative-path entries are removed
+- **GIVEN** `~/.gemini/config/skills.json` contains a stale entry with relative path `.ithyno/antigravity/skills`
+- **WHEN** `installSkills()` runs with `antigravity` selected
+- **THEN** the stale relative entry is removed and replaced with the absolute-path entry
 
-After `openspec init --tools antigravity` writes its files to the default
-`.agent/` location, the install flow SHALL relocate those files to
-`.ithyno/antigravity/` so the inspection paths match the isolated layout.
+### Requirement: OpenSpec output is NOT relocated
 
-#### Scenario: OpenSpec skills relocated after init
-- **GIVEN** `openspec init --tools antigravity` wrote `.agent/skills/openspec-propose/SKILL.md`
-- **WHEN** the post-init fixup runs
-- **THEN** `.ithyno/antigravity/skills/openspec-propose/SKILL.md` exists with the same content
-- **AND** `.agent/skills/openspec-propose/SKILL.md` no longer exists
+The install flow SHALL NOT relocate OpenSpec-generated files from `.agent/` or
+`.agents/`. OpenSpec's install destination MUST remain under its default location
+and is outside ithyno's responsibility.
 
-#### Scenario: OpenSpec workflows relocated after init
+#### Scenario: OpenSpec files remain in place after install
 - **GIVEN** `openspec init --tools antigravity` wrote `.agent/workflows/opsx-propose.md`
-- **WHEN** the post-init fixup runs
-- **THEN** `.ithyno/antigravity/workflows/opsx-propose.md` exists with the same content
-- **AND** `.agent/workflows/opsx-propose.md` no longer exists
+- **WHEN** `installSkills()` runs
+- **THEN** `.agent/workflows/opsx-propose.md` remains at its original location

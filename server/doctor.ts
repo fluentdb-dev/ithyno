@@ -335,14 +335,33 @@ function checkAgmsg(gitBash: CliStatus | undefined): CliStatus {
 export async function runDoctor(): Promise<DoctorReport> {
   const agentDefs = AGENT_CLIS;
 
-  // Run all agent CLI checks + tmux + git + node in parallel
-  const [agentResults, tmuxResult, gitResult, nodeResult, alerterResult] = await Promise.all([
-    Promise.all(agentDefs.map((def) => checkCommand(def.cmd, def.versionArg))),
-    checkCommand("tmux", "-V"),
-    checkCommand("git", "--version"),
-    checkCommand("node", "--version"),
-    process.platform === "darwin" ? checkCommand("alerter", "--version") : Promise.resolve(undefined),
-  ]);
+  // On Windows each check spawns cmd.exe; running them all in parallel
+  // causes heavy contention and intermittent timeouts. Serialize on
+  // Windows, parallelize elsewhere.
+  let agentResults: CliStatus[];
+  let tmuxResult: CliStatus;
+  let gitResult: CliStatus;
+  let nodeResult: CliStatus;
+  let alerterResult: CliStatus | undefined;
+
+  if (process.platform === "win32") {
+    agentResults = [];
+    for (const def of agentDefs) {
+      agentResults.push(await checkCommand(def.cmd, def.versionArg));
+    }
+    tmuxResult = await checkCommand("tmux", "-V");
+    gitResult = await checkCommand("git", "--version");
+    nodeResult = await checkCommand("node", "--version");
+    alerterResult = undefined;
+  } else {
+    [agentResults, tmuxResult, gitResult, nodeResult, alerterResult] = await Promise.all([
+      Promise.all(agentDefs.map((def) => checkCommand(def.cmd, def.versionArg))),
+      checkCommand("tmux", "-V"),
+      checkCommand("git", "--version"),
+      checkCommand("node", "--version"),
+      process.platform === "darwin" ? checkCommand("alerter", "--version") : Promise.resolve(undefined),
+    ]);
+  }
 
   const agents: Record<Cli, CliStatus> = {} as Record<Cli, CliStatus>;
   for (let i = 0; i < agentDefs.length; i++) {

@@ -514,7 +514,7 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
   }> = [
     { cli: "codex", pathContains: [".codex/", "ithy-opsx-apply", ".md"] },
     // agy: nested `<ns>/<cmd>.md` so slash-command surface is `/ithy-opsx:apply`.
-    { cli: "antigravity", pathContains: [".ithyno/antigravity/workflows/ithy-opsx-apply.md"] },
+    { cli: "antigravity", pathContains: [".ithyno/antigravity/skills/ithy-opsx-apply/SKILL.md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
     { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
     { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
@@ -590,8 +590,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     },
     {
       cli: "antigravity",
-      expectedPathContains: [".ithyno/antigravity/workflows/ithy-opsx-"],
-      probeCommandPath: ".ithyno/antigravity/workflows/ithy-opsx-test-probe.md",
+      expectedPathContains: [".ithyno/antigravity/skills/ithy-opsx-"],
+      probeCommandPath: ".ithyno/antigravity/skills/ithy-opsx-test-probe/SKILL.md",
     },
     {
       cli: "cursor",
@@ -918,10 +918,10 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     // Claude: both skills at .claude/commands/<ns>/<cmd>.md.
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/apply.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
-    // Antigravity (agy): isolated .ithyno/antigravity/workflows/<ns>-<cmd>.md
-    // — Agy discovers via .agents/skills.json bridge.
-    expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Antigravity (agy): isolated .ithyno/antigravity/skills/<ns>-<cmd>/SKILL.md
+    // — Agy discovers via ~/.gemini/config/skills.json (absolute path).
+    expect(existsSync(join(projectRoot, ".ithyno/antigravity/skills/ithy-opsx-apply/SKILL.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".ithyno/antigravity/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".ithyno/antigravity/rules/ithy-opsx-dispatch.md"))).toBe(true);
     // Cursor: flat .cursor/commands/<ns>-<cmd>.md — matches openspec adapter.
     expect(existsSync(join(projectRoot, ".cursor/commands/ithy-opsx-apply.md"))).toBe(true);
@@ -1108,11 +1108,9 @@ describe("installSkills — antigravity migration wire-up", () => {
     // Files landed at .ithyno/antigravity/workflows/.
     expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/opsx-propose.md"))).toBe(true);
     expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/opsx-apply.md"))).toBe(true);
-    // Renderer's own ithy-opsx-* output landed alongside, under the
-    // nested `<ns>/<cmd>.md` shape (openspec-flat vs renderer-nested
-    // don't collide because they use different filename shapes).
-    expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-apply.md"))).toBe(true);
-    expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-dispatch.md"))).toBe(true);
+    // Renderer's own ithy-opsx-* output in skills/<name>/SKILL.md format.
+    expect(existsSync(join(projectRoot, ".ithyno/antigravity/skills/ithy-opsx-apply/SKILL.md"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".ithyno/antigravity/skills/ithy-opsx-dispatch/SKILL.md"))).toBe(true);
   });
 
   it("emits an empty migration entry when antigravity is selected with nothing to migrate", async () => {
@@ -1397,13 +1395,10 @@ describe("installSkills — claude→agent copy wire-up", () => {
     expect(existsSync(join(canonicalRoot, ".claude/commands/ithy-opsx/dispatch.md"))).toBe(true);
   });
 
-  it("copy hook skips when renderer will write to the same target basename", async () => {
-    // Seed .claude/commands/ithy-opsx/apply.md — the antigravity
-    // renderer will ALSO write .ithyno/antigravity/workflows/ithy-opsx-apply.md
-    // (from ithyno/skills/ithy-opsx-apply/). Order-of-operations:
-    // copy runs BEFORE render, so at copy time the target is absent
-    // and the copy proceeds. Then the renderer overwrites it with
-    // its own (correct, universal-source-derived) content.
+  it("copy and renderer write to separate paths (workflows/ vs skills/)", async () => {
+    // Seed .claude/commands/ithy-opsx/apply.md — the copy writes to
+    // workflows/ and the renderer writes to skills/<name>/SKILL.md.
+    // They no longer collide since the renderer uses SKILL.md format.
     seedClaude("apply.md", "STALE CLAUDE COPY\n");
     const result = await installSkills({
       projectRoot,
@@ -1414,13 +1409,15 @@ describe("installSkills — claude→agent copy wire-up", () => {
     expect(result.errors).toEqual([]);
     const copyEntry = result.migrations.find((m) => m.kind === "copy");
     expect(copyEntry!.copied).toContain(".claude/commands/ithy-opsx/apply.md");
-    // Target has renderer output (GENERATED banner), not the stale copy.
-    const finalContent = readFileSync(
-      join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-apply.md"),
+    // Copy landed at workflows/.
+    expect(existsSync(join(projectRoot, ".ithyno/antigravity/workflows/ithy-opsx-apply.md"))).toBe(true);
+    // Renderer landed at skills/<name>/SKILL.md with GENERATED banner.
+    const rendererContent = readFileSync(
+      join(projectRoot, ".ithyno/antigravity/skills/ithy-opsx-apply/SKILL.md"),
       "utf-8",
     );
-    expect(finalContent).toContain("GENERATED FILE");
-    expect(finalContent).not.toContain("STALE CLAUDE COPY");
+    expect(rendererContent).toContain("GENERATED FILE");
+    expect(rendererContent).not.toContain("STALE CLAUDE COPY");
   });
 
   it("dry-run copy reports plan without touching disk", async () => {

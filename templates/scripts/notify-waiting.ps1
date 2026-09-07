@@ -2,7 +2,8 @@
 param(
   [string]$CliName = "CLI",
   [ValidateSet("electron", "vscode", "cli")][string]$Context = "cli",
-  [string]$HostAppName = ""
+  [string]$HostAppName = "",
+  [ValidateSet("stop", "pretooluse")][string]$HookType = "stop"
 )
 
 # --- CWD / project name (mirrors notify-waiting.sh) ---
@@ -70,4 +71,12 @@ try {
   $notify.Dispose()
 } catch {
   # Hooks are best-effort and must never interrupt the CLI.
+}
+
+# Agy hooks require valid JSON on stdout.
+# Stop → {}, PreToolUse → {"decision":"allow"} to let the tool proceed.
+if ($HookType -eq "pretooluse") {
+  Write-Output '{"decision":"allow"}'
+} else {
+  Write-Output '{}'
 }

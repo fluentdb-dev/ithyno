@@ -2,14 +2,13 @@
 /**
  * Antigravity (agy) renderer for the cross-CLI skill installer.
  *
- * Emits `.ithyno/antigravity/workflows/<namespace>-<command>.md`.
- * Antigravity discovers the isolated path via `.agents/skills.json`
- * and `.agents/plugins.json` bridge files (emitted by installSkills).
- * Agy derives the slash-command name from the file's path shape:
- *   - flat `<name>.md`                → `/<name>`   (openspec's opsx-*)
- * OpenSpec's own Agy adapter follows the same convention with
- * `opsx-<id>.md`; ithyno therefore emits `ithy-opsx-<command>.md`.
- * Frontmatter shape (description only) matches OpenSpec's adapter.
+ * Emits `.ithyno/antigravity/skills/<namespace>-<command>/SKILL.md`.
+ * Antigravity discovers the isolated path via `~/.gemini/config/skills.json`
+ * (absolute path entry emitted by installSkills).
+ *
+ * Antigravity requires skills in folder format: `<skill-name>/SKILL.md`
+ * with `name` and `description` in YAML frontmatter. Flat workflow `.md`
+ * files are NOT discovered as skills.
  *
  * The `agy` CLI key from `server/doctor.ts::Cli` is aliased to
  * `antigravity` at the resolver level (see `renderers/index.ts`).
@@ -52,8 +51,10 @@ function translateCommandReferences(body: string): string {
 }
 
 function frontmatter(source: SkillSource): string {
-  // openspec's antigravity adapter emits only `description:` — mirror it.
+  // Antigravity requires `name` and `description` in SKILL.md frontmatter.
+  const skillName = `${source.manifest.namespace}-${source.manifest.command}`;
   const doc: Record<string, unknown> = {
+    name: skillName,
     description: source.manifest.description.replace(/\s+/g, " ").trim(),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
@@ -77,7 +78,7 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
     "# Ithy OpenSpec Dispatch Execution Rules",
     "",
     "When performing `/ithy-opsx-dispatch`, `/ithy-opsx-dispatch-multi`, or evaluating",
-    "either corresponding workflow under `.ithyno/antigravity/workflows/` as an Agy/Antigravity Manager:",
+    "either corresponding skill under `.ithyno/antigravity/skills/` as an Agy/Antigravity Manager:",
     "",
     "1. **Delegate selected Agy workers.** After the dispatcher selects a",
     "   single-prompt Agy/Antigravity worker from `agents.yaml`, you MUST call",
@@ -125,9 +126,9 @@ function dispatchExecutionRule(source: SkillSource): RenderedFile {
 export const antigravityRenderer: Renderer = {
   cli: "antigravity",
   render(source: SkillSource): RenderedFile[] {
-    // Agy discovers flat workflow files. A nested namespace directory is
-    // silently ignored, so encode the namespace into the basename.
-    const path = `.ithyno/antigravity/workflows/${source.manifest.namespace}-${source.manifest.command}.md`;
+    // Agy discovers skills in folder format: <skill-name>/SKILL.md
+    const skillName = `${source.manifest.namespace}-${source.manifest.command}`;
+    const path = `.ithyno/antigravity/skills/${skillName}/SKILL.md`;
     const body = translateCommandReferences(
       expandTokens(fillPlaceholders(source.body.trimEnd(), source)),
     );

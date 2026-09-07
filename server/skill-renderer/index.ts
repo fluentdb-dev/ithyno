@@ -11,6 +11,7 @@
  * per the propose's rollout plan.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
 import { copyClaudeIthyOpsxCommandsToAgent, migrateLegacyAntigravityDir } from "./migrate-agy.js";
@@ -53,7 +54,6 @@ interface BridgeJson {
 }
 
 const ITHYNO_AG_SKILLS_PATH = ".ithyno/antigravity/skills";
-const ITHYNO_AG_PLUGIN_PATH = ".ithyno/antigravity";
 
 /**
  * Merge an ithyno entry into a bridge JSON file (.agents/skills.json or
@@ -62,6 +62,7 @@ const ITHYNO_AG_PLUGIN_PATH = ".ithyno/antigravity";
 async function mergeBridgeJson(
   filePath: string,
   entryPath: string,
+  staleEntryPaths?: string[],
 ): Promise<void> {
   let existing: BridgeJson = { entries: [] };
   const raw = await readIfExists(filePath);
@@ -73,36 +74,38 @@ async function mergeBridgeJson(
       existing = { entries: [] };
     }
   }
-  // Check if entry already exists
-  if (existing.entries.some((e) => e.path === entryPath)) return;
-  existing.entries.push({ path: entryPath });
+  // Remove stale ithyno entries from previous versions
+  let changed = false;
+  if (staleEntryPaths) {
+    const before = existing.entries.length;
+    existing.entries = existing.entries.filter(
+      (e) => !staleEntryPaths.includes(e.path),
+    );
+    if (existing.entries.length !== before) changed = true;
+  }
+  // Add current entry if not already present
+  if (existing.entries.some((e) => e.path === entryPath)) {
+    if (!changed) return;
+  } else {
+    existing.entries.push({ path: entryPath });
+  }
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
 }
 
 /**
- * Emit .agents/skills.json, .agents/plugins.json, and
- * .ithyno/antigravity/plugin.json so Antigravity discovers ithyno
- * skills and hooks from the isolated .ithyno/antigravity/ subtree.
+ * Register ithyno's isolated skill directory with Antigravity's
+ * global config so it discovers skills from .ithyno/antigravity/skills/.
+ * Uses absolute path since global config cannot resolve relative paths.
  */
 async function emitAntigravityBridgeFiles(projectRoot: string): Promise<void> {
+  const geminiConfig = join(homedir(), ".gemini", "config");
+  const absSkillsPath = join(projectRoot, ITHYNO_AG_SKILLS_PATH);
   await mergeBridgeJson(
-    join(projectRoot, ".agents", "skills.json"),
-    ITHYNO_AG_SKILLS_PATH,
+    join(geminiConfig, "skills.json"),
+    absSkillsPath,
+    [ITHYNO_AG_SKILLS_PATH],
   );
-  await mergeBridgeJson(
-    join(projectRoot, ".agents", "plugins.json"),
-    ITHYNO_AG_PLUGIN_PATH,
-  );
-
-  // plugin.json identity file
-  const pluginJsonPath = join(projectRoot, ITHYNO_AG_PLUGIN_PATH, "plugin.json");
-  const pluginContent = JSON.stringify({ name: "ithyno" }, null, 2) + "\n";
-  const existingPlugin = await readIfExists(pluginJsonPath);
-  if (existingPlugin !== pluginContent) {
-    await mkdir(dirname(pluginJsonPath), { recursive: true });
-    await writeFile(pluginJsonPath, pluginContent, "utf-8");
-  }
 }
 
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {

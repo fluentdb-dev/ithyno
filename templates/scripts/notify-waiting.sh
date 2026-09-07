@@ -5,6 +5,18 @@ set -u
 cli_name=${1:-CLI}
 notification_context=${2:-${ITHYNO_NOTIFICATION_CONTEXT:-cli}}
 notification_host_app=${3:-${ITHYNO_NOTIFICATION_HOST_APP:-}}
+hook_type=${4:-stop}
+
+# Agy hooks require valid JSON on stdout.
+# Stop → {}, PreToolUse → {"decision":"allow"} to let the tool proceed.
+emit_hook_json() {
+  if [ "$hook_type" = "pretooluse" ]; then
+    printf '{"decision":"allow"}'
+  else
+    printf '{}'
+  fi
+}
+
 title="ithyno — CLI waiting"
 body="$cli_name is waiting for your input"
 
@@ -35,13 +47,16 @@ if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && command -v osascript >/de
   else
     osascript -e "display notification \"$escaped_body\" with title \"$escaped_title\"" >/dev/null 2>&1 || true
   fi
+  emit_hook_json
   exit 0
 fi
 
 if command -v notify-send >/dev/null 2>&1; then
   notify-send "$title" "$body" >/dev/null 2>&1 || true
+  emit_hook_json
   exit 0
 fi
 
 # Notification tools are optional; hooks must never make the CLI fail.
+emit_hook_json
 exit 0

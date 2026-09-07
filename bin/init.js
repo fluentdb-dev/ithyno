@@ -17,6 +17,7 @@ import { readFile, writeFile, mkdir, readdir, stat, chmod } from "node:fs/promis
 import { existsSync } from "node:fs";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -108,7 +109,9 @@ function isIthynoHookEntry(entry, scriptAbsPath) {
     value === scriptAbsPath ||
     value.startsWith(`${scriptAbsPath} `) ||
     value === `'${scriptAbsPath}'` ||
-    value.startsWith(`'${scriptAbsPath}' `)
+    value.startsWith(`'${scriptAbsPath}' `) ||
+    value.includes(scriptAbsPath) ||
+    value.includes(`'${scriptAbsPath}'`)
   );
   if (entry?.type === "command" && (matches(entry.command) || matches(entry.bash) || matches(entry.powershell))) return true;
   return Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.type === "command" && (matches(h.command) || matches(h.bash) || matches(h.powershell)));
@@ -118,14 +121,25 @@ function shellArg(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
 }
 
-function notificationCommand(scriptAbsPath, cliName, context, hostAppName) {
+function notificationCommand(scriptAbsPath, cliName, context, hostAppName, { cmdExe = false, hookType } = {}) {
   if (!context || !["electron", "vscode", "cli"].includes(context)) return scriptAbsPath;
+  if (scriptAbsPath.endsWith(".ps1") && cmdExe) {
+    // Antigravity runs hooks via cmd.exe /c on Windows.
+    // cmd.exe does not understand single quotes, and -Command causes
+    // quoting conflicts with cmd.exe's own parser. Use -File with
+    // named params (double-quote the path only if it contains spaces).
+    const dqPath = scriptAbsPath.includes(" ") ? `"${scriptAbsPath}"` : scriptAbsPath;
+    const parts = [dqPath, "-CliName", cliName, "-Context", context];
+    if (hostAppName) parts.push("-HostAppName", hostAppName);
+    if (hookType) parts.push("-HookType", hookType);
+    return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${parts.join(" ")}`;
+  }
   const args = [scriptAbsPath, cliName, context];
   if (hostAppName) args.push(hostAppName);
   const cmd = args.map(shellArg).join(" ");
-  // Claude Code runs hook commands via bash even on Windows.
+  // Claude Code runs hooks via bash even on Windows.
   // .ps1 scripts must be invoked through powershell.exe.
-  if (scriptAbsPath.endsWith(".ps1")) return `powershell.exe -File ${cmd}`;
+  if (scriptAbsPath.endsWith(".ps1")) return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${cmd}`;
   return cmd;
 }
 
@@ -185,27 +199,41 @@ export async function claudeNotifyHookStatus(projectRoot, scriptAbsPath) {
   return { supported: true, enabled, settingsPath };
 }
 
-/** Merge the notification hook into Agy's project-local hooks.json. */
+/** Merge the notification hook into Agy's global config hooks.json. */
 export async function installAgyNotifyHook(projectRoot, scriptAbsPath, force = false, { context, hostAppName } = {}) {
-  const settingsPath = join(projectRoot, ".agent", "hooks.json");
+  const settingsPath = join(homedir(), ".gemini", "config", "hooks.json");
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
-  // Agy Stop is a flat lifecycle event: handlers are placed directly in the
-  // array. Grouped matcher/hooks entries are only valid for tool-use events.
-  const entry = { type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName), timeout: 10 };
   const events = settings["ithyno-notification"] ?? {};
-  const existing = Array.isArray(events.Stop) ? events.Stop : [];
-  const filtered = existing.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
-  if (force || filtered.length === existing.length) filtered.push(entry);
-  settings["ithyno-notification"] = { ...events, Stop: filtered };
+
+  // --- Stop hook (flat lifecycle event) ---
+  const stopEntry = { type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName, { cmdExe: true, hookType: "stop" }), timeout: 10 };
+  const existingStop = Array.isArray(events.Stop) ? events.Stop : [];
+  const filteredStop = existingStop.filter((item) => !isIthynoHookEntry(item, scriptAbsPath));
+  filteredStop.push(stopEntry);
+
+  // --- PreToolUse hook (ask_question matcher — mid-task input wait) ---
+  const preToolEntry = {
+    matcher: "ask_question",
+    hooks: [{ type: "command", command: notificationCommand(scriptAbsPath, "agy", context, hostAppName, { cmdExe: true, hookType: "pretooluse" }), timeout: 10 }],
+  };
+  const existingPre = Array.isArray(events.PreToolUse) ? events.PreToolUse : [];
+  const filteredPre = existingPre.filter((item) => {
+    // Remove ithyno entries regardless of matcher structure
+    if (item?.hooks) return !item.hooks.some((h) => isIthynoHookEntry(h, scriptAbsPath));
+    return !isIthynoHookEntry(item, scriptAbsPath);
+  });
+  filteredPre.push(preToolEntry);
+
+  settings["ithyno-notification"] = { ...events, Stop: filteredStop, PreToolUse: filteredPre };
   await mkdir(dirname(settingsPath), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   return { supported: true, settingsPath, changed: true };
 }
 
 export async function removeAgyNotifyHook(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".agent", "hooks.json");
+  const settingsPath = join(homedir(), ".gemini", "config", "hooks.json");
   if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   let changed = false;
@@ -223,7 +251,7 @@ export async function removeAgyNotifyHook(projectRoot, scriptAbsPath) {
 }
 
 export async function agyNotifyHookStatus(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".agent", "hooks.json");
+  const settingsPath = join(homedir(), ".gemini", "config", "hooks.json");
   if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const block = settings?.["ithyno-notification"];
