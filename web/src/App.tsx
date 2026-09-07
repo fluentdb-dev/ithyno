@@ -14,6 +14,7 @@ import { Tags, TagDetailPage } from "./pages/Tags";
 import { Archive } from "./pages/Archive";
 import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
+import { Environment } from "./pages/Environment";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
 import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
@@ -371,6 +372,7 @@ export function App() {
           <NavLink to="/tags">Tags</NavLink>
           <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/docs">Docs</NavLink>
+          <NavLink to="/environment">Environment</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="topbar-right">
@@ -434,6 +436,7 @@ export function App() {
             <Route path="/tags/:ns/*" element={<TagDetailPage />} />
             <Route path="/archive" element={<Archive />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/environment" element={<Environment />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         )}

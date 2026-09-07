@@ -306,22 +306,22 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
 });
 
 describe("buildManagerPtyEnv", () => {
-  it("uses the server's active port/token when explicit values are present", () => {
-    const env = buildManagerPtyEnv(57703, "abc123");
+  it("uses the server's active port/token when explicit values are present", async () => {
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_PORT).toBe("57703");
     expect(env.ITHYNO_BASE).toBe("http://localhost:57703");
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });
 
-  it("falls back to the default port only when no explicit port was supplied", () => {
-    const env = buildManagerPtyEnv(undefined, "abc123");
+  it("falls back to the default port only when no explicit port was supplied", async () => {
+    const env = await buildManagerPtyEnv(undefined, "abc123");
     expect(env.ITHYNO_PORT).toBe("4321");
     expect(env.ITHYNO_BASE).toBe("http://localhost:4321");
   });
 
-  it("removes inherited launcher tokens before handing the env to the Manager PTY", () => {
+  it("removes inherited launcher tokens before handing the env to the Manager PTY", async () => {
     process.env.ITHYNO_LAUNCHER_SESSION_TOKEN = "stale-token";
-    const env = buildManagerPtyEnv(57703, "abc123");
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });

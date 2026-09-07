@@ -84,6 +84,13 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
+import {
+  getEnvironmentSnapshot,
+  mutateEnvironmentFile,
+  readEnvironmentSelection,
+  revealEnvironmentValue,
+  writeEnvironmentSelection,
+} from "./environment/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -421,6 +428,116 @@ fastify.get("/api/health", async () => {
       ? { available: true as const }
       : { available: false as const, reason: pty.reason },
   };
+});
+
+fastify.get("/api/environment", async () => {
+  return getEnvironmentSnapshot(getProjectRoot(), process.env);
+});
+
+fastify.get("/api/development-environment", async () => {
+  return getEnvironmentSnapshot(getProjectRoot(), process.env);
+});
+
+fastify.get("/api/environment/diagnostics", async () => {
+  const snapshot = await getEnvironmentSnapshot(getProjectRoot(), process.env);
+  return {
+    diagnostics: snapshot.diagnostics,
+    encryption: snapshot.encryption,
+    selection: snapshot.selection,
+  };
+});
+
+fastify.get("/api/development-environment/diagnostics", async () => {
+  const snapshot = await getEnvironmentSnapshot(getProjectRoot(), process.env);
+  return {
+    diagnostics: snapshot.diagnostics,
+    encryption: snapshot.encryption,
+    selection: snapshot.selection,
+  };
+});
+
+fastify.post("/api/environment/selection", async (req) => {
+  const body = (req.body ?? {}) as { selectedProfile?: string | null; preferences?: Record<string, unknown> };
+  const current = await readEnvironmentSelection(getProjectRoot());
+  const next = {
+    selectedProfile: body.selectedProfile ?? current.selectedProfile ?? null,
+    preferences: { ...current.preferences, ...(body.preferences ?? {}) },
+  };
+  await writeEnvironmentSelection(getProjectRoot(), next);
+  return { selection: next, snapshot: await getEnvironmentSnapshot(getProjectRoot(), process.env) };
+});
+
+fastify.post("/api/development-environment/selection", async (req) => {
+  const body = (req.body ?? {}) as { selectedProfile?: string | null; preferences?: Record<string, unknown> };
+  const current = await readEnvironmentSelection(getProjectRoot());
+  const next = {
+    selectedProfile: body.selectedProfile ?? current.selectedProfile ?? null,
+    preferences: { ...current.preferences, ...(body.preferences ?? {}) },
+  };
+  await writeEnvironmentSelection(getProjectRoot(), next);
+  return { selection: next, snapshot: await getEnvironmentSnapshot(getProjectRoot(), process.env) };
+});
+
+fastify.post("/api/environment/reveal", async (req, reply) => {
+  const body = (req.body ?? {}) as { key?: string };
+  const key = body.key?.trim();
+  if (!key) {
+    reply.code(400);
+    return { error: "missing key" };
+  }
+  const value = await revealEnvironmentValue(getProjectRoot(), key, process.env);
+  return { key, value };
+});
+
+fastify.post("/api/development-environment/reveal", async (req, reply) => {
+  const body = (req.body ?? {}) as { key?: string };
+  const key = body.key?.trim();
+  if (!key) {
+    reply.code(400);
+    return { error: "missing key" };
+  }
+  const value = await revealEnvironmentValue(getProjectRoot(), key, process.env);
+  return { key, value };
+});
+
+fastify.post("/api/environment/mutate", async (req, reply) => {
+  const body = (req.body ?? {}) as {
+    profile?: string;
+    values?: Record<string, string>;
+    remove?: string[];
+    revision?: string;
+  };
+  const profile = body.profile ?? "default";
+  if (!profile) {
+    reply.code(400);
+    return { error: "missing profile" };
+  }
+  return mutateEnvironmentFile(getProjectRoot(), {
+    profile,
+    values: body.values,
+    remove: body.remove,
+    revision: body.revision,
+  });
+});
+
+fastify.post("/api/development-environment/mutate", async (req, reply) => {
+  const body = (req.body ?? {}) as {
+    profile?: string;
+    values?: Record<string, string>;
+    remove?: string[];
+    revision?: string;
+  };
+  const profile = body.profile ?? "default";
+  if (!profile) {
+    reply.code(400);
+    return { error: "missing profile" };
+  }
+  return mutateEnvironmentFile(getProjectRoot(), {
+    profile,
+    values: body.values,
+    remove: body.remove,
+    revision: body.revision,
+  });
 });
 
 fastify.get("/api/about", async () => getAboutInfo());
