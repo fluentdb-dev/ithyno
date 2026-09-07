@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,7 +34,7 @@ describe("development environment resolver", () => {
     expect(state.variables.find((item) => item.key === "API_URL")?.source).toBe(".env.dev");
   });
 
-  it("reveal returns actual values and mutations preserve revision checks", async () => {
+  it("reveals actual values and preserves revision checks", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     mkdirSync(join(dir, ".ithyno"), { recursive: true });
     writeFileSync(join(dir, ".env"), "A=1\n", "utf8");
@@ -43,8 +46,43 @@ describe("development environment resolver", () => {
     const initial = await readEnvironmentSelection(dir);
     expect(initial.selectedProfile).toBe("default");
 
-    const mutation = await mutateEnvironmentFile(dir, { profile: "default", values: { B: "2" }, revision: "" });
+    const currentContent = await readFile(join(dir, ".env"), "utf8");
+    const currentRevision = createHash("sha1").update(currentContent).digest("hex");
+    const mutation = await mutateEnvironmentFile(dir, { profile: "default", values: { B: "2" }, revision: currentRevision });
     expect(mutation.wrote).toBe(true);
     expect(mutation.path).toBe(".env");
+  });
+
+  it("rejects reserved keys and stale revisions", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "A=1\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "default", preferences: {} });
+
+    await expect(
+      mutateEnvironmentFile(dir, { profile: "default", values: { ITHYNO_SESSION_TOKEN: "secret" }, revision: "" }),
+    ).rejects.toThrow(/Reserved environment keys/);
+
+    await expect(
+      mutateEnvironmentFile(dir, { profile: "default", values: { B: "2" }, revision: "stale" }),
+    ).rejects.toThrow(/stale revision/);
+  });
+
+  it("reports escaping symlinks and tracked secrets", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    const outside = mkdtempSync(join(tmpdir(), "ithyno-outside-"));
+    writeFileSync(join(dir, ".env"), "A=1\n", "utf8");
+    writeFileSync(join(outside, ".env.remote"), "SECRET=remote\n", "utf8");
+    symlinkSync(join(outside, ".env.remote"), join(dir, ".env.dev"));
+    execFileSync("git", ["init"], { cwd: dir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+    writeFileSync(join(dir, ".env.local"), "B=2\n", "utf8");
+    execFileSync("git", ["add", ".env.local"], { cwd: dir });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: dir });
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    const state = await composeDevelopmentEnvironment(dir);
+    expect(state.diagnostics.some((diag) => diag.kind === "path-traversal")).toBe(true);
+    expect(state.diagnostics.some((diag) => diag.kind === "git-tracked-secret")).toBe(true);
   });
 });

@@ -22,8 +22,8 @@
 
 - [x] 4.1 Add the top-level Environment navigation item and route, separate from Settings and agent configuration.
 - [x] 4.2 Implement profile selection and creation, masked variable table, source/encryption/status display, reload, and empty state.
-- [ ] 4.3 Implement explicit reveal/copy/edit/delete actions and a save review showing the exact target file and pending operations.
-- [ ] 4.4 Implement diagnostics and restart-required messaging while preserving unsaved drafts across focus and same-session route changes.
+- [x] 4.3 Implement explicit reveal/copy/edit/delete actions and a save review showing the exact target file and pending operations.
+- [x] 4.4 Implement diagnostics and restart-required messaging while preserving unsaved drafts across focus and same-session route changes.
 - [ ] 4.5 Add component tests for masking, explicit reveal, stale-save recovery, draft persistence, and reserved-key validation.
 
 ## 5. Process environment integration
