@@ -111,7 +111,7 @@ export async function registerEnvironmentRoutes(
     },
   );
 
-  fastify.post<{ Body: { profile?: string } }>("/api/environment/encrypt", async (req, reply) => {
+  fastify.post<{ Body: { profile?: string } }>("/api/environment/encrypt", { logLevel: "silent" }, async (req, reply) => {
     const body = req.body ?? {};
     const profile = body.profile ?? "default";
     if (!profile) {

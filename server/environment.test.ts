@@ -88,6 +88,28 @@ describe("development environment resolver", () => {
     ).rejects.toThrow(/stale revision/);
   });
 
+  it("rejects invalid mutation keys and preserves inline comments", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "A=1\nB=2 # keep me\n", "utf8");
+
+    const currentContent = await readFile(join(dir, ".env"), "utf8");
+    const currentRevision = createHash("sha1").update(currentContent).digest("hex");
+
+    await expect(
+      mutateEnvironmentFile(dir, { profile: "default", values: { "FOO BAR": "x" }, revision: currentRevision }),
+    ).rejects.toThrow(/Invalid environment key name/);
+
+    await expect(
+      mutateEnvironmentFile(dir, { profile: "default", remove: ["BAD KEY"], revision: currentRevision }),
+    ).rejects.toThrow(/Invalid environment key name/);
+
+    const mutation = await mutateEnvironmentFile(dir, { profile: "default", values: { B: "updated" }, revision: currentRevision });
+    expect(mutation.wrote).toBe(true);
+
+    const nextContent = await readFile(join(dir, ".env"), "utf8");
+    expect(nextContent).toContain('B="updated" # keep me');
+  });
+
   it("reports escaping symlinks and tracked secrets", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     const outside = mkdtempSync(join(tmpdir(), "ithyno-outside-"));

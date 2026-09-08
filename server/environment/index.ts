@@ -79,6 +79,8 @@ export type DevelopmentEnvironmentEncryptionResult = {
 const STATE_PATH = ".ithyno/environment.json";
 const RESERVED_PREFIX = "ITHYNO_";
 const PROFILE_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ENV_ASSIGNMENT_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
 
 function toRelative(projectRoot: string, filePath: string): string {
   return relative(projectRoot, filePath).replace(/\\/g, "/");
@@ -119,17 +121,23 @@ function sha1(input: string): string {
   return createHash("sha1").update(input).digest("hex");
 }
 
-function readTrackedState(projectRoot: string, filePath: string): boolean {
-  const rel = toRelative(projectRoot, filePath);
+function readTrackedState(projectRoot: string, filePaths: string[]): Set<string> {
+  const tracked = new Set<string>();
+  if (filePaths.length === 0) return tracked;
+  const rels = filePaths.map((filePath) => toRelative(projectRoot, filePath));
   try {
-    execFileSync("git", ["ls-files", "--error-unmatch", rel], {
+    const output = execFileSync("git", ["ls-files", "--", ...rels], {
       cwd: projectRoot,
-      stdio: "ignore",
-    });
-    return true;
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString("utf8");
+    for (const line of output.split(/\r?\n/)) {
+      const rel = line.trim();
+      if (rel) tracked.add(rel);
+    }
   } catch {
-    return false;
+    return tracked;
   }
+  return tracked;
 }
 
 async function inspectFile(projectRoot: string, filePath: string): Promise<{ ok: boolean; realPath?: string; diagnostic?: EnvironmentDiagnostic }> {
@@ -307,13 +315,14 @@ async function collectResolvedEnvironment(
     }
   }
 
+  const trackedFiles = readTrackedState(root, Array.from(diagnosticFiles));
   for (const filePath of Array.from(diagnosticFiles)) {
     const inspection = await inspectFile(root, filePath);
     if (inspection.diagnostic) {
       diagnostics.push(inspection.diagnostic);
       continue;
     }
-    if (readTrackedState(root, filePath)) {
+    if (trackedFiles.has(toRelative(root, filePath))) {
       diagnostics.push({
         kind: "git-tracked-secret",
         severity: "warning",
@@ -442,6 +451,54 @@ export async function revealEnvironmentValue(
   return values[key];
 }
 
+function parseAssignmentLine(line: string): { key: string; valuePart: string; comment: string } | null {
+  const match = line.match(ENV_ASSIGNMENT_RE);
+  if (!match) return null;
+  const key = match[1];
+  const rawValuePart = match[2] ?? "";
+  let comment = "";
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  for (let index = 0; index < rawValuePart.length; index += 1) {
+    const char = rawValuePart[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (char === "#" && !inSingle && !inDouble) {
+      const before = rawValuePart.slice(0, index);
+      const whitespace = before.match(/\s*$/)?.[0] ?? "";
+      if (whitespace) {
+        comment = `${whitespace}${rawValuePart.slice(index)}`;
+        break;
+      }
+    }
+  }
+  return { key, valuePart: rawValuePart, comment };
+}
+
+function assertValidMutationKeys(keys: Iterable<string>): void {
+  for (const key of keys) {
+    if (!key.trim()) continue;
+    if (!ENV_KEY_RE.test(key)) {
+      throw new Error(`Invalid environment key name "${key}"`);
+    }
+  }
+}
+
 export async function mutateEnvironmentFile(
   projectRoot: string,
   payload: DevelopmentEnvironmentMutation,
@@ -455,9 +512,16 @@ export async function mutateEnvironmentFile(
   if (!profilePath || !isInsideProjectRoot(root, profilePath)) {
     throw new Error("Invalid profile target");
   }
+  assertValidMutationKeys(Object.keys(payload.values ?? {}));
   const reservedUpdates = Object.keys(payload.values ?? {}).filter((key) => key.startsWith(RESERVED_PREFIX));
   if (reservedUpdates.length > 0) {
     throw new Error("Reserved environment keys cannot be managed as project values");
+  }
+  for (const key of payload.remove ?? []) {
+    if (!key.trim()) continue;
+    if (!ENV_KEY_RE.test(key)) {
+      throw new Error(`Invalid environment key name "${key}"`);
+    }
   }
   const reservedRemovals = (payload.remove ?? []).filter((key) => key.trim().startsWith(RESERVED_PREFIX));
   if (reservedRemovals.length > 0) {
@@ -485,16 +549,16 @@ export async function mutateEnvironmentFile(
   const lines = currentContent.split(/\r?\n/);
   const nextLines: string[] = [];
   for (const line of lines) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
-    if (!match) {
+    const assignment = parseAssignmentLine(line);
+    if (!assignment) {
       nextLines.push(line);
       continue;
     }
-    const key = match[1];
+    const key = assignment.key;
     if (removals.has(key)) continue;
     if (entries.has(key)) {
       const value = entries.get(key) ?? "";
-      nextLines.push(`${key}=${serializeEnvValue(value)}`);
+      nextLines.push(`${key}=${serializeEnvValue(value)}${assignment.comment}`);
       entries.delete(key);
       continue;
     }
