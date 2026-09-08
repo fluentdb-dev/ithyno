@@ -239,6 +239,7 @@ export async function discoverDevelopmentProfiles(projectRoot: string): Promise<
 async function collectResolvedEnvironment(
   projectRoot: string,
   selection: DevelopmentEnvironmentSelection,
+  inheritedEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<{
   orderedFiles: string[];
   env: Record<string, string>;
@@ -287,18 +288,26 @@ async function collectResolvedEnvironment(
 
   const encryptionSources: string[] = [];
   const encryptionKeys = [
-    process.env.DOTENVX_KEY,
-    process.env.DOTENV_KEY,
-    process.env.DOTENV_PRIVATE_KEY,
-    process.env.DOTENV_PUBLIC_KEY,
-    process.env.DOTENVX_KEYS,
-    process.env.DOTENVX_KEY_FILE,
-  ].filter((value): value is string => Boolean(value));
+    "DOTENVX_KEY",
+    "DOTENV_KEY",
+    "DOTENV_PRIVATE_KEY",
+    "DOTENV_PUBLIC_KEY",
+    "DOTENVX_KEYS",
+    "DOTENVX_KEY_FILE",
+  ].filter((key) => Boolean(inheritedEnv[key]));
   if (encryptionKeys.length > 0) {
     encryptionSources.push(...encryptionKeys);
   }
 
-  for (const filePath of orderedFiles) {
+  const diagnosticFiles = new Set<string>(orderedFiles);
+  for (const profile of profiles) {
+    const profilePath = resolve(root, profile.path);
+    if (existsSync(profilePath)) {
+      diagnosticFiles.add(profilePath);
+    }
+  }
+
+  for (const filePath of Array.from(diagnosticFiles)) {
     const inspection = await inspectFile(root, filePath);
     if (inspection.diagnostic) {
       diagnostics.push(inspection.diagnostic);
@@ -324,6 +333,22 @@ async function collectResolvedEnvironment(
           path: toRelative(root, filePath),
         });
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
+      diagnostics.push({
+        kind: code === "EACCES" || code === "EPERM" ? "unreadable-file" : "unsupported-syntax",
+        severity: "error",
+        message: `Unable to parse ${toRelative(root, filePath)}: ${message}`,
+        path: toRelative(root, filePath),
+      });
+    }
+  }
+
+  for (const filePath of orderedFiles) {
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const parsed = parseDotenvx(raw) as Record<string, string>;
       for (const [key, value] of Object.entries(parsed)) {
         if (key.startsWith(RESERVED_PREFIX)) continue;
         env[key] = value;
@@ -340,7 +365,7 @@ async function collectResolvedEnvironment(
       const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
       diagnostics.push({
         kind: code === "EACCES" || code === "EPERM" ? "unreadable-file" : "unsupported-syntax",
-        severity: code === "EACCES" || code === "EPERM" ? "error" : "error",
+        severity: "error",
         message: `Unable to parse ${toRelative(root, filePath)}: ${message}`,
         path: toRelative(root, filePath),
       });
@@ -364,7 +389,7 @@ export async function composeDevelopmentEnvironment(
   void inheritedEnv;
   const root = resolve(projectRoot);
   const selection = await readEnvironmentSelection(root);
-  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, profiles } = await collectResolvedEnvironment(root, selection);
+  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, profiles } = await collectResolvedEnvironment(root, selection, inheritedEnv);
   const resolvedEntries = Object.entries(env).sort(([a], [b]) => a.localeCompare(b));
   const variableMap = new Map(variableEntries.map((item) => [item.key, item]));
   const state: DevelopmentEnvironmentState = {
@@ -401,7 +426,7 @@ export async function resolveDevelopmentEnvironmentValues(
   void inheritedEnv;
   const root = resolve(projectRoot);
   const selection = await readEnvironmentSelection(root);
-  const { env } = await collectResolvedEnvironment(root, selection);
+  const { env } = await collectResolvedEnvironment(root, selection, inheritedEnv);
   return env;
 }
 

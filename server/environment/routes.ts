@@ -22,11 +22,11 @@ export async function registerEnvironmentRoutes(
   const getProjectRoot = options.getProjectRoot;
   const getProcessEnv = options.getProcessEnv ?? (() => process.env);
 
-  fastify.get("/api/environment", async () => {
+  fastify.get("/api/environment", { logLevel: "silent" }, async () => {
     return getEnvironmentSnapshot(getProjectRoot(), getProcessEnv());
   });
 
-  fastify.get("/api/environment/diagnostics", async () => {
+  fastify.get("/api/environment/diagnostics", { logLevel: "silent" }, async () => {
     const snapshot = await getEnvironmentSnapshot(getProjectRoot(), getProcessEnv());
     return {
       diagnostics: snapshot.diagnostics,

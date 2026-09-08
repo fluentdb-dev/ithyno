@@ -27,12 +27,13 @@ type Snapshot = {
   revision: string;
 };
 
-type DraftState = {
+export type DraftState = {
   edits: Record<string, string>;
   removals: string[];
 };
 
 const DRAFT_STORAGE_KEY = "ithyno-environment-draft";
+const LAST_APPLIED_REVISION_STORAGE_KEY = "ithyno-environment-last-applied-revision";
 
 function authHeaders(): Record<string, string> {
   const token = getSessionToken();
@@ -41,10 +42,10 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-function readDraft(): DraftState {
-  if (typeof window === "undefined") return { edits: {}, removals: [] };
+export function readDraftState(storage: Storage | null = typeof window === "undefined" ? null : window.localStorage): DraftState {
+  if (!storage) return { edits: {}, removals: [] };
   try {
-    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+    const raw = storage.getItem(DRAFT_STORAGE_KEY);
     if (!raw) return { edits: {}, removals: [] };
     const parsed = JSON.parse(raw) as Partial<DraftState>;
     return {
@@ -56,9 +57,57 @@ function readDraft(): DraftState {
   }
 }
 
-function writeDraft(draft: DraftState): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+export function writeDraftState(draft: DraftState, storage: Storage | null = typeof window === "undefined" ? null : window.localStorage): void {
+  if (!storage) return;
+  storage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+}
+
+export function buildPendingOperations(targetProfile: string | null | undefined, draft: DraftState): string[] {
+  const operations: string[] = [];
+  const target = targetProfile ?? "default";
+  for (const [key, value] of Object.entries(draft.edits)) {
+    operations.push(`write ${key}=${value} into ${target}`);
+  }
+  for (const key of draft.removals) {
+    operations.push(`remove ${key} from ${target}`);
+  }
+  return operations;
+}
+
+export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
+  if (!managerRunning || !lastAppliedRevision || !snapshotRevision) return false;
+  return lastAppliedRevision !== snapshotRevision;
+}
+
+function readLastAppliedRevision(storage: Storage | null = typeof window === "undefined" ? null : window.localStorage): string | null {
+  if (!storage) return null;
+  try {
+    return storage.getItem(LAST_APPLIED_REVISION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastAppliedRevision(revision: string | null, storage: Storage | null = typeof window === "undefined" ? null : window.localStorage): void {
+  if (!storage) return;
+  if (!revision) {
+    storage.removeItem(LAST_APPLIED_REVISION_STORAGE_KEY);
+    return;
+  }
+  storage.setItem(LAST_APPLIED_REVISION_STORAGE_KEY, revision);
+}
+
+export function EnvironmentEmptyState() {
+  return (
+    <div style={{ border: "1px solid #d0d7de", background: "#f6f8fa", padding: 16, marginBottom: 16 }}>
+      <strong>No env files exist yet.</strong>
+      <p>Create the first project profile with the name field above, or add a .env file manually. ithyno session variables stay separate from project variables.</p>
+    </div>
+  );
+}
+
+export function EnvironmentValueCell({ variable, revealedValue }: { variable: Variable; revealedValue?: string }) {
+  return <span>{revealedValue ?? variable.maskedValue}</span>;
 }
 
 export function Environment() {
@@ -67,7 +116,7 @@ export function Environment() {
   const [loading, setLoading] = useState(false);
   const [managerRunning, setManagerRunning] = useState(false);
   const [restartRequired, setRestartRequired] = useState(false);
-  const [draft, setDraft] = useState<DraftState>(() => readDraft());
+  const [draft, setDraft] = useState<DraftState>(() => readDraftState());
   const [reviewOpen, setReviewOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -78,7 +127,7 @@ export function Environment() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    writeDraft(draft);
+    writeDraftState(draft);
   }, [draft]);
 
   const load = async () => {
@@ -88,13 +137,18 @@ export function Environment() {
         fetch("/api/environment"),
         fetch("/api/health"),
       ]);
+      let nextSnapshot: Snapshot | null = null;
       if (envRes.ok) {
-        setSnapshot(await envRes.json());
+        nextSnapshot = await envRes.json() as Snapshot;
+        setSnapshot(nextSnapshot);
       }
+      let nextManagerRunning = false;
       if (healthRes.ok) {
         const health = await healthRes.json() as { terminal?: { available?: boolean } };
-        setManagerRunning(Boolean(health.terminal?.available));
+        nextManagerRunning = Boolean(health.terminal?.available);
+        setManagerRunning(nextManagerRunning);
       }
+      setRestartRequired(shouldShowRestartRequired(readLastAppliedRevision(), nextSnapshot?.revision ?? null, nextManagerRunning));
     } finally {
       setLoading(false);
     }
@@ -104,19 +158,10 @@ export function Environment() {
     void load();
   }, []);
 
-  const pendingOperations = () => {
-    const operations: string[] = [];
-    const target = snapshot?.selection.selectedProfile ?? "default";
-    for (const [key, value] of Object.entries(draft.edits)) {
-      operations.push(`write ${key}=${value} into ${target}`);
-    }
-    for (const key of draft.removals) {
-      operations.push(`remove ${key} from ${target}`);
-    }
-    return operations;
-  };
+  const pendingOperations = () => buildPendingOperations(snapshot?.selection.selectedProfile ?? null, draft);
 
   const onSelect = async (profile: string | null) => {
+    const previousRevision = snapshot?.revision ?? null;
     setLoading(true);
     setSaveError(null);
     try {
@@ -130,6 +175,7 @@ export function Environment() {
         setSnapshot(payload.snapshot);
         if (managerRunning) {
           setRestartRequired(true);
+          writeLastAppliedRevision(previousRevision);
         }
       }
     } finally {
@@ -194,6 +240,7 @@ export function Environment() {
   const createProfile = async () => {
     const profile = createProfileName.trim();
     if (!profile) return;
+    const previousRevision = snapshot?.revision ?? null;
     setLoading(true);
     setSaveError(null);
     try {
@@ -215,7 +262,10 @@ export function Environment() {
       if (selectRes.ok) {
         const payload = await selectRes.json() as { snapshot: Snapshot };
         setSnapshot(payload.snapshot);
-        if (managerRunning) setRestartRequired(true);
+        if (managerRunning) {
+          setRestartRequired(true);
+          writeLastAppliedRevision(previousRevision);
+        }
       }
       setCreateProfileName("");
     } finally {
@@ -225,6 +275,7 @@ export function Environment() {
 
   const saveChanges = async () => {
     if (!snapshot) return;
+    const previousRevision = snapshot.revision;
     setSaving(true);
     setSaveError(null);
     try {
@@ -250,7 +301,10 @@ export function Environment() {
       }
       setDraft({ edits: {}, removals: [] });
       setReviewOpen(false);
-      if (managerRunning) setRestartRequired(true);
+      if (managerRunning) {
+        setRestartRequired(true);
+        writeLastAppliedRevision(previousRevision);
+      }
       setRevealed((cur) => Object.fromEntries(Object.entries(cur).filter(([key]) => !draft.edits[key] && !draft.removals.includes(key))));
     } finally {
       setSaving(false);
@@ -318,40 +372,48 @@ export function Environment() {
               </button>
             </div>
           ) : null}
-          <h3>Profiles</h3>
-          <ul>
-            {snapshot.profiles.map((profile) => (
-              <li key={profile.name}>
-                {profile.name} — {profile.path} {profile.selected ? "(selected)" : ""}
-              </li>
-            ))}
-          </ul>
-          <h3>Variables</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Value</th>
-                <th>Source</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.variables.map((variable) => (
-                <tr key={variable.key}>
-                  <td>{variable.key}</td>
-                  <td>{revealed[variable.key] ?? variable.maskedValue}</td>
-                  <td>{variable.source}</td>
-                  <td>
-                    <button onClick={() => void onReveal(variable.key)} style={{ marginRight: 4 }}>Reveal</button>
-                    <button onClick={() => void onCopy(variable.key)} style={{ marginRight: 4 }}>Copy</button>
-                    <button onClick={() => stageEdit(variable.key)} style={{ marginRight: 4 }}>Edit</button>
-                    <button onClick={() => removeVariable(variable.key)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {snapshot.profiles.length === 0 ? <EnvironmentEmptyState /> : (
+            <>
+              <h3>Profiles</h3>
+              <ul>
+                {snapshot.profiles.map((profile) => (
+                  <li key={profile.name}>
+                    {profile.name} — {profile.path} {profile.selected ? "(selected)" : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {snapshot.profiles.length === 0 ? null : (
+            <>
+              <h3>Variables</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Value</th>
+                    <th>Source</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshot.variables.map((variable) => (
+                    <tr key={variable.key}>
+                      <td>{variable.key}</td>
+                      <td><EnvironmentValueCell variable={variable} revealedValue={revealed[variable.key]} /></td>
+                      <td>{variable.source}</td>
+                      <td>
+                        <button onClick={() => void onReveal(variable.key)} style={{ marginRight: 4 }}>Reveal</button>
+                        <button onClick={() => void onCopy(variable.key)} style={{ marginRight: 4 }}>Copy</button>
+                        <button onClick={() => stageEdit(variable.key)} style={{ marginRight: 4 }}>Edit</button>
+                        <button onClick={() => removeVariable(variable.key)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
           <h3>Diagnostics</h3>
           <ul>
             {snapshot.diagnostics.map((diag, index) => (

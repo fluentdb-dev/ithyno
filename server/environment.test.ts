@@ -34,6 +34,27 @@ describe("development environment resolver", () => {
     expect(state.variables.find((item) => item.key === "API_URL")?.source).toBe(".env.dev");
   });
 
+  it("does not expose dotenvx key values in encryption sources and still reports diagnostics without a selection", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    mkdirSync(join(dir, ".env"), { recursive: true });
+    writeFileSync(join(dir, ".env.local"), "A=1\n", "utf8");
+    const previousDotenvxKey = process.env.DOTENVX_KEY;
+    process.env.DOTENVX_KEY = "super-secret";
+    try {
+      await writeEnvironmentSelection(dir, { selectedProfile: null, preferences: {} });
+      const state = await composeDevelopmentEnvironment(dir);
+      expect(state.encryption.sources).toEqual(["DOTENVX_KEY"]);
+      expect(state.encryption.sources.join(" ")).not.toContain("super-secret");
+      expect(state.diagnostics.some((diagnostic) => diagnostic.kind === "unsupported-syntax")).toBe(true);
+    } finally {
+      if (previousDotenvxKey === undefined) {
+        delete process.env.DOTENVX_KEY;
+      } else {
+        process.env.DOTENVX_KEY = previousDotenvxKey;
+      }
+    }
+  });
+
   it("reveals actual values and preserves revision checks", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     mkdirSync(join(dir, ".ithyno"), { recursive: true });
