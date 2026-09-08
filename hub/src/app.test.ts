@@ -7,11 +7,149 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Database } from "sqlite3";
 import { startHubRuntime, classifyWebhookEvent, parseWebhookPayload, verifyWebhookRequest } from "./app.js";
 import { parseHubConfig } from "./config.js";
+import type { GitLabClient } from "./gitlab-flow.js";
+import { processIssueGenerationJob, applyIssueFlowFailure } from "./gitlab-flow.js";
 
 const tempDirs: string[] = [];
 
+class FakeGitLabClient implements GitLabClient {
+  public branches = new Set<string>();
+  public mergeRequests = new Map<string, { iid: string; webUrl: string; draft: boolean; state: string }>();
+  public comments = new Map<string, Array<{ id: string; body: string }>>();
+  public labels = new Map<string, string[]>();
+  public commitAttempts = 0;
+  public shouldFailCommit = false;
+  public baseRevision = "abc123";
+
+  async getDefaultBranch(): Promise<string> {
+    return "main";
+  }
+
+  async getOpenSpecRevision(): Promise<string> {
+    return this.baseRevision;
+  }
+
+  async getBranch(_projectPath: string, branchName: string): Promise<{ name: string } | null> {
+    return this.branches.has(branchName) ? { name: branchName } : null;
+  }
+
+  async createBranch(_projectPath: string, branchName: string): Promise<void> {
+    this.branches.add(branchName);
+  }
+
+  async commitAndPushFiles(): Promise<void> {
+    this.commitAttempts += 1;
+    if (this.shouldFailCommit) {
+      throw new Error("commit-failed");
+    }
+  }
+
+  async findMergeRequest(_projectPath: string, issueIid: string, sourceBranch: string): Promise<{ iid: string; webUrl: string; draft: boolean; state: string } | null> {
+    return this.mergeRequests.get(`${issueIid}:${sourceBranch}`) ?? null;
+  }
+
+  async upsertMergeRequest(projectPath: string, issueIid: string, sourceBranch: string, _targetBranch: string, _title: string, _description: string): Promise<{ iid: string; webUrl: string }> {
+    const key = `${issueIid}:${sourceBranch}`;
+    const iid = `mr-${issueIid}`;
+    this.mergeRequests.set(key, { iid, webUrl: `${projectPath}/-/merge_requests/${iid}`, draft: true, state: "opened" });
+    return { iid, webUrl: `${projectPath}/-/merge_requests/${iid}` };
+  }
+
+  async findIssueComment(_projectPath: string, issueIid: string, marker: string): Promise<{ id: string; body: string } | null> {
+    const comments = this.comments.get(`${issueIid}:${marker}`) ?? [];
+    return comments[0] ?? null;
+  }
+
+  async upsertIssueComment(_projectPath: string, issueIid: string, marker: string, body: string): Promise<void> {
+    const key = `${issueIid}:${marker}`;
+    const comments = this.comments.get(key) ?? [];
+    const next = comments.length === 0 ? [{ id: `${issueIid}-${marker}`, body }] : [{ ...comments[0], body }];
+    this.comments.set(key, next);
+  }
+
+  async setIssueLabels(_projectPath: string, issueIid: string, labels: string[]): Promise<void> {
+    this.labels.set(issueIid, labels);
+  }
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("hub issue-to-draft flow", () => {
+  it("creates a canonical change branch, artifacts, and draft merge request for an eligible issue", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-flow-"));
+    tempDirs.push(dir);
+    const client = new FakeGitLabClient();
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+    });
+    config.gitlabClient = client;
+    const payload = { projectPath: "group/project", issueIid: "42", title: "Add issue flow", body: "We need a deterministic change from this issue.", labels: ["ai:spec"] };
+
+    const artifacts = await processIssueGenerationJob(config, payload, client);
+    expect(artifacts).not.toBeNull();
+    expect(client.branches.has("change/42-add-issue-flow")).toBe(true);
+    expect(client.mergeRequests.size).toBe(1);
+    expect(client.comments.get("42:ithyno-hub:status")?.[0]?.body).toContain("change/42-add-issue-flow");
+    expect(artifacts?.proposalContent).toContain("base-specs-revision");
+    expect(client.labels.get("42")).toContain("ai:in-progress");
+  });
+
+  it("requests clarification for a thin issue without generating artifacts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-clarification-"));
+    tempDirs.push(dir);
+    const client = new FakeGitLabClient();
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+    });
+    config.gitlabClient = client;
+    const payload = { projectPath: "group/project", issueIid: "43", title: "", body: "", labels: ["ai:spec"] };
+
+    const artifacts = await processIssueGenerationJob(config, payload, client);
+    expect(artifacts).toBeNull();
+    expect(client.branches.size).toBe(0);
+    expect(client.comments.get("43:ithyno-hub:clarification")?.[0]?.body).toContain("Please add");
+  });
+
+  it("reconciles an existing branch and merge request on retry and records failure cleanup on write errors", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-recovery-"));
+    tempDirs.push(dir);
+    const client = new FakeGitLabClient();
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+      ITHYNO_HUB_FAILURE_LABEL: "ai:failed",
+    });
+    config.gitlabClient = client;
+    const payload = { projectPath: "group/project", issueIid: "44", title: "Recover partial writes", body: "The hub should recover after a partial write failure.", labels: ["ai:spec"] };
+
+    client.shouldFailCommit = true;
+    await expect(processIssueGenerationJob(config, payload, client)).rejects.toThrow("commit-failed");
+    await applyIssueFlowFailure(config, payload, new Error("commit-failed"));
+    expect(client.labels.get("44")).toContain("ai:failed");
+    expect(client.labels.get("44")).not.toContain("ai:in-progress");
+
+    client.shouldFailCommit = false;
+    const artifacts = await processIssueGenerationJob(config, payload, client);
+    expect(artifacts).not.toBeNull();
+    expect(client.commitAttempts).toBe(2);
+    expect(client.branches.has("change/44-recover-partial-writes")).toBe(true);
+  });
 });
 
 describe("hub webhook intake", () => {

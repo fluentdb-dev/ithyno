@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import { WebSocketServer, WebSocket } from "ws";
 import { buildHubEventEnvelope, isSupportedHubEventVersion } from "@ithyno/shared";
 import type { HubConfig } from "./config.js";
+import { applyIssueFlowFailure, parseIssuePayload, processIssueGenerationJob } from "./gitlab-flow.js";
 import { createOperationalStore, type OperationalStore } from "./store.js";
 
 interface Subscriber {
@@ -29,7 +30,7 @@ export interface HubRuntime {
   close: () => Promise<void>;
 }
 
-const JOB_PROCESSOR_INTERVAL_MS = 5000;
+const JOB_PROCESSOR_INTERVAL_MS = Number.parseInt(process.env.ITHYNO_HUB_JOB_PROCESSOR_INTERVAL_MS ?? "", 10) || 5000;
 const JOB_LEASE_DURATION_MS = 15000;
 const JOB_MAX_ATTEMPTS = 5;
 
@@ -42,7 +43,7 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
     done(null, body.toString());
   });
   const subscribers = new Set<Subscriber>();
-  const jobProcessor = startJobProcessor(store);
+  const jobProcessor = startJobProcessor(config, store);
 
   app.get("/healthz", async () => ({ ok: true, service: "ithyno-hub" }));
   app.get("/readyz", async () => ({ ok: true, service: "ithyno-hub" }));
@@ -98,7 +99,7 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await store.createJob(deliveryId, payload.eventType, payload.projectId, payload.title, payload.targetUrl);
+    await store.createJob(deliveryId, payload.eventType, payload.projectId, payload.title, payload.targetUrl, { eventType: payload.eventType, projectId: payload.projectId, title: payload.title, targetUrl: payload.targetUrl, body: parsedBody });
     for (const subscriber of subscribers) {
       if (!shouldDeliverToSubscriber(subscriber, payload.projectId)) continue;
       subscriber.ws.send(JSON.stringify(envelope));
@@ -379,7 +380,7 @@ function getHeaderValue(headers: Record<string, string | string[] | undefined>, 
   return undefined;
 }
 
-function startJobProcessor(store: OperationalStore): { stop: () => void } {
+function startJobProcessor(config: HubConfig, store: OperationalStore): { stop: () => void } {
   const processPendingJobs = async () => {
     try {
       await store.recoverExpiredLeases(Date.now());
@@ -394,9 +395,19 @@ function startJobProcessor(store: OperationalStore): { stop: () => void } {
           await store.recordAudit(job.eventType, job.projectId, "terminal_failed", "retry-budget-exhausted");
           continue;
         }
-        const backoffMs = Math.min(1000 * 2 ** Math.max(0, nextAttempt - 1), 10000);
-        const nextAttemptAt = Date.now() + backoffMs;
-        await store.markJobRetry(job.id, nextAttempt, nextAttemptAt);
+        const issuePayload = parseJobIssuePayload(job);
+        try {
+          await processHubJob(config, store, job);
+          await store.markJobTerminal(job.id);
+          await store.recordAudit(job.eventType, job.projectId, "succeeded", `job ${job.id} completed`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await store.markJobTerminal(job.id, message);
+          await store.recordAudit(job.eventType, job.projectId, "terminal_failed", message);
+          if (issuePayload) {
+            await applyIssueFlowFailure(config, issuePayload, error as Error).catch(() => undefined);
+          }
+        }
       }
     } catch (error) {
       console.error(`[hub] job processor failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -410,4 +421,23 @@ function startJobProcessor(store: OperationalStore): { stop: () => void } {
   return {
     stop: () => clearInterval(timer),
   };
+}
+
+async function processHubJob(config: HubConfig, _store: OperationalStore, job: { id: string; eventType: string; projectId: string; title: string; targetUrl: string; payloadJson?: string | null }): Promise<void> {
+  const payload = parseJobIssuePayload(job);
+  if (payload) {
+    await processIssueGenerationJob(config, payload, config.gitlabClient);
+  }
+}
+
+function parseJobIssuePayload(job: { payloadJson?: string | null }): ReturnType<typeof parseIssuePayload> | null {
+  if (!job.payloadJson) return null;
+  try {
+    const parsed = JSON.parse(job.payloadJson) as { body?: Record<string, unknown>; projectId?: string };
+    const body = parsed.body ?? parsed;
+    const projectId = parsed.projectId ?? ((body as Record<string, unknown>).projectId as string | undefined) ?? "";
+    return parseIssuePayload(body as Record<string, unknown>, projectId);
+  } catch {
+    return null;
+  }
 }

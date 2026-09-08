@@ -42,6 +42,7 @@ export function isAllowedHubNotificationTarget(
 
 export function startHubRelay(config: HubRelayConfig): HubRelayHandle {
   if (!config.hubUrl || !config.hubCredential) {
+    config.onConnectionStatus?.("disconnected");
     return { close: () => undefined };
   }
   let socket: WebSocket | null = null;

@@ -32,6 +32,7 @@ export interface JobRecord {
   leaseOwner?: string | null;
   leaseExpiresAt?: number | null;
   nextAttemptAt?: number | null;
+  payloadJson?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,9 +41,9 @@ export interface OperationalStore {
   initialize(): Promise<void>;
   recordDelivery(delivery: DeliveryRecord): Promise<void>;
   recordAudit(eventType: string, projectId: string, outcome: string, detail: string): Promise<void>;
-  createJob(id: string, eventType: string, projectId: string, title: string, targetUrl: string): Promise<void>;
+  createJob(id: string, eventType: string, projectId: string, title: string, targetUrl: string, payload?: Record<string, unknown>): Promise<void>;
   markJobRetry(id: string, attempt: number, nextAttemptAt: number): Promise<void>;
-  markJobTerminal(id: string, error: string): Promise<void>;
+  markJobTerminal(id: string, error?: string): Promise<void>;
   recoverExpiredLeases(now: number): Promise<string[]>;
   purgeExpiredRecords(now: number): Promise<void>;
   listReadyJobs(now: number, limit: number): Promise<JobRecord[]>;
@@ -102,6 +103,7 @@ class SqliteOperationalStore implements OperationalStore {
         lease_owner TEXT,
         lease_expires_at INTEGER,
         next_attempt_at INTEGER,
+        payload_json TEXT,
         terminal_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -173,15 +175,16 @@ class SqliteOperationalStore implements OperationalStore {
     );
   }
 
-  async createJob(id: string, eventType: string, projectId: string, title: string, targetUrl: string): Promise<void> {
+  async createJob(id: string, eventType: string, projectId: string, title: string, targetUrl: string, payload?: Record<string, unknown>): Promise<void> {
     const now = new Date().toISOString();
+    const payloadJson = payload ? JSON.stringify(payload) : null;
     await this.run(
       `
-        INSERT INTO jobs (id, event_type, project_id, title, target_url, status, attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+        INSERT INTO jobs (id, event_type, project_id, title, target_url, status, attempts, payload_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
       `,
-      [id, eventType, projectId, title, targetUrl, "queued", now, now],
+      [id, eventType, projectId, title, targetUrl, "queued", payloadJson, now, now],
     );
   }
 
@@ -193,11 +196,12 @@ class SqliteOperationalStore implements OperationalStore {
     );
   }
 
-  async markJobTerminal(id: string, error: string): Promise<void> {
+  async markJobTerminal(id: string, error?: string): Promise<void> {
     const now = new Date().toISOString();
+    const status = error ? "terminal_failed" : "succeeded";
     await this.run(
-      `UPDATE jobs SET status = 'terminal_failed', terminal_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
-      [error, now, id],
+      `UPDATE jobs SET status = ?, terminal_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
+      [status, error ?? null, now, id],
     );
   }
 
@@ -224,7 +228,7 @@ class SqliteOperationalStore implements OperationalStore {
 
   async listReadyJobs(now: number, limit: number): Promise<JobRecord[]> {
     return await this.all<JobRecord>(
-      `SELECT id, event_type AS eventType, project_id AS projectId, title, target_url AS targetUrl, status, attempts, lease_owner AS leaseOwner, lease_expires_at AS leaseExpiresAt, next_attempt_at AS nextAttemptAt, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE status IN ('queued','retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?) ORDER BY created_at LIMIT ?`,
+      `SELECT id, event_type AS eventType, project_id AS projectId, title, target_url AS targetUrl, status, attempts, lease_owner AS leaseOwner, lease_expires_at AS leaseExpiresAt, next_attempt_at AS nextAttemptAt, payload_json AS payloadJson, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE status IN ('queued','retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?) ORDER BY created_at LIMIT ?`,
       [now, now, limit],
     );
   }

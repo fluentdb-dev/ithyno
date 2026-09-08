@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { join } from "node:path";
+import type { GitLabClient } from "./gitlab-flow.js";
+
 export interface HubConfig {
   host: string;
   port: number;
@@ -10,6 +13,15 @@ export interface HubConfig {
   statePath: string;
   retentionMs: number;
   workstationSubscriptionCredential: string;
+  gitlabToken?: string;
+  gitlabClient?: GitLabClient;
+  aiSpecLabel: string;
+  defaultBranch: string;
+  changeBranchPrefix: string;
+  workspaceRoot: string;
+  issueCommentMarker: string;
+  inProgressLabel?: string;
+  terminalFailureLabel?: string;
 }
 
 const DEFAULT_PORT = 4322;
@@ -21,6 +33,7 @@ export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig 
   const port = Number(env.ITHYNO_HUB_PORT ?? defaultPortValue());
   const retentionDays = Number.parseInt(env.ITHYNO_HUB_RETENTION_DAYS ?? "", 10);
   const retentionMs = Number.parseInt(env.ITHYNO_HUB_RETENTION_MS ?? "", 10);
+  const workspaceRoot = env.ITHYNO_HUB_WORKSPACE_ROOT ?? join(process.cwd(), ".hub-workspace");
   return {
     host: env.ITHYNO_HUB_HOST ?? "127.0.0.1",
     port: Number.isFinite(port) && port > 0 ? port : DEFAULT_PORT,
@@ -36,6 +49,14 @@ export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig 
         ? retentionDays * 24 * 60 * 60 * 1000
         : DEFAULT_RETENTION_MS,
     workstationSubscriptionCredential: env.ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL ?? "change-me",
+    gitlabToken: env.ITHYNO_GITLAB_TOKEN ?? undefined,
+    aiSpecLabel: env.ITHYNO_GITLAB_AI_SPEC_LABEL ?? "ai:spec",
+    defaultBranch: env.ITHYNO_GITLAB_DEFAULT_BRANCH ?? "main",
+    changeBranchPrefix: env.ITHYNO_HUB_CHANGE_BRANCH_PREFIX ?? "change",
+    workspaceRoot,
+    issueCommentMarker: env.ITHYNO_HUB_ISSUE_COMMENT_MARKER ?? "ithyno-hub",
+    inProgressLabel: env.ITHYNO_HUB_IN_PROGRESS_LABEL ?? "ai:in-progress",
+    terminalFailureLabel: env.ITHYNO_HUB_FAILURE_LABEL ?? "ai:failed",
   };
 }
 
@@ -68,9 +89,15 @@ export function redactHubConfig(config: HubConfig): Record<string, unknown> {
     botIdentity: config.botIdentity,
     webhookVerificationMode: config.webhookVerificationMode,
     webhookSecret: "[REDACTED]",
+    gitlabToken: config.gitlabToken ? "[REDACTED]" : undefined,
     statePath: config.statePath,
     retentionMs: config.retentionMs,
     workstationSubscriptionCredential: "[REDACTED]",
+    aiSpecLabel: config.aiSpecLabel,
+    defaultBranch: config.defaultBranch,
+    changeBranchPrefix: config.changeBranchPrefix,
+    workspaceRoot: config.workspaceRoot,
+    issueCommentMarker: config.issueCommentMarker,
   };
 }
 

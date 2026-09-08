@@ -36,24 +36,24 @@
 
 ## 5. Issue to Draft OpenSpec Merge Request
 
-- [ ] 5.1 Implement an eligibility policy requiring an allowlisted Issue, `ai:spec`, and sufficient title/problem content
-- [ ] 5.2 Implement canonical `<issue-iid>-<slug>` change ids, `change/<change-id>` branches, and collision-safe slug normalization
-- [ ] 5.3 Fetch the default branch OpenSpec context and compute the base `openspec/specs/` revision recorded in proposal metadata
-- [ ] 5.4 Implement the selected change-generation adapter and validate generated proposal, tasks, and delta specs before GitLab writes
-- [ ] 5.5 Commit generated artifacts to the canonical branch through the GitLab integration using least-privilege credentials
-- [ ] 5.6 Create or reconcile one Draft merge request linked to the Issue, and post one status or clarification comment without comment duplication
-- [ ] 5.7 Make branch/MR creation resumable after partial failure and clear misleading lifecycle labels on terminal failure
-- [ ] 5.8 Add end-to-end tests with a fake GitLab API for first creation, duplicate delivery, existing branch, existing MR, thin Issue, and partial-write recovery
+- [x] 5.1 Implement an eligibility policy requiring an allowlisted Issue, `ai:spec`, and sufficient title/problem content
+- [x] 5.2 Implement canonical `<issue-iid>-<slug>` change ids, `change/<change-id>` branches, and collision-safe slug normalization
+- [x] 5.3 Fetch the default branch OpenSpec context and compute the base `openspec/specs/` revision recorded in proposal metadata
+- [x] 5.4 Implement the selected change-generation adapter and validate generated proposal, tasks, and delta specs before GitLab writes
+- [x] 5.5 Commit generated artifacts to the canonical branch through the GitLab integration using least-privilege credentials
+- [x] 5.6 Create or reconcile one Draft merge request linked to the Issue, and post one status or clarification comment without comment duplication
+- [x] 5.7 Make branch/MR creation resumable after partial failure and clear misleading lifecycle labels on terminal failure
+- [x] 5.8 Add end-to-end tests with a fake GitLab API for first creation, duplicate delivery, existing branch, existing MR, thin Issue, and partial-write recovery
 
 ## 6. Hub Event Stream and Workstation Relay
 
 - [x] 6.1 Implement the authenticated versioned hub WebSocket endpoint with project filtering and bounded event retention/replay
 - [x] 6.2 Add the optional workstation upstream client using hub URL/credential configuration, compatibility negotiation, bounded reconnect, and clean shutdown
 - [x] 6.3 Map hub notifications into the existing workstation WebSocket without sending hub or GitLab credentials to the browser
-- [ ] 6.4 Preserve full standalone behavior when hub configuration is absent or unreachable, with regression tests for filesystem updates
+- [x] 6.4 Preserve full standalone behavior when hub configuration is absent or unreachable, with regression tests for filesystem updates
 - [x] 6.5 Add separate hub-connection state to the dashboard so a hub outage does not replace the workstation live-session state
 - [x] 6.6 Validate notification targets against the configured GitLab origin/project before rendering them as clickable
-- [ ] 6.7 Add integration tests from hub event publication through workstation relay to dashboard store update and reconnect recovery
+- [x] 6.7 Add integration tests from hub event publication through workstation relay to dashboard store update and reconnect recovery
 
 ## 7. GitLab CE Deployment Verification
 
