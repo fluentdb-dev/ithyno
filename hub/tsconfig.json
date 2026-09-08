@@ -1,11 +1,14 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "..",
+    "rootDir": "src",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@ithyno/shared": ["../shared/dist/index.d.ts"]
+    }
   },
-  "include": ["src", "../shared/src"]
+  "include": ["src"]
 }

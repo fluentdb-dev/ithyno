@@ -16,7 +16,7 @@ describe("shared parser primitives", () => {
     expect(spec.requirements).toHaveLength(1);
     expect(spec.requirements[0]?.name).toBe("Live updates");
     expect(spec.requirements[0]?.scenarios[0]?.steps).toEqual(["It updates"]);
-    expect(spec.delta).toBe("ADDED");
+    expect(spec.delta).toBe("MODIFIED");
   });
 
   it("builds a versioned hub event envelope", () => {

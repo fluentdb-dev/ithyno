@@ -7,7 +7,7 @@ import Fastify from "fastify";
 import { WebSocketServer, WebSocket } from "ws";
 import { buildHubEventEnvelope, isSupportedHubEventVersion } from "@ithyno/shared";
 import type { HubConfig } from "./config.js";
-import { createOperationalStore } from "./store.js";
+import { createOperationalStore, type OperationalStore } from "./store.js";
 
 interface Subscriber {
   ws: WebSocket;
@@ -19,8 +19,7 @@ interface ParsedWebhookPayload {
   projectId: string;
   title: string;
   targetUrl: string;
-  body: string;
-  bodyObject: Record<string, unknown>;
+  body: Record<string, unknown>;
   supported: boolean;
   reason?: string;
 }
@@ -29,6 +28,10 @@ export interface HubRuntime {
   app: ReturnType<typeof Fastify>;
   close: () => Promise<void>;
 }
+
+const JOB_PROCESSOR_INTERVAL_MS = 5000;
+const JOB_LEASE_DURATION_MS = 15000;
+const JOB_MAX_ATTEMPTS = 5;
 
 export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   await mkdir(dirname(resolve(config.statePath)), { recursive: true });
@@ -39,6 +42,7 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
     done(null, body.toString());
   });
   const subscribers = new Set<Subscriber>();
+  const jobProcessor = startJobProcessor(store);
 
   app.get("/healthz", async () => ({ ok: true, service: "ithyno-hub" }));
   app.get("/readyz", async () => ({ ok: true, service: "ithyno-hub" }));
@@ -46,12 +50,12 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   app.post("/webhooks/gitlab", async (request, reply) => {
     const bodyText = typeof request.body === "string" ? request.body : undefined;
     const parsedBody = parseBody(bodyText, request.body);
-    const payload = parseWebhookPayload(parsedBody, config);
     const verification = verifyWebhookRequest(config, request.headers, bodyText);
     if (!verification.ok) {
-      await store.recordAudit(payload.eventType, payload.projectId, "rejected", verification.reason);
+      await store.recordAudit("webhook.received", "unknown/project", "rejected", verification.reason);
       return reply.code(401).send({ accepted: false, reason: verification.reason });
     }
+    const payload = parseWebhookPayload(parsedBody, config);
     const projectAllowed = isProjectAllowed(config.projectAllowlist, payload.projectId);
     if (!projectAllowed) {
       const auditDetail = `project ${payload.projectId} rejected by allowlist`;
@@ -128,8 +132,9 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
           ws.close(1008, "unsupported protocol version");
           return;
         }
-        subscriber.projectIds = new Set((payload.projectIds ?? []).filter(Boolean));
-        if (subscriber.projectIds.size === 0) {
+        if (payload.projectIds !== undefined) {
+          subscriber.projectIds = new Set((payload.projectIds ?? []).filter((value): value is string => typeof value === "string" && Boolean(value)));
+        } else {
           subscriber.projectIds = new Set(config.projectAllowlist);
         }
         ws.send(JSON.stringify({ type: "ready", version: 1 }));
@@ -142,6 +147,7 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   });
 
   const close = async () => {
+    jobProcessor.stop();
     await Promise.allSettled([
       new Promise<void>((resolve) => wss.close(() => resolve())),
       app.close(),
@@ -185,8 +191,13 @@ export function parseWebhookPayload(body: Record<string, unknown>, config: HubCo
     projectId,
     title,
     targetUrl,
-    body: JSON.stringify({ eventType, projectId, title, targetUrl, classification: classification.kind }),
-    bodyObject: body,
+    body: {
+      eventType,
+      projectId,
+      title,
+      targetUrl,
+      classification: classification.kind,
+    },
     supported: classification.supported,
     reason: classification.reason,
   };
@@ -335,7 +346,7 @@ function normalizeProjectReference(value: string): string {
 }
 
 function shouldDeliverToSubscriber(subscriber: Subscriber, projectId: string): boolean {
-  return subscriber.projectIds.size === 0 || subscriber.projectIds.has(projectId);
+  return subscriber.projectIds.size > 0 && subscriber.projectIds.has(projectId);
 }
 
 function getHeaderValue(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
@@ -347,4 +358,37 @@ function getHeaderValue(headers: Record<string, string | string[] | undefined>, 
     }
   }
   return undefined;
+}
+
+function startJobProcessor(store: OperationalStore): { stop: () => void } {
+  const processPendingJobs = async () => {
+    try {
+      await store.recoverExpiredLeases(Date.now());
+      const jobs = await store.listReadyJobs(Date.now(), 10);
+      for (const job of jobs) {
+        const leaseExpiresAt = Date.now() + JOB_LEASE_DURATION_MS;
+        const claimed = await store.claimJob(job.id, "hub-processor", leaseExpiresAt);
+        if (!claimed) continue;
+        const nextAttempt = job.attempts + 1;
+        if (nextAttempt > JOB_MAX_ATTEMPTS) {
+          await store.markJobTerminal(job.id, "retry-budget-exhausted");
+          await store.recordAudit(job.eventType, job.projectId, "terminal_failed", "retry-budget-exhausted");
+          continue;
+        }
+        const backoffMs = Math.min(1000 * 2 ** Math.max(0, nextAttempt - 1), 10000);
+        const nextAttemptAt = Date.now() + backoffMs;
+        await store.markJobRetry(job.id, nextAttempt, nextAttemptAt);
+      }
+    } catch (error) {
+      console.error(`[hub] job processor failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  void processPendingJobs();
+  const timer = setInterval(() => {
+    void processPendingJobs();
+  }, JOB_PROCESSOR_INTERVAL_MS);
+  return {
+    stop: () => clearInterval(timer),
+  };
 }

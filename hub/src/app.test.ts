@@ -20,7 +20,7 @@ describe("hub webhook intake", () => {
     const payload = parseWebhookPayload(body, config);
     expect(classification.supported).toBe(true);
     expect(payload.projectId).toBe("group/project");
-    expect(payload.body).toContain("group/project");
+    expect(payload.body).toMatchObject({ projectId: "group/project", classification: "issue" });
   });
 
   it("verifies signed webhook signatures and rejects invalid secrets", () => {

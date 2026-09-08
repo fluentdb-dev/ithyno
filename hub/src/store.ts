@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { resolve } from "node:path";
+import { mkdir, open, rm } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import sqlite3 from "sqlite3";
 
 const { Database } = sqlite3;
@@ -20,6 +21,21 @@ export interface DeliveryRecord {
   updatedAt: string;
 }
 
+export interface JobRecord {
+  id: string;
+  eventType: string;
+  projectId: string;
+  title: string;
+  targetUrl: string;
+  status: string;
+  attempts: number;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: number | null;
+  nextAttemptAt?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface OperationalStore {
   initialize(): Promise<void>;
   recordDelivery(delivery: DeliveryRecord): Promise<void>;
@@ -28,6 +44,8 @@ export interface OperationalStore {
   markJobRetry(id: string, attempt: number, nextAttemptAt: number): Promise<void>;
   markJobTerminal(id: string, error: string): Promise<void>;
   recoverExpiredLeases(now: number): Promise<string[]>;
+  listReadyJobs(now: number, limit: number): Promise<JobRecord[]>;
+  claimJob(id: string, leaseOwner: string, leaseExpiresAt: number): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -36,14 +54,20 @@ export function createOperationalStore(statePath: string): OperationalStore {
 }
 
 class SqliteOperationalStore implements OperationalStore {
-  private readonly db: sqlite3.Database;
+  private readonly dbPath: string;
+  private readonly lockFilePath: string;
+  private db: sqlite3.Database | null = null;
+  private lockFileHandle: Awaited<ReturnType<typeof open>> | null = null;
 
   constructor(statePath: string) {
-    const dbPath = resolve(statePath, "operations.sqlite");
-    this.db = new Database(dbPath);
+    this.dbPath = resolve(statePath, "operations.sqlite");
+    this.lockFilePath = resolve(statePath, "operations.lock");
   }
 
   async initialize(): Promise<void> {
+    await mkdir(dirname(this.dbPath), { recursive: true });
+    await this.acquireLock();
+    this.db = new Database(this.dbPath);
     await this.run("PRAGMA journal_mode=WAL");
     await this.run("PRAGMA synchronous=NORMAL");
     await this.run(`
@@ -187,12 +211,59 @@ class SqliteOperationalStore implements OperationalStore {
     return recovered;
   }
 
+  async listReadyJobs(now: number, limit: number): Promise<JobRecord[]> {
+    return await this.all<JobRecord>(
+      `SELECT id, event_type AS eventType, project_id AS projectId, title, target_url AS targetUrl, status, attempts, lease_owner AS leaseOwner, lease_expires_at AS leaseExpiresAt, next_attempt_at AS nextAttemptAt, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE status IN ('queued','retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?) ORDER BY created_at LIMIT ?`,
+      [now, now, limit],
+    );
+  }
+
+  async claimJob(id: string, leaseOwner: string, leaseExpiresAt: number): Promise<boolean> {
+    const now = Date.now();
+    const existing = await this.all<JobRecord>(`SELECT id, lease_owner AS leaseOwner, lease_expires_at AS leaseExpiresAt FROM jobs WHERE id = ?`, [id]);
+    if (existing.length === 0) return false;
+    const current = existing[0];
+    if (current.leaseOwner && current.leaseExpiresAt && current.leaseExpiresAt > now) {
+      return false;
+    }
+    const result = await this.runAndGetInfo(
+      `UPDATE jobs SET lease_owner = ?, lease_expires_at = ?, status = 'queued', updated_at = ? WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+      [leaseOwner, leaseExpiresAt, new Date().toISOString(), id, now],
+    );
+    return result.changes > 0;
+  }
+
   async close(): Promise<void> {
     await this.closeDb();
+    await this.releaseLock();
+  }
+
+  private async acquireLock(): Promise<void> {
+    try {
+      this.lockFileHandle = await open(this.lockFilePath, "wx");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") {
+        throw new Error(`single-writer lock already held: ${this.lockFilePath}`);
+      }
+      throw error;
+    }
+  }
+
+  private async releaseLock(): Promise<void> {
+    if (this.lockFileHandle) {
+      await this.lockFileHandle.close();
+      this.lockFileHandle = null;
+    }
+    await rm(this.lockFilePath, { force: true });
   }
 
   private async run(sql: string, params: unknown[] = []): Promise<void> {
     await new Promise<void>((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("store is not initialized"));
+        return;
+      }
       this.db.run(sql, params, (error) => {
         if (error) reject(error);
         else resolve();
@@ -200,8 +271,25 @@ class SqliteOperationalStore implements OperationalStore {
     });
   }
 
+  private async runAndGetInfo(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
+    return await new Promise<{ changes: number }>((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("store is not initialized"));
+        return;
+      }
+      this.db.run(sql, params, function (error) {
+        if (error) reject(error);
+        else resolve({ changes: this.changes });
+      });
+    });
+  }
+
   private async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     return await new Promise<T[]>((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("store is not initialized"));
+        return;
+      }
       this.db.all(sql, params, (error, rows: T[]) => {
         if (error) reject(error);
         else resolve(rows);
@@ -210,11 +298,13 @@ class SqliteOperationalStore implements OperationalStore {
   }
 
   private async closeDb(): Promise<void> {
+    if (!this.db) return;
     await new Promise<void>((resolve, reject) => {
-      this.db.close((error) => {
+      this.db!.close((error) => {
         if (error) reject(error);
         else resolve();
       });
     });
+    this.db = null;
   }
 }

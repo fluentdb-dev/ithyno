@@ -32,7 +32,7 @@
 - [x] 4.6 Implement supported-event classification, failed-pipeline filtering, bot-loop suppression, and no-op acknowledgement for unsupported events
 - [x] 4.7 Persist the strongest available GitLab delivery identity before acknowledgement and add deterministic fallback identity tests
 - [x] 4.8 Implement bounded retry/backoff, expired-lease recovery, terminal failure reporting, and refusal of unsupported multi-replica SQLite operation
-- [x] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
+- [ ] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
 
 ## 5. Issue to Draft OpenSpec Merge Request
 
