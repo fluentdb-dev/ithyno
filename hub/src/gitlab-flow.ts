@@ -130,16 +130,9 @@ export function evaluateIssueEligibility(payload: GitLabIssuePayload, aiSpecLabe
   return { ok: true };
 }
 
-export async function resolveChangeId(payload: GitLabIssuePayload, client: GitLabClient, config: HubConfig): Promise<string> {
+export async function resolveChangeId(payload: GitLabIssuePayload, _client: GitLabClient, _config: HubConfig): Promise<string> {
   const baseSlug = toSlug(payload.title || payload.issueIid || "change");
-  const baseId = `${payload.issueIid}-${baseSlug}`;
-  let candidate = baseId;
-  let suffix = 1;
-  while (await client.getBranch(payload.projectPath, `${config.changeBranchPrefix}/${candidate}`)) {
-    candidate = `${baseId}-${suffix}`;
-    suffix += 1;
-  }
-  return candidate;
+  return `${payload.issueIid}-${baseSlug}`;
 }
 
 export async function generateArtifacts(changeId: string, payload: GitLabIssuePayload, branchName: string, baseRevision: string, config: HubConfig): Promise<GeneratedArtifacts> {

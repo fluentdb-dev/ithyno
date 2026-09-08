@@ -197,12 +197,11 @@ describe("hub issue-to-draft flow", () => {
     await store.close();
   });
 
-  it("uses deterministic suffixes when a change-id collision already exists", async () => {
+  it("reuses the canonical change id when the canonical branch already exists", async () => {
     const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-collision-"));
     tempDirs.push(dir);
     const client = new FakeGitLabClient();
     client.branches.add("change/101-a-title");
-    client.branches.add("change/101-a-title-1");
     const config = parseHubConfig({
       ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
       ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
@@ -214,7 +213,7 @@ describe("hub issue-to-draft flow", () => {
     const payload = { projectPath: "group/project", issueIid: "101", title: "A title", body: "Need a deterministic change ID.", labels: ["ai:spec"] };
 
     const changeId = await resolveChangeId(payload, client, config);
-    expect(changeId).toBe("101-a-title-2");
+    expect(changeId).toBe("101-a-title");
   });
 
   it("reconciles an existing branch and merge request on retry and records failure cleanup on write errors", async () => {
@@ -244,6 +243,9 @@ describe("hub issue-to-draft flow", () => {
     expect(artifacts).not.toBeNull();
     expect(client.commitAttempts).toBe(2);
     expect(client.branches.has("change/44-recover-partial-writes")).toBe(true);
+    expect(client.branches.has("change/44-recover-partial-writes-1")).toBe(false);
+    expect(client.mergeRequests.get("44:change/44-recover-partial-writes")).toMatchObject({ draft: true, state: "opened" });
+    expect(client.mergeRequests.size).toBe(1);
   });
 });
 
