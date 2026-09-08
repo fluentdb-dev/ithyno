@@ -84,15 +84,7 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
-import {
-  encryptEnvironmentFile,
-  getEnvironmentSnapshot,
-  mutateEnvironmentFile,
-  readEnvironmentSelection,
-  revealEnvironmentValue,
-  validateProfileName,
-  writeEnvironmentSelection,
-} from "./environment/index.js";
+import { registerEnvironmentRoutes } from "./environment/routes.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -133,6 +125,10 @@ let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
 await fastify.register(rateLimit, { global: false });
+await fastify.register(registerEnvironmentRoutes, {
+  getProjectRoot,
+  getProcessEnv: () => process.env,
+});
 
 // ---- CSRF protection -------------------------------------------------------
 // Built once we know the listening port (see fastify.listen below). Used by
@@ -430,101 +426,6 @@ fastify.get("/api/health", async () => {
       ? { available: true as const }
       : { available: false as const, reason: pty.reason },
   };
-});
-
-fastify.get("/api/environment", async () => {
-  return getEnvironmentSnapshot(getProjectRoot(), process.env);
-});
-
-fastify.get("/api/environment/diagnostics", async () => {
-  const snapshot = await getEnvironmentSnapshot(getProjectRoot(), process.env);
-  return {
-    diagnostics: snapshot.diagnostics,
-    encryption: snapshot.encryption,
-    selection: snapshot.selection,
-  };
-});
-
-fastify.post("/api/environment/selection", async (req, reply) => {
-  const body = (req.body ?? {}) as { selectedProfile?: string | null; preferences?: Record<string, unknown> };
-  const current = await readEnvironmentSelection(getProjectRoot());
-  const nextProfile = body.selectedProfile === null || body.selectedProfile === undefined || body.selectedProfile === ""
-    ? null
-    : validateProfileName(body.selectedProfile);
-  if (body.selectedProfile !== null && body.selectedProfile !== undefined && body.selectedProfile !== "" && !nextProfile) {
-    reply.code(400);
-    return { error: "invalid profile" };
-  }
-  const next = {
-    selectedProfile: nextProfile ?? current.selectedProfile ?? null,
-    preferences: { ...current.preferences, ...(body.preferences ?? {}) },
-  };
-  await writeEnvironmentSelection(getProjectRoot(), next);
-  return { selection: next, snapshot: await getEnvironmentSnapshot(getProjectRoot(), process.env) };
-});
-
-fastify.post(
-  "/api/environment/reveal",
-  { logLevel: "silent" },
-  async (req, reply) => {
-    const body = (req.body ?? {}) as { key?: string };
-    const key = body.key?.trim();
-    if (!key) {
-      reply.code(400);
-      return { error: "missing key" };
-    }
-    try {
-      const value = await revealEnvironmentValue(getProjectRoot(), key, process.env);
-      return { key, value };
-    } catch (err) {
-      reply.code(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-  },
-);
-
-fastify.post(
-  "/api/environment/mutate",
-  { logLevel: "silent" },
-  async (req, reply) => {
-    const body = (req.body ?? {}) as {
-      profile?: string;
-      values?: Record<string, string>;
-      remove?: string[];
-      revision?: string;
-    };
-    const profile = body.profile ?? "default";
-    if (!profile) {
-      reply.code(400);
-      return { error: "missing profile" };
-    }
-    try {
-      return await mutateEnvironmentFile(getProjectRoot(), {
-        profile,
-        values: body.values,
-        remove: body.remove,
-        revision: body.revision,
-      });
-    } catch (err) {
-      reply.code(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-  },
-);
-
-fastify.post("/api/environment/encrypt", async (req, reply) => {
-  const body = (req.body ?? {}) as { profile?: string };
-  const profile = body.profile ?? "default";
-  if (!profile) {
-    reply.code(400);
-    return { error: "missing profile" };
-  }
-  try {
-    return await encryptEnvironmentFile(getProjectRoot(), profile, process.env);
-  } catch (err) {
-    reply.code(400);
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
 });
 
 fastify.get("/api/about", async () => getAboutInfo());

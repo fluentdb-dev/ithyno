@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import { writeEnvironmentSelection } from "../environment/index.js";
 import {
   _setTmuxCacheForTest,
   attachPtyToSocket,
@@ -324,6 +325,26 @@ describe("buildManagerPtyEnv", () => {
     const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
+  });
+
+  it("injects the selected profile into the Manager PTY environment", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\nITHYNO_RESERVED=blocked\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.SELECTED_VALUE).toBe("from-dev");
+    expect(env.BASE_VALUE).toBe("from-default");
+    expect(env.ITHYNO_RESERVED).toBeUndefined();
+  });
+
+  it("leaves the Manager PTY environment unchanged when no profile is selected", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\n", "utf8");
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.BASE_VALUE).toBeUndefined();
+    expect(env.SELECTED_VALUE).toBeUndefined();
   });
 });
 

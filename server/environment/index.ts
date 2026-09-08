@@ -4,7 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { parse as parseDotenvx } from "@dotenvx/dotenvx";
+
+const require = createRequire(import.meta.url);
 
 export type EnvironmentDiagnostic = {
   kind:
@@ -189,9 +192,13 @@ export async function writeEnvironmentSelection(
   await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-export function discoverDevelopmentProfiles(projectRoot: string): DevelopmentEnvironmentProfile[] {
+export async function discoverDevelopmentProfiles(projectRoot: string): Promise<{
+  profiles: DevelopmentEnvironmentProfile[];
+  diagnostics: EnvironmentDiagnostic[];
+}> {
   const root = resolve(projectRoot);
   const profiles: DevelopmentEnvironmentProfile[] = [];
+  const diagnostics: EnvironmentDiagnostic[] = [];
   const files = existsSync(root) ? readdirSync(root, { withFileTypes: true }) : [];
   const seen = new Set<string>();
 
@@ -201,20 +208,32 @@ export function discoverDevelopmentProfiles(projectRoot: string): DevelopmentEnv
     profiles.push({ name, path: toRelative(root, path), exists: existsSync(path), isBase, selected: false });
   };
 
+  const maybeAddProfile = async (name: string, path: string, isBase: boolean): Promise<void> => {
+    const inspection = await inspectFile(root, path);
+    if (inspection.diagnostic) {
+      diagnostics.push(inspection.diagnostic);
+      return;
+    }
+    addProfile(name, path, isBase);
+  };
+
   if (existsSync(join(root, ".env"))) {
-    addProfile("default", join(root, ".env"), true);
+    await maybeAddProfile("default", join(root, ".env"), true);
   }
   if (existsSync(join(root, ".env.local"))) {
-    addProfile("local", join(root, ".env.local"), false);
+    await maybeAddProfile("local", join(root, ".env.local"), false);
   }
   for (const entry of files) {
     if (entry.isDirectory()) continue;
     if (!entry.name.startsWith(".env.")) continue;
     const name = entry.name.slice(5);
     if (name === "local") continue;
-    addProfile(name, join(root, entry.name), false);
+    await maybeAddProfile(name, join(root, entry.name), false);
   }
-  return profiles.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    profiles: profiles.sort((a, b) => a.name.localeCompare(b.name)),
+    diagnostics,
+  };
 }
 
 async function collectResolvedEnvironment(
@@ -229,9 +248,9 @@ async function collectResolvedEnvironment(
   profiles: DevelopmentEnvironmentProfile[];
 }> {
   const root = resolve(projectRoot);
-  const profiles = discoverDevelopmentProfiles(root);
+  const { profiles, diagnostics: discoveredDiagnostics } = await discoverDevelopmentProfiles(root);
   const orderedFiles: string[] = [];
-  const diagnostics: EnvironmentDiagnostic[] = [];
+  const diagnostics: EnvironmentDiagnostic[] = [...discoveredDiagnostics];
   const env: Record<string, string> = {};
   const variableEntriesByKey = new Map<string, DevelopmentEnvironmentVariable>();
   const selectedProfile = validateProfileName(selection.selectedProfile) ?? null;
@@ -240,21 +259,23 @@ async function collectResolvedEnvironment(
     if (!orderedFiles.includes(filePath)) orderedFiles.push(filePath);
   };
 
-  if (existsSync(join(root, ".env"))) {
-    addFile(join(root, ".env"));
-  }
-  if (existsSync(join(root, ".env.local"))) {
-    addFile(join(root, ".env.local"));
-  }
-  if (selectedProfile && selectedProfile !== "default" && selectedProfile !== "local") {
-    const profilePath = resolveProfilePath(root, selectedProfile);
-    if (profilePath && existsSync(profilePath)) {
-      addFile(profilePath);
+  if (selectedProfile !== null) {
+    if (existsSync(join(root, ".env"))) {
+      addFile(join(root, ".env"));
     }
-  } else if (selectedProfile === "local") {
-    const profilePath = resolveProfilePath(root, "local");
-    if (profilePath && existsSync(profilePath)) {
-      addFile(profilePath);
+    if (existsSync(join(root, ".env.local"))) {
+      addFile(join(root, ".env.local"));
+    }
+    if (selectedProfile && selectedProfile !== "default" && selectedProfile !== "local") {
+      const profilePath = resolveProfilePath(root, selectedProfile);
+      if (profilePath && existsSync(profilePath)) {
+        addFile(profilePath);
+      }
+    } else if (selectedProfile === "local") {
+      const profilePath = resolveProfilePath(root, "local");
+      if (profilePath && existsSync(profilePath)) {
+        addFile(profilePath);
+      }
     }
   }
 
@@ -439,7 +460,7 @@ export async function mutateEnvironmentFile(
   const lines = currentContent.split(/\r?\n/);
   const nextLines: string[] = [];
   for (const line of lines) {
-    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
     if (!match) {
       nextLines.push(line);
       continue;
@@ -504,7 +525,7 @@ export async function encryptEnvironmentFile(
       message: "No dotenvx encryption keys are configured.",
     };
   }
-  const cliPath = resolve(process.cwd(), "node_modules", "@dotenvx/dotenvx", "src", "cli", "dotenvx.js");
+  const cliPath = require.resolve("@dotenvx/dotenvx/src/cli/dotenvx.js");
   try {
     execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath], {
       cwd: root,

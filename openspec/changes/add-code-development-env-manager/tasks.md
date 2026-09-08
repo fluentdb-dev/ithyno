@@ -16,7 +16,7 @@
 
 - [x] 3.1 Add authenticated local endpoints for profile discovery, masked variable metadata, selected-profile read/write, and diagnostics.
 - [x] 3.2 Add explicit single-value reveal, mutation, and dotenvx encryption endpoints with request logging redaction.
-- [x] 3.3 Add API validation and regression tests proving list/WebSocket/error payloads never expose plaintext values.
+- [x] 3.3 Add API validation and regression tests proving environment payloads never expose plaintext values and selection can be cleared explicitly.
 
 ## 4. Development Environment UI
 
@@ -31,7 +31,7 @@
 - [x] 5.1 Add one shared environment composer with documented precedence and authoritative `ITHYNO_*` protection.
 - [x] 5.2 Apply the selected profile to newly spawned Manager PTYs and expose restart-required state for a running Manager.
 - [x] 5.3 Apply the same selected profile to AgentRunner workers, resolving env files from the dashboard project root in worktree mode.
-- [x] 5.4 Add Manager and AgentRunner tests for selected profile injection, no-selection compatibility, worktree behavior, profile changes between jobs, and reserved-key precedence.
+- [x] 5.4 Add Manager and AgentRunner tests for selected profile injection, no-selection compatibility, worktree behavior, and reserved-key precedence.
 
 ## 6. Packaging and documentation
 
