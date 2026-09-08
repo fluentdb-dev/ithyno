@@ -73,6 +73,9 @@ export function validateHubConfig(config: HubConfig): string[] {
   } else if (!config.webhookSecret.trim()) {
     errors.push("webhook secret must be configured when verification is enabled");
   }
+  if (!config.gitlabClient && !config.gitlabToken?.trim()) {
+    errors.push("gitlab token must be configured when GitLab writes are enabled");
+  }
   if (config.retentionMs <= 0) errors.push("retention period must be a positive duration");
   if (!config.workstationSubscriptionCredential || config.workstationSubscriptionCredential === "change-me") {
     errors.push("workstation subscription credential must be set to a non-default value");

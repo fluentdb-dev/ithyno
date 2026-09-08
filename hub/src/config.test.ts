@@ -7,6 +7,7 @@ describe("hub config", () => {
     const config = parseHubConfig({
       ITHYNO_HUB_PORT: "4322",
       ITHYNO_GITLAB_ORIGIN: "https://gitlab.example.com",
+      ITHYNO_GITLAB_TOKEN: "test-token",
       ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
       ITHYNO_HUB_BOT_IDENTITY: "",
       ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "change-me",
@@ -21,6 +22,7 @@ describe("hub config", () => {
   it("rejects unsigned verification outside local dev", () => {
     const config = parseHubConfig({
       ITHYNO_HUB_HOST: "0.0.0.0",
+      ITHYNO_GITLAB_TOKEN: "test-token",
       ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
       ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
       ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
@@ -31,6 +33,7 @@ describe("hub config", () => {
 
   it("redacts configuration secrets", () => {
     const redacted = redactHubConfig(parseHubConfig({
+      ITHYNO_GITLAB_TOKEN: "super-secret",
       ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "super-secret",
       ITHYNO_HUB_WEBHOOK_SECRET: "super-secret",
     }));

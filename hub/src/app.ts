@@ -7,7 +7,7 @@ import Fastify from "fastify";
 import { WebSocketServer, WebSocket } from "ws";
 import { buildHubEventEnvelope, isSupportedHubEventVersion } from "@ithyno/shared";
 import type { HubConfig } from "./config.js";
-import { applyIssueFlowFailure, parseIssuePayload, processIssueGenerationJob } from "./gitlab-flow.js";
+import { applyIssueFlowFailure, createDefaultGitLabClient, parseIssuePayload, processIssueGenerationJob } from "./gitlab-flow.js";
 import { createOperationalStore, type JobRecord, type OperationalStore } from "./store.js";
 
 interface Subscriber {
@@ -40,6 +40,9 @@ export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   await mkdir(dirname(resolve(config.statePath)), { recursive: true });
   const store = createOperationalStore(config.statePath, config.retentionMs);
   await store.initialize();
+  if (!config.gitlabClient && config.gitlabToken) {
+    config.gitlabClient = createDefaultGitLabClient(config);
+  }
   const app = Fastify({ logger: false });
   app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
     done(null, body.toString());

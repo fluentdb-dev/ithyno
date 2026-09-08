@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { HubConfig } from "./config.js";
@@ -38,6 +37,18 @@ export interface GeneratedArtifacts {
   specContent: string;
 }
 
+class GitLabApiError extends Error {
+  readonly status: number;
+  readonly responseBody?: string;
+
+  constructor(message: string, status: number, responseBody?: string) {
+    super(message);
+    this.name = "GitLabApiError";
+    this.status = status;
+    this.responseBody = responseBody;
+  }
+}
+
 export function parseIssuePayload(body: Record<string, unknown>, projectId: string): GitLabIssuePayload | null {
   const objectKind = String((body.object_kind as string | undefined) ?? (body.event_type as string | undefined) ?? "").toLowerCase();
   if (objectKind !== "issue" && objectKind !== "work_item") return null;
@@ -59,7 +70,7 @@ export function parseIssuePayload(body: Record<string, unknown>, projectId: stri
   };
 }
 
-export async function processIssueGenerationJob(config: HubConfig, payload: GitLabIssuePayload, client: GitLabClient = config.gitlabClient ?? createDefaultGitLabClient()): Promise<GeneratedArtifacts | null> {
+export async function processIssueGenerationJob(config: HubConfig, payload: GitLabIssuePayload, client: GitLabClient = config.gitlabClient ?? createDefaultGitLabClient(config)): Promise<GeneratedArtifacts | null> {
   const eligible = evaluateIssueEligibility(payload, config.aiSpecLabel);
   if (!eligible.ok) {
     const clarificationBody = buildClarificationComment(payload, eligible.reason ?? "missing-information");
@@ -108,7 +119,7 @@ export async function processIssueGenerationJob(config: HubConfig, payload: GitL
   return artifacts;
 }
 
-export async function applyIssueFlowFailure(config: HubConfig, payload: GitLabIssuePayload, error: unknown, client: GitLabClient = config.gitlabClient ?? createDefaultGitLabClient()): Promise<void> {
+export async function applyIssueFlowFailure(config: HubConfig, payload: GitLabIssuePayload, error: unknown, client: GitLabClient = config.gitlabClient ?? createDefaultGitLabClient(config)): Promise<void> {
   const failureBody = buildFailureComment(payload, error);
   await client.upsertIssueComment(payload.projectPath, payload.issueIid, `${config.issueCommentMarker}:failure`, failureBody);
   if (config.terminalFailureLabel && client.setIssueLabels) {
@@ -136,7 +147,7 @@ export async function resolveChangeId(payload: GitLabIssuePayload, _client: GitL
 }
 
 export async function generateArtifacts(changeId: string, payload: GitLabIssuePayload, branchName: string, baseRevision: string, config: HubConfig): Promise<GeneratedArtifacts> {
-  const dirPath = resolve(config.workspaceRoot, changeId);
+  const dirPath = join(config.workspaceRoot, changeId);
   const proposalPath = join(dirPath, "proposal.md");
   const tasksPath = join(dirPath, "tasks.md");
   const specPath = join(dirPath, "specs", "gitlab-hub", "spec.md");
@@ -170,20 +181,162 @@ export function validateArtifacts(artifacts: GeneratedArtifacts): string[] {
   return errors;
 }
 
-export function createDefaultGitLabClient(): GitLabClient {
+export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
+  normalizeGitLabOrigin(config.gitlabOrigin);
+  if (!config.gitlabToken?.trim()) {
+    throw new Error("gitlab token is required for writes");
+  }
+
   return {
-    async getDefaultBranch() { return "main"; },
-    async getOpenSpecRevision(_projectPath, branch) { return `${branch}:unknown`; },
-    async getBranch() { return null; },
-    async createBranch() {},
-    async commitAndPushFiles() {},
-    async findMergeRequest() { return null; },
-    async upsertMergeRequest(_projectPath, _issueIid, _sourceBranch, _targetBranch, title, description) {
-      const iid = `mr-${createHash("sha256").update(`${title}:${description}`).digest("hex").slice(0, 8)}`;
-      return { iid, webUrl: `https://gitlab.example.com/merge_requests/${iid}` };
+    async getDefaultBranch(projectPath: string): Promise<string> {
+      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}`);
+      const defaultBranch = String((payload as { default_branch?: string } | null)?.default_branch ?? "").trim();
+      return defaultBranch || config.defaultBranch;
     },
-    async findIssueComment() { return null; },
-    async upsertIssueComment() {},
+    async getOpenSpecRevision(projectPath: string, branch: string): Promise<string> {
+      const commits = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/commits?ref_name=${encodeURIComponent(branch)}&path=openspec/specs&per_page=1`).catch((error: unknown) => {
+        if (error instanceof GitLabApiError && error.status === 404) return [];
+        throw error;
+      });
+      if (Array.isArray(commits) && commits.length > 0) {
+        const first = commits[0] as { id?: string } | null;
+        const commitId = first?.id ? String(first.id) : "";
+        if (commitId) return `${branch}:${commitId}`;
+      }
+      const branchPayload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/branches/${encodeURIComponent(branch)}`).catch((error: unknown) => {
+        if (error instanceof GitLabApiError && error.status === 404) return null;
+        throw error;
+      });
+      const commitId = branchPayload && typeof branchPayload === "object"
+        ? String((branchPayload as { commit?: { id?: string } }).commit?.id ?? "")
+        : "";
+      if (commitId) return `${branch}:${commitId}`;
+      return `${branch}:unknown`;
+    },
+    async getBranch(projectPath: string, branchName: string): Promise<{ name: string } | null> {
+      try {
+        const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/branches/${encodeURIComponent(branchName)}`);
+        return payload && typeof payload === "object" ? { name: String((payload as { name?: string }).name ?? branchName) } : null;
+      } catch (error) {
+        if (error instanceof GitLabApiError && error.status === 404) return null;
+        throw error;
+      }
+    },
+    async createBranch(projectPath: string, branchName: string, ref: string): Promise<void> {
+      await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/branches`, {
+        method: "POST",
+        body: JSON.stringify({ branch: branchName, ref }),
+      });
+    },
+    async commitAndPushFiles(projectPath: string, branchName: string, files: Array<{ path: string; content: string }>, commitMessage: string): Promise<void> {
+      const actions: Array<{ action: string; file_path: string; content: string; encoding: string }> = [];
+      for (const file of files) {
+        const filePath = file.path;
+        const existing = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(branchName)}`).catch((error: unknown) => {
+          if (error instanceof GitLabApiError && error.status === 404) return null;
+          throw error;
+        });
+        actions.push({
+          action: existing ? "update" : "create",
+          file_path: filePath,
+          content: file.content,
+          encoding: "text",
+        });
+      }
+      await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/repository/commits`, {
+        method: "POST",
+        body: JSON.stringify({
+          branch: branchName,
+          commit_message: commitMessage,
+          actions,
+        }),
+      });
+    },
+    async findMergeRequest(projectPath: string, _issueIid: string, sourceBranch: string): Promise<{ iid: string; webUrl: string; draft: boolean; state: string } | null> {
+      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests?state=all&source_branch=${encodeURIComponent(sourceBranch)}&per_page=100`);
+      if (!Array.isArray(payload)) return null;
+      const existing = payload.find((entry: unknown) => {
+        if (!entry || typeof entry !== "object") return false;
+        const mergeRequest = entry as { source_branch?: string };
+        return mergeRequest.source_branch === sourceBranch;
+      });
+      if (!existing || typeof existing !== "object") return null;
+      const mergeRequest = existing as { iid?: number | string; web_url?: string; draft?: boolean; state?: string };
+      return {
+        iid: String(mergeRequest.iid ?? ""),
+        webUrl: String(mergeRequest.web_url ?? ""),
+        draft: Boolean(mergeRequest.draft),
+        state: String(mergeRequest.state ?? ""),
+      };
+    },
+    async upsertMergeRequest(projectPath: string, issueIid: string, sourceBranch: string, targetBranch: string, title: string, description: string): Promise<{ iid: string; webUrl: string }> {
+      const existing = await this.findMergeRequest(projectPath, issueIid, sourceBranch);
+      if (existing && existing.iid) {
+        const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests/${encodeURIComponent(existing.iid)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            title,
+            description,
+            draft: true,
+          }),
+        });
+        return {
+          iid: String((payload as { iid?: number | string } | null)?.iid ?? existing.iid),
+          webUrl: String((payload as { web_url?: string } | null)?.web_url ?? existing.webUrl),
+        };
+      }
+      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests`, {
+        method: "POST",
+        body: JSON.stringify({
+          source_branch: sourceBranch,
+          target_branch: targetBranch,
+          title,
+          description,
+          draft: true,
+          remove_source_branch: false,
+        }),
+      });
+      return {
+        iid: String((payload as { iid?: number | string } | null)?.iid ?? ""),
+        webUrl: String((payload as { web_url?: string } | null)?.web_url ?? ""),
+      };
+    },
+    async findIssueComment(projectPath: string, issueIid: string, marker: string): Promise<{ id: string; body: string } | null> {
+      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/issues/${encodeURIComponent(issueIid)}/notes?per_page=100`);
+      if (!Array.isArray(payload)) return null;
+      const comment = payload.find((entry: unknown) => {
+        if (!entry || typeof entry !== "object") return false;
+        const note = entry as { body?: string };
+        return Boolean(note.body?.includes(marker));
+      });
+      if (!comment || typeof comment !== "object") return null;
+      const note = comment as { id?: number | string; body?: string };
+      return {
+        id: String(note.id ?? ""),
+        body: String(note.body ?? ""),
+      };
+    },
+    async upsertIssueComment(projectPath: string, issueIid: string, marker: string, body: string): Promise<void> {
+      const markerBody = `${marker}\n\n${body}`;
+      const existing = await this.findIssueComment(projectPath, issueIid, marker);
+      if (existing?.id) {
+        await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/notes/${encodeURIComponent(existing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({ body: markerBody }),
+        });
+        return;
+      }
+      await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/issues/${encodeURIComponent(issueIid)}/notes`, {
+        method: "POST",
+        body: JSON.stringify({ body: markerBody }),
+      });
+    },
+    async setIssueLabels(projectPath: string, issueIid: string, labels: string[]): Promise<void> {
+      await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/issues/${encodeURIComponent(issueIid)}`, {
+        method: "PUT",
+        body: JSON.stringify({ labels: labels.join(",") }),
+      });
+    },
   };
 }
 
@@ -312,4 +465,80 @@ function relativePath(filePath: string, workspaceRoot: string): string {
     ? resolvedFilePath.slice(resolvedWorkspaceRoot.length + 1)
     : resolvedFilePath;
   return relative;
+}
+
+async function requestGitLab(config: HubConfig, path: string, init: { method?: string; body?: string } = {}): Promise<unknown> {
+  const url = buildGitLabApiUrl(config, path);
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "PRIVATE-TOKEN": config.gitlabToken?.trim() ?? "",
+  };
+  if (init.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(url, { method: init.method ?? "GET", body: init.body, headers });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new GitLabApiError(sanitizeErrorMessage(`gitlab request failed (${response.status}) for ${path}`), response.status, sanitizeErrorMessage(errorBody));
+  }
+  if (response.status === 204) return null;
+  const text = await response.text();
+  if (!text) return null;
+  const payload = JSON.parse(text) as unknown;
+  validateGitLabResponsePayload(payload, config);
+  return payload;
+}
+
+function buildGitLabApiUrl(config: HubConfig, path: string): URL {
+  const base = normalizeGitLabOrigin(config.gitlabOrigin);
+  const parsed = new URL(base);
+  const prefix = parsed.pathname.replace(/\/+$/, "");
+  const relativePath = path.startsWith("/") ? path : `/${path}`;
+  const fullPath = `${prefix}/api/v4${relativePath}`;
+  return new URL(`${parsed.protocol}//${parsed.host}${fullPath}`);
+}
+
+function normalizeGitLabOrigin(value: string): string {
+  const parsed = new URL(value);
+  if (!parsed.protocol.startsWith("http")) {
+    throw new Error("gitlab origin must be an absolute http(s) URL");
+  }
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+function validateGitLabResponsePayload(payload: unknown, config: HubConfig): void {
+  if (!payload || typeof payload !== "object") return;
+  const root = payload as Record<string, unknown>;
+  const candidateUrls = [root.web_url, root.http_url_to_repo, root.ssh_url_to_repo];
+  if (root.project && typeof root.project === "object") {
+    const project = root.project as Record<string, unknown>;
+    candidateUrls.push(project.web_url);
+  }
+  for (const candidate of candidateUrls) {
+    if (typeof candidate === "string") {
+      validateGitLabTargetOrigin(candidate, config);
+    }
+  }
+}
+
+function validateGitLabTargetOrigin(targetUrl: string, config: HubConfig): void {
+  try {
+    const parsed = new URL(targetUrl);
+    const expected = new URL(config.gitlabOrigin);
+    if (parsed.origin !== expected.origin) {
+      throw new Error(`gitlab target origin mismatch: ${parsed.origin}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("gitlab target origin mismatch")) {
+      throw error;
+    }
+    throw new Error(`invalid gitlab target URL: ${targetUrl}`);
+  }
+}
+
+function sanitizeErrorMessage(value: string): string {
+  return value
+    .replace(/PRIVATE-TOKEN:\s*[^\s,;]+/gi, "PRIVATE-TOKEN: [REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+    .replace(/token[:=]\s*[^\s,;]+/gi, "token=[REDACTED]");
 }
