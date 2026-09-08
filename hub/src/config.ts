@@ -62,7 +62,14 @@ export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig 
 
 export function validateHubConfig(config: HubConfig): string[] {
   const errors: string[] = [];
-  if (!config.gitlabOrigin.startsWith("http")) errors.push("gitlab origin must be an absolute http(s) URL");
+  try {
+    const parsed = new URL(config.gitlabOrigin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      errors.push("gitlab origin must be an absolute http(s) URL");
+    }
+  } catch {
+    errors.push("gitlab origin must be an absolute http(s) URL");
+  }
   if (config.projectAllowlist.length === 0) errors.push("project allowlist must include at least one project");
   if (!config.botIdentity.trim()) errors.push("bot identity must be explicitly configured");
   if (config.webhookVerificationMode === "none") {

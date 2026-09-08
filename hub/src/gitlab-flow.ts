@@ -253,12 +253,12 @@ export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
       });
     },
     async findMergeRequest(projectPath: string, _issueIid: string, sourceBranch: string): Promise<{ iid: string; webUrl: string; draft: boolean; state: string } | null> {
-      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests?state=all&source_branch=${encodeURIComponent(sourceBranch)}&per_page=100`);
+      const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests?state=opened&source_branch=${encodeURIComponent(sourceBranch)}&per_page=100`);
       if (!Array.isArray(payload)) return null;
       const existing = payload.find((entry: unknown) => {
         if (!entry || typeof entry !== "object") return false;
-        const mergeRequest = entry as { source_branch?: string };
-        return mergeRequest.source_branch === sourceBranch;
+        const mergeRequest = entry as { source_branch?: string; state?: string };
+        return mergeRequest.source_branch === sourceBranch && mergeRequest.state === "opened";
       });
       if (!existing || typeof existing !== "object") return null;
       const mergeRequest = existing as { iid?: number | string; web_url?: string; draft?: boolean; state?: string };
@@ -271,13 +271,13 @@ export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
     },
     async upsertMergeRequest(projectPath: string, issueIid: string, sourceBranch: string, targetBranch: string, title: string, description: string): Promise<{ iid: string; webUrl: string }> {
       const existing = await this.findMergeRequest(projectPath, issueIid, sourceBranch);
+      const mergeRequestData = buildMergeRequestPayload(title, description);
       if (existing && existing.iid) {
         const payload = await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/merge_requests/${encodeURIComponent(existing.iid)}`, {
           method: "PUT",
           body: JSON.stringify({
-            title,
-            description,
-            draft: true,
+            ...mergeRequestData,
+            state_event: "reopen",
           }),
         });
         return {
@@ -290,9 +290,7 @@ export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
         body: JSON.stringify({
           source_branch: sourceBranch,
           target_branch: targetBranch,
-          title,
-          description,
-          draft: true,
+          ...mergeRequestData,
           remove_source_branch: false,
         }),
       });
@@ -320,7 +318,7 @@ export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
       const markerBody = `${marker}\n\n${body}`;
       const existing = await this.findIssueComment(projectPath, issueIid, marker);
       if (existing?.id) {
-        await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/notes/${encodeURIComponent(existing.id)}`, {
+        await requestGitLab(config, `/projects/${encodeURIComponent(projectPath)}/issues/${encodeURIComponent(issueIid)}/notes/${encodeURIComponent(existing.id)}`, {
           method: "PUT",
           body: JSON.stringify({ body: markerBody }),
         });
@@ -433,6 +431,19 @@ function buildMergeRequestDescription(changeId: string, payload: GitLabIssuePayl
   return `Draft OpenSpec change ${changeId} for Issue #${payload.issueIid}\n\nBase specs revision: ${baseRevision}`;
 }
 
+function buildMergeRequestPayload(title: string, description: string): { title: string; description: string; draft: boolean } {
+  return {
+    title: normalizeMergeRequestTitle(title),
+    description,
+    draft: true,
+  };
+}
+
+function normalizeMergeRequestTitle(title: string): string {
+  const trimmed = title.trim();
+  return trimmed.startsWith("Draft: ") ? trimmed : `Draft: ${trimmed || "OpenSpec change"}`;
+}
+
 function normalizeLabels(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((entry) => typeof entry === "string" ? entry : String(entry ?? "")).filter(Boolean);
@@ -476,10 +487,13 @@ async function requestGitLab(config: HubConfig, path: string, init: { method?: s
   if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(url, { method: init.method ?? "GET", body: init.body, headers });
+  const response = await fetch(url, { method: init.method ?? "GET", body: init.body, headers, redirect: "manual" });
+  if (response.type === "opaqueredirect" || response.redirected || [301, 302, 303, 307, 308].includes(response.status)) {
+    throw new GitLabApiError(sanitizeErrorMessage(`gitlab redirects are not allowed for ${path}`, config), response.status, sanitizeErrorMessage(response.headers.get("location") ?? "", config));
+  }
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new GitLabApiError(sanitizeErrorMessage(`gitlab request failed (${response.status}) for ${path}`), response.status, sanitizeErrorMessage(errorBody));
+    throw new GitLabApiError(sanitizeErrorMessage(`gitlab request failed (${response.status}) for ${path}`, config), response.status, sanitizeErrorMessage(errorBody, config));
   }
   if (response.status === 204) return null;
   const text = await response.text();
@@ -500,30 +514,44 @@ function buildGitLabApiUrl(config: HubConfig, path: string): URL {
 
 function normalizeGitLabOrigin(value: string): string {
   const parsed = new URL(value);
-  if (!parsed.protocol.startsWith("http")) {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("gitlab origin must be an absolute http(s) URL");
   }
   return parsed.toString().replace(/\/+$/, "");
 }
 
 function validateGitLabResponsePayload(payload: unknown, config: HubConfig): void {
-  if (!payload || typeof payload !== "object") return;
-  const root = payload as Record<string, unknown>;
-  const candidateUrls = [root.web_url, root.http_url_to_repo, root.ssh_url_to_repo];
-  if (root.project && typeof root.project === "object") {
-    const project = root.project as Record<string, unknown>;
-    candidateUrls.push(project.web_url);
-  }
+  const candidateUrls = collectGitLabCandidateUrls(payload);
   for (const candidate of candidateUrls) {
-    if (typeof candidate === "string") {
-      validateGitLabTargetOrigin(candidate, config);
+    validateGitLabTargetOrigin(candidate, config);
+  }
+}
+
+function collectGitLabCandidateUrls(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectGitLabCandidateUrls(entry));
+  }
+  if (!value || typeof value !== "object") return [];
+  const root = value as Record<string, unknown>;
+  const candidateUrls: string[] = [];
+  for (const [key, nestedValue] of Object.entries(root)) {
+    if ((key === "web_url" || key === "http_url_to_repo" || key === "ssh_url_to_repo" || key === "url") && typeof nestedValue === "string") {
+      candidateUrls.push(nestedValue);
+      continue;
+    }
+    if (nestedValue && typeof nestedValue === "object") {
+      candidateUrls.push(...collectGitLabCandidateUrls(nestedValue));
     }
   }
+  return candidateUrls;
 }
 
 function validateGitLabTargetOrigin(targetUrl: string, config: HubConfig): void {
   try {
     const parsed = new URL(targetUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`invalid gitlab target URL: ${targetUrl}`);
+    }
     const expected = new URL(config.gitlabOrigin);
     if (parsed.origin !== expected.origin) {
       throw new Error(`gitlab target origin mismatch: ${parsed.origin}`);
@@ -536,9 +564,14 @@ function validateGitLabTargetOrigin(targetUrl: string, config: HubConfig): void 
   }
 }
 
-function sanitizeErrorMessage(value: string): string {
-  return value
+function sanitizeErrorMessage(value: string, config: HubConfig): string {
+  const exactToken = config.gitlabToken?.trim();
+  let sanitized = value
     .replace(/PRIVATE-TOKEN:\s*[^\s,;]+/gi, "PRIVATE-TOKEN: [REDACTED]")
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "******")
     .replace(/token[:=]\s*[^\s,;]+/gi, "token=[REDACTED]");
+  if (exactToken) {
+    sanitized = sanitized.replaceAll(exactToken, "[REDACTED]");
+  }
+  return sanitized;
 }
