@@ -43,6 +43,7 @@ export interface OperationalStore {
   recordAudit(eventType: string, projectId: string, outcome: string, detail: string): Promise<void>;
   createJob(id: string, eventType: string, projectId: string, title: string, targetUrl: string, payload?: Record<string, unknown>): Promise<void>;
   markJobRetry(id: string, attempt: number, nextAttemptAt: number): Promise<void>;
+  markJobSucceeded(id: string): Promise<void>;
   markJobTerminal(id: string, error?: string): Promise<void>;
   recoverExpiredLeases(now: number): Promise<string[]>;
   purgeExpiredRecords(now: number): Promise<void>;
@@ -196,18 +197,25 @@ class SqliteOperationalStore implements OperationalStore {
     );
   }
 
+  async markJobSucceeded(id: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.run(
+      `UPDATE jobs SET status = 'succeeded', terminal_error = NULL, next_attempt_at = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
+      [now, id],
+    );
+  }
+
   async markJobTerminal(id: string, error?: string): Promise<void> {
     const now = new Date().toISOString();
-    const status = error ? "terminal_failed" : "succeeded";
     await this.run(
-      `UPDATE jobs SET status = ?, terminal_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
-      [status, error ?? null, now, id],
+      `UPDATE jobs SET status = 'terminal_failed', terminal_error = ?, next_attempt_at = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
+      [error ?? null, now, id],
     );
   }
 
   async recoverExpiredLeases(now: number): Promise<string[]> {
     const rows = await this.all<{ id: string }>(
-      `SELECT id FROM jobs WHERE lease_expires_at IS NOT NULL AND lease_expires_at <= ? AND status <> 'terminal_failed'`,
+      `SELECT id FROM jobs WHERE lease_expires_at IS NOT NULL AND lease_expires_at <= ? AND status NOT IN ('terminal_failed', 'succeeded')`,
       [now],
     );
     if (rows.length === 0) return [];

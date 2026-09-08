@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { buildHubEventEnvelope, isSupportedHubEventVersion } from "@ithyno/shared";
 import type { HubConfig } from "./config.js";
 import { applyIssueFlowFailure, parseIssuePayload, processIssueGenerationJob } from "./gitlab-flow.js";
-import { createOperationalStore, type OperationalStore } from "./store.js";
+import { createOperationalStore, type JobRecord, type OperationalStore } from "./store.js";
 
 interface Subscriber {
   ws: WebSocket;
@@ -33,6 +33,8 @@ export interface HubRuntime {
 const JOB_PROCESSOR_INTERVAL_MS = Number.parseInt(process.env.ITHYNO_HUB_JOB_PROCESSOR_INTERVAL_MS ?? "", 10) || 5000;
 const JOB_LEASE_DURATION_MS = 15000;
 const JOB_MAX_ATTEMPTS = 5;
+const JOB_RETRY_BASE_DELAY_MS = 1000;
+const JOB_RETRY_MAX_DELAY_MS = 30000;
 
 export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   await mkdir(dirname(resolve(config.statePath)), { recursive: true });
@@ -380,6 +382,34 @@ function getHeaderValue(headers: Record<string, string | string[] | undefined>, 
   return undefined;
 }
 
+export async function processJobAttempt(
+  config: HubConfig,
+  store: OperationalStore,
+  job: JobRecord,
+  processor: (config: HubConfig, job: JobRecord) => Promise<void> = (currentConfig, currentJob) => processHubJob(currentConfig, store, currentJob),
+): Promise<void> {
+  const issuePayload = parseJobIssuePayload(job);
+  const nextAttempt = job.attempts + 1;
+  if (nextAttempt > JOB_MAX_ATTEMPTS) {
+    await store.markJobTerminal(job.id, "retry-budget-exhausted");
+    await store.recordAudit(job.eventType, job.projectId, "terminal_failed", "retry-budget-exhausted");
+    if (issuePayload) {
+      await applyIssueFlowFailure(config, issuePayload, new Error("retry-budget-exhausted")).catch(() => undefined);
+    }
+    return;
+  }
+  try {
+    await processor(config, job);
+    await store.markJobSucceeded(job.id);
+    await store.recordAudit(job.eventType, job.projectId, "succeeded", `job ${job.id} completed`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const retryAt = Date.now() + calculateRetryBackoffMs(nextAttempt);
+    await store.markJobRetry(job.id, nextAttempt, retryAt);
+    await store.recordAudit(job.eventType, job.projectId, "retrying", message);
+  }
+}
+
 function startJobProcessor(config: HubConfig, store: OperationalStore): { stop: () => void } {
   const processPendingJobs = async () => {
     try {
@@ -389,25 +419,7 @@ function startJobProcessor(config: HubConfig, store: OperationalStore): { stop: 
         const leaseExpiresAt = Date.now() + JOB_LEASE_DURATION_MS;
         const claimed = await store.claimJob(job.id, "hub-processor", leaseExpiresAt);
         if (!claimed) continue;
-        const nextAttempt = job.attempts + 1;
-        if (nextAttempt > JOB_MAX_ATTEMPTS) {
-          await store.markJobTerminal(job.id, "retry-budget-exhausted");
-          await store.recordAudit(job.eventType, job.projectId, "terminal_failed", "retry-budget-exhausted");
-          continue;
-        }
-        const issuePayload = parseJobIssuePayload(job);
-        try {
-          await processHubJob(config, store, job);
-          await store.markJobTerminal(job.id);
-          await store.recordAudit(job.eventType, job.projectId, "succeeded", `job ${job.id} completed`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          await store.markJobTerminal(job.id, message);
-          await store.recordAudit(job.eventType, job.projectId, "terminal_failed", message);
-          if (issuePayload) {
-            await applyIssueFlowFailure(config, issuePayload, error as Error).catch(() => undefined);
-          }
-        }
+        await processJobAttempt(config, store, job);
       }
     } catch (error) {
       console.error(`[hub] job processor failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -440,4 +452,8 @@ function parseJobIssuePayload(job: { payloadJson?: string | null }): ReturnType<
   } catch {
     return null;
   }
+}
+
+function calculateRetryBackoffMs(attempt: number): number {
+  return Math.min(JOB_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), JOB_RETRY_MAX_DELAY_MS);
 }

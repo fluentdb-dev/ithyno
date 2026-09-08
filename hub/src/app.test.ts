@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Database } from "sqlite3";
-import { startHubRuntime, classifyWebhookEvent, parseWebhookPayload, verifyWebhookRequest } from "./app.js";
+import { startHubRuntime, classifyWebhookEvent, parseWebhookPayload, verifyWebhookRequest, processJobAttempt } from "./app.js";
 import { parseHubConfig } from "./config.js";
+import { createOperationalStore } from "./store.js";
 import type { GitLabClient } from "./gitlab-flow.js";
-import { processIssueGenerationJob, applyIssueFlowFailure } from "./gitlab-flow.js";
+import { processIssueGenerationJob, applyIssueFlowFailure, resolveChangeId } from "./gitlab-flow.js";
 
 const tempDirs: string[] = [];
 
@@ -120,6 +121,100 @@ describe("hub issue-to-draft flow", () => {
     expect(artifacts).toBeNull();
     expect(client.branches.size).toBe(0);
     expect(client.comments.get("43:ithyno-hub:clarification")?.[0]?.body).toContain("Please add");
+  });
+
+  it("retries transient commit failures until the retry budget is exhausted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-retry-"));
+    tempDirs.push(dir);
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+    });
+    const store = createOperationalStore(dir);
+    await store.initialize();
+    await store.createJob("delivery-retry-1", "issue", "group/project", "Needs spec", "https://gitlab.example.com/group/project/-/issues/1", {
+      eventType: "issue",
+      projectId: "group/project",
+      title: "Needs spec",
+      targetUrl: "https://gitlab.example.com/group/project/-/issues/1",
+      body: {
+        object_kind: "issue",
+        project: { path_with_namespace: "group/project", name: "Alpha" },
+        object_attributes: { title: "Needs spec", description: "Please generate" },
+      },
+    });
+
+    let attempts = 0;
+    const processor = async () => {
+      attempts += 1;
+      throw new Error("commit-failed");
+    };
+    const payloadJson = JSON.stringify({
+      eventType: "issue",
+      projectId: "group/project",
+      title: "Needs spec",
+      targetUrl: "https://gitlab.example.com/group/project/-/issues/1",
+      body: {
+        object_kind: "issue",
+        project: { path_with_namespace: "group/project", name: "Alpha" },
+        object_attributes: { title: "Needs spec", description: "Please generate" },
+      },
+    });
+    let job = {
+      id: "delivery-retry-1",
+      eventType: "issue",
+      projectId: "group/project",
+      title: "Needs spec",
+      targetUrl: "https://gitlab.example.com/group/project/-/issues/1",
+      status: "queued",
+      attempts: 0,
+      payloadJson,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies Parameters<typeof processJobAttempt>[2];
+    for (let index = 0; index < 6; index += 1) {
+      await processJobAttempt(config, store, job, processor);
+      job = { ...job, attempts: job.attempts + 1 };
+    }
+
+    expect(attempts).toBe(5);
+    const persisted = await new Promise<{ status: string; attempts: number; terminal_error: string | null } | null>((resolve, reject) => {
+      const db = new Database(join(dir, "operations.sqlite"));
+      db.get("SELECT status, attempts, terminal_error FROM jobs WHERE id = ?", ["delivery-retry-1"], (error, result: { status: string; attempts: number; terminal_error: string | null } | undefined) => {
+        db.close((closeError) => {
+          if (error) reject(error);
+          else if (closeError) reject(closeError);
+          else resolve(result ?? null);
+        });
+      });
+    });
+    expect(persisted?.status).toBe("terminal_failed");
+    expect(persisted?.attempts).toBe(5);
+    await store.close();
+  });
+
+  it("uses deterministic suffixes when a change-id collision already exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-collision-"));
+    tempDirs.push(dir);
+    const client = new FakeGitLabClient();
+    client.branches.add("change/101-a-title");
+    client.branches.add("change/101-a-title-1");
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+    });
+    const payload = { projectPath: "group/project", issueIid: "101", title: "A title", body: "Need a deterministic change ID.", labels: ["ai:spec"] };
+
+    const changeId = await resolveChangeId(payload, client, config);
+    expect(changeId).toBe("101-a-title-2");
   });
 
   it("reconciles an existing branch and merge request on retry and records failure cleanup on write errors", async () => {

@@ -133,9 +133,6 @@ export function evaluateIssueEligibility(payload: GitLabIssuePayload, aiSpecLabe
 export async function resolveChangeId(payload: GitLabIssuePayload, client: GitLabClient, config: HubConfig): Promise<string> {
   const baseSlug = toSlug(payload.title || payload.issueIid || "change");
   const baseId = `${payload.issueIid}-${baseSlug}`;
-  const branchName = `${config.changeBranchPrefix}/${baseId}`;
-  const existingBranch = await client.getBranch(payload.projectPath, branchName);
-  if (existingBranch) return baseId;
   let candidate = baseId;
   let suffix = 1;
   while (await client.getBranch(payload.projectPath, `${config.changeBranchPrefix}/${candidate}`)) {
