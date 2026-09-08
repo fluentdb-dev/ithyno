@@ -32,7 +32,7 @@
 - [x] 4.6 Implement supported-event classification, failed-pipeline filtering, bot-loop suppression, and no-op acknowledgement for unsupported events
 - [x] 4.7 Persist the strongest available GitLab delivery identity before acknowledgement and add deterministic fallback identity tests
 - [x] 4.8 Implement bounded retry/backoff, expired-lease recovery, terminal failure reporting, and refusal of unsupported multi-replica SQLite operation
-- [ ] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
+- [x] 4.9 Add webhook contract tests for valid, invalid, duplicate, replayed, unsupported, bot-authored, and unregistered-project deliveries
 
 ## 5. Issue to Draft OpenSpec Merge Request
 
@@ -51,8 +51,8 @@
 - [x] 6.2 Add the optional workstation upstream client using hub URL/credential configuration, compatibility negotiation, bounded reconnect, and clean shutdown
 - [x] 6.3 Map hub notifications into the existing workstation WebSocket without sending hub or GitLab credentials to the browser
 - [ ] 6.4 Preserve full standalone behavior when hub configuration is absent or unreachable, with regression tests for filesystem updates
-- [ ] 6.5 Add separate hub-connection state to the dashboard so a hub outage does not replace the workstation live-session state
-- [ ] 6.6 Validate notification targets against the configured GitLab origin/project before rendering them as clickable
+- [x] 6.5 Add separate hub-connection state to the dashboard so a hub outage does not replace the workstation live-session state
+- [x] 6.6 Validate notification targets against the configured GitLab origin/project before rendering them as clickable
 - [ ] 6.7 Add integration tests from hub event publication through workstation relay to dashboard store update and reconnect recovery
 
 ## 7. GitLab CE Deployment Verification

@@ -18,6 +18,17 @@ describe("hub config", () => {
     expect(errors).toContain("workstation subscription credential must be set to a non-default value");
   });
 
+  it("rejects unsigned verification outside local dev", () => {
+    const config = parseHubConfig({
+      ITHYNO_HUB_HOST: "0.0.0.0",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+    });
+    const errors = validateHubConfig(config);
+    expect(errors).toContain("webhook verification mode none requires loopback host and dev mode");
+  });
+
   it("redacts configuration secrets", () => {
     const redacted = redactHubConfig(parseHubConfig({
       ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "super-secret",

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import sqlite3 from "sqlite3";
 
@@ -44,24 +44,27 @@ export interface OperationalStore {
   markJobRetry(id: string, attempt: number, nextAttemptAt: number): Promise<void>;
   markJobTerminal(id: string, error: string): Promise<void>;
   recoverExpiredLeases(now: number): Promise<string[]>;
+  purgeExpiredRecords(now: number): Promise<void>;
   listReadyJobs(now: number, limit: number): Promise<JobRecord[]>;
   claimJob(id: string, leaseOwner: string, leaseExpiresAt: number): Promise<boolean>;
   close(): Promise<void>;
 }
 
-export function createOperationalStore(statePath: string): OperationalStore {
-  return new SqliteOperationalStore(statePath);
+export function createOperationalStore(statePath: string, retentionMs = 7 * 24 * 60 * 60 * 1000): OperationalStore {
+  return new SqliteOperationalStore(statePath, retentionMs);
 }
 
 class SqliteOperationalStore implements OperationalStore {
   private readonly dbPath: string;
   private readonly lockFilePath: string;
+  private readonly retentionMs: number;
   private db: sqlite3.Database | null = null;
   private lockFileHandle: Awaited<ReturnType<typeof open>> | null = null;
 
-  constructor(statePath: string) {
+  constructor(statePath: string, retentionMs: number) {
     this.dbPath = resolve(statePath, "operations.sqlite");
     this.lockFilePath = resolve(statePath, "operations.lock");
+    this.retentionMs = retentionMs;
   }
 
   async initialize(): Promise<void> {
@@ -114,6 +117,7 @@ class SqliteOperationalStore implements OperationalStore {
         created_at TEXT NOT NULL
       )
     `);
+    await this.purgeExpiredRecords(Date.now());
   }
 
   async recordDelivery(delivery: DeliveryRecord): Promise<void> {
@@ -211,6 +215,13 @@ class SqliteOperationalStore implements OperationalStore {
     return recovered;
   }
 
+  async purgeExpiredRecords(now: number): Promise<void> {
+    const cutoffAt = new Date(Math.max(0, now - this.retentionMs)).toISOString();
+    await this.run(`DELETE FROM deliveries WHERE updated_at <= ?`, [cutoffAt]);
+    await this.run(`DELETE FROM audits WHERE created_at <= ?`, [cutoffAt]);
+    await this.run(`DELETE FROM jobs WHERE status = 'terminal_failed' AND updated_at <= ?`, [cutoffAt]);
+  }
+
   async listReadyJobs(now: number, limit: number): Promise<JobRecord[]> {
     return await this.all<JobRecord>(
       `SELECT id, event_type AS eventType, project_id AS projectId, title, target_url AS targetUrl, status, attempts, lease_owner AS leaseOwner, lease_expires_at AS leaseExpiresAt, next_attempt_at AS nextAttemptAt, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE status IN ('queued','retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?) ORDER BY created_at LIMIT ?`,
@@ -241,9 +252,25 @@ class SqliteOperationalStore implements OperationalStore {
   private async acquireLock(): Promise<void> {
     try {
       this.lockFileHandle = await open(this.lockFilePath, "wx");
+      await this.lockFileHandle.writeFile(String(process.pid));
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "EEXIST") {
+        const existingContents = await readFile(this.lockFilePath, "utf8").catch(() => "");
+        const pid = Number.parseInt(existingContents.trim(), 10);
+        if (Number.isFinite(pid)) {
+          try {
+            process.kill(pid, 0);
+            throw new Error(`single-writer lock already held: ${this.lockFilePath}`);
+          } catch (killError) {
+            const killCode = (killError as NodeJS.ErrnoException).code;
+            if (killCode === "ESRCH") {
+              await rm(this.lockFilePath, { force: true });
+              return await this.acquireLock();
+            }
+            throw killError;
+          }
+        }
         throw new Error(`single-writer lock already held: ${this.lockFilePath}`);
       }
       throw error;

@@ -30,5 +30,7 @@ describe("shared parser primitives", () => {
     expect(envelope.version).toBe(1);
     expect(envelope.type).toBe("issue.created");
     expect(isSupportedHubEventVersion(envelope.version)).toBe(true);
+    expect(isSupportedHubEventVersion(0)).toBe(false);
+    expect(isSupportedHubEventVersion(2)).toBe(false);
   });
 });

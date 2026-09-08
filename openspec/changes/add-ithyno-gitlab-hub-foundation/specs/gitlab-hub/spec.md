@@ -44,6 +44,39 @@ The hub SHALL classify Work Item/Issue, merge request, failed pipeline, comment/
 - **WHEN** the configured bot's own comment or merge-request update would repeat an action already performed by the hub
 - **THEN** the hub acknowledges it without enqueueing the repeated action
 
+### Requirement: Explicit Issue Eligibility
+The hub SHALL create an OpenSpec change only for an allowlisted Issue carrying the configured `ai:spec` label and SHALL request more information instead of generating artifacts when required Issue content is absent.
+
+#### Scenario: Eligible Issue
+- **WHEN** an Issue gains `ai:spec` and contains the required title and problem description
+- **THEN** the hub queues exactly one change-generation job for that Issue
+
+#### Scenario: Insufficient Issue
+- **WHEN** an Issue gains `ai:spec` but lacks required problem information
+- **THEN** the hub posts one actionable clarification comment and does not create a change branch
+
+### Requirement: Canonical Issue-to-Change Identity
+The hub SHALL derive the change id as `<issue-iid>-<slug>`, use branch `change/<change-id>`, record the Issue reference and base OpenSpec specs revision in proposal metadata, and reconcile existing canonical resources on retry.
+
+#### Scenario: First generation attempt
+- **WHEN** an eligible Issue has no canonical branch or merge request
+- **THEN** the hub creates the branch from the configured default branch and writes generated OpenSpec artifacts containing the Issue reference and base spec revision
+
+#### Scenario: Retried generation attempt
+- **WHEN** the same Issue event is processed after its canonical branch or Draft merge request already exists
+- **THEN** the hub reuses and reconciles those resources rather than creating a second branch or merge request
+
+### Requirement: Draft Merge Request Review Gate
+The hub SHALL open one Draft merge request for generated OpenSpec artifacts and SHALL leave implementation, Draft removal, merge, and archive to later explicitly authorized stages.
+
+#### Scenario: Generation succeeds
+- **WHEN** generated OpenSpec artifacts are committed to the canonical change branch
+- **THEN** the hub opens or updates a Draft merge request linked to the Issue and reports that human specification review is required
+
+#### Scenario: Generation fails
+- **WHEN** artifact generation, commit, push, or merge-request creation fails
+- **THEN** the hub records a terminal failure and leaves no lifecycle label implying that implementation is running successfully
+
 ### Requirement: GitLab-Owned Domain State
 The hub SHALL derive change lifecycle state from GitLab Issues, labels, branches, and merge requests and SHALL NOT maintain a conflicting private lifecycle status as an independent source of truth.
 

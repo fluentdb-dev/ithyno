@@ -8,15 +8,19 @@ export interface HubConfig {
   webhookVerificationMode: "signed" | "legacy" | "none";
   webhookSecret: string;
   statePath: string;
+  retentionMs: number;
   workstationSubscriptionCredential: string;
 }
 
 const DEFAULT_PORT = 4322;
+const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 function defaultPortValue(): number {
   return DEFAULT_PORT;
 }
 export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const port = Number(env.ITHYNO_HUB_PORT ?? defaultPortValue());
+  const retentionDays = Number.parseInt(env.ITHYNO_HUB_RETENTION_DAYS ?? "", 10);
+  const retentionMs = Number.parseInt(env.ITHYNO_HUB_RETENTION_MS ?? "", 10);
   return {
     host: env.ITHYNO_HUB_HOST ?? "127.0.0.1",
     port: Number.isFinite(port) && port > 0 ? port : DEFAULT_PORT,
@@ -26,6 +30,11 @@ export function parseHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig 
     webhookVerificationMode: parseVerificationMode(env.ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE),
     webhookSecret: env.ITHYNO_HUB_WEBHOOK_SECRET ?? "",
     statePath: env.ITHYNO_HUB_STATE_PATH ?? "/var/lib/ithyno-hub",
+    retentionMs: Number.isFinite(retentionMs) && retentionMs > 0
+      ? retentionMs
+      : Number.isFinite(retentionDays) && retentionDays > 0
+        ? retentionDays * 24 * 60 * 60 * 1000
+        : DEFAULT_RETENTION_MS,
     workstationSubscriptionCredential: env.ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL ?? "change-me",
   };
 }
@@ -35,9 +44,15 @@ export function validateHubConfig(config: HubConfig): string[] {
   if (!config.gitlabOrigin.startsWith("http")) errors.push("gitlab origin must be an absolute http(s) URL");
   if (config.projectAllowlist.length === 0) errors.push("project allowlist must include at least one project");
   if (!config.botIdentity.trim()) errors.push("bot identity must be explicitly configured");
-  if (config.webhookVerificationMode !== "none" && !config.webhookSecret.trim()) {
+  if (config.webhookVerificationMode === "none") {
+    const isLocalDev = process.env.ITHYNO_DEV === "1" && isLoopbackHost(config.host);
+    if (!isLocalDev) {
+      errors.push("webhook verification mode none requires loopback host and dev mode");
+    }
+  } else if (!config.webhookSecret.trim()) {
     errors.push("webhook secret must be configured when verification is enabled");
   }
+  if (config.retentionMs <= 0) errors.push("retention period must be a positive duration");
   if (!config.workstationSubscriptionCredential || config.workstationSubscriptionCredential === "change-me") {
     errors.push("workstation subscription credential must be set to a non-default value");
   }
@@ -54,6 +69,7 @@ export function redactHubConfig(config: HubConfig): Record<string, unknown> {
     webhookVerificationMode: config.webhookVerificationMode,
     webhookSecret: "[REDACTED]",
     statePath: config.statePath,
+    retentionMs: config.retentionMs,
     workstationSubscriptionCredential: "[REDACTED]",
   };
 }
@@ -67,6 +83,11 @@ function parseVerificationMode(value: string | undefined): HubConfig["webhookVer
     default:
       return "signed";
   }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
 }
 
 function splitCsv(value: string): string[] {

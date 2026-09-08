@@ -78,7 +78,7 @@ import { writeNeedsHuman, appendAnswer, parseNeedsHuman } from "./needs-human.js
 import { getAboutInfo } from "./about.js";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "./doctor.js";
-import { startHubRelay } from "./hub-relay.js";
+import { isAllowedHubNotificationTarget, startHubRelay, type HubConnectionStatus } from "./hub-relay.js";
 import type { HubEventEnvelope } from "@ithyno/shared";
 import {
   getAllManagerActivities,
@@ -163,14 +163,24 @@ const wss = new WebSocketServer({ noServer: true });
 // Dedicated WS for the embedded terminal. Separate from /ws so terminal bytes
 // never mix with structured dashboard events.
 const ptyWss = new WebSocketServer({ noServer: true });
+const projectAllowlist = (process.env.ITHYNO_GITLAB_PROJECT_ALLOWLIST ?? "")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter(Boolean);
 const hubRelay = startHubRelay({
   hubUrl: process.env.ITHYNO_HUB_URL,
   hubCredential: process.env.ITHYNO_HUB_CREDENTIAL,
-  projectIds: (process.env.ITHYNO_GITLAB_PROJECT_ALLOWLIST ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean),
-  onEvent: (event) => broadcast({ type: "hub-event-relayed", event }),
+  projectIds: projectAllowlist,
+  onEvent: (event) => {
+    const valid = isAllowedHubNotificationTarget(event, {
+      gitlabOrigin: process.env.ITHYNO_GITLAB_ORIGIN ?? "https://gitlab.example.com",
+      projectIds: projectAllowlist,
+    });
+    if (valid) {
+      broadcast({ type: "hub-event-relayed", event });
+    }
+  },
+  onConnectionStatus: (status) => broadcast({ type: "hub-connection-updated", status }),
 });
 fastify.addHook("onClose", async () => {
   hubRelay.close();
@@ -202,6 +212,7 @@ type ServerEvent =
     }
   | { type: "doctor-updated"; report: DoctorReport }
   | { type: "hub-event-relayed"; event: HubEventEnvelope }
+  | { type: "hub-connection-updated"; status: HubConnectionStatus }
   // expose-manager-activity-per-change: `activity: null` means the entry was
   // cleared (the Manager posted `idle` for that change).
   | { type: "manager-activity-updated"; changeId: string; activity: ManagerActivity | null };

@@ -7,7 +7,7 @@ ithyno currently coordinates OpenSpec changes only while a workstation instance 
 - Add an independently deployable `ithyno-hub` service that receives authenticated GitLab webhooks, filters supported events, and treats GitLab projects, branches, merge requests, and labels as the authoritative domain state.
 - Support GitLab CE through per-project webhooks, with group webhooks available only as an optional Premium/Ultimate registration mode.
 - Add durable operational bookkeeping for webhook deduplication, retries, and job leases without creating a second source of truth for change or merge-request state.
-- Add a GitLab event ingestion foundation that reacts to authenticated issue, merge-request, note, push, and pipeline events, records durable delivery state, and relays selected notifications to the workstation over an authenticated WebSocket channel.
+- Add an Issue-to-OpenSpec flow that reacts to an explicit `ai:spec` label, creates a `change/<issue-number>-<slug>` branch, records the base spec revision, and opens one Draft merge request for human review.
 - Extract reusable OpenSpec parsing and transport types into an internal shared package while keeping filesystem and GitLab I/O implementations separate.
 - Relay hub events over an authenticated WebSocket connection to the existing workstation server and dashboard, while preserving the current standalone behavior when no hub is configured.
 - Ship the hub from this monorepo as its own workspace and container image. Define a versioned boundary so it can be extracted into a separate repository later without coupling the first implementation to cross-repository releases.
@@ -17,7 +17,7 @@ ithyno currently coordinates OpenSpec changes only while a workstation instance 
 
 ### New Capabilities
 
-- `gitlab-hub`: Authenticated, CE-compatible GitLab event ingestion and durable webhook delivery for downstream notification relays.
+- `gitlab-hub`: Authenticated, CE-compatible GitLab event ingestion and Issue-to-Draft-MR OpenSpec orchestration.
 - `hub-event-delivery`: Durable event processing, deduplication, retry handling, job leases, and authenticated downstream event delivery.
 
 ### Modified Capabilities

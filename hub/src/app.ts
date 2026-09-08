@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Server as HttpServer } from "node:http";
@@ -35,7 +35,7 @@ const JOB_MAX_ATTEMPTS = 5;
 
 export async function startHubRuntime(config: HubConfig): Promise<HubRuntime> {
   await mkdir(dirname(resolve(config.statePath)), { recursive: true });
-  const store = createOperationalStore(config.statePath);
+  const store = createOperationalStore(config.statePath, config.retentionMs);
   await store.initialize();
   const app = Fastify({ logger: false });
   app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
@@ -172,6 +172,17 @@ function parseBody(bodyText: string | undefined, requestBody: unknown): Record<s
   return {};
 }
 
+function resolveWebhookTitle(body: Record<string, unknown>, project: Record<string, unknown> | undefined, fallback: string): string {
+  const objectAttributes = body.object_attributes as Record<string, unknown> | undefined;
+  const providedTitle = String(
+    (objectAttributes?.title as string | undefined)
+      ?? (body.title as string | undefined)
+      ?? (project?.name as string | undefined)
+      ?? fallback,
+  );
+  return providedTitle || fallback;
+}
+
 export function parseWebhookPayload(body: Record<string, unknown>, config: HubConfig): ParsedWebhookPayload {
   const project = body.project as Record<string, unknown> | undefined;
   const eventType = String(body.event_type ?? body.object_kind ?? body.event_name ?? "webhook.received");
@@ -183,7 +194,7 @@ export function parseWebhookPayload(body: Record<string, unknown>, config: HubCo
       ?? (project?.id as string | undefined)
       ?? "unknown/project",
   );
-  const title = String((project?.name as string | undefined) ?? (body.title as string | undefined) ?? eventType);
+  const title = resolveWebhookTitle(body, project, eventType);
   const targetUrl = String((project?.web_url as string | undefined) ?? (body.target_url as string | undefined) ?? `${config.gitlabOrigin}/${projectId}`);
   const classification = classifyWebhookEvent(body, config);
   return {
@@ -251,6 +262,7 @@ function isPipelineEvent(objectKind: string, eventName: string): boolean {
 }
 
 function isBotAuthoredEvent(body: Record<string, unknown>, botIdentity: string): boolean {
+  const normalizedBot = botIdentity.trim().toLowerCase();
   const candidates = [
     (body as Record<string, unknown>).user_username,
     (body as Record<string, unknown>).user_name,
@@ -261,14 +273,15 @@ function isBotAuthoredEvent(body: Record<string, unknown>, botIdentity: string):
     (body as Record<string, unknown>).author,
     (body as Record<string, unknown>).object_attributes,
   ];
-  const normalizedBot = botIdentity.trim().toLowerCase();
   return candidates.some((candidate) => {
     if (typeof candidate === "string") {
       return candidate.trim().toLowerCase() === normalizedBot;
     }
     if (candidate && typeof candidate === "object") {
       const nested = candidate as Record<string, unknown>;
-      const nestedUsername = String(nested.username ?? nested.user_name ?? nested.user ?? "").trim().toLowerCase();
+      const nestedUsername = String(
+        nested.username ?? nested.user_name ?? nested.user ?? nested.assignee ?? nested.author ?? "",
+      ).trim().toLowerCase();
       return nestedUsername === normalizedBot;
     }
     return false;
@@ -284,8 +297,14 @@ export function verifyWebhookRequest(config: HubConfig, headers: Record<string, 
   }
   if (config.webhookVerificationMode === "signed") {
     const signatureHeader = getHeaderValue(headers, "x-gitlab-signature");
+    const timestampHeader = getHeaderValue(headers, "x-gitlab-timestamp");
     if (!signatureHeader) return { ok: false, reason: "missing-signature" };
-    const expected = `sha256=${createHash("sha256").update(bodyText).digest("hex")}`;
+    if (!timestampHeader) return { ok: false, reason: "missing-timestamp" };
+    const timestamp = Number.parseInt(timestampHeader, 10);
+    if (!Number.isFinite(timestamp)) return { ok: false, reason: "invalid-timestamp" };
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSeconds - timestamp) > 300) return { ok: false, reason: "expired-timestamp" };
+    const expected = `sha256=${createHmac("sha256", config.webhookSecret).update(`${timestampHeader}.${bodyText}`).digest("hex")}`;
     if (!constantTimeCompare(signatureHeader, expected)) {
       return { ok: false, reason: "invalid-signature" };
     }
