@@ -20,6 +20,7 @@ class FakeGitLabClient implements GitLabClient {
   public labels = new Map<string, string[]>();
   public commitAttempts = 0;
   public shouldFailCommit = false;
+  public upsertCalls = 0;
   public baseRevision = "abc123";
 
   async getDefaultBranch(): Promise<string> {
@@ -50,6 +51,7 @@ class FakeGitLabClient implements GitLabClient {
   }
 
   async upsertMergeRequest(projectPath: string, issueIid: string, sourceBranch: string, _targetBranch: string, _title: string, _description: string): Promise<{ iid: string; webUrl: string }> {
+    this.upsertCalls += 1;
     const key = `${issueIid}:${sourceBranch}`;
     const iid = `mr-${issueIid}`;
     this.mergeRequests.set(key, { iid, webUrl: `${projectPath}/-/merge_requests/${iid}`, draft: true, state: "opened" });
@@ -214,6 +216,29 @@ describe("hub issue-to-draft flow", () => {
 
     const changeId = await resolveChangeId(payload, client, config);
     expect(changeId).toBe("101-a-title");
+  });
+
+  it("updates an existing open non-draft merge request in place without creating a second mr", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ithyno-hub-reconcile-"));
+    tempDirs.push(dir);
+    const client = new FakeGitLabClient();
+    const config = parseHubConfig({
+      ITHYNO_HUB_SUBSCRIPTION_CREDENTIAL: "relay-secret",
+      ITHYNO_GITLAB_PROJECT_ALLOWLIST: "group/project",
+      ITHYNO_HUB_WEBHOOK_SECRET: "s3cr3t",
+      ITHYNO_HUB_WEBHOOK_VERIFICATION_MODE: "none",
+      ITHYNO_HUB_STATE_PATH: dir,
+      ITHYNO_HUB_WORKSPACE_ROOT: join(dir, "workspace"),
+    });
+    config.gitlabClient = client;
+    const payload = { projectPath: "group/project", issueIid: "45", title: "Reconcile stale merge request", body: "The hub should update the existing MR in place.", labels: ["ai:spec"] };
+    client.mergeRequests.set("45:change/45-reconcile-stale-merge-request", { iid: "mr-45", webUrl: "https://gitlab.example.com/group/project/-/merge_requests/45", draft: false, state: "opened" });
+
+    const artifacts = await processIssueGenerationJob(config, payload, client);
+    expect(artifacts).not.toBeNull();
+    expect(client.upsertCalls).toBe(1);
+    expect(client.mergeRequests.size).toBe(1);
+    expect(client.mergeRequests.get("45:change/45-reconcile-stale-merge-request")).toMatchObject({ iid: "mr-45", draft: true, state: "opened" });
   });
 
   it("reconciles an existing branch and merge request on retry and records failure cleanup on write errors", async () => {

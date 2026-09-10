@@ -126,6 +126,38 @@ describe("gitlab http client", () => {
     expect(postCall?.body).toContain('"title":"Draft: Draft"');
   });
 
+  it("updates an existing open merge request in place without sending a reopen event", async () => {
+    const calls: Array<{ url: string; method: string; body?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? String(init.body) : undefined });
+      if (url.includes("/merge_requests?state=opened")) {
+        return new Response(JSON.stringify([{ iid: 7, web_url: "https://gitlab.example.com/group/project/-/merge_requests/7", source_branch: "change/42", state: "opened", draft: false }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/merge_requests/7") && method === "PUT") {
+        return new Response(JSON.stringify({ iid: 7, web_url: "https://gitlab.example.com/group/project/-/merge_requests/7" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createDefaultGitLabClient(createConfig());
+    const result = await client.upsertMergeRequest("group/project", "42", "change/42", "main", "Draft", "body");
+
+    expect(result.iid).toBe("7");
+    const putCall = calls.find((call) => call.method === "PUT" && call.url.includes("/merge_requests/7"));
+    expect(putCall?.body).toContain('"draft":true');
+    expect(putCall?.body).toContain('"title":"Draft: Draft"');
+    expect(putCall?.body).not.toContain('"state_event":"reopen"');
+  });
+
   it("rejects array payloads that contain a URL from a different origin", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ iid: 7, web_url: "https://evil.example.com/group/project/-/merge_requests/7" }]), {
       status: 200,

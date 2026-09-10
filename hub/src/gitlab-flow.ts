@@ -104,8 +104,7 @@ export async function processIssueGenerationJob(config: HubConfig, payload: GitL
     { path: relativeToWorkspace(artifacts.specPath, config.workspaceRoot), content: artifacts.specContent },
   ], `agent: generate change ${changeId}`);
 
-  const existingMergeRequest = await client.findMergeRequest(payload.projectPath, payload.issueIid, branchName);
-  const mergeRequest = existingMergeRequest ?? await client.upsertMergeRequest(
+  const mergeRequest = await client.upsertMergeRequest(
     payload.projectPath,
     payload.issueIid,
     branchName,
@@ -277,7 +276,7 @@ export function createDefaultGitLabClient(config: HubConfig): GitLabClient {
           method: "PUT",
           body: JSON.stringify({
             ...mergeRequestData,
-            state_event: "reopen",
+            ...(existing.state === "opened" ? {} : { state_event: "reopen" }),
           }),
         });
         return {
