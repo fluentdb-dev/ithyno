@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
   readStableTerminalSession,
   rotateStableTerminalSession,
@@ -7,6 +8,23 @@ import {
   resolveTerminalSessionState,
   TERMINAL_SESSION_LOST_TIMEOUT_MS,
 } from "./Terminal";
+
+describe("terminal attachment deadline", () => {
+  it("keeps the original deadline across repeated transport open/close cycles", () => {
+    const first = beginTerminalAttachmentWindow(null, 1_000);
+    const afterTransportOpen = beginTerminalAttachmentWindow(first, 5_000);
+    const afterAnotherReconnect = beginTerminalAttachmentWindow(afterTransportOpen, 12_000);
+
+    expect(first).toBe(1_000);
+    expect(afterTransportOpen).toBe(1_000);
+    expect(afterAnotherReconnect).toBe(1_000);
+    expect(resolveTerminalSessionState("reconnecting", afterAnotherReconnect, 16_001)).toBe("lost");
+  });
+
+  it("starts a new deadline only after a successful handshake cleared the previous one", () => {
+    expect(beginTerminalAttachmentWindow(null, 20_000)).toBe(20_000);
+  });
+});
 
 function makeStorage(): Storage {
   const map = new Map<string, string>();

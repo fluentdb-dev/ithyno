@@ -1,10 +1,11 @@
 ---
 verdict: pass
-summary: "PTY sessions now survive transient socket disconnects, reattach safely without duplicate processes, and retain explicit cleanup behavior."
+summary: "PTY recovery now requires an attachment handshake and retains a bounded reconnect deadline across transport churn."
 findings: []
 ---
 
 ## Notes
 
-- Reviewed through `cfcc1d3`.
-- Production request intent routing, per-session creation locking, structured failure handling, reconnect I/O, idle TTL, project isolation, explicit restart, and shutdown cleanup have direct coverage.
+- Fixed after the Electron runtime report following `cfcc1d3`.
+- Transport open no longer resets the PTY attachment deadline; attached/reattached is the only recovery signal.
+- A handshake watchdog covers sockets that open but never complete PTY attachment.

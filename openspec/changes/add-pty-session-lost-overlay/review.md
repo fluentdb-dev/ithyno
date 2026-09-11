@@ -1,11 +1,10 @@
 ---
 verdict: pass
-summary: "The terminal distinguishes recoverable disconnects from lost sessions and explicit reload reliably creates a fresh session."
+summary: "Repeated failed attachment attempts now reach the lost-session overlay within the bounded reconnect window."
 findings: []
 ---
 
 ## Notes
 
-- Reviewed through `cfcc1d3`.
-- Stable session metadata remains in create state until the server handshake, then switches to reattach; malformed state and explicit rotation have regression coverage.
-- Reload acknowledgement and bounded fallback both advance the restart flow without repeated activation.
+- The reconnect deadline persists across repeated transport open/close cycles and has direct regression coverage.
+- Electron runtime confirmation of the corrected packaged behavior remains a human verification step.

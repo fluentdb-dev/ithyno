@@ -11,6 +11,18 @@ import { writeClipboardText } from "../clipboardBridge";
 export type TerminalSessionState = "connected" | "reconnecting" | "lost";
 export const TERMINAL_SESSION_LOST_TIMEOUT_MS = 15_000;
 
+/**
+ * Start (or retain) the deadline for obtaining a PTY attachment handshake.
+ * A WebSocket transport can open successfully even when the server later
+ * rejects PTY attachment, so transport-open must never reset this timestamp.
+ */
+export function beginTerminalAttachmentWindow(
+  currentStartedAtMs: number | null,
+  nowMs: number,
+): number {
+  return currentStartedAtMs ?? nowMs;
+}
+
 export function resolveTerminalSessionState(
   currentState: TerminalSessionState,
   disconnectStartedAtMs: number | null,
@@ -207,6 +219,7 @@ export function Terminal() {
 
     let ws: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let handshakeTimer: number | null = null;
     let disconnectedAtMs: number | null = null;
     let closedByRestart = false;
     let currentSessionState: TerminalSessionState = "connected";
@@ -229,6 +242,20 @@ export function Terminal() {
     const setTerminalSession = (nextState: TerminalSessionState) => {
       currentSessionState = nextState;
       setSessionState(nextState);
+    };
+
+    const clearHandshakeTimer = () => {
+      if (handshakeTimer !== null) {
+        window.clearTimeout(handshakeTimer);
+        handshakeTimer = null;
+      }
+    };
+
+    const markSessionLost = () => {
+      shouldAutoReconnect = false;
+      setConnected(false);
+      setTerminalSession("lost");
+      term.writeln("\r\n[session lost — reload terminal]");
     };
 
     const buildUrl = () => {
@@ -285,38 +312,47 @@ export function Terminal() {
 
     const connect = () => {
       if (closedByRestart) return;
-      ws = new WebSocket(buildUrl());
-      wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
+      clearHandshakeTimer();
+      disconnectedAtMs = beginTerminalAttachmentWindow(disconnectedAtMs, Date.now());
+      const socket = new WebSocket(buildUrl());
+      ws = socket;
+      wsRef.current = socket;
+      socket.binaryType = "arraybuffer";
 
-      ws.onopen = () => {
-        disconnectedAtMs = null;
+      const remainingHandshakeMs = Math.max(
+        0,
+        TERMINAL_SESSION_LOST_TIMEOUT_MS - (Date.now() - disconnectedAtMs),
+      );
+      handshakeTimer = window.setTimeout(() => {
+        if (closedByRestart || ws !== socket) return;
+        handshakeTimer = null;
+        markSessionLost();
+        try { socket.close(); } catch { /* ignore */ }
+      }, remainingHandshakeMs);
+
+      socket.onopen = () => {
         if (reconnectTimer !== null) {
           window.clearTimeout(reconnectTimer);
           reconnectTimer = null;
         }
-        setConnected(true);
-        setTerminalSession("connected");
         fitNow();
         term.focus();
       };
-      ws.onmessage = (ev) => {
+      socket.onmessage = (ev) => {
         const raw = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
         if (typeof raw === "string") {
           const status = parseTerminalSessionStatusMessage(raw);
           if (status) {
+            clearHandshakeTimer();
             if (status.status === "missing") {
               shouldAutoReconnect = false;
-              disconnectedAtMs = Date.now();
               if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
                 pendingReloadRef.current = null;
                 clearPendingReloadTimer();
                 restartTerminal();
                 return;
               }
-              setConnected(false);
-              setTerminalSession("lost");
-              term.writeln("\r\n[session lost — reload terminal]");
+              markSessionLost();
               return;
             }
             if (status.status === "reattached" || status.status === "attached") {
@@ -359,10 +395,11 @@ export function Terminal() {
         }
         term.write(raw as any);
       };
-      ws.onclose = () => {
+      socket.onclose = () => {
+        clearHandshakeTimer();
         if (closedByRestart) return;
         if (!shouldAutoReconnect) return;
-        if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
+        disconnectedAtMs = beginTerminalAttachmentWindow(disconnectedAtMs, Date.now());
         const nextState = resolveTerminalSessionState(
           currentSessionState,
           disconnectedAtMs,
@@ -371,7 +408,7 @@ export function Terminal() {
         setConnected(false);
         setTerminalSession(nextState);
         if (nextState === "lost") {
-          term.writeln("\r\n[session lost — reload terminal]");
+          markSessionLost();
           return;
         }
         term.writeln("\r\n[reconnecting…]");
@@ -381,12 +418,18 @@ export function Terminal() {
           connect();
         }, 1000);
       };
-      ws.onerror = () => {
+      socket.onerror = () => {
         if (closedByRestart) return;
         if (!shouldAutoReconnect) return;
-        if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
+        disconnectedAtMs = beginTerminalAttachmentWindow(disconnectedAtMs, Date.now());
         setConnected(false);
-        setTerminalSession(resolveTerminalSessionState(currentSessionState, disconnectedAtMs, Date.now()));
+        const nextState = resolveTerminalSessionState(currentSessionState, disconnectedAtMs, Date.now());
+        setTerminalSession(nextState);
+        if (nextState === "lost") {
+          clearHandshakeTimer();
+          markSessionLost();
+          try { socket.close(); } catch { /* ignore */ }
+        }
       };
     };
 
@@ -398,6 +441,7 @@ export function Terminal() {
       clearPendingReloadTimer();
       pendingReloadRef.current = null;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      clearHandshakeTimer();
       if (ws) {
         try { ws.close(); } catch { /* ignore */ }
       }
