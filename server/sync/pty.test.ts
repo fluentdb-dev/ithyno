@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
 import {
@@ -10,6 +10,8 @@ import {
   attachPtyToSocket,
   ptyStartup,
   resolveManagerStartup,
+  resolvePtySessionKey,
+  parsePtyConnectionIdentity,
   terminateAllLivePtys,
   activeTerminalCount,
   tmuxSessionName,
@@ -641,6 +643,25 @@ describe("terminateAllLivePtys", () => {
     // the test env). This documents the empty-array contract.
     expect(() => terminateAllLivePtys()).not.toThrow();
     expect(activeTerminalCount()).toBe(0);
+  });
+});
+
+describe("pty session identity and reconnect semantics", () => {
+  it("keeps project/session identity stable for reconnects", () => {
+    const idA = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
+    const idB = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
+    expect(idA).toEqual(idB);
+    expect(idA.sessionKey).toContain("/tmp/project-a::shell-1");
+  });
+
+  it("parses the reconnect identity from the websocket URL", () => {
+    const parsed = parsePtyConnectionIdentity(
+      "ws://localhost:4321/pty?projectRoot=/tmp/project-a&sessionId=shell-2",
+      "/tmp/project-a",
+    );
+    expect(parsed.projectRoot).toBe("/tmp/project-a");
+    expect(parsed.sessionId).toBe("shell-2");
+    expect(parsed.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-2`);
   });
 });
 

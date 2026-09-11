@@ -26,6 +26,25 @@ export function resolveTerminalSessionState(
   return currentState === "lost" ? "lost" : "reconnecting";
 }
 
+export function parseTerminalSessionStatusMessage(
+  raw: unknown,
+): { status: "attached" | "reattached" | "missing" | "terminated"; sessionKey?: string } | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || parsed.type !== "session-status") {
+      return null;
+    }
+    const status = parsed.status;
+    if (status === "attached" || status === "reattached" || status === "missing" || status === "terminated") {
+      return { status, sessionKey: typeof parsed.sessionKey === "string" ? parsed.sessionKey : undefined };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
  * Browser terminal pane. Streams bytes over a dedicated /pty WebSocket to a
  * real PTY on the local server (xterm.js renders, the server spawns the shell).
@@ -67,6 +86,9 @@ export function Terminal() {
     let reconnectTimer: number | null = null;
     let disconnectedAtMs: number | null = null;
     let closedByRestart = false;
+    let currentSessionState: TerminalSessionState = "connected";
+    let shouldAutoReconnect = true;
+    const sessionKey = `${projectRoot || "workspace"}:${terminalRestartCounter}`;
 
     const fitNow = () => {
       try {
@@ -79,15 +101,20 @@ export function Terminal() {
       }
     };
 
+    const setTerminalSession = (nextState: TerminalSessionState) => {
+      currentSessionState = nextState;
+      setSessionState(nextState);
+    };
+
     const buildUrl = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const token = getSessionToken();
       const params = new URLSearchParams();
       if (token) params.set("token", token);
       if (projectRoot) params.set("project", projectRoot);
-      const session = `${projectRoot || "workspace"}:${terminalRestartCounter}`;
-      params.set("session", session);
-      params.set("sessionId", session);
+      params.set("session", sessionKey);
+      params.set("sessionId", sessionKey);
+      params.set("sessionKey", sessionKey);
       return `${proto}://${location.host}/pty?${params.toString()}`;
     };
 
@@ -142,26 +169,56 @@ export function Terminal() {
           reconnectTimer = null;
         }
         setConnected(true);
-        setSessionState("connected");
+        setTerminalSession("connected");
         fitNow();
         term.focus();
       };
       ws.onmessage = (ev) => {
-        const data = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
-        term.write(data as any);
+        const raw = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
+        if (typeof raw === "string") {
+          const status = parseTerminalSessionStatusMessage(raw);
+          if (status) {
+            if (status.status === "missing") {
+              shouldAutoReconnect = false;
+              disconnectedAtMs = Date.now();
+              setConnected(false);
+              setTerminalSession("lost");
+              term.writeln("\r\n[session lost — reload terminal]");
+              return;
+            }
+            if (status.status === "reattached" || status.status === "attached") {
+              disconnectedAtMs = null;
+              if (reconnectTimer !== null) {
+                window.clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+              }
+              shouldAutoReconnect = true;
+              setConnected(true);
+              setTerminalSession("connected");
+              return;
+            }
+            if (status.status === "terminated") {
+              disconnectedAtMs = Date.now();
+              shouldAutoReconnect = false;
+              setConnected(false);
+              setTerminalSession("lost");
+              return;
+            }
+          }
+        }
+        term.write(raw as any);
       };
       ws.onclose = () => {
         if (closedByRestart) return;
+        if (!shouldAutoReconnect) return;
         if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
         const nextState = resolveTerminalSessionState(
-          "connected",
+          currentSessionState,
           disconnectedAtMs,
           Date.now(),
         );
         setConnected(false);
-        setSessionState((currentState) =>
-          resolveTerminalSessionState(currentState, disconnectedAtMs, Date.now()),
-        );
+        setTerminalSession(nextState);
         if (nextState === "lost") {
           term.writeln("\r\n[session lost — reload terminal]");
           return;
@@ -169,17 +226,16 @@ export function Terminal() {
         term.writeln("\r\n[reconnecting…]");
         if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
         reconnectTimer = window.setTimeout(() => {
-          if (closedByRestart) return;
+          if (closedByRestart || !shouldAutoReconnect) return;
           connect();
         }, 1000);
       };
       ws.onerror = () => {
         if (closedByRestart) return;
+        if (!shouldAutoReconnect) return;
         if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
         setConnected(false);
-        setSessionState((currentState) =>
-          resolveTerminalSessionState(currentState, disconnectedAtMs, Date.now()),
-        );
+        setTerminalSession(resolveTerminalSessionState(currentSessionState, disconnectedAtMs, Date.now()));
       };
     };
 
@@ -187,7 +243,15 @@ export function Terminal() {
 
     return () => {
       closedByRestart = true;
+      shouldAutoReconnect = false;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (ws && ws.readyState === ws.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "terminate", reason: "reload", sessionKey }));
+        } catch {
+          /* ignore */
+        }
+      }
       if (ws) {
         try { ws.close(); } catch { /* ignore */ }
       }
