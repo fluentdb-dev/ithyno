@@ -13,7 +13,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
@@ -379,10 +379,90 @@ type ClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number };
 
+export function resolvePtySessionKey(
+  cwd: string,
+  opts?: { projectId?: string; projectRoot?: string; sessionId?: string; sessionKey?: string },
+): { projectRoot: string; sessionId: string; sessionKey: string } {
+  const projectRoot = String(opts?.projectId ?? opts?.projectRoot ?? cwd ?? "").trim() || cwd;
+  const sessionId = String(opts?.sessionId ?? opts?.sessionKey ?? "default").trim() || "default";
+  return {
+    projectRoot: resolve(projectRoot),
+    sessionId,
+    sessionKey: `${resolve(projectRoot)}::${sessionId}`,
+  };
+}
+
+export function parsePtyConnectionIdentity(
+  url: string | undefined,
+  cwd: string,
+): { projectRoot: string; sessionId: string; sessionKey: string } {
+  const search = url?.split("?")[1] ?? "";
+  const params = new URLSearchParams(search);
+  const projectRoot = params.get("projectRoot") ?? params.get("project") ?? params.get("cwd") ?? cwd;
+  const sessionId = params.get("sessionId") ?? params.get("session") ?? params.get("id") ?? "default";
+  return resolvePtySessionKey(cwd, { projectId: projectRoot, sessionId });
+}
+
+let idleTtlMs = Number(process.env.ITHYNO_PTY_IDLE_TTL_MS ?? 10 * 60 * 1000);
+
+export function getPtyIdleTtlMs(): number {
+  if (!Number.isFinite(idleTtlMs) || idleTtlMs <= 0) {
+    return 10 * 60 * 1000;
+  }
+  return idleTtlMs;
+}
+
+export function _setPtyIdleTtlForTest(ms: number | null): void {
+  idleTtlMs = ms === null ? Number(process.env.ITHYNO_PTY_IDLE_TTL_MS ?? 10 * 60 * 1000) : ms;
+}
+
+export function setPtyIdleTtlForTest(ms: number | null): void {
+  _setPtyIdleTtlForTest(ms);
+}
+
 // Registry of live PTY sessions. The last entry is the most recently active
 // terminal — that's what /api/pty/inject writes to.
-type LiveTerminal = { term: any; ws: WebSocket; cwd: string };
+type LiveTerminal = {
+  term: any;
+  ws: WebSocket | null;
+  cwd: string;
+  sessionKey: string;
+  idleTimer: NodeJS.Timeout | null;
+};
 const live: LiveTerminal[] = [];
+const liveBySession = new Map<string, LiveTerminal>();
+
+function clearIdleTimer(entry: LiveTerminal): void {
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+}
+
+function removeLiveEntry(entry: LiveTerminal): void {
+  clearIdleTimer(entry);
+  const i = live.indexOf(entry);
+  if (i >= 0) live.splice(i, 1);
+  if (liveBySession.get(entry.sessionKey) === entry) {
+    liveBySession.delete(entry.sessionKey);
+  }
+}
+
+function scheduleIdleCleanup(entry: LiveTerminal): void {
+  if (entry.ws) return;
+  if (entry.idleTimer) return;
+  entry.idleTimer = setTimeout(() => {
+    if (entry.ws) return;
+    const current = liveBySession.get(entry.sessionKey);
+    if (current !== entry) return;
+    try {
+      entry.term.kill();
+    } catch {
+      /* ignore */
+    }
+    removeLiveEntry(entry);
+  }, getPtyIdleTtlMs());
+}
 
 function bump(entry: LiveTerminal): void {
   const i = live.indexOf(entry);
@@ -464,21 +544,16 @@ export function activeTerminalCount(): number {
  * state after the sockets flush.
  */
 export function terminateAllLivePtys(oldProjectRoot?: string): void {
-  // Snapshot before iterating — the ws.on("close") handler mutates
-  // `live` as each socket finishes closing, and we don't want the
-  // iteration to skip entries due to concurrent splice().
   const snapshot = live.slice();
   for (const entry of snapshot) {
+    clearIdleTimer(entry);
     try { entry.term.kill(); } catch { /* already dead */ }
-    try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+    if (entry.ws) {
+      try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+    }
+    removeLiveEntry(entry);
   }
 
-  // Also kill the tmux session for the outgoing project root, so a
-  // future `tmux new-session -A -s <name>` for a different project
-  // does not attach to a lingering pane with the wrong cwd. Best
-  // effort — swallow errors (session not found, tmux missing, env
-  // override that we cannot mirror here, etc.).
-  // See scope-tmux-session-name-per-project.
   if (oldProjectRoot) {
     const sessionName = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(oldProjectRoot);
     try {
@@ -490,9 +565,9 @@ export function terminateAllLivePtys(oldProjectRoot?: string): void {
 }
 
 /**
- * Attach a WebSocket to a freshly-spawned PTY. The socket sends raw stdout
- * bytes as text frames and accepts a small JSON control protocol for input
- * and resize. The PTY dies when the socket closes.
+ * Attach a WebSocket to a PTY session. A socket close detaches the client but
+ * leaves the server-owned PTY alive so reconnects reuse it. An explicit restart
+ * changes the session identity so a fresh PTY is spawned instead.
  */
 export async function attachPtyToSocket(
   ws: WebSocket,
@@ -500,20 +575,69 @@ export async function attachPtyToSocket(
     cwd: string;
     cols?: number;
     rows?: number;
+    projectId?: string;
+    projectRoot?: string;
+    sessionId?: string;
+    sessionKey?: string;
     /** When present, ptyStartup() derives the startup command + auto-inject
      *  line from `registry.managerAgent()`. Pass null to use the env-var /
      *  hardcoded fallback chain. See add-manager-agent-config. */
     registry?: AgentRegistry | null;
   },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  // Guard (guard-terminal-autolaunch-on-agents-yaml round 2): refuse to
-  // spawn a PTY at all when the project has no `agents.yaml`. The client
-  // dashboard already gates the aside render on `hasAgentsYaml`, so this
-  // branch normally does not fire — it is a defense-in-depth against
-  // direct `/pty` WebSocket clients.
   if (!hasAgentsYaml(opts.cwd)) {
     console.log(`[pty] spawn skipped — no agents.yaml at ${opts.cwd}`);
     return { ok: false, reason: "no-agents-yaml" };
+  }
+
+  const identity = resolvePtySessionKey(opts.cwd, {
+    projectId: opts.projectId ?? opts.projectRoot ?? opts.cwd,
+    sessionId: opts.sessionId ?? opts.sessionKey ?? "default",
+  });
+
+  const existing = liveBySession.get(identity.sessionKey);
+  if (existing) {
+    if (existing.cwd !== opts.cwd && existing.cwd !== identity.projectRoot) {
+      return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+    }
+    const previous = existing.ws;
+    if (previous && previous !== ws) {
+      try { previous.close(1000, "reattach"); } catch { /* ignore */ }
+    }
+    existing.ws = ws;
+    existing.cwd = opts.cwd;
+    clearIdleTimer(existing);
+    bump(existing);
+
+    const attach = (raw: Buffer | string) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
+      } catch {
+        return;
+      }
+      if (existing.ws !== ws) return;
+      if (msg.type === "input") {
+        bump(existing);
+        existing.term.write(msg.data);
+      } else if (msg.type === "resize") {
+        const cols = Math.max(1, Math.floor(msg.cols));
+        const rows = Math.max(1, Math.floor(msg.rows));
+        try {
+          existing.term.resize(cols, rows);
+        } catch {
+          /* ignore transient resize errors */
+        }
+      }
+    };
+
+    ws.on("message", attach);
+    ws.on("close", () => {
+      if (existing.ws !== ws) return;
+      existing.ws = null;
+      scheduleIdleCleanup(existing);
+    });
+    return { ok: true };
   }
 
   const pty = await loadPty();
@@ -528,25 +652,14 @@ export async function attachPtyToSocket(
     env: buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN),
   });
 
-  const entry: LiveTerminal = { term, ws, cwd: opts.cwd };
+  const entry: LiveTerminal = { term, ws, cwd: opts.cwd, sessionKey: identity.sessionKey, idleTimer: null };
   live.push(entry);
+  liveBySession.set(identity.sessionKey, entry);
 
-  // Auto-launch the resolved startup command so the Terminal panel has
-  // a receiver from the moment it opens. The 300 ms delay lets the shell
-  // finish printing its prompt so the typed line appears at the prompt,
-  // not before it. If the manager entry declared an `initialInput`,
-  // inject it 300 ms after the startup command so the Manager has time
-  // to boot and render its own prompt.
-  //
-  // Guard (guard-terminal-autolaunch-on-agents-yaml): skip the Claude
-  // injection when the project has no agents.yaml. The PTY still spawns
-  // a plain shell — manual use is never blocked.
   const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
   if (startup) {
     if (!hasAgentsYaml(opts.cwd)) {
-      console.log(
-        `[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`,
-      );
+      console.log(`[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`);
     } else {
       setTimeout(() => {
         try {
@@ -573,10 +686,9 @@ export async function attachPtyToSocket(
     if (ws.readyState === ws.OPEN) ws.send(data);
   });
   term.onExit(() => {
-    try {
-      ws.close();
-    } catch {
-      /* ignore */
+    removeLiveEntry(entry);
+    if (entry.ws) {
+      try { entry.ws.close(); } catch { /* ignore */ }
     }
   });
 
@@ -602,13 +714,9 @@ export async function attachPtyToSocket(
   });
 
   ws.on("close", () => {
-    const i = live.indexOf(entry);
-    if (i >= 0) live.splice(i, 1);
-    try {
-      term.kill();
-    } catch {
-      /* already dead */
-    }
+    if (entry.ws !== ws) return;
+    entry.ws = null;
+    scheduleIdleCleanup(entry);
   });
 
   return { ok: true };

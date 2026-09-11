@@ -22,6 +22,8 @@ export function Terminal() {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const appliedTheme = useAppliedTheme();
+  const projectRoot = useStore((s) => s.state?.root ?? "");
+  const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const [connected, setConnected] = useState(true);
 
   useEffect(() => {
@@ -42,10 +44,14 @@ export function Terminal() {
     term.loadAddon(fit);
     term.open(host);
 
+    let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let closedByRestart = false;
+
     const fitNow = () => {
       try {
         fit.fit();
-        if (ws.readyState === ws.OPEN) {
+        if (ws && ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         }
       } catch {
@@ -53,33 +59,20 @@ export function Terminal() {
       }
     };
 
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const token = getSessionToken();
-    const ws = new WebSocket(
-      `${proto}://${location.host}/pty${token ? `?token=${encodeURIComponent(token)}` : ""}`,
-    );
-    ws.binaryType = "arraybuffer";
-
-    ws.onopen = () => {
-      setConnected(true);
-      fitNow();
-      term.focus();
-    };
-    ws.onmessage = (ev) => {
-      const data = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
-      term.write(data as any);
-    };
-    ws.onclose = () => {
-      setConnected(false);
-      term.writeln("\r\n[disconnected]");
-    };
-    ws.onerror = () => {
-      setConnected(false);
-      term.writeln("\r\n[connection error]");
+    const buildUrl = () => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const token = getSessionToken();
+      const params = new URLSearchParams();
+      if (token) params.set("token", token);
+      if (projectRoot) params.set("project", projectRoot);
+      const session = `${projectRoot || "workspace"}:${terminalRestartCounter}`;
+      params.set("session", session);
+      params.set("sessionId", session);
+      return `${proto}://${location.host}/pty?${params.toString()}`;
     };
 
     const inputDisposable = term.onData((data) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "input", data }));
+      if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
     // Ctrl+Shift+C/V copy-paste. Plain Ctrl+C/Ctrl+V are left completely
@@ -90,7 +83,7 @@ export function Terminal() {
     // handling to begin with and the browser's native copy/paste
     // already worked there — Windows/Linux have no such Cmd-equivalent,
     // hence the separate shortcut (shown as a hint in the terminal UI).
-    term.attachCustomKeyEventHandler((ev) => {
+    const keyHandler = (ev: KeyboardEvent) => {
       if (ev.type !== "keydown" || !ev.ctrlKey || !ev.shiftKey || ev.altKey) return true;
       if (ev.key === "C" || ev.code === "KeyC") {
         if (!term.hasSelection()) return true;
@@ -110,21 +103,54 @@ export function Terminal() {
         return false;
       }
       return true;
-    });
+    };
+    term.attachCustomKeyEventHandler(keyHandler);
 
     const ro = new ResizeObserver(() => fitNow());
     ro.observe(host);
     window.addEventListener("resize", fitNow);
 
+    const connect = () => {
+      if (closedByRestart) return;
+      ws = new WebSocket(buildUrl());
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        setConnected(true);
+        fitNow();
+        term.focus();
+      };
+      ws.onmessage = (ev) => {
+        const data = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
+        term.write(data as any);
+      };
+      ws.onclose = () => {
+        if (closedByRestart) return;
+        setConnected(false);
+        term.writeln("\r\n[reconnecting…]");
+        if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(() => {
+          connect();
+        }, 1000);
+      };
+      ws.onerror = () => {
+        if (closedByRestart) return;
+        setConnected(false);
+        term.writeln("\r\n[connection error]");
+      };
+    };
+
+    connect();
+
     return () => {
+      closedByRestart = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (ws) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
       window.removeEventListener("resize", fitNow);
       ro.disconnect();
       inputDisposable.dispose();
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
       term.dispose();
       termRef.current = null;
     };
@@ -133,7 +159,7 @@ export function Terminal() {
     // `term.options.theme = …`, which is the officially-supported live
     // re-color path (no dispose, scrollback preserved).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectRoot, terminalRestartCounter]);
 
   // Live re-color on theme flip. Reads the CSS variables AFTER
   // useAppliedTheme has updated `<html data-theme=…>`, so the values it
