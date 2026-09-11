@@ -771,6 +771,75 @@ describe("attachPtyToSocket lifecycle", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects reattach when the matching session is missing even if another PTY is still live", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const termA = makeFakePty();
+    const termB = makeFakePty();
+    const spawn = vi.fn((cmd?: string) => {
+      return cmd === "bash" ? termB : termA;
+    });
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const live = makeFakeWs();
+    const liveResult = await attachPtyToSocket(live, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "other-live-session",
+      intent: "create",
+    });
+    expect(liveResult.ok).toBe(true);
+
+    const missing = makeFakeWs();
+    const missingResult = await attachPtyToSocket(missing, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "missing-session",
+      intent: "reattach",
+    });
+    expect(missingResult.ok).toBe(false);
+    if (!missingResult.ok) expect(missingResult.reason).toBe("session-missing");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("converts a rejected concurrent create lock into a structured failure", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+
+    const boom = new Error("pty launch failed");
+    const spawn = vi.fn(() => {
+      throw boom;
+    });
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    const [firstResult, secondResult] = await Promise.all([
+      attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "concurrent-failure" }),
+      attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "concurrent-failure" }),
+    ]);
+
+    expect(firstResult.ok).toBe(false);
+    expect(secondResult.ok).toBe(false);
+    if (!firstResult.ok) expect(firstResult.reason).toBe("pty launch failed");
+    if (!secondResult.ok) expect(secondResult.reason).toBe("pty launch failed");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it("reattaches to the same PTY and forwards output to the replacement socket", async () => {
     writeFileSync(
       join(dir, "agents.yaml"),

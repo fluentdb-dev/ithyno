@@ -1,9 +1,82 @@
 import { describe, expect, it } from "vitest";
 import {
   parseTerminalSessionStatusMessage,
+  readStableTerminalSession,
+  rotateStableTerminalSession,
+  markStableTerminalSessionEstablished,
   resolveTerminalSessionState,
   TERMINAL_SESSION_LOST_TIMEOUT_MS,
 } from "./Terminal";
+
+function makeStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      map.set(key, value);
+    },
+    removeItem: (key: string) => {
+      map.delete(key);
+    },
+    clear: () => {
+      map.clear();
+    },
+    key: (index: number) => Array.from(map.keys())[index] ?? null,
+    get length() {
+      return map.size;
+    },
+  };
+}
+
+describe("stable terminal session storage", () => {
+  it("starts as create + unestablished on first read", () => {
+    const storage = makeStorage();
+    const session = readStableTerminalSession("/tmp/project", storage);
+
+    expect(session).toMatchObject({ intent: "create", established: false });
+    expect(session.key).toContain("/tmp/project");
+  });
+
+  it("marks the session as reattach + established after the first attach handshake", () => {
+    const storage = makeStorage();
+    const initial = readStableTerminalSession("/tmp/project", storage);
+
+    markStableTerminalSessionEstablished("/tmp/project", initial.key, storage);
+    const next = readStableTerminalSession("/tmp/project", storage);
+
+    expect(next).toEqual({ key: initial.key, intent: "reattach", established: true });
+  });
+
+  it("keeps a rotated session in create state until the attach handshake arrives", () => {
+    const storage = makeStorage();
+    const first = readStableTerminalSession("/tmp/project", storage);
+    const rotated = rotateStableTerminalSession("/tmp/project", storage);
+
+    expect(rotated).not.toBe(first.key);
+    expect(readStableTerminalSession("/tmp/project", storage)).toMatchObject({
+      key: rotated,
+      intent: "create",
+      established: false,
+    });
+
+    markStableTerminalSessionEstablished("/tmp/project", rotated, storage);
+    expect(readStableTerminalSession("/tmp/project", storage)).toMatchObject({
+      key: rotated,
+      intent: "reattach",
+      established: true,
+    });
+  });
+
+  it("recovers from malformed stored metadata by creating a fresh unestablished session", () => {
+    const storage = makeStorage();
+    storage.setItem("ithyno-terminal-session-key:/tmp/project", "{not valid json");
+
+    const recovered = readStableTerminalSession("/tmp/project", storage);
+
+    expect(recovered).toMatchObject({ intent: "create", established: false });
+    expect(storage.getItem("ithyno-terminal-session-key:/tmp/project")).toContain('"intent":"create"');
+  });
+});
 
 describe("resolveTerminalSessionState", () => {
   it("keeps a transient disconnect in reconnecting state", () => {

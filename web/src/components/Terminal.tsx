@@ -55,17 +55,29 @@ function terminalSessionStorageKey(projectRoot: string): string {
   return `ithyno-terminal-session-key:${projectRoot || "workspace"}`;
 }
 
-export function readStableTerminalSession(projectRoot: string): StableTerminalSession {
+type StableTerminalSessionStorage = Pick<Storage, "getItem" | "setItem">;
+
+function getStableTerminalSessionStorage(): StableTerminalSessionStorage | null {
+  if (typeof window !== "undefined" && window.sessionStorage) {
+    return window.sessionStorage;
+  }
+  return null;
+}
+
+export function readStableTerminalSession(
+  projectRoot: string,
+  storage: StableTerminalSessionStorage | null = getStableTerminalSessionStorage(),
+): StableTerminalSession {
   const storageKey = terminalSessionStorageKey(projectRoot);
   const fallbackKey = `${projectRoot || "workspace"}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  if (typeof window === "undefined") {
+  if (!storage) {
     return { key: fallbackKey, intent: "create", established: false };
   }
-  const raw = window.sessionStorage.getItem(storageKey);
+  const raw = storage.getItem(storageKey);
   if (!raw) {
     const fresh = fallbackKey;
     const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
-    window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+    storage.setItem(storageKey, JSON.stringify(next));
     return next;
   }
   try {
@@ -79,7 +91,7 @@ export function readStableTerminalSession(projectRoot: string): StableTerminalSe
         established,
       };
       if (!parsed.established) {
-        window.sessionStorage.setItem(storageKey, JSON.stringify(session));
+        storage.setItem(storageKey, JSON.stringify(session));
       }
       return session;
     }
@@ -88,26 +100,33 @@ export function readStableTerminalSession(projectRoot: string): StableTerminalSe
   }
   const fresh = fallbackKey;
   const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
-  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+  storage.setItem(storageKey, JSON.stringify(next));
   return next;
 }
 
-export function rotateStableTerminalSession(projectRoot: string): string {
+export function rotateStableTerminalSession(
+  projectRoot: string,
+  storage: StableTerminalSessionStorage | null = getStableTerminalSessionStorage(),
+): string {
   const storageKey = terminalSessionStorageKey(projectRoot);
   const fresh = `${projectRoot || "workspace"}:reload:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  if (typeof window === "undefined") return fresh;
+  if (!storage) return fresh;
   const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
-  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+  storage.setItem(storageKey, JSON.stringify(next));
   return fresh;
 }
 
-export function markStableTerminalSessionEstablished(projectRoot: string, sessionKey: string): void {
+export function markStableTerminalSessionEstablished(
+  projectRoot: string,
+  sessionKey: string,
+  storage: StableTerminalSessionStorage | null = getStableTerminalSessionStorage(),
+): void {
   const storageKey = terminalSessionStorageKey(projectRoot);
-  if (typeof window === "undefined") return;
-  const cached = readStableTerminalSession(projectRoot);
+  if (!storage) return;
+  const cached = readStableTerminalSession(projectRoot, storage);
   if (cached.key !== sessionKey) return;
   const next: StableTerminalSession = { key: sessionKey, intent: "reattach", established: true };
-  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+  storage.setItem(storageKey, JSON.stringify(next));
 }
 
 /**
@@ -141,14 +160,19 @@ export function Terminal() {
   };
 
   const handleReload = () => {
+    if (pendingReloadRef.current) {
+      return;
+    }
+
     const session = readStableTerminalSession(projectRoot);
-    const nextKey = rotateStableTerminalSession(projectRoot);
     const currentKey = session.key;
+    const nextKey = rotateStableTerminalSession(projectRoot);
     const ws = wsRef.current;
     pendingReloadRef.current = { currentKey, nextKey };
     clearPendingReloadTimer();
     pendingReloadTimerRef.current = window.setTimeout(() => {
-      if (!pendingReloadRef.current) return;
+      const pending = pendingReloadRef.current;
+      if (!pending) return;
       pendingReloadRef.current = null;
       clearPendingReloadTimer();
       restartTerminal();

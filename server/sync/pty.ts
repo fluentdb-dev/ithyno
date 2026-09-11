@@ -744,8 +744,9 @@ export async function attachPtyToSocket(
   }
 
   if (intent === "reattach") {
+    const exactLive = liveBySession.has(identity.sessionKey);
     const tombstoned = lostSessionKeys.has(identity.sessionKey);
-    if (tombstoned || liveBySession.size === 0) {
+    if (!exactLive || tombstoned) {
       sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
       try { ws.close(1000, "session lost"); } catch { /* ignore */ }
       return { ok: false, reason: "session-missing" };
@@ -753,7 +754,13 @@ export async function attachPtyToSocket(
   }
 
   if (creationLocks.has(identity.sessionKey)) {
-    await creationLocks.get(identity.sessionKey)!;
+    const pending = creationLocks.get(identity.sessionKey)!;
+    try {
+      await pending;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason };
+    }
     const rechecked = liveBySession.get(identity.sessionKey);
     if (rechecked) {
       if (rechecked.ws !== ws) {
