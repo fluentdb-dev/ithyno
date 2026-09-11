@@ -1,27 +1,27 @@
-## 1. Client: detect PTY WS close
+## 1. Client: detect PTY disconnects without false alarms
 
-- [ ] 1.1 In `Terminal.tsx` (or wherever the `/pty` WS is created), attach `onclose` and `onerror` handlers
-- [ ] 1.2 Flip a component-local `disconnected: boolean` state on close/error
-- [ ] 1.3 Distinguish "user unmounted the terminal" from "server closed the socket" — do not surface the overlay on the former (the cleanup effect fires close intentionally)
+- [x] 1.1 In `Terminal.tsx`, track reconnect attempts and persistent disconnect state separately from a healthy web socket.
+- [x] 1.2 Distinguish transient socket loss during automatic reattachment from a terminal session that is truly lost.
+- [x] 1.3 Do not surface the overlay when the terminal is intentionally unmounted or the component is cleaning up.
 
 ## 2. Client: overlay markup + CSS
 
-- [ ] 2.1 Absolutely-positioned overlay covering the xterm container when `disconnected === true`
-- [ ] 2.2 Dimmed backdrop (`rgba(0,0,0,0.6)`) + centered card with message and Reload button
-- [ ] 2.3 Message text: "Terminal session ended — reload to reconnect."; button label: "Reload terminal"
+- [x] 2.1 Render an absolutely-positioned overlay covering the xterm container only when the session is lost.
+- [x] 2.2 Use a dimmed backdrop and centered card with the message "Terminal session ended — reload to reconnect." and a "Reload terminal" button.
+- [x] 2.3 Preserve the existing xterm beneath the overlay and keep the reconnect warning visible during the retry window.
 
 ## 3. Client: reload gesture
 
-- [ ] 3.1 `Reload terminal` handler: dispose current xterm instance + close current WS ref, then re-run the mount effect (dispose the effect's cleanup, re-init from scratch)
-- [ ] 3.2 New xterm instance mounts, new WS opens, fresh shell — do not attempt to restore scrollback
+- [x] 3.1 `Reload terminal` fires the existing terminal restart flow so the current socket closes and a fresh PTY is spawned with a new session identity.
+- [x] 3.2 The reload path intentionally drops stale state and creates a new xterm instance rather than trying to resume the dead session.
 
 ## 4. Spec delta
 
-- [ ] 4.1 `openspec/changes/add-pty-session-lost-overlay/specs/dashboard/spec.md`: MODIFIED requirement covering the embedded-terminal's disconnect handling
+- [x] 4.1 `openspec/changes/add-pty-session-lost-overlay/specs/dashboard/spec.md`: MODIFIED requirement covering the terminal's reconnect versus session-lost semantics.
 
 ## 5. Verification
 
-- [ ] 5.1 Open the embedded terminal, run `sleep 30`, restart the server (`kill <pid>` or edit `server/*.ts` under `dev`); within seconds the overlay appears
-- [ ] 5.2 Click Reload terminal → overlay disappears → fresh prompt appears → typing works
-- [ ] 5.3 Deliberately unmounting the terminal pane (via the toggle) does NOT surface the overlay (regression: cleanup-close is not a disconnect)
-- [ ] 5.4 Multiple back-to-back reloads work (no leaked xterm instances, no ghost WS)
+- [x] 5.1 A transient socket gap while automatic reattachment is in progress does not render the lost-session overlay.
+- [x] 5.2 When the reattach window expires, the overlay appears and the Reload terminal action creates a fresh PTY.
+- [x] 5.3 Deliberate unmounts remain silent and do not leak stale session-lost state.
+- [x] 5.4 Repeated reloads succeed without leaving duplicate xterm or websocket instances alive.

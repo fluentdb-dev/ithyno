@@ -8,6 +8,24 @@ import { useAppliedTheme, type AppliedTheme } from "../hooks/useAppliedTheme";
 import { useStore } from "../store";
 import { writeClipboardText } from "../clipboardBridge";
 
+export type TerminalSessionState = "connected" | "reconnecting" | "lost";
+export const TERMINAL_SESSION_LOST_TIMEOUT_MS = 15_000;
+
+export function resolveTerminalSessionState(
+  currentState: TerminalSessionState,
+  disconnectStartedAtMs: number | null,
+  nowMs: number,
+  maxReattachWaitMs = TERMINAL_SESSION_LOST_TIMEOUT_MS,
+): TerminalSessionState {
+  if (disconnectStartedAtMs === null) {
+    return currentState === "lost" ? "lost" : "connected";
+  }
+  if (nowMs - disconnectStartedAtMs >= maxReattachWaitMs) {
+    return "lost";
+  }
+  return currentState === "lost" ? "lost" : "reconnecting";
+}
+
 /**
  * Browser terminal pane. Streams bytes over a dedicated /pty WebSocket to a
  * real PTY on the local server (xterm.js renders, the server spawns the shell).
@@ -25,6 +43,7 @@ export function Terminal() {
   const projectRoot = useStore((s) => s.state?.root ?? "");
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const [connected, setConnected] = useState(true);
+  const [sessionState, setSessionState] = useState<TerminalSessionState>("connected");
 
   useEffect(() => {
     const host = hostRef.current;
@@ -46,6 +65,7 @@ export function Terminal() {
 
     let ws: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let disconnectedAtMs: number | null = null;
     let closedByRestart = false;
 
     const fitNow = () => {
@@ -116,7 +136,13 @@ export function Terminal() {
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
+        disconnectedAtMs = null;
+        if (reconnectTimer !== null) {
+          window.clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
         setConnected(true);
+        setSessionState("connected");
         fitNow();
         term.focus();
       };
@@ -126,17 +152,34 @@ export function Terminal() {
       };
       ws.onclose = () => {
         if (closedByRestart) return;
+        if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
+        const nextState = resolveTerminalSessionState(
+          "connected",
+          disconnectedAtMs,
+          Date.now(),
+        );
         setConnected(false);
+        setSessionState((currentState) =>
+          resolveTerminalSessionState(currentState, disconnectedAtMs, Date.now()),
+        );
+        if (nextState === "lost") {
+          term.writeln("\r\n[session lost — reload terminal]");
+          return;
+        }
         term.writeln("\r\n[reconnecting…]");
         if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
         reconnectTimer = window.setTimeout(() => {
+          if (closedByRestart) return;
           connect();
         }, 1000);
       };
       ws.onerror = () => {
         if (closedByRestart) return;
+        if (disconnectedAtMs === null) disconnectedAtMs = Date.now();
         setConnected(false);
-        term.writeln("\r\n[connection error]");
+        setSessionState((currentState) =>
+          resolveTerminalSessionState(currentState, disconnectedAtMs, Date.now()),
+        );
       };
     };
 
@@ -174,9 +217,25 @@ export function Terminal() {
   // never touching xterm's key handling), so the Ctrl+Shift+C/V hint
   // below is only useful — and only shown — on Windows/Linux.
   const isMac = /Mac/i.test(navigator.platform);
+  const hasLostSession = sessionState === "lost";
 
   return (
     <div ref={hostRef} className="terminal-host">
+      {hasLostSession && (
+        <div className="terminal-session-lost-overlay" role="alert">
+          <div className="terminal-session-lost-card">
+            <div className="terminal-session-lost-title">Terminal session ended</div>
+            <div className="terminal-session-lost-message">Terminal session ended — reload to reconnect.</div>
+            <button
+              type="button"
+              className="terminal-session-lost-button"
+              onClick={() => useStore.getState().restartTerminal()}
+            >
+              Reload terminal
+            </button>
+          </div>
+        </div>
+      )}
       <button
         className={`terminal-reconnect${connected ? "" : " terminal-reconnect-warn"}`}
         title={isMac ? "Restart terminal (⇧⌘K)" : "Restart terminal (Ctrl+Shift+K)"}

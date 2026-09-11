@@ -2193,6 +2193,59 @@ a.modal-btn:hover {
   position: relative;
 }
 
+.terminal-session-lost-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 10, 15, 0.66);
+  backdrop-filter: blur(1px);
+}
+
+.terminal-session-lost-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 360px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--panel) 92%, transparent);
+  box-shadow: var(--shadow-modal, 0 18px 32px rgba(0, 0, 0, 0.35));
+  text-align: center;
+}
+
+.terminal-session-lost-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.terminal-session-lost-message {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.terminal-session-lost-button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg-on-solid, #0d1117);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.terminal-session-lost-button:hover {
+  filter: brightness(1.05);
+}
+
 /* Reconnect button — top-right of the terminal pane, always visible */
 .terminal-reconnect {
   position: absolute;

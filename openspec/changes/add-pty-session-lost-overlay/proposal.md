@@ -2,58 +2,30 @@
 tags: [feature/terminal, screen/change-detail, area/web]
 ---
 
-## Why
+  ## Why
 
-The embedded terminal's WebSocket to `/pty` silently drops when the
-server restarts (every `server/*.ts` edit under `dev`, every reload,
-every `add-agent-runner` iteration). Xterm.js keeps rendering the last
-frame it saw, users type into what looks like a live prompt, and no
-keystroke ever reaches a shell. The confusion is immediate — several
-sessions of dogfooding hit this. Silent failure is the worst mode.
+  The embedded terminal now keeps the PTY alive across transient socket drops and reattaches automatically, but a true session-loss state still needs a clear intervention. A silent hang is especially confusing when the browser tab stayed open and the shell never reappears. The UI should distinguish recoverable reconnects from a dead PTY / dead server session without regressing the persistent reattach flow.
 
-The dashboard already has an `AuthExpiredError` banner for stale
-tokens; the PTY WS just needs an analogous "connection lost" surface.
+  ## What Changes
 
-## What Changes
+  - **Recoverable disconnects stay quiet.** A transient `/pty` close while a reconnect is already in flight does not render the lost-session overlay. The terminal keeps showing the reconnect status in-place and proceeds with automatic reattachment.
+  - **Session-lost overlay only after failure.** When a reconnect does not succeed within a bounded timeout, the PTY has exited, or the server-side session is no longer recoverable, the terminal renders a clear overlay with the message "Terminal session ended — reload to reconnect." and a "Reload terminal" button.
+  - **Explicit reload creates a fresh PTY.** The reload gesture bumps the terminal restart counter so the underlying `/pty` connection reopens with a new session identity and a fresh shell.
+  - **No overlay on normal cleanup.** Component unmounts and deliberate shutdowns remain silent and do not surface the lost-session surface.
 
-- **Terminal WS close detection.** The client already opens `/pty` via
-  a dedicated WebSocket. Add an `onclose` / `onerror` handler that
-  flips a per-terminal `disconnected` state.
-- **Overlay in the xterm container.** When `disconnected` is true,
-  render an absolutely-positioned overlay on top of the xterm view:
-  a dimmed backdrop, "Terminal session ended — reload to reconnect."
-  message, and a `Reload terminal` button. The button re-fires the
-  original WS connect logic (same URL, same token).
-- **Reload behavior.** Clicking `Reload terminal` disposes the current
-  xterm instance, opens a new PTY WS, and mounts a fresh xterm. This
-  is deliberately more aggressive than trying to reconnect the same
-  xterm — a fresh shell is the honest state after the server restart.
-- **No auto-reconnect.** Rejected as noisier than the disconnect
-  itself — a background reconnect that races the user's next
-  keystroke can produce phantom input. The one-click reload is the
-  explicit gesture.
+  ## Capabilities
 
-## Capabilities
+  ### Modified Capabilities
 
-### Modified Capabilities
+  - `dashboard`: the embedded terminal distinguishes transient reconnection from an irrecoverable PTY/server session and offers an explicit manual reload as the fail-safe path.
 
-- `dashboard`: the embedded terminal surfaces WS closure explicitly
-  and offers a manual reconnect gesture, matching the
-  auth-expired-banner pattern already used for HTTP requests.
+  ## Impact
 
-## Impact
+  - `web/src/components/Terminal.tsx`: track reconnect state separately from a definitive session-lost condition
+  - `web/src/styles.css`: overlay + failure states for the terminal container
+  - `openspec/changes/add-pty-session-lost-overlay/specs/dashboard/spec.md`: align the requirement with automatic reattachment semantics
 
-- `web/src/components/Terminal.tsx` (or wherever the PTY WS is
-  opened): capture close/error, flip local state
-- New overlay markup + CSS on the terminal container
-- Small handler to dispose + re-init on reload click
+  ## Out of scope
 
-## Out of scope
-
-- **Server-side PTY reattach** to preserve scrollback across
-  restart. The current `/pty` endpoint spawns a fresh shell on each
-  connect; buffering + resume is a much larger design.
-- **Auto-reconnect polling.** Would race user input; skipped.
-- **Distinguishing "server restart" from "PTY child exited"**. Both
-  end at the same overlay because the user's next action is the
-  same either way.
+  - **Persisting PTY state across a full server process restart.** This remains a separate design problem from session-lost UX.
+  - **Silent auto-reconnect on a fully dead PTY.** The dashboard explicitly escalates to the overlay only after the reconnect window expires.
