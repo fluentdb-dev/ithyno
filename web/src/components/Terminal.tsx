@@ -45,6 +45,30 @@ export function parseTerminalSessionStatusMessage(
   return null;
 }
 
+function terminalSessionStorageKey(projectRoot: string): string {
+  return `ithyno-terminal-session-key:${projectRoot || "workspace"}`;
+}
+
+function readStableTerminalSession(projectRoot: string): { key: string; intent: "create" | "reattach" } {
+  const storageKey = terminalSessionStorageKey(projectRoot);
+  if (typeof window === "undefined") return { key: `${projectRoot || "workspace"}:default`, intent: "create" };
+  const existing = window.sessionStorage.getItem(storageKey);
+  if (existing) {
+    return { key: existing, intent: "reattach" };
+  }
+  const fresh = `${projectRoot || "workspace"}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  window.sessionStorage.setItem(storageKey, fresh);
+  return { key: fresh, intent: "create" };
+}
+
+function rotateStableTerminalSession(projectRoot: string): string {
+  const storageKey = terminalSessionStorageKey(projectRoot);
+  if (typeof window === "undefined") return `${projectRoot || "workspace"}:reload:${Date.now()}`;
+  const fresh = `${projectRoot || "workspace"}:reload:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  window.sessionStorage.setItem(storageKey, fresh);
+  return fresh;
+}
+
 /**
  * Browser terminal pane. Streams bytes over a dedicated /pty WebSocket to a
  * real PTY on the local server (xterm.js renders, the server spawns the shell).
@@ -61,8 +85,27 @@ export function Terminal() {
   const appliedTheme = useAppliedTheme();
   const projectRoot = useStore((s) => s.state?.root ?? "");
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
+  const restartTerminal = useStore((s) => s.restartTerminal);
   const [connected, setConnected] = useState(true);
   const [sessionState, setSessionState] = useState<TerminalSessionState>("connected");
+  const wsRef = useRef<WebSocket | null>(null);
+  const pendingReloadRef = useRef<{ currentKey: string; nextKey: string } | null>(null);
+
+  const handleReload = () => {
+    const session = readStableTerminalSession(projectRoot);
+    const nextKey = rotateStableTerminalSession(projectRoot);
+    const currentKey = session.key;
+    const ws = wsRef.current;
+    pendingReloadRef.current = { currentKey, nextKey };
+
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: "restart", reason: "reload", sessionKey: currentKey, intent: "create" }));
+      setConnected(false);
+      setSessionState("reconnecting");
+      return;
+    }
+    restartTerminal();
+  };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -88,7 +131,9 @@ export function Terminal() {
     let closedByRestart = false;
     let currentSessionState: TerminalSessionState = "connected";
     let shouldAutoReconnect = true;
-    const sessionKey = `${projectRoot || "workspace"}:${terminalRestartCounter}`;
+    const sessionStateInfo = readStableTerminalSession(projectRoot);
+    const sessionKey = sessionStateInfo.key;
+    wsRef.current = null;
 
     const fitNow = () => {
       try {
@@ -112,6 +157,7 @@ export function Terminal() {
       const params = new URLSearchParams();
       if (token) params.set("token", token);
       if (projectRoot) params.set("project", projectRoot);
+      params.set("intent", sessionStateInfo.intent);
       params.set("session", sessionKey);
       params.set("sessionId", sessionKey);
       params.set("sessionKey", sessionKey);
@@ -160,6 +206,7 @@ export function Terminal() {
     const connect = () => {
       if (closedByRestart) return;
       ws = new WebSocket(buildUrl());
+      wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
@@ -181,6 +228,11 @@ export function Terminal() {
             if (status.status === "missing") {
               shouldAutoReconnect = false;
               disconnectedAtMs = Date.now();
+              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
+                pendingReloadRef.current = null;
+                restartTerminal();
+                return;
+              }
               setConnected(false);
               setTerminalSession("lost");
               term.writeln("\r\n[session lost — reload terminal]");
@@ -193,6 +245,14 @@ export function Terminal() {
                 reconnectTimer = null;
               }
               shouldAutoReconnect = true;
+              if (pendingReloadRef.current) {
+                const pending = pendingReloadRef.current;
+                if (pending.currentKey === status.sessionKey) {
+                  pendingReloadRef.current = null;
+                  restartTerminal();
+                  return;
+                }
+              }
               setConnected(true);
               setTerminalSession("connected");
               return;
@@ -200,6 +260,11 @@ export function Terminal() {
             if (status.status === "terminated") {
               disconnectedAtMs = Date.now();
               shouldAutoReconnect = false;
+              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
+                pendingReloadRef.current = null;
+                restartTerminal();
+                return;
+              }
               setConnected(false);
               setTerminalSession("lost");
               return;
@@ -245,16 +310,10 @@ export function Terminal() {
       closedByRestart = true;
       shouldAutoReconnect = false;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      if (ws && ws.readyState === ws.OPEN) {
-        try {
-          ws.send(JSON.stringify({ type: "terminate", reason: "reload", sessionKey }));
-        } catch {
-          /* ignore */
-        }
-      }
       if (ws) {
         try { ws.close(); } catch { /* ignore */ }
       }
+      wsRef.current = null;
       window.removeEventListener("resize", fitNow);
       ro.disconnect();
       inputDisposable.dispose();
@@ -293,7 +352,7 @@ export function Terminal() {
             <button
               type="button"
               className="terminal-session-lost-button"
-              onClick={() => useStore.getState().restartTerminal()}
+              onClick={handleReload}
             >
               Reload terminal
             </button>
@@ -304,7 +363,7 @@ export function Terminal() {
         className={`terminal-reconnect${connected ? "" : " terminal-reconnect-warn"}`}
         title={isMac ? "Restart terminal (⇧⌘K)" : "Restart terminal (Ctrl+Shift+K)"}
         aria-label="Restart terminal"
-        onClick={() => useStore.getState().restartTerminal()}
+        onClick={handleReload}
       >
         &#x21BB;
       </button>

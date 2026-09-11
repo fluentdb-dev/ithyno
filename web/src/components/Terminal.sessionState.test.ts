@@ -27,6 +27,13 @@ describe("resolveTerminalSessionState", () => {
     ).toBe("lost");
   });
 
+  it("stays lost once the session has already timed out", () => {
+    const now = 10_000;
+    expect(
+      resolveTerminalSessionState("lost", now - 5_000, now, TERMINAL_SESSION_LOST_TIMEOUT_MS),
+    ).toBe("lost");
+  });
+
   it("recognizes the server handshake when the PTY is missing or reattached", () => {
     expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "attached" }))).toEqual({
       status: "attached",
@@ -36,5 +43,14 @@ describe("resolveTerminalSessionState", () => {
       status: "missing",
       sessionKey: "abc",
     });
+    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "terminated", sessionKey: "def" }))).toEqual({
+      status: "terminated",
+      sessionKey: "def",
+    });
+  });
+
+  it("ignores unrelated websocket payloads", () => {
+    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "data", payload: "x" }))).toBeNull();
+    expect(parseTerminalSessionStatusMessage("not-json")).toBeNull();
   });
 });

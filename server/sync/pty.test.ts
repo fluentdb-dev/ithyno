@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import Fastify from "fastify";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import * as ptyModule from "./pty.js";
 import {
   _setTmuxCacheForTest,
   attachPtyToSocket,
@@ -31,6 +34,7 @@ let savedEnv: string | undefined;
 let savedSession: string | undefined;
 
 beforeEach(() => {
+  ptyModule._resetPtyRuntimeForTest();
   dir = mkdtempSync(join(tmpdir(), "ithyno-pty-test-"));
   savedEnv = process.env.ITHYNO_TERMINAL_STARTUP;
   savedSession = process.env.ITHYNO_TMUX_SESSION;
@@ -40,6 +44,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  ptyModule._resetPtyRuntimeForTest();
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
   if (savedEnv !== undefined) process.env.ITHYNO_TERMINAL_STARTUP = savedEnv;
   else delete process.env.ITHYNO_TERMINAL_STARTUP;
@@ -53,6 +59,65 @@ async function loadWith(yaml: string): Promise<AgentRegistry> {
   const reg = new AgentRegistry(dir);
   await reg.load();
   return reg;
+}
+
+function makeFakeWs() {
+  const handlers = new Map<string, Array<(...args: any[]) => void>>();
+  const ws: any = {
+    OPEN: 1,
+    readyState: 1,
+    sent: [] as any[],
+    close: vi.fn((code?: number, reason?: string) => {
+      ws.readyState = 3;
+      for (const handler of handlers.get("close") ?? []) handler(code, reason);
+    }),
+    send: vi.fn((payload: any) => {
+      ws.sent.push(payload);
+    }),
+    on: (event: string, handler: (...args: any[]) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return ws;
+    },
+    emitMessage: (payload: any) => {
+      for (const handler of handlers.get("message") ?? []) handler(payload);
+    },
+    emitClose: () => {
+      for (const handler of handlers.get("close") ?? []) handler(1000, "close");
+    },
+  };
+  return ws;
+}
+
+function makeFakePty() {
+  const rx = new EventEmitter();
+  const term: any = {
+    kill: vi.fn(() => {
+      term.killed = true;
+      rx.emit("exit");
+    }),
+    write: vi.fn((data: string) => {
+      term.writes.push(data);
+      return true;
+    }),
+    resize: vi.fn((cols: number, rows: number) => {
+      term.resizeCalls.push({ cols, rows });
+    }),
+    writes: [] as string[],
+    resizeCalls: [] as Array<{ cols: number; rows: number }>,
+    killed: false,
+    onData: (fn: (data: string) => void) => {
+      term.dataHandler = fn;
+    },
+    emitData: (data: string) => {
+      if (term.dataHandler) term.dataHandler(data);
+    },
+    onExit: (fn: () => void) => {
+      rx.on("exit", fn);
+    },
+  };
+  return term;
 }
 
 describe("ptyStartup — priority chain", () => {
@@ -643,6 +708,130 @@ describe("terminateAllLivePtys", () => {
     // the test env). This documents the empty-array contract.
     expect(() => terminateAllLivePtys()).not.toThrow();
     expect(activeTerminalCount()).toBe(0);
+  });
+});
+
+describe("attachPtyToSocket lifecycle", () => {
+  it("detaches without killing the PTY on normal socket close", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const result = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "detached-shell" });
+    expect(result.ok).toBe(true);
+
+    ws.emitClose();
+    expect(term.kill).not.toHaveBeenCalled();
+    expect(activeTerminalCount()).toBe(1);
+  });
+
+  it("rejects reattach without a live PTY after restart and only creates fresh when intent=create", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const spawn = vi.fn(() => makeFakePty());
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const reattach = makeFakeWs();
+    const reattachResult = await attachPtyToSocket(reattach, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "persisted-shell",
+      intent: "reattach",
+    });
+    expect(reattachResult.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+
+    const create = makeFakeWs();
+    const createResult = await attachPtyToSocket(create, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "persisted-shell",
+      intent: "create",
+    });
+    expect(createResult.ok).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("reattaches to the same PTY and forwards output to the replacement socket", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+
+    const firstResult = await attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "shell-1" });
+    expect(firstResult.ok).toBe(true);
+
+    const secondResult = await attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "shell-1" });
+    expect(secondResult.ok).toBe(true);
+
+    term.emitData("hello again");
+    expect(second.send).toHaveBeenCalled();
+    expect(first.send).not.toHaveBeenCalledWith("hello again");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles explicit reload as a terminate-and-restart action and clears the tombstone", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const attachResult = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "reload-shell" });
+    expect(attachResult.ok).toBe(true);
+
+    const key = `${resolve(dir)}::reload-shell`;
+    ws.emitMessage(JSON.stringify({ type: "restart", reason: "reload", sessionKey: key }));
+    expect(term.kill).toHaveBeenCalledTimes(1);
+    expect(ws.close).toHaveBeenCalledWith(1000, "reload");
+  });
+});
+
+describe("server shutdown cleanup", () => {
+  it("calls terminateAllLivePtys when the Fastify server closes", async () => {
+    const app = Fastify({ logger: false });
+    const spy = vi.spyOn(ptyModule, "terminateAllLivePtys");
+    app.addHook("onClose", async () => {
+      ptyModule.terminateAllLivePtys();
+    });
+
+    await app.ready();
+    await app.close();
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 

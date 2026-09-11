@@ -1,8 +1,12 @@
 ---
-verdict: pass
-summary: "The lost-session overlay now appears only for a truly missing PTY, while automatic reconnect preserves live sessions and explicit reload immediately terminates the stale PTY before creating a fresh one."
+verdict: needs-rework
+summary: "Session-lost overlay and PTY reconnect semantics are in place; final Manager review is still pending."
 findings: []
+---
 
 ## Notes
 
-The client now waits for an explicit session-status handshake from the server, halts auto-reconnect on a missing PTY, and shows the overlay only after the reattach window expires or the server reports a dead session. Reload keeps the stale PTY from lingering by sending an explicit terminate request before the new session key is opened.
+- The overlay only appears once the reconnect window expires.
+- A clean unmount detaches without terminating the server PTY.
+- Explicit Reload is the only path that terminates and recreates a PTY.
+- Reconnect remains gated on an existing PTY, and lifecycle tests cover the expected behavior.

@@ -24,8 +24,15 @@ export type PtyAvailability =
   | { available: false; reason: string };
 
 let cached: PtyAvailability | null = null;
+let injectedPty: PtyAvailability | null = null;
+
+export function _setPtyForTest(next: PtyAvailability | null): void {
+  injectedPty = next;
+  cached = next;
+}
 
 export async function loadPty(): Promise<PtyAvailability> {
+  if (injectedPty) return injectedPty;
   if (cached) return cached;
   try {
     const mod = await import("@homebridge/node-pty-prebuilt-multiarch");
@@ -378,8 +385,18 @@ function withEnter(s: string): string {
 type ClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
-  | { type: "terminate"; reason?: string; sessionKey?: string }
-  | { type: "restart"; reason?: string; sessionKey?: string };
+  | { type: "terminate"; reason?: string; sessionKey?: string; intent?: "create" | "reattach" }
+  | { type: "restart"; reason?: string; sessionKey?: string; intent?: "create" | "reattach" };
+
+export function parsePtyConnectionIntent(
+  url: string | undefined,
+): "create" | "reattach" {
+  const search = url?.split("?")[1] ?? "";
+  const params = new URLSearchParams(search);
+  const value = params.get("intent");
+  if (value === "reattach") return "reattach";
+  return "create";
+}
 
 export function resolvePtySessionKey(
   cwd: string,
@@ -422,6 +439,14 @@ export function setPtyIdleTtlForTest(ms: number | null): void {
   _setPtyIdleTtlForTest(ms);
 }
 
+export function _resetPtyRuntimeForTest(): void {
+  injectedPty = null;
+  cached = null;
+  live.length = 0;
+  liveBySession.clear();
+  lostSessionKeys.clear();
+}
+
 // Registry of live PTY sessions. The last entry is the most recently active
 // terminal — that's what /api/pty/inject writes to.
 type LiveTerminal = {
@@ -433,7 +458,32 @@ type LiveTerminal = {
 };
 const live: LiveTerminal[] = [];
 const liveBySession = new Map<string, LiveTerminal>();
-const lostSessionKeys = new Set<string>();
+const lostSessionKeys = new Map<string, number>();
+const MAX_LOST_SESSION_KEYS = 128;
+const LOST_SESSION_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+
+function pruneLostSessionKeys(now = Date.now()): void {
+  for (const [sessionKey, stampedAt] of [...lostSessionKeys.entries()]) {
+    if (now - stampedAt > LOST_SESSION_TOMBSTONE_TTL_MS) {
+      lostSessionKeys.delete(sessionKey);
+    }
+  }
+  while (lostSessionKeys.size > MAX_LOST_SESSION_KEYS) {
+    const oldestKey = lostSessionKeys.keys().next().value;
+    if (oldestKey === undefined) break;
+    lostSessionKeys.delete(oldestKey);
+  }
+}
+
+function markLostSessionKey(sessionKey: string): void {
+  pruneLostSessionKeys();
+  lostSessionKeys.set(sessionKey, Date.now());
+  pruneLostSessionKeys();
+}
+
+function clearLostSessionKey(sessionKey: string): void {
+  lostSessionKeys.delete(sessionKey);
+}
 
 function sendSessionStatus(
   ws: WebSocket | null,
@@ -564,7 +614,7 @@ export function activeTerminalCount(): number {
 export function terminateAllLivePtys(oldProjectRoot?: string): void {
   const snapshot = live.slice();
   for (const entry of snapshot) {
-    lostSessionKeys.add(entry.sessionKey);
+    markLostSessionKey(entry.sessionKey);
     clearIdleTimer(entry);
     try { entry.term.kill(); } catch { /* already dead */ }
     if (entry.ws) {
@@ -598,6 +648,7 @@ export async function attachPtyToSocket(
     projectRoot?: string;
     sessionId?: string;
     sessionKey?: string;
+    intent?: "create" | "reattach";
     /** When present, ptyStartup() derives the startup command + auto-inject
      *  line from `registry.managerAgent()`. Pass null to use the env-var /
      *  hardcoded fallback chain. See add-manager-agent-config. */
@@ -613,11 +664,16 @@ export async function attachPtyToSocket(
     projectId: opts.projectId ?? opts.projectRoot ?? opts.cwd,
     sessionId: opts.sessionId ?? opts.sessionKey ?? "default",
   });
+  const intent = opts.intent ?? parsePtyConnectionIntent(ws.url);
 
-  if (lostSessionKeys.has(identity.sessionKey)) {
-    sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
-    try { ws.close(1000, "session lost"); } catch { /* ignore */ }
-    return { ok: false, reason: "session-missing" };
+  pruneLostSessionKeys();
+  if (intent === "reattach" && !liveBySession.has(identity.sessionKey)) {
+    const tombstoned = lostSessionKeys.has(identity.sessionKey);
+    if (tombstoned || liveBySession.size === 0) {
+      sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
+      try { ws.close(1000, "session lost"); } catch { /* ignore */ }
+      return { ok: false, reason: "session-missing" };
+    }
   }
 
   const existing = liveBySession.get(identity.sessionKey);
@@ -625,6 +681,7 @@ export async function attachPtyToSocket(
     if (existing.cwd !== opts.cwd && existing.cwd !== identity.projectRoot) {
       return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
     }
+    clearLostSessionKey(identity.sessionKey);
     const previous = existing.ws;
     if (previous && previous !== ws) {
       try { previous.close(1000, "reattach"); } catch { /* ignore */ }
@@ -646,7 +703,7 @@ export async function attachPtyToSocket(
       if (msg.type === "terminate" || msg.type === "restart") {
         const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
         try { existing.term.kill(); } catch { /* ignore */ }
-        lostSessionKeys.add(existing.sessionKey);
+        markLostSessionKey(existing.sessionKey);
         removeLiveEntry(existing);
         sendSessionStatus(ws, "terminated", existing.sessionKey, reason);
         try { ws.close(1000, reason); } catch { /* ignore */ }
@@ -675,6 +732,12 @@ export async function attachPtyToSocket(
     return { ok: true };
   }
 
+  if (intent === "reattach") {
+    sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
+    try { ws.close(1000, "session lost"); } catch { /* ignore */ }
+    return { ok: false, reason: "session-missing" };
+  }
+
   const pty = await loadPty();
   if (!pty.available) return { ok: false, reason: pty.reason };
 
@@ -688,7 +751,7 @@ export async function attachPtyToSocket(
   });
 
   const entry: LiveTerminal = { term, ws, cwd: opts.cwd, sessionKey: identity.sessionKey, idleTimer: null };
-  lostSessionKeys.delete(identity.sessionKey);
+  clearLostSessionKey(identity.sessionKey);
   live.push(entry);
   liveBySession.set(identity.sessionKey, entry);
 
@@ -724,7 +787,7 @@ export async function attachPtyToSocket(
   });
   term.onExit(() => {
     const exitSocket = entry.ws;
-    lostSessionKeys.add(entry.sessionKey);
+    markLostSessionKey(entry.sessionKey);
     if (exitSocket) {
       sendSessionStatus(exitSocket, "missing", entry.sessionKey, "pty-exit");
     }
@@ -743,7 +806,7 @@ export async function attachPtyToSocket(
     }
     if (msg.type === "terminate" || msg.type === "restart") {
       const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
-      lostSessionKeys.add(entry.sessionKey);
+      markLostSessionKey(entry.sessionKey);
       try { term.kill(); } catch { /* ignore */ }
       removeLiveEntry(entry);
       sendSessionStatus(ws, "terminated", entry.sessionKey, reason);

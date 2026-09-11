@@ -123,6 +123,9 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
+fastify.addHook("onClose", async () => {
+  terminateAllLivePtys();
+});
 await fastify.register(rateLimit, { global: false });
 
 // ---- CSRF protection -------------------------------------------------------
