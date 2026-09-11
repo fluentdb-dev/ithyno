@@ -444,6 +444,7 @@ export function _resetPtyRuntimeForTest(): void {
   cached = null;
   live.length = 0;
   liveBySession.clear();
+  creationLocks.clear();
   lostSessionKeys.clear();
 }
 
@@ -458,6 +459,7 @@ type LiveTerminal = {
 };
 const live: LiveTerminal[] = [];
 const liveBySession = new Map<string, LiveTerminal>();
+const creationLocks = new Map<string, Promise<void>>();
 const lostSessionKeys = new Map<string, number>();
 const MAX_LOST_SESSION_KEYS = 128;
 const LOST_SESSION_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
@@ -666,20 +668,9 @@ export async function attachPtyToSocket(
   });
   const intent = opts.intent ?? parsePtyConnectionIntent(ws.url);
 
-  pruneLostSessionKeys();
-  if (intent === "reattach" && !liveBySession.has(identity.sessionKey)) {
-    const tombstoned = lostSessionKeys.has(identity.sessionKey);
-    if (tombstoned || liveBySession.size === 0) {
-      sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
-      try { ws.close(1000, "session lost"); } catch { /* ignore */ }
-      return { ok: false, reason: "session-missing" };
-    }
-  }
-
-  const existing = liveBySession.get(identity.sessionKey);
-  if (existing) {
+  const attachToExisting = (existing: LiveTerminal): boolean => {
     if (existing.cwd !== opts.cwd && existing.cwd !== identity.projectRoot) {
-      return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+      return false;
     }
     clearLostSessionKey(identity.sessionKey);
     const previous = existing.ws;
@@ -729,110 +720,175 @@ export async function attachPtyToSocket(
       existing.ws = null;
       scheduleIdleCleanup(existing);
     });
+    return true;
+  };
+
+  pruneLostSessionKeys();
+  const sameSessionIdProjectConflict = live.some(
+    (entry) =>
+      entry.sessionKey.endsWith(`::${identity.sessionId}`) &&
+      entry.cwd !== opts.cwd &&
+      entry.cwd !== identity.projectRoot,
+  );
+  if (sameSessionIdProjectConflict) {
+    return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+  }
+
+  const current = liveBySession.get(identity.sessionKey);
+  if (current) {
+    const ok = attachToExisting(current);
+    if (!ok) {
+      return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+    }
     return { ok: true };
   }
 
   if (intent === "reattach") {
-    sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
-    try { ws.close(1000, "session lost"); } catch { /* ignore */ }
-    return { ok: false, reason: "session-missing" };
-  }
-
-  const pty = await loadPty();
-  if (!pty.available) return { ok: false, reason: pty.reason };
-
-  const { cmd, args } = defaultShell();
-  const term = pty.module.spawn(cmd, args, {
-    name: "xterm-256color",
-    cols: opts.cols ?? 80,
-    rows: opts.rows ?? 24,
-    cwd: opts.cwd,
-    env: buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN),
-  });
-
-  const entry: LiveTerminal = { term, ws, cwd: opts.cwd, sessionKey: identity.sessionKey, idleTimer: null };
-  clearLostSessionKey(identity.sessionKey);
-  live.push(entry);
-  liveBySession.set(identity.sessionKey, entry);
-
-  const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
-  if (startup) {
-    if (!hasAgentsYaml(opts.cwd)) {
-      console.log(`[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`);
-    } else {
-      setTimeout(() => {
-        try {
-          console.log(`[pty] auto-launching: ${startup}`);
-          term.write(withEnter(startup));
-        } catch {
-          /* term already dead */
-        }
-        if (initialInput) {
-          setTimeout(() => {
-            try {
-              console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
-              term.write(withEnter(initialInput));
-            } catch {
-              /* term already dead */
-            }
-          }, 300);
-        }
-      }, 300);
+    const tombstoned = lostSessionKeys.has(identity.sessionKey);
+    if (tombstoned || liveBySession.size === 0) {
+      sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
+      try { ws.close(1000, "session lost"); } catch { /* ignore */ }
+      return { ok: false, reason: "session-missing" };
     }
   }
 
-  term.onData((data: string) => {
-    const active = entry.ws;
-    if (active && active.readyState === active.OPEN) active.send(data);
-  });
-  term.onExit(() => {
-    const exitSocket = entry.ws;
-    markLostSessionKey(entry.sessionKey);
-    if (exitSocket) {
-      sendSessionStatus(exitSocket, "missing", entry.sessionKey, "pty-exit");
+  if (creationLocks.has(identity.sessionKey)) {
+    await creationLocks.get(identity.sessionKey)!;
+    const rechecked = liveBySession.get(identity.sessionKey);
+    if (rechecked) {
+      if (rechecked.ws !== ws) {
+        const ok = attachToExisting(rechecked);
+        if (!ok) {
+          return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+        }
+      }
+      return { ok: true };
     }
-    removeLiveEntry(entry);
-    if (exitSocket) {
-      try { exitSocket.close(); } catch { /* ignore */ }
-    }
-  });
+  }
 
-  ws.on("message", (raw: Buffer | string) => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
-    } catch {
-      return;
+  const createTask = (async () => {
+    if (liveBySession.has(identity.sessionKey)) return;
+    const pty = await loadPty();
+    if (!pty.available) {
+      throw new Error(pty.reason);
     }
-    if (msg.type === "terminate" || msg.type === "restart") {
-      const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
-      markLostSessionKey(entry.sessionKey);
-      try { term.kill(); } catch { /* ignore */ }
-      removeLiveEntry(entry);
-      sendSessionStatus(ws, "terminated", entry.sessionKey, reason);
-      try { ws.close(1000, reason); } catch { /* ignore */ }
-      return;
-    }
-    if (msg.type === "input") {
-      bump(entry);
-      term.write(msg.data);
-    } else if (msg.type === "resize") {
-      const cols = Math.max(1, Math.floor(msg.cols));
-      const rows = Math.max(1, Math.floor(msg.rows));
-      try {
-        term.resize(cols, rows);
-      } catch {
-        /* ignore transient resize errors */
+
+    const { cmd, args } = defaultShell();
+    const env = buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN);
+    const term = pty.module.spawn(cmd, args, {
+      name: "xterm-256color",
+      cols: opts.cols ?? 80,
+      rows: opts.rows ?? 24,
+      cwd: opts.cwd,
+      env,
+    });
+
+    const entry: LiveTerminal = { term, ws, cwd: opts.cwd, sessionKey: identity.sessionKey, idleTimer: null };
+    clearLostSessionKey(identity.sessionKey);
+    live.push(entry);
+    liveBySession.set(identity.sessionKey, entry);
+
+    const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
+    if (startup) {
+      if (!hasAgentsYaml(opts.cwd)) {
+        console.log(`[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`);
+      } else {
+        setTimeout(() => {
+          try {
+            console.log(`[pty] auto-launching: ${startup}`);
+            term.write(withEnter(startup));
+          } catch {
+            /* term already dead */
+          }
+          if (initialInput) {
+            setTimeout(() => {
+              try {
+                console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
+                term.write(withEnter(initialInput));
+              } catch {
+                /* term already dead */
+              }
+            }, 300);
+          }
+        }, 300);
       }
     }
-  });
 
-  ws.on("close", () => {
-    if (entry.ws !== ws) return;
-    entry.ws = null;
-    scheduleIdleCleanup(entry);
-  });
+    term.onData((data: string) => {
+      const active = entry.ws;
+      if (active && active.readyState === active.OPEN) active.send(data);
+    });
+    term.onExit(() => {
+      const exitSocket = entry.ws;
+      markLostSessionKey(entry.sessionKey);
+      if (exitSocket) {
+        sendSessionStatus(exitSocket, "missing", entry.sessionKey, "pty-exit");
+      }
+      removeLiveEntry(entry);
+      if (exitSocket) {
+        try { exitSocket.close(); } catch { /* ignore */ }
+      }
+    });
 
-  sendSessionStatus(ws, "attached", identity.sessionKey, "attached");
-  return { ok: true };
+    ws.on("message", (raw: Buffer | string) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
+      } catch {
+        return;
+      }
+      if (msg.type === "terminate" || msg.type === "restart") {
+        const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
+        markLostSessionKey(entry.sessionKey);
+        try { term.kill(); } catch { /* ignore */ }
+        removeLiveEntry(entry);
+        sendSessionStatus(ws, "terminated", entry.sessionKey, reason);
+        try { ws.close(1000, reason); } catch { /* ignore */ }
+        return;
+      }
+      if (msg.type === "input") {
+        bump(entry);
+        term.write(msg.data);
+      } else if (msg.type === "resize") {
+        const cols = Math.max(1, Math.floor(msg.cols));
+        const rows = Math.max(1, Math.floor(msg.rows));
+        try {
+          term.resize(cols, rows);
+        } catch {
+          /* ignore transient resize errors */
+        }
+      }
+    });
+
+    ws.on("close", () => {
+      if (entry.ws !== ws) return;
+      entry.ws = null;
+      scheduleIdleCleanup(entry);
+    });
+
+    sendSessionStatus(ws, "attached", identity.sessionKey, "attached");
+  })();
+
+  creationLocks.set(identity.sessionKey, createTask);
+  try {
+    await createTask;
+    const created = liveBySession.get(identity.sessionKey);
+    if (created) {
+      if (created.ws !== ws) {
+        const ok = attachToExisting(created);
+        if (!ok) {
+          return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+        }
+      }
+      return { ok: true };
+    }
+    return { ok: false, reason: "session creation failed" };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason };
+  } finally {
+    if (creationLocks.get(identity.sessionKey) === createTask) {
+      creationLocks.delete(identity.sessionKey);
+    }
+  }
 }

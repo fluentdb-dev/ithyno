@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import Fastify from "fastify";
 import { tmpdir } from "node:os";
@@ -19,7 +19,9 @@ import {
   activeTerminalCount,
   tmuxSessionName,
   buildManagerPtyEnv,
+  setPtyIdleTtlForTest,
 } from "./pty.js";
+import { registerProductionShutdown } from "../production-shutdown.js";
 
 /**
  * Priority chain for the Terminal panel's PTY startup command
@@ -45,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   ptyModule._resetPtyRuntimeForTest();
+  setPtyIdleTtlForTest(null);
   vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
   if (savedEnv !== undefined) process.env.ITHYNO_TERMINAL_STARTUP = savedEnv;
@@ -797,6 +800,124 @@ describe("attachPtyToSocket lifecycle", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards input and resize after reattach", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    const firstResult = await attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "input-shell" });
+    expect(firstResult.ok).toBe(true);
+
+    const secondResult = await attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "input-shell" });
+    expect(secondResult.ok).toBe(true);
+
+    second.emitMessage(JSON.stringify({ type: "input", data: "echo hi\n" }));
+    second.emitMessage(JSON.stringify({ type: "resize", cols: 120, rows: 40 }));
+
+    expect(term.write).toHaveBeenCalledWith("echo hi\n");
+    expect(term.resize).toHaveBeenCalledWith(120, 40);
+  });
+
+  it("rejects a same-session attach from another project root", async () => {
+    const otherRoot = join(tmpdir(), `ithyno-pty-other-${Date.now()}`);
+    mkdirSync(otherRoot, { recursive: true });
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    writeFileSync(
+      join(otherRoot, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const ok = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "project-shell" });
+    expect(ok.ok).toBe(true);
+
+    const mismatch = makeFakeWs();
+    const next = await attachPtyToSocket(mismatch, {
+      cwd: otherRoot,
+      projectRoot: otherRoot,
+      sessionId: "project-shell",
+    });
+    expect(next.ok).toBe(false);
+    if (!next.ok) expect(next.reason).toContain("project mismatch");
+    rmSync(otherRoot, { recursive: true, force: true });
+  });
+
+  it("kills and removes an idle PTY once the TTL expires", async () => {
+    setPtyIdleTtlForTest(5);
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const result = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "ttl-shell" });
+    expect(result.ok).toBe(true);
+
+    ws.emitClose();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(term.kill).toHaveBeenCalledTimes(1);
+    expect(activeTerminalCount()).toBe(0);
+  });
+
+  it("creates only one PTY for concurrent same-key attaches", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const a = makeFakeWs();
+    const b = makeFakeWs();
+    const [first, second] = await Promise.all([
+      attachPtyToSocket(a, { cwd: dir, projectRoot: dir, sessionId: "concurrent-shell" }),
+      attachPtyToSocket(b, { cwd: dir, projectRoot: dir, sessionId: "concurrent-shell" }),
+    ]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(activeTerminalCount()).toBe(1);
+  });
+
   it("handles explicit reload as a terminate-and-restart action and clears the tombstone", async () => {
     writeFileSync(
       join(dir, "agents.yaml"),
@@ -822,10 +943,21 @@ describe("attachPtyToSocket lifecycle", () => {
 });
 
 describe("server shutdown cleanup", () => {
+  it("registers the production close hook without importing the entrypoint", async () => {
+    const app = Fastify({ logger: false });
+    const spy = vi.fn();
+
+    registerProductionShutdown(app, spy);
+    await app.ready();
+    await app.close();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("calls terminateAllLivePtys when the Fastify server closes", async () => {
     const app = Fastify({ logger: false });
     const spy = vi.spyOn(ptyModule, "terminateAllLivePtys");
-    app.addHook("onClose", async () => {
+    registerProductionShutdown(app, () => {
       ptyModule.terminateAllLivePtys();
     });
 

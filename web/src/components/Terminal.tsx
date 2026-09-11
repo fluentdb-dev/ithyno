@@ -45,28 +45,69 @@ export function parseTerminalSessionStatusMessage(
   return null;
 }
 
+export type StableTerminalSession = {
+  key: string;
+  intent: "create" | "reattach";
+  established: boolean;
+};
+
 function terminalSessionStorageKey(projectRoot: string): string {
   return `ithyno-terminal-session-key:${projectRoot || "workspace"}`;
 }
 
-function readStableTerminalSession(projectRoot: string): { key: string; intent: "create" | "reattach" } {
+export function readStableTerminalSession(projectRoot: string): StableTerminalSession {
   const storageKey = terminalSessionStorageKey(projectRoot);
-  if (typeof window === "undefined") return { key: `${projectRoot || "workspace"}:default`, intent: "create" };
-  const existing = window.sessionStorage.getItem(storageKey);
-  if (existing) {
-    return { key: existing, intent: "reattach" };
+  const fallbackKey = `${projectRoot || "workspace"}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  if (typeof window === "undefined") {
+    return { key: fallbackKey, intent: "create", established: false };
   }
-  const fresh = `${projectRoot || "workspace"}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  window.sessionStorage.setItem(storageKey, fresh);
-  return { key: fresh, intent: "create" };
+  const raw = window.sessionStorage.getItem(storageKey);
+  if (!raw) {
+    const fresh = fallbackKey;
+    const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
+    window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+    return next;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.key === "string") {
+      const established = parsed.established === true;
+      const intent: StableTerminalSession["intent"] = parsed.intent === "create" && !established ? "create" : "reattach";
+      const session: StableTerminalSession = {
+        key: parsed.key,
+        intent,
+        established,
+      };
+      if (!parsed.established) {
+        window.sessionStorage.setItem(storageKey, JSON.stringify(session));
+      }
+      return session;
+    }
+  } catch {
+    /* ignore malformed storage and create a fresh session */
+  }
+  const fresh = fallbackKey;
+  const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
+  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
+  return next;
 }
 
-function rotateStableTerminalSession(projectRoot: string): string {
+export function rotateStableTerminalSession(projectRoot: string): string {
   const storageKey = terminalSessionStorageKey(projectRoot);
-  if (typeof window === "undefined") return `${projectRoot || "workspace"}:reload:${Date.now()}`;
   const fresh = `${projectRoot || "workspace"}:reload:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  window.sessionStorage.setItem(storageKey, fresh);
+  if (typeof window === "undefined") return fresh;
+  const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
+  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
   return fresh;
+}
+
+export function markStableTerminalSessionEstablished(projectRoot: string, sessionKey: string): void {
+  const storageKey = terminalSessionStorageKey(projectRoot);
+  if (typeof window === "undefined") return;
+  const cached = readStableTerminalSession(projectRoot);
+  if (cached.key !== sessionKey) return;
+  const next: StableTerminalSession = { key: sessionKey, intent: "reattach", established: true };
+  window.sessionStorage.setItem(storageKey, JSON.stringify(next));
 }
 
 /**
@@ -90,6 +131,14 @@ export function Terminal() {
   const [sessionState, setSessionState] = useState<TerminalSessionState>("connected");
   const wsRef = useRef<WebSocket | null>(null);
   const pendingReloadRef = useRef<{ currentKey: string; nextKey: string } | null>(null);
+  const pendingReloadTimerRef = useRef<number | null>(null);
+
+  const clearPendingReloadTimer = () => {
+    if (pendingReloadTimerRef.current !== null) {
+      window.clearTimeout(pendingReloadTimerRef.current);
+      pendingReloadTimerRef.current = null;
+    }
+  };
 
   const handleReload = () => {
     const session = readStableTerminalSession(projectRoot);
@@ -97,6 +146,13 @@ export function Terminal() {
     const currentKey = session.key;
     const ws = wsRef.current;
     pendingReloadRef.current = { currentKey, nextKey };
+    clearPendingReloadTimer();
+    pendingReloadTimerRef.current = window.setTimeout(() => {
+      if (!pendingReloadRef.current) return;
+      pendingReloadRef.current = null;
+      clearPendingReloadTimer();
+      restartTerminal();
+    }, 10_000);
 
     if (ws && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ type: "restart", reason: "reload", sessionKey: currentKey, intent: "create" }));
@@ -230,6 +286,7 @@ export function Terminal() {
               disconnectedAtMs = Date.now();
               if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
                 pendingReloadRef.current = null;
+                clearPendingReloadTimer();
                 restartTerminal();
                 return;
               }
@@ -245,6 +302,10 @@ export function Terminal() {
                 reconnectTimer = null;
               }
               shouldAutoReconnect = true;
+              if (status.sessionKey) {
+                markStableTerminalSessionEstablished(projectRoot, status.sessionKey);
+              }
+              clearPendingReloadTimer();
               if (pendingReloadRef.current) {
                 const pending = pendingReloadRef.current;
                 if (pending.currentKey === status.sessionKey) {
@@ -262,6 +323,7 @@ export function Terminal() {
               shouldAutoReconnect = false;
               if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
                 pendingReloadRef.current = null;
+                clearPendingReloadTimer();
                 restartTerminal();
                 return;
               }
@@ -309,6 +371,8 @@ export function Terminal() {
     return () => {
       closedByRestart = true;
       shouldAutoReconnect = false;
+      clearPendingReloadTimer();
+      pendingReloadRef.current = null;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (ws) {
         try { ws.close(); } catch { /* ignore */ }
