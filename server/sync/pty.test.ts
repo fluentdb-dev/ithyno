@@ -67,7 +67,6 @@ async function loadWith(yaml: string): Promise<AgentRegistry> {
 function makeFakeWs() {
   const handlers = new Map<string, Array<(...args: any[]) => void>>();
   const ws: any = {
-    OPEN: 1,
     readyState: 1,
     sent: [] as any[],
     close: vi.fn((code?: number, reason?: string) => {
@@ -395,6 +394,24 @@ describe("buildManagerPtyEnv", () => {
     expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });
+  it("does not inherit host harness color suppression into the embedded xterm", async () => {
+    const previousNoColor = process.env.NO_COLOR;
+    const previousColorTerm = process.env.COLORTERM;
+    try {
+      process.env.NO_COLOR = "1";
+      process.env.COLORTERM = "";
+      const env = buildManagerPtyEnv(57703, "abc123");
+      expect(env.NO_COLOR).toBeUndefined();
+      expect(env.TERM).toBe("xterm-256color");
+      expect(env.COLORTERM).toBe("truecolor");
+    } finally {
+      if (previousNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = previousNoColor;
+      if (previousColorTerm === undefined) delete process.env.COLORTERM;
+      else process.env.COLORTERM = previousColorTerm;
+    }
+  });
+
 });
 
 function expectedTmuxStartup(session: string, command: string): string {
@@ -869,6 +886,46 @@ describe("attachPtyToSocket lifecycle", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it("replays buffered ANSI output when a new xterm socket reattaches", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const firstResult = await attachPtyToSocket(first, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "ansi-replay-shell",
+      intent: "create",
+    });
+    expect(firstResult.ok).toBe(true);
+
+    const coloredFrame = "\u001b[2J\u001b[31mred status\u001b[0m";
+    term.emitData(coloredFrame);
+    first.emitClose();
+
+    const second = makeFakeWs();
+    const secondResult = await attachPtyToSocket(second, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "ansi-replay-shell",
+      intent: "reattach",
+    });
+
+    expect(secondResult.ok).toBe(true);
+    expect(second.sent).toContain(coloredFrame);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards input and resize after reattach", async () => {
     writeFileSync(
       join(dir, "agents.yaml"),
@@ -1037,6 +1094,14 @@ describe("server shutdown cleanup", () => {
 });
 
 describe("pty session identity and reconnect semantics", () => {
+  beforeEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  afterEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
   it("keeps project/session identity stable for reconnects", () => {
     const idA = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
     const idB = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
@@ -1052,6 +1117,51 @@ describe("pty session identity and reconnect semantics", () => {
     expect(parsed.projectRoot).toBe("/tmp/project-a");
     expect(parsed.sessionId).toBe("shell-2");
     expect(parsed.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-2`);
+  });
+
+  it("sends raw client sessionId in session-status messages, not the composite server key", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-session-id-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+      const ws = makeFakeWs();
+      const clientSessionId = "test-shell-123";
+      const attachResult = await attachPtyToSocket(ws, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId: clientSessionId,
+      });
+      expect(attachResult.ok).toBe(true);
+
+      // Verify that session-status message contains the raw client sessionId,
+      // not the composite server key (which includes the resolved project root)
+      expect(ws.sent.length).toBeGreaterThan(0);
+      const statusMessage = ws.sent.find((msg: string) => {
+        try {
+          const parsed = JSON.parse(msg);
+          return parsed.type === "session-status";
+        } catch {
+          return false;
+        }
+      });
+      expect(statusMessage).toBeDefined();
+      const parsed = JSON.parse(statusMessage);
+      expect(parsed.sessionId).toBe(clientSessionId);
+      expect(parsed.sessionId).not.toContain("::");
+      expect(parsed.sessionId).not.toContain(tempDir);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

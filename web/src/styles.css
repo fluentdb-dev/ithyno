@@ -2231,6 +2231,14 @@ a.modal-btn:hover {
   line-height: 1.5;
 }
 
+.terminal-session-lost-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  align-items: stretch;
+}
+
 .terminal-session-lost-button {
   border: 1px solid var(--accent);
   background: var(--accent);

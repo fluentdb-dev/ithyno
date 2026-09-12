@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { WebSocket } from "ws";
+import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
@@ -347,6 +347,11 @@ function tmuxMissingFallback(): string {
 export function buildManagerPtyEnv(port: string | number | undefined, token: string): NodeJS.ProcessEnv {
   const inherited = { ...process.env };
   delete inherited.ITHYNO_LAUNCHER_SESSION_TOKEN;
+  // Host agent terminals commonly set NO_COLOR=1 and TERM=dumb for their own
+  // captured output. Those values describe the parent harness, not the
+  // browser-backed xterm that receives this PTY, and would incorrectly force
+  // interactive CLIs into monochrome mode.
+  delete inherited.NO_COLOR;
 
   const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
   const base = `http://localhost:${resolvedPort}`;
@@ -354,6 +359,7 @@ export function buildManagerPtyEnv(port: string | number | undefined, token: str
     ...inherited,
     LANG: inherited.LANG || "en_US.UTF-8",
     TERM: "xterm-256color",
+    COLORTERM: inherited.COLORTERM || "truecolor",
     ITHYNO_SESSION_TOKEN: token,
     ITHYNO_PORT: resolvedPort,
     ITHYNO_BASE: base,
@@ -455,7 +461,10 @@ type LiveTerminal = {
   ws: WebSocket | null;
   cwd: string;
   sessionKey: string;
+  sessionId: string;
   idleTimer: NodeJS.Timeout | null;
+  replayChunks: string[];
+  replayChars: number;
 };
 const live: LiveTerminal[] = [];
 const liveBySession = new Map<string, LiveTerminal>();
@@ -463,6 +472,33 @@ const creationLocks = new Map<string, Promise<void>>();
 const lostSessionKeys = new Map<string, number>();
 const MAX_LOST_SESSION_KEYS = 128;
 const LOST_SESSION_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+const MAX_PTY_REPLAY_CHARS = 512 * 1024;
+
+function appendReplayOutput(entry: LiveTerminal, data: string): void {
+  if (!data) return;
+  entry.replayChunks.push(data);
+  entry.replayChars += data.length;
+  while (entry.replayChars > MAX_PTY_REPLAY_CHARS && entry.replayChunks.length > 1) {
+    const removed = entry.replayChunks.shift();
+    if (removed) entry.replayChars -= removed.length;
+  }
+  if (entry.replayChars > MAX_PTY_REPLAY_CHARS && entry.replayChunks.length === 1) {
+    const only = entry.replayChunks[0];
+    entry.replayChunks[0] = only.slice(-MAX_PTY_REPLAY_CHARS);
+    entry.replayChars = entry.replayChunks[0].length;
+  }
+}
+
+function replayTerminalOutput(entry: LiveTerminal, ws: WebSocket): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  for (const chunk of entry.replayChunks) {
+    try {
+      ws.send(chunk);
+    } catch {
+      return;
+    }
+  }
+}
 
 function pruneLostSessionKeys(now = Date.now()): void {
   for (const [sessionKey, stampedAt] of [...lostSessionKeys.entries()]) {
@@ -491,11 +527,12 @@ function sendSessionStatus(
   ws: WebSocket | null,
   status: "attached" | "reattached" | "missing" | "terminated",
   sessionKey: string,
+  sessionId: string,
   reason?: string,
 ): void {
-  if (!ws || ws.readyState !== ws.OPEN) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try {
-    ws.send(JSON.stringify({ type: "session-status", status, sessionKey, reason }));
+    ws.send(JSON.stringify({ type: "session-status", status, sessionKey, sessionId, reason }));
   } catch {
     /* ignore */
   }
@@ -681,7 +718,8 @@ export async function attachPtyToSocket(
     existing.cwd = opts.cwd;
     clearIdleTimer(existing);
     bump(existing);
-    sendSessionStatus(ws, "reattached", identity.sessionKey, "reattached");
+    replayTerminalOutput(existing, ws);
+    sendSessionStatus(ws, "reattached", identity.sessionKey, identity.sessionId, "reattached");
 
     const attach = (raw: Buffer | string) => {
       let msg: ClientMessage;
@@ -696,7 +734,7 @@ export async function attachPtyToSocket(
         try { existing.term.kill(); } catch { /* ignore */ }
         markLostSessionKey(existing.sessionKey);
         removeLiveEntry(existing);
-        sendSessionStatus(ws, "terminated", existing.sessionKey, reason);
+        sendSessionStatus(ws, "terminated", existing.sessionKey, existing.sessionId, reason);
         try { ws.close(1000, reason); } catch { /* ignore */ }
         return;
       }
@@ -747,7 +785,7 @@ export async function attachPtyToSocket(
     const exactLive = liveBySession.has(identity.sessionKey);
     const tombstoned = lostSessionKeys.has(identity.sessionKey);
     if (!exactLive || tombstoned) {
-      sendSessionStatus(ws, "missing", identity.sessionKey, "session-missing");
+      sendSessionStatus(ws, "missing", identity.sessionKey, identity.sessionId, "session-missing");
       try { ws.close(1000, "session lost"); } catch { /* ignore */ }
       return { ok: false, reason: "session-missing" };
     }
@@ -790,7 +828,16 @@ export async function attachPtyToSocket(
       env,
     });
 
-    const entry: LiveTerminal = { term, ws, cwd: opts.cwd, sessionKey: identity.sessionKey, idleTimer: null };
+    const entry: LiveTerminal = {
+      term,
+      ws,
+      cwd: opts.cwd,
+      sessionKey: identity.sessionKey,
+      sessionId: identity.sessionId,
+      idleTimer: null,
+      replayChunks: [],
+      replayChars: 0,
+    };
     clearLostSessionKey(identity.sessionKey);
     live.push(entry);
     liveBySession.set(identity.sessionKey, entry);
@@ -822,14 +869,15 @@ export async function attachPtyToSocket(
     }
 
     term.onData((data: string) => {
+      appendReplayOutput(entry, data);
       const active = entry.ws;
-      if (active && active.readyState === active.OPEN) active.send(data);
+      if (active && active.readyState === WebSocket.OPEN) active.send(data);
     });
     term.onExit(() => {
       const exitSocket = entry.ws;
       markLostSessionKey(entry.sessionKey);
       if (exitSocket) {
-        sendSessionStatus(exitSocket, "missing", entry.sessionKey, "pty-exit");
+        sendSessionStatus(exitSocket, "missing", entry.sessionKey, entry.sessionId, "pty-exit");
       }
       removeLiveEntry(entry);
       if (exitSocket) {
@@ -849,7 +897,7 @@ export async function attachPtyToSocket(
         markLostSessionKey(entry.sessionKey);
         try { term.kill(); } catch { /* ignore */ }
         removeLiveEntry(entry);
-        sendSessionStatus(ws, "terminated", entry.sessionKey, reason);
+        sendSessionStatus(ws, "terminated", entry.sessionKey, entry.sessionId, reason);
         try { ws.close(1000, reason); } catch { /* ignore */ }
         return;
       }
@@ -873,7 +921,7 @@ export async function attachPtyToSocket(
       scheduleIdleCleanup(entry);
     });
 
-    sendSessionStatus(ws, "attached", identity.sessionKey, "attached");
+    sendSessionStatus(ws, "attached", identity.sessionKey, identity.sessionId, "attached");
   })();
 
   creationLocks.set(identity.sessionKey, createTask);

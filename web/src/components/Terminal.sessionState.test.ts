@@ -5,9 +5,25 @@ import {
   readStableTerminalSession,
   rotateStableTerminalSession,
   markStableTerminalSessionEstablished,
+  resolveTerminalProjectRoot,
   resolveTerminalSessionState,
+  resolveTerminalOverlayPresentation,
   TERMINAL_SESSION_LOST_TIMEOUT_MS,
 } from "./Terminal";
+
+describe("terminal project identity", () => {
+  it("converts the OpenSpec workspace root to the containing POSIX project root", () => {
+    expect(resolveTerminalProjectRoot("/Users/example/project/openspec")).toBe("/Users/example/project");
+  });
+
+  it("converts the OpenSpec workspace root to the containing Windows project root", () => {
+    expect(resolveTerminalProjectRoot("C:\\Users\\example\\project\\openspec")).toBe("C:\\Users\\example\\project");
+  });
+
+  it("does not alter a root that is not an OpenSpec directory", () => {
+    expect(resolveTerminalProjectRoot("/Users/example/project")).toBe("/Users/example/project");
+  });
+});
 
 describe("terminal attachment deadline", () => {
   it("keeps the original deadline across repeated transport open/close cycles", () => {
@@ -128,20 +144,144 @@ describe("resolveTerminalSessionState", () => {
   it("recognizes the server handshake when the PTY is missing or reattached", () => {
     expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "attached" }))).toEqual({
       status: "attached",
-      sessionKey: undefined,
+      sessionId: undefined,
     });
-    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "missing", sessionKey: "abc" }))).toEqual({
+    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "missing", sessionId: "abc" }))).toEqual({
       status: "missing",
-      sessionKey: "abc",
+      sessionId: "abc",
     });
-    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "terminated", sessionKey: "def" }))).toEqual({
+    expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "session-status", status: "terminated", sessionId: "def" }))).toEqual({
       status: "terminated",
-      sessionKey: "def",
+      sessionId: "def",
     });
   });
 
   it("ignores unrelated websocket payloads", () => {
     expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "data", payload: "x" }))).toBeNull();
     expect(parseTerminalSessionStatusMessage("not-json")).toBeNull();
+  });
+});
+
+describe("terminal UX session management", () => {
+  it("manual reconnect preserves the stored session key across storage access", () => {
+    const storage = makeStorage();
+    const session1 = readStableTerminalSession("/tmp/project", storage);
+    markStableTerminalSessionEstablished("/tmp/project", session1.key, storage);
+
+    // Re-reading should return the same key in reattach mode
+    const session2 = readStableTerminalSession("/tmp/project", storage);
+    expect(session2.key).toBe(session1.key);
+    expect(session2.intent).toBe("reattach");
+  });
+
+  it("explicit restart rotates the session key via rotateStableTerminalSession", () => {
+    const storage = makeStorage();
+    const session1 = readStableTerminalSession("/tmp/project", storage);
+    markStableTerminalSessionEstablished("/tmp/project", session1.key, storage);
+
+    // Explicit restart rotates to a new key
+    const session2Key = rotateStableTerminalSession("/tmp/project", storage);
+    expect(session2Key).not.toBe(session1.key);
+
+    const session2 = readStableTerminalSession("/tmp/project", storage);
+    expect(session2.key).toBe(session2Key);
+    expect(session2.intent).toBe("create");
+    expect(session2.established).toBe(false);
+  });
+
+  it("handles missing session status from server", () => {
+    const status = parseTerminalSessionStatusMessage(
+      JSON.stringify({ type: "session-status", status: "missing", sessionId: "old-key" })
+    );
+    expect(status?.status).toBe("missing");
+  });
+
+  it("handles terminated session status from server", () => {
+    const status = parseTerminalSessionStatusMessage(
+      JSON.stringify({ type: "session-status", status: "terminated", sessionId: "killed-key" })
+    );
+    expect(status?.status).toBe("terminated");
+  });
+
+  it("distinguishes transient timeout from authoritative missing/terminated", () => {
+    const startTime = 10_000;
+    const afterTimeout = startTime + TERMINAL_SESSION_LOST_TIMEOUT_MS + 1;
+
+    // Transient timeout: session lost without authoritative status
+    expect(
+      resolveTerminalSessionState("reconnecting", startTime, afterTimeout, TERMINAL_SESSION_LOST_TIMEOUT_MS)
+    ).toBe("lost");
+
+    // Still reconnecting before timeout: should stay reconnecting
+    const midTime = startTime + TERMINAL_SESSION_LOST_TIMEOUT_MS / 2;
+    expect(
+      resolveTerminalSessionState("connected", startTime, midTime, TERMINAL_SESSION_LOST_TIMEOUT_MS)
+    ).toBe("reconnecting");
+  });
+});
+
+describe("terminal overlay presentation resolver", () => {
+  it("does not show overlay during transient reconnecting state", () => {
+    const presentation = resolveTerminalOverlayPresentation("reconnecting", null);
+    expect(presentation.showOverlay).toBe(false);
+  });
+
+  it("does not show overlay when connected", () => {
+    const presentation = resolveTerminalOverlayPresentation("connected", null);
+    expect(presentation.showOverlay).toBe(false);
+  });
+
+  it("shows only Try reconnect button when lost without authoritative status", () => {
+    const presentation = resolveTerminalOverlayPresentation("lost", null);
+    expect(presentation.showOverlay).toBe(true);
+    expect(presentation.showTryReconnect).toBe(true);
+    expect(presentation.showDestructiveRestart).toBe(false);
+    expect(presentation.title).toBe("Terminal reconnection timed out");
+  });
+
+  it("shows only Start new terminal when server reports missing session", () => {
+    const presentation = resolveTerminalOverlayPresentation("lost", "missing");
+    expect(presentation.showOverlay).toBe(true);
+    expect(presentation.showTryReconnect).toBe(false);
+    expect(presentation.showDestructiveRestart).toBe(true);
+    expect(presentation.destructiveRestartLabel).toBe("Start new terminal");
+    expect(presentation.title).toBe("Terminal session not found");
+  });
+
+  it("shows only Start new terminal when server reports terminated session", () => {
+    const presentation = resolveTerminalOverlayPresentation("lost", "terminated");
+    expect(presentation.showOverlay).toBe(true);
+    expect(presentation.showTryReconnect).toBe(false);
+    expect(presentation.showDestructiveRestart).toBe(true);
+    expect(presentation.destructiveRestartLabel).toBe("Start new terminal");
+    expect(presentation.title).toBe("Terminal session terminated");
+  });
+
+  it("manual retry action (Try reconnect) does not rotate session key", () => {
+    // This is a behavioral requirement:
+    // handleTryReconnect clears sessionStatus and increments reconnectAttempt
+    // without calling rotateStableTerminalSession. The effect will read the
+    // same session key and use intent=reattach, preserving the stable key.
+    const storage = makeStorage();
+    const session1 = readStableTerminalSession("/tmp/project", storage);
+    markStableTerminalSessionEstablished("/tmp/project", session1.key, storage);
+
+    // Simulate manual retry: status is cleared, but key is NOT rotated
+    const session2 = readStableTerminalSession("/tmp/project", storage);
+    expect(session2.key).toBe(session1.key);
+    expect(session2.intent).toBe("reattach");
+  });
+
+  it("explicit restart action rotates session key (distinct from manual retry)", () => {
+    const storage = makeStorage();
+    const session1 = readStableTerminalSession("/tmp/project", storage);
+    markStableTerminalSessionEstablished("/tmp/project", session1.key, storage);
+
+    // Simulate explicit restart: key IS rotated, intent becomes create
+    const rotated = rotateStableTerminalSession("/tmp/project", storage);
+    expect(rotated).not.toBe(session1.key);
+
+    const session2 = readStableTerminalSession("/tmp/project", storage);
+    expect(session2.intent).toBe("create");
   });
 });

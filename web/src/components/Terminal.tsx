@@ -9,6 +9,7 @@ import { useStore } from "../store";
 import { writeClipboardText } from "../clipboardBridge";
 
 export type TerminalSessionState = "connected" | "reconnecting" | "lost";
+export type TerminalSessionStatus = "attached" | "reattached" | "missing" | "terminated" | null;
 export const TERMINAL_SESSION_LOST_TIMEOUT_MS = 15_000;
 
 /**
@@ -21,6 +22,14 @@ export function beginTerminalAttachmentWindow(
   nowMs: number,
 ): number {
   return currentStartedAtMs ?? nowMs;
+}
+
+/** WorkspaceState.root points at the OpenSpec directory, while the PTY
+ * protocol identifies the containing project root. Keep this conversion in
+ * one place so POSIX and Windows paths produce the same identity as the
+ * server-side cwd. */
+export function resolveTerminalProjectRoot(workspaceRoot: string): string {
+  return workspaceRoot.replace(/[\\/]openspec[\\/]?$/, "");
 }
 
 export function resolveTerminalSessionState(
@@ -40,7 +49,7 @@ export function resolveTerminalSessionState(
 
 export function parseTerminalSessionStatusMessage(
   raw: unknown,
-): { status: "attached" | "reattached" | "missing" | "terminated"; sessionKey?: string } | null {
+): { status: "attached" | "reattached" | "missing" | "terminated"; sessionId?: string } | null {
   if (typeof raw !== "string") return null;
   try {
     const parsed = JSON.parse(raw);
@@ -49,12 +58,91 @@ export function parseTerminalSessionStatusMessage(
     }
     const status = parsed.status;
     if (status === "attached" || status === "reattached" || status === "missing" || status === "terminated") {
-      return { status, sessionKey: typeof parsed.sessionKey === "string" ? parsed.sessionKey : undefined };
+      return { status, sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : undefined };
     }
   } catch {
     /* ignore */
   }
   return null;
+}
+
+export type TerminalOverlayPresentation = {
+  showOverlay: boolean;
+  title: string;
+  message: string;
+  showTryReconnect: boolean;
+  showDestructiveRestart: boolean;
+  destructiveRestartLabel: string;
+};
+
+/**
+ * Pure presentation resolver: determines overlay visibility and button availability
+ * based on session state and server status.
+ *
+ * Non-blocking automatic reconnection (sessionState === "reconnecting", no status yet)
+ * returns showOverlay: false. Overlay only appears after timeout expires or server
+ * returns authoritative status.
+ */
+export function resolveTerminalOverlayPresentation(
+  sessionState: TerminalSessionState,
+  sessionStatus: TerminalSessionStatus,
+): TerminalOverlayPresentation {
+  // Do not render overlay during automatic reconnection. The connection effect
+  // will either succeed (moving back to connected) or timeout (moving to lost).
+  if (sessionState === "reconnecting") {
+    return {
+      showOverlay: false,
+      title: "",
+      message: "",
+      showTryReconnect: false,
+      showDestructiveRestart: false,
+      destructiveRestartLabel: "Restart terminal",
+    };
+  }
+
+  // Overlay only appears after lost state
+  if (sessionState !== "lost") {
+    return {
+      showOverlay: false,
+      title: "",
+      message: "",
+      showTryReconnect: false,
+      showDestructiveRestart: false,
+      destructiveRestartLabel: "Restart terminal",
+    };
+  }
+
+  // sessionState === "lost" from here on
+  const isAuthoritative = sessionStatus === "missing" || sessionStatus === "terminated";
+
+  if (isAuthoritative) {
+    // Server explicitly reported missing or terminated — offer only fresh start
+    const title = sessionStatus === "missing"
+      ? "Terminal session not found"
+      : "Terminal session terminated";
+    const message = sessionStatus === "missing"
+      ? "The terminal session was not found on the server."
+      : "The terminal session was terminated.";
+
+    return {
+      showOverlay: true,
+      title,
+      message,
+      showTryReconnect: false,
+      showDestructiveRestart: true,
+      destructiveRestartLabel: "Start new terminal",
+    };
+  }
+
+  // Timed out without authoritative status — offer retry only
+  return {
+    showOverlay: true,
+    title: "Terminal reconnection timed out",
+    message: "Unable to reconnect to your terminal. Try again or start a new session.",
+    showTryReconnect: true,
+    showDestructiveRestart: false,
+    destructiveRestartLabel: "Restart terminal",
+  };
 }
 
 export type StableTerminalSession = {
@@ -155,11 +243,14 @@ export function Terminal() {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const appliedTheme = useAppliedTheme();
-  const projectRoot = useStore((s) => s.state?.root ?? "");
+  const workspaceRoot = useStore((s) => s.state?.root ?? "");
+  const projectRoot = resolveTerminalProjectRoot(workspaceRoot);
   const terminalRestartCounter = useStore((s) => s.terminalRestartCounter);
   const restartTerminal = useStore((s) => s.restartTerminal);
   const [connected, setConnected] = useState(true);
   const [sessionState, setSessionState] = useState<TerminalSessionState>("connected");
+  const [sessionStatus, setSessionStatus] = useState<TerminalSessionStatus>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingReloadRef = useRef<{ currentKey: string; nextKey: string } | null>(null);
   const pendingReloadTimerRef = useRef<number | null>(null);
@@ -169,6 +260,14 @@ export function Terminal() {
       window.clearTimeout(pendingReloadTimerRef.current);
       pendingReloadTimerRef.current = null;
     }
+  };
+
+  const handleTryReconnect = () => {
+    // Clear stale authoritative status when user manually retries
+    setSessionStatus(null);
+    // Trigger reconnect by incrementing counter, which re-runs the connection effect
+    // while preserving the same session key and intent=reattach
+    setReconnectAttempt((prev) => prev + 1);
   };
 
   const handleReload = () => {
@@ -190,7 +289,7 @@ export function Terminal() {
       restartTerminal();
     }, 10_000);
 
-    if (ws && ws.readyState === ws.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "restart", reason: "reload", sessionKey: currentKey, intent: "create" }));
       setConnected(false);
       setSessionState("reconnecting");
@@ -231,7 +330,7 @@ export function Terminal() {
     const fitNow = () => {
       try {
         fit.fit();
-        if (ws && ws.readyState === ws.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         }
       } catch {
@@ -272,7 +371,7 @@ export function Terminal() {
     };
 
     const inputDisposable = term.onData((data) => {
-      if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "input", data }));
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
     // Ctrl+Shift+C/V copy-paste. Plain Ctrl+C/Ctrl+V are left completely
@@ -344,15 +443,17 @@ export function Terminal() {
           const status = parseTerminalSessionStatusMessage(raw);
           if (status) {
             clearHandshakeTimer();
+            setSessionStatus(status.status);
             if (status.status === "missing") {
               shouldAutoReconnect = false;
-              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
+              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionId) {
                 pendingReloadRef.current = null;
                 clearPendingReloadTimer();
                 restartTerminal();
                 return;
               }
-              markSessionLost();
+              setConnected(false);
+              setTerminalSession("lost");
               return;
             }
             if (status.status === "reattached" || status.status === "attached") {
@@ -362,13 +463,13 @@ export function Terminal() {
                 reconnectTimer = null;
               }
               shouldAutoReconnect = true;
-              if (status.sessionKey) {
-                markStableTerminalSessionEstablished(projectRoot, status.sessionKey);
+              if (status.sessionId) {
+                markStableTerminalSessionEstablished(projectRoot, status.sessionId);
               }
               clearPendingReloadTimer();
               if (pendingReloadRef.current) {
                 const pending = pendingReloadRef.current;
-                if (pending.currentKey === status.sessionKey) {
+                if (pending.currentKey === status.sessionId) {
                   pendingReloadRef.current = null;
                   restartTerminal();
                   return;
@@ -381,7 +482,7 @@ export function Terminal() {
             if (status.status === "terminated") {
               disconnectedAtMs = Date.now();
               shouldAutoReconnect = false;
-              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionKey) {
+              if (pendingReloadRef.current && pendingReloadRef.current.currentKey === status.sessionId) {
                 pendingReloadRef.current = null;
                 clearPendingReloadTimer();
                 restartTerminal();
@@ -456,8 +557,9 @@ export function Terminal() {
     // Theme changes flow through the separate effect below via
     // `term.options.theme = …`, which is the officially-supported live
     // re-color path (no dispose, scrollback preserved).
+    // Manual reconnect attempts trigger via reconnectAttempt counter change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectRoot, terminalRestartCounter]);
+  }, [projectRoot, terminalRestartCounter, reconnectAttempt]);
 
   // Live re-color on theme flip. Reads the CSS variables AFTER
   // useAppliedTheme has updated `<html data-theme=…>`, so the values it
@@ -472,22 +574,35 @@ export function Terminal() {
   // never touching xterm's key handling), so the Ctrl+Shift+C/V hint
   // below is only useful — and only shown — on Windows/Linux.
   const isMac = /Mac/i.test(navigator.platform);
-  const hasLostSession = sessionState === "lost";
+  const presentation = resolveTerminalOverlayPresentation(sessionState, sessionStatus);
 
   return (
     <div ref={hostRef} className="terminal-host">
-      {hasLostSession && (
+      {presentation.showOverlay && (
         <div className="terminal-session-lost-overlay" role="alert">
           <div className="terminal-session-lost-card">
-            <div className="terminal-session-lost-title">Terminal session ended</div>
-            <div className="terminal-session-lost-message">Terminal session ended — reload to reconnect.</div>
-            <button
-              type="button"
-              className="terminal-session-lost-button"
-              onClick={handleReload}
-            >
-              Reload terminal
-            </button>
+            <div className="terminal-session-lost-title">{presentation.title}</div>
+            <div className="terminal-session-lost-message">{presentation.message}</div>
+            <div className="terminal-session-lost-buttons">
+              {presentation.showTryReconnect && (
+                <button
+                  type="button"
+                  className="terminal-session-lost-button"
+                  onClick={handleTryReconnect}
+                >
+                  Try reconnect
+                </button>
+              )}
+              {presentation.showDestructiveRestart && (
+                <button
+                  type="button"
+                  className="terminal-session-lost-button"
+                  onClick={handleReload}
+                >
+                  {presentation.destructiveRestartLabel}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
