@@ -491,12 +491,22 @@ function appendReplayOutput(entry: LiveTerminal, data: string): void {
 
 function replayTerminalOutput(entry: LiveTerminal, ws: WebSocket): void {
   if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "replay-start" }));
+  } catch {
+    return;
+  }
   for (const chunk of entry.replayChunks) {
     try {
       ws.send(chunk);
     } catch {
       return;
     }
+  }
+  try {
+    ws.send(JSON.stringify({ type: "replay-end" }));
+  } catch {
+    return;
   }
 }
 

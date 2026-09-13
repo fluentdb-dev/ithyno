@@ -66,6 +66,57 @@ export function parseTerminalSessionStatusMessage(
   return null;
 }
 
+export type TerminalReplayProtocolMessage = "replay-start" | "replay-end";
+
+export function parseTerminalReplayProtocolMessage(raw: unknown): TerminalReplayProtocolMessage | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const type = parsed.type;
+    if (type === "replay-start" || type === "replay-end") {
+      return type;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export interface TerminalReplayInputGate {
+  begin(): void;
+  finish(enqueueBarrier: (done: () => void) => void): void;
+  shouldForward(_data: string): boolean;
+  reset(): void;
+}
+
+export function createTerminalReplayInputGate(): TerminalReplayInputGate {
+  let suppressed = false;
+  let generation = 0;
+
+  return {
+    begin() {
+      suppressed = true;
+      generation++;
+    },
+    finish(enqueueBarrier: (done: () => void) => void) {
+      const capturedGeneration = generation;
+      enqueueBarrier(() => {
+        if (generation === capturedGeneration) {
+          suppressed = false;
+        }
+      });
+    },
+    shouldForward(_data: string): boolean {
+      return !suppressed;
+    },
+    reset() {
+      suppressed = false;
+      generation++;
+    },
+  };
+}
+
 export type TerminalOverlayPresentation = {
   showOverlay: boolean;
   title: string;
@@ -323,6 +374,7 @@ export function Terminal() {
     let closedByRestart = false;
     let currentSessionState: TerminalSessionState = "connected";
     let shouldAutoReconnect = true;
+    const gate = createTerminalReplayInputGate();
     const sessionStateInfo = readStableTerminalSession(projectRoot);
     const sessionKey = sessionStateInfo.key;
     wsRef.current = null;
@@ -371,6 +423,7 @@ export function Terminal() {
     };
 
     const inputDisposable = term.onData((data) => {
+      if (!gate.shouldForward(data)) return;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
@@ -440,6 +493,19 @@ export function Terminal() {
       socket.onmessage = (ev) => {
         const raw = typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data);
         if (typeof raw === "string") {
+          // Check for replay protocol messages
+          const replayMsg = parseTerminalReplayProtocolMessage(raw);
+          if (replayMsg === "replay-start") {
+            gate.begin();
+            return;
+          }
+          if (replayMsg === "replay-end") {
+            gate.finish((done) => {
+              term.write("", done);
+            });
+            return;
+          }
+
           const status = parseTerminalSessionStatusMessage(raw);
           if (status) {
             clearHandshakeTimer();
@@ -541,6 +607,7 @@ export function Terminal() {
       shouldAutoReconnect = false;
       clearPendingReloadTimer();
       pendingReloadRef.current = null;
+      gate.reset();
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       clearHandshakeTimer();
       if (ws) {

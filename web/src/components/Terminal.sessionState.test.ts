@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
+  parseTerminalReplayProtocolMessage,
+  createTerminalReplayInputGate,
   readStableTerminalSession,
   rotateStableTerminalSession,
   markStableTerminalSessionEstablished,
@@ -283,5 +285,95 @@ describe("terminal overlay presentation resolver", () => {
 
     const session2 = readStableTerminalSession("/tmp/project", storage);
     expect(session2.intent).toBe("create");
+  });
+});
+
+describe("terminal replay protocol and input suppression", () => {
+  it("parses replay-start message as a replay protocol control message", () => {
+    const parsed = parseTerminalReplayProtocolMessage(JSON.stringify({ type: "replay-start" }));
+    expect(parsed).toBe("replay-start");
+  });
+
+  it("parses replay-end message as a replay protocol control message", () => {
+    const parsed = parseTerminalReplayProtocolMessage(JSON.stringify({ type: "replay-end" }));
+    expect(parsed).toBe("replay-end");
+  });
+
+  it("returns null for non-replay messages", () => {
+    const sessionStatus = parseTerminalReplayProtocolMessage(
+      JSON.stringify({ type: "session-status", status: "attached" }),
+    );
+    expect(sessionStatus).toBeNull();
+  });
+
+  it("returns null for non-JSON strings", () => {
+    const ansiOutput = parseTerminalReplayProtocolMessage("\x1b[1;2H");
+    expect(ansiOutput).toBeNull();
+  });
+
+  it("returns null for undefined/non-string input", () => {
+    const undef = parseTerminalReplayProtocolMessage(undefined);
+    expect(undef).toBeNull();
+
+    const binary = parseTerminalReplayProtocolMessage(new Uint8Array([1, 2, 3]));
+    expect(binary).toBeNull();
+  });
+
+  it("begin suppresses input", () => {
+    const gate = createTerminalReplayInputGate();
+    gate.begin();
+    expect(gate.shouldForward("\x1b[?1;2c")).toBe(false);
+  });
+
+  it("finish queues barrier callback and keeps input suppressed until callback fires", () => {
+    const gate = createTerminalReplayInputGate();
+    gate.begin();
+
+    let capturedDone: ((v: void) => void) | null = null;
+    gate.finish((done) => {
+      capturedDone = done;
+    });
+
+    expect(gate.shouldForward("\x1b[?1;2c")).toBe(false);
+    expect(capturedDone).not.toBeNull();
+
+    capturedDone!();
+
+    expect(gate.shouldForward("user input")).toBe(true);
+  });
+
+  it("reset releases suppression", () => {
+    const gate = createTerminalReplayInputGate();
+    gate.begin();
+    expect(gate.shouldForward("data")).toBe(false);
+
+    gate.reset();
+    expect(gate.shouldForward("data")).toBe(true);
+  });
+
+  it("generation invalidates stale barrier callbacks", () => {
+    const gate = createTerminalReplayInputGate();
+
+    let doneA: (() => void) | null = null;
+    gate.begin();
+    gate.finish((done) => {
+      doneA = done;
+    });
+
+    let doneB: (() => void) | null = null;
+    gate.begin();
+    gate.finish((done) => {
+      doneB = done;
+    });
+
+    expect(gate.shouldForward("\x1b[?1;2c")).toBe(false);
+
+    doneA!();
+
+    expect(gate.shouldForward("\x1b[?1;2c")).toBe(false);
+
+    doneB!();
+
+    expect(gate.shouldForward("user input")).toBe(true);
   });
 });

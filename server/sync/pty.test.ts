@@ -1165,6 +1165,90 @@ describe("pty session identity and reconnect semantics", () => {
   });
 });
 
+// ---- terminal replay protocol (prevent query response corruption) --------
+describe("terminal replay protocol", () => {
+  beforeEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  afterEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  it("sends replay-start and replay-end boundary messages around buffered output", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-replay-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      const spawn = vi.fn(() => term);
+      ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+      // First connection: write some output to the replay buffer
+      const first = makeFakeWs();
+      const attachFirst = await attachPtyToSocket(first, { cwd: tempDir, projectRoot: tempDir, sessionId: "test-1" });
+      expect(attachFirst.ok).toBe(true);
+
+      // Simulate terminal output (including ANSI with control sequences)
+      term.emitData("Hello, ");
+      term.emitData("\x1b[1;31m");
+      term.emitData("world"); // Red text
+      term.emitData("\x1b[0m"); // Reset
+      term.emitData("\n");
+
+      // Disconnect first socket
+      first.close();
+
+      // Second connection: should replay buffered output with boundary messages
+      const second = makeFakeWs();
+      const attachSecond = await attachPtyToSocket(second, { cwd: tempDir, projectRoot: tempDir, sessionId: "test-1" });
+      expect(attachSecond.ok).toBe(true);
+
+      // Verify replay protocol structure in sent messages:
+      // 1. session-status "reattached"
+      // 2. replay-start boundary
+      // 3. buffered ANSI chunks (raw strings, not JSON)
+      // 4. replay-end boundary
+      // 5. possibly more messages
+
+      expect(second.sent.length).toBeGreaterThan(0);
+
+      const messages = second.sent.map((msg: string) => {
+        try {
+          return JSON.parse(msg);
+        } catch {
+          return { type: "raw", data: msg };
+        }
+      });
+
+      // Find replay-start and replay-end
+      const replayStartIdx = messages.findIndex((m: any) => m.type === "replay-start");
+      const replayEndIdx = messages.findIndex((m: any) => m.type === "replay-end");
+
+      expect(replayStartIdx).toBeGreaterThanOrEqual(0);
+      expect(replayEndIdx).toBeGreaterThan(replayStartIdx);
+
+      // Verify that replay chunks are between start and end
+      const replayChunks = messages.slice(replayStartIdx + 1, replayEndIdx);
+      expect(replayChunks.length).toBeGreaterThan(0);
+
+      // First replay chunk should contain the initial output
+      const firstChunk = replayChunks[0];
+      expect(firstChunk.type).toBe("raw");
+      expect(firstChunk.data).toContain("Hello");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---- tmuxSessionName (scope-tmux-session-name-per-project) ---------------
 describe("tmuxSessionName", () => {
   it("returns literal `ithyno` when projectRoot is undefined (test-friendly fallback)", () => {
