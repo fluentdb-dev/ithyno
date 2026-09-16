@@ -441,8 +441,12 @@ export function Environment() {
           ) : null}
 
           {reviewOpen ? (
-            <div className="modal-backdrop" onClick={() => setReviewOpen(false)}>
-              <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <dialog
+              open
+              className="environment-save-dialog"
+              onClose={() => setReviewOpen(false)}
+            >
+              <div className="environment-save-dialog-inner">
                 <h3 className="modal-title">Confirm save</h3>
                 <p className="modal-subtitle">
                   <code>{snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</code>
@@ -458,7 +462,7 @@ export function Environment() {
                   <button className="btn-primary" onClick={() => void saveChanges()} disabled={saving}>Save</button>
                 </div>
               </div>
-            </div>
+            </dialog>
           ) : null}
 
           {snapshot.profiles.length === 0 ? null : (
