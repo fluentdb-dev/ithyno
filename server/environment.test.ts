@@ -67,8 +67,11 @@ describe("development environment resolver", () => {
     const initial = await readEnvironmentSelection(dir);
     expect(initial.selectedProfile).toBe("default");
 
+    const snapshot = await composeDevelopmentEnvironment(dir);
     const currentContent = await readFile(join(dir, ".env"), "utf8");
     const currentRevision = createHash("sha1").update(currentContent).digest("hex");
+    expect(snapshot.revision).toBe(currentRevision);
+
     const mutation = await mutateEnvironmentFile(dir, { profile: "default", values: { B: "2" }, revision: currentRevision });
     expect(mutation.wrote).toBe(true);
     expect(mutation.path).toBe(".env");

@@ -171,25 +171,30 @@ export function Environment() {
     writeDraftState(draft);
   }, [draft]);
 
+  const refreshSnapshot = async (): Promise<Snapshot | null> => {
+    const [envRes, healthRes] = await Promise.all([
+      fetch("/api/environment"),
+      fetch("/api/health"),
+    ]);
+    let nextSnapshot: Snapshot | null = null;
+    if (envRes.ok) {
+      nextSnapshot = await envRes.json() as Snapshot;
+      setSnapshot(nextSnapshot);
+    }
+    let nextManagerRunning = false;
+    if (healthRes.ok) {
+      const health = await healthRes.json() as { terminal?: { available?: boolean } };
+      nextManagerRunning = Boolean(health.terminal?.available);
+      setManagerRunning(nextManagerRunning);
+    }
+    setRestartRequired(shouldShowRestartRequired(readLastAppliedRevision(), nextSnapshot?.revision ?? null, nextManagerRunning));
+    return nextSnapshot;
+  };
+
   const load = async () => {
     setLoading(true);
     try {
-      const [envRes, healthRes] = await Promise.all([
-        fetch("/api/environment"),
-        fetch("/api/health"),
-      ]);
-      let nextSnapshot: Snapshot | null = null;
-      if (envRes.ok) {
-        nextSnapshot = await envRes.json() as Snapshot;
-        setSnapshot(nextSnapshot);
-      }
-      let nextManagerRunning = false;
-      if (healthRes.ok) {
-        const health = await healthRes.json() as { terminal?: { available?: boolean } };
-        nextManagerRunning = Boolean(health.terminal?.available);
-        setManagerRunning(nextManagerRunning);
-      }
-      setRestartRequired(shouldShowRestartRequired(readLastAppliedRevision(), nextSnapshot?.revision ?? null, nextManagerRunning));
+      return await refreshSnapshot();
     } finally {
       setLoading(false);
     }
@@ -242,12 +247,18 @@ export function Environment() {
     await navigator.clipboard.writeText(value);
   };
 
+  const openReview = async () => {
+    setSaveError(null);
+    await refreshSnapshot();
+    setReviewOpen(true);
+  };
+
   const stageEdit = (key: string) => {
     setEditingKey(key);
     setEditingValue(revealed[key] ?? "");
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editingKey) return;
     setDraft((cur) => ({
       edits: { ...cur.edits, [editingKey]: editingValue },
@@ -255,6 +266,7 @@ export function Environment() {
     }));
     setEditingKey(null);
     setEditingValue("");
+    await openReview();
     if (managerRunning) setRestartRequired(true);
   };
 
@@ -266,7 +278,7 @@ export function Environment() {
     if (managerRunning) setRestartRequired(true);
   };
 
-  const stageVariable = () => {
+  const stageVariable = async () => {
     const key = newKey.trim();
     if (!key) return;
     setDraft((cur) => ({
@@ -275,6 +287,7 @@ export function Environment() {
     }));
     setNewKey("");
     setNewValue("");
+    await openReview();
     if (managerRunning) setRestartRequired(true);
   };
 
@@ -321,7 +334,9 @@ export function Environment() {
     setSaving(true);
     setSaveError(null);
     try {
-      const targetProfile = snapshot.selection.selectedProfile ?? "default";
+      const refreshed = await fetch("/api/environment");
+      const latestSnapshot = refreshed.ok ? (await refreshed.json() as Snapshot) : snapshot;
+      const targetProfile = latestSnapshot.selection.selectedProfile ?? "default";
       const res = await fetch("/api/environment/mutate", {
         method: "POST",
         headers: authHeaders(),
@@ -329,17 +344,20 @@ export function Environment() {
           profile: targetProfile,
           values: draft.edits,
           remove: draft.removals,
-          revision: snapshot.revision,
+          revision: latestSnapshot.revision,
         }),
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({})) as { error?: string };
-        setSaveError(payload.error ?? "Unable to save environment changes");
+        const message = payload.error === "stale revision"
+          ? "The environment file changed since this page loaded. Refresh it and save again."
+          : payload.error ?? "Unable to save environment changes";
+        setSaveError(message);
         return;
       }
-      const refreshed = await fetch("/api/environment");
-      if (refreshed.ok) {
-        setSnapshot(await refreshed.json());
+      const refreshedAfter = await fetch("/api/environment");
+      if (refreshedAfter.ok) {
+        setSnapshot(await refreshedAfter.json());
       }
       setDraft({ edits: {}, removals: [] });
       setReviewOpen(false);
@@ -430,39 +448,33 @@ export function Environment() {
             </section>
           )}
 
-          {(Object.keys(draft.edits).length > 0 || draft.removals.length > 0) ? (
-            <section className="settings-section">
-              <div className="settings-actions">
-                <button onClick={() => setReviewOpen(true)} disabled={saving}>
-                  Save changes
-                </button>
-              </div>
-            </section>
-          ) : null}
-
           {reviewOpen ? (
-            <dialog
-              open
-              className="environment-save-dialog"
-              onClose={() => setReviewOpen(false)}
-            >
-              <div className="environment-save-dialog-inner">
-                <h3 className="modal-title">Confirm save</h3>
-                <p className="modal-subtitle">
-                  <code>{snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</code>
-                </p>
-                <ul className="environment-list">
-                  {pendingOperations().map((operation) => (
-                    <li key={operation}>{operation}</li>
-                  ))}
-                </ul>
-                {saveError ? <p className="environment-error">{saveError}</p> : null}
-                <div className="modal-actions">
-                  <button className="btn-secondary" onClick={() => setReviewOpen(false)} disabled={saving}>Cancel</button>
-                  <button className="btn-primary" onClick={() => void saveChanges()} disabled={saving}>Save</button>
+            <div className="environment-save-dialog-backdrop" onClick={() => setReviewOpen(false)}>
+              <div
+                className="environment-save-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Confirm save"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="environment-save-dialog-inner">
+                  <h3 className="modal-title">Confirm save</h3>
+                  <p className="modal-subtitle">
+                    <code>{snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</code>
+                  </p>
+                  <ul className="environment-list">
+                    {pendingOperations().map((operation) => (
+                      <li key={operation}>{operation}</li>
+                    ))}
+                  </ul>
+                  {saveError ? <p className="environment-error">{saveError}</p> : null}
+                  <div className="modal-actions">
+                    <button className="btn-secondary" onClick={() => setReviewOpen(false)} disabled={saving}>Cancel</button>
+                    <button className="btn-primary" onClick={() => void saveChanges()} disabled={saving}>Save</button>
+                  </div>
                 </div>
               </div>
-            </dialog>
+            </div>
           ) : null}
 
           {snapshot.profiles.length === 0 ? null : (
@@ -486,7 +498,7 @@ export function Environment() {
                       onChange={(e) => setNewValue(e.target.value)}
                       placeholder="value"
                     />
-                    <button onClick={stageVariable}>Stage variable</button>
+                    <button onClick={() => void stageVariable()}>Stage variable</button>
                   </div>
                 </label>
               </div>

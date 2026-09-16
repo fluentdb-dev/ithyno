@@ -400,6 +400,11 @@ export async function composeDevelopmentEnvironment(
   const selection = await readEnvironmentSelection(root);
   const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, profiles } = await collectResolvedEnvironment(root, selection, inheritedEnv);
   const resolvedEntries = Object.entries(env).sort(([a], [b]) => a.localeCompare(b));
+  const targetProfile = selection.selectedProfile ?? "default";
+  const targetPath = resolveProfilePath(root, targetProfile);
+  const targetContent = targetPath && existsSync(targetPath) && lstatSync(targetPath).isFile()
+    ? await readFile(targetPath, "utf8")
+    : "";
   const variableMap = new Map(variableEntries.map((item) => [item.key, item]));
   const state: DevelopmentEnvironmentState = {
     projectRoot: root,
@@ -422,7 +427,7 @@ export async function composeDevelopmentEnvironment(
       status: encryptionSources.length > 0 ? "ready" : "missing",
       sources: encryptionSources,
     },
-    revision: sha1(JSON.stringify({ selection, orderedFiles: orderedFiles.map((filePath) => toRelative(root, filePath)), env: resolvedEntries })),
+    revision: sha1(targetContent),
   };
 
   return state;
