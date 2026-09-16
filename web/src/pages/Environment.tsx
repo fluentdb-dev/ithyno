@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSessionToken } from "../runtime";
 import { CopyIcon } from "../components/ClipboardCopyButton";
+import { writeClipboardText } from "../clipboardBridge";
 
 type Profile = {
   name: string;
@@ -47,6 +48,13 @@ export function removeRevealedEnvironmentValue(
   const next = { ...revealed };
   delete next[key];
   return next;
+}
+
+export function stageEnvironmentRemoval(draft: DraftState, key: string): DraftState {
+  return {
+    edits: Object.fromEntries(Object.entries(draft.edits).filter(([entryKey]) => entryKey !== key)),
+    removals: [...new Set([...draft.removals, key])],
+  };
 }
 
 function authHeaders(): Record<string, string> {
@@ -295,6 +303,31 @@ export function EnvironmentActionButtons({
   );
 }
 
+export function EnvironmentDeleteConfirmDialog({
+  variableKey,
+  onConfirm,
+  onCancel,
+}: {
+  variableKey: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={`Delete ${variableKey}`} onClick={(event) => event.stopPropagation()}>
+        <h3>Delete variable — {variableKey}</h3>
+        <p>
+          This removes <code>{variableKey}</code> from the selected environment profile after you save the pending changes.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger" onClick={onConfirm}>Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Environment() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -305,6 +338,7 @@ export function Environment() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [createProfileName, setCreateProfileName] = useState("");
@@ -374,7 +408,7 @@ export function Environment() {
     }
   };
 
-  const onReveal = async (key: string) => {
+  const fetchEnvironmentValue = async (key: string) => {
     const res = await fetch("/api/environment/reveal", {
       method: "POST",
       headers: authHeaders(),
@@ -382,8 +416,14 @@ export function Environment() {
     });
     if (!res.ok) return undefined;
     const payload = await res.json() as { value: string };
-    setRevealed((cur) => ({ ...cur, [key]: payload.value }));
     return payload.value;
+  };
+
+  const onReveal = async (key: string) => {
+    const value = await fetchEnvironmentValue(key);
+    if (value === undefined) return undefined;
+    setRevealed((cur) => ({ ...cur, [key]: value }));
+    return value;
   };
 
   const toggleReveal = async (key: string) => {
@@ -395,9 +435,11 @@ export function Environment() {
   };
 
   const onCopy = async (key: string) => {
-    const value = revealed[key] ?? (await onReveal(key));
+    const value = hasRevealedEnvironmentValue(revealed, key)
+      ? revealed[key]
+      : await fetchEnvironmentValue(key);
     if (value === undefined) return;
-    await navigator.clipboard.writeText(value);
+    await writeClipboardText(value);
   };
 
   const openReview = async () => {
@@ -423,12 +465,13 @@ export function Environment() {
     if (managerRunning) setRestartRequired(true);
   };
 
-  const removeVariable = (key: string) => {
-    setDraft((cur) => ({
-      edits: Object.fromEntries(Object.entries(cur.edits).filter(([entryKey]) => entryKey !== key)),
-      removals: [...new Set([...cur.removals, key])],
-    }));
+  const confirmRemoveVariable = async () => {
+    if (!deletingKey) return;
+    const key = deletingKey;
+    setDeletingKey(null);
+    setDraft((cur) => stageEnvironmentRemoval(cur, key));
     if (managerRunning) setRestartRequired(true);
+    await openReview();
   };
 
   const stageVariable = async () => {
@@ -685,7 +728,7 @@ export function Environment() {
                               onToggleReveal={toggleReveal}
                               onCopy={onCopy}
                               onEdit={stageEdit}
-                              onDelete={removeVariable}
+                              onDelete={setDeletingKey}
                             />
                           </td>
                         </tr>
@@ -699,6 +742,13 @@ export function Environment() {
 
 
           {saveError ? <p className="environment-error">{saveError}</p> : null}
+          {deletingKey ? (
+            <EnvironmentDeleteConfirmDialog
+              variableKey={deletingKey}
+              onConfirm={() => void confirmRemoveVariable()}
+              onCancel={() => setDeletingKey(null)}
+            />
+          ) : null}
           {editingKey ? (
             <section className="settings-section environment-panel">
               <h3>Edit {editingKey}</h3>

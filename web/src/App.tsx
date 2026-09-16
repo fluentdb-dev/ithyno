@@ -5,7 +5,11 @@ import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
 import { clearSessionToken, getSessionToken } from "./runtime";
 import { recoverDecision } from "./focusRecovery";
-import { insertTextIntoField, type VsCodeClipboardResponse } from "./clipboardBridge";
+import {
+  insertTextIntoField,
+  isClipboardPasteShortcut,
+  type VsCodeClipboardResponse,
+} from "./clipboardBridge";
 import { Overview } from "./pages/Overview";
 import { ChangeDetail } from "./pages/ChangeDetail";
 import { Specs } from "./pages/Specs";
@@ -196,10 +200,7 @@ export function App() {
     let pendingElement: HTMLInputElement | HTMLTextAreaElement | null = null;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = typeof navigator !== "undefined" &&
-        (navigator.platform.startsWith("Mac") || navigator.platform === "MacIntel");
-      const isPaste = isMac ? (e.metaKey && e.key === "v") : (e.ctrlKey && e.key === "v");
-      if (!isPaste) return;
+      if (!isClipboardPasteShortcut(e)) return;
 
       const target = document.activeElement;
       if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return;

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   EnvironmentActionButtons,
+  EnvironmentDeleteConfirmDialog,
   EnvironmentEmptyState,
   EnvironmentNoProfileState,
   EnvironmentValueCell,
@@ -11,6 +12,7 @@ import {
   hasRevealedEnvironmentValue,
   readDraftState,
   removeRevealedEnvironmentValue,
+  stageEnvironmentRemoval,
   shouldShowRestartRequired,
   writeDraftState,
   type DraftState,
@@ -120,6 +122,33 @@ describe("environment action buttons", () => {
       SECOND_SECRET: "two",
     });
     expect(revealed).toEqual({ FIRST_SECRET: "one", SECOND_SECRET: "two" });
+  });
+
+  it("stages a deletion without mutating the existing draft", () => {
+    const draft: DraftState = {
+      edits: { DELETE_ME: "draft", KEEP_ME: "value" },
+      removals: ["ALREADY_REMOVED"],
+    };
+
+    expect(stageEnvironmentRemoval(draft, "DELETE_ME")).toEqual({
+      edits: { KEEP_ME: "value" },
+      removals: ["ALREADY_REMOVED", "DELETE_ME"],
+    });
+    expect(draft.edits).toHaveProperty("DELETE_ME", "draft");
+  });
+
+  it("renders a destructive confirmation before deleting a variable", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentDeleteConfirmDialog
+        variableKey="SECRET"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain("Delete variable — SECRET");
+    expect(markup).toContain("after you save the pending changes");
   });
 
   const createVariable = (key = "SECRET") => ({
