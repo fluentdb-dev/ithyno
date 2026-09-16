@@ -482,7 +482,7 @@ export function Environment() {
                 </label>
               </div>
 
-              <h3>Variables</h3>
+              <h3 style={{ marginTop: 20 }}>Variables</h3>
               {snapshot.variables.length === 0 ? (
                 <div className="environment-empty-state environment-empty-plain">
                   <strong>No variables defined for this profile yet.</strong>
