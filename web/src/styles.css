@@ -3215,7 +3215,7 @@ a.modal-btn:hover {
   flex-wrap: wrap;
   gap: 6px;
 }
-.environment-actions button,
+.environment-actions button:not(.environment-action-button),
 .environment-inline-controls button,
 .environment-panel button {
   padding: 6px 10px;
@@ -3226,10 +3226,32 @@ a.modal-btn:hover {
   cursor: pointer;
   font: inherit;
 }
-.environment-actions button:hover,
+.environment-actions button:not(.environment-action-button):hover,
 .environment-inline-controls button:hover,
 .environment-panel button:hover {
   background: color-mix(in oklab, var(--accent) 12%, var(--panel-2));
+}
+.environment-action-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.environment-action-button:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--panel);
+  border-color: var(--border);
+}
+.environment-action-button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .environment-status,
 .environment-error {

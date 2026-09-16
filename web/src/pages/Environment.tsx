@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getSessionToken } from "../runtime";
+import { CopyIcon } from "../components/ClipboardCopyButton";
 
 type Profile = {
   name: string;
@@ -34,6 +35,19 @@ export type DraftState = {
 
 const DRAFT_STORAGE_KEY = "ithyno-environment-draft";
 const LAST_APPLIED_REVISION_STORAGE_KEY = "ithyno-environment-last-applied-revision";
+
+export function hasRevealedEnvironmentValue(revealed: Record<string, string>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(revealed, key);
+}
+
+export function removeRevealedEnvironmentValue(
+  revealed: Record<string, string>,
+  key: string,
+): Record<string, string> {
+  const next = { ...revealed };
+  delete next[key];
+  return next;
+}
 
 function authHeaders(): Record<string, string> {
   const token = getSessionToken();
@@ -150,6 +164,137 @@ export function EnvironmentValueCell({ variable, revealedValue }: { variable: Va
   return <span className="environment-value-cell">{revealedValue ?? variable.maskedValue}</span>;
 }
 
+function RevealIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 3C4.5 3 1.73 5.61 1 9c.73 3.39 3.5 6 7 6s6.27-2.61 7-6c-.73-3.39-3.5-6-7-6zm0 9c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function HideIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M2 8l.5-.5M8 4c3.5 0 6.27 2.61 7 6-.73 3.39-3.5 6-7 6s-6.27-2.61-7-6c.73-3.39 3.5-6 7-6zm0 5c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3z"
+        stroke="currentColor"
+        fill="none"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2 2l12 12"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M10.5 1.5L14.5 5.5M1.5 14.5H5.5L14 6L10 2L1.5 10.5V14.5Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DeleteIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M2.5 4H3.5M3.5 4V13.5C3.5 14.03 3.97 14.5 4.5 14.5H11.5C12.03 14.5 12.5 14.03 12.5 13.5V4M3.5 4H12.5M6.5 7V12M9.5 7V12M4.5 4V2.5C4.5 2.22 4.72 2 5 2H11C11.28 2 11.5 2.22 11.5 2.5V4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+interface EnvironmentActionButtonsProps {
+  variable: Variable;
+  isRevealed: boolean;
+  onToggleReveal: (key: string) => Promise<void>;
+  onCopy: (key: string) => Promise<void>;
+  onEdit: (key: string) => void;
+  onDelete: (key: string) => void;
+}
+
+export function EnvironmentActionButtons({
+  variable,
+  isRevealed,
+  onToggleReveal,
+  onCopy,
+  onEdit,
+  onDelete,
+}: EnvironmentActionButtonsProps) {
+  const [revealing, setRevealing] = useState(false);
+
+  const handleToggleReveal = useCallback(async () => {
+    setRevealing(true);
+    try {
+      await onToggleReveal(variable.key);
+    } finally {
+      setRevealing(false);
+    }
+  }, [variable.key, onToggleReveal]);
+
+  return (
+    <div className="environment-actions">
+      <button
+        type="button"
+        className="environment-action-button environment-action-button--reveal"
+        onClick={() => void handleToggleReveal()}
+        disabled={revealing}
+        aria-label={isRevealed ? "Hide value" : "Reveal value"}
+        title={isRevealed ? "Hide value" : "Reveal value"}
+      >
+        {isRevealed ? <HideIcon /> : <RevealIcon />}
+      </button>
+      <button
+        type="button"
+        className="environment-action-button environment-action-button--copy"
+        onClick={() => void onCopy(variable.key)}
+        aria-label="Copy value"
+        title="Copy value"
+      >
+        <CopyIcon copied={false} />
+      </button>
+      <button
+        type="button"
+        className="environment-action-button environment-action-button--edit"
+        onClick={() => onEdit(variable.key)}
+        aria-label="Edit value"
+        title="Edit value"
+      >
+        <EditIcon />
+      </button>
+      <button
+        type="button"
+        className="environment-action-button environment-action-button--delete"
+        onClick={() => onDelete(variable.key)}
+        aria-label="Delete value"
+        title="Delete value"
+      >
+        <DeleteIcon />
+      </button>
+    </div>
+  );
+}
+
 export function Environment() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -241,9 +386,17 @@ export function Environment() {
     return payload.value;
   };
 
+  const toggleReveal = async (key: string) => {
+    if (hasRevealedEnvironmentValue(revealed, key)) {
+      setRevealed((cur) => removeRevealedEnvironmentValue(cur, key));
+    } else {
+      await onReveal(key);
+    }
+  };
+
   const onCopy = async (key: string) => {
     const value = revealed[key] ?? (await onReveal(key));
-    if (!value) return;
+    if (value === undefined) return;
     await navigator.clipboard.writeText(value);
   };
 
@@ -526,12 +679,14 @@ export function Environment() {
                           <td><EnvironmentValueCell variable={variable} revealedValue={revealed[variable.key]} /></td>
                           <td>{variable.source}</td>
                           <td>
-                            <div className="environment-actions">
-                              <button onClick={() => void onReveal(variable.key)}>Reveal</button>
-                              <button onClick={() => void onCopy(variable.key)}>Copy</button>
-                              <button onClick={() => stageEdit(variable.key)}>Edit</button>
-                              <button onClick={() => removeVariable(variable.key)}>Delete</button>
-                            </div>
+                            <EnvironmentActionButtons
+                              variable={variable}
+                              isRevealed={hasRevealedEnvironmentValue(revealed, variable.key)}
+                              onToggleReveal={toggleReveal}
+                              onCopy={onCopy}
+                              onEdit={stageEdit}
+                              onDelete={removeVariable}
+                            />
                           </td>
                         </tr>
                       ))}

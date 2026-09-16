@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  EnvironmentActionButtons,
   EnvironmentEmptyState,
   EnvironmentNoProfileState,
   EnvironmentValueCell,
   buildPendingOperations,
   describeEncryptionStatus,
+  hasRevealedEnvironmentValue,
   readDraftState,
+  removeRevealedEnvironmentValue,
   shouldShowRestartRequired,
   writeDraftState,
   type DraftState,
@@ -70,6 +73,144 @@ describe("environment page helpers", () => {
     expect(describeEncryptionStatus("ready")).toBe("ready");
     expect(describeEncryptionStatus("missing")).toContain("DOTENVX_KEY");
     expect(describeEncryptionStatus("missing")).toContain("DOTENV_KEY");
+  });
+});
+
+describe("revealed environment value helpers", () => {
+  it("detects revealed values by key presence, not truthiness", () => {
+    const revealed: Record<string, string> = { EMPTY: "", NONEMPTY: "secret" };
+
+    expect(hasRevealedEnvironmentValue(revealed, "EMPTY")).toBe(true);
+    expect(hasRevealedEnvironmentValue(revealed, "NONEMPTY")).toBe(true);
+    expect(hasRevealedEnvironmentValue(revealed, "MISSING")).toBe(false);
+  });
+
+  it("removes revealed values while preserving others", () => {
+    const revealed: Record<string, string> = { API_KEY: "secret", DB_PASS: "", OTHER: "value" };
+
+    const result = removeRevealedEnvironmentValue(revealed, "DB_PASS");
+
+    expect(hasRevealedEnvironmentValue(result, "DB_PASS")).toBe(false);
+    expect(hasRevealedEnvironmentValue(result, "API_KEY")).toBe(true);
+    expect(hasRevealedEnvironmentValue(result, "OTHER")).toBe(true);
+    expect(result).toEqual({ API_KEY: "secret", OTHER: "value" });
+  });
+
+  it("does not mutate the original revealed state", () => {
+    const revealed: Record<string, string> = { KEY: "value" };
+    const original = revealed;
+
+    removeRevealedEnvironmentValue(revealed, "KEY");
+
+    expect(revealed).toBe(original);
+    expect(hasRevealedEnvironmentValue(revealed, "KEY")).toBe(true);
+  });
+});
+
+describe("environment action buttons", () => {
+  it("treats an empty revealed value as revealed", () => {
+    expect(hasRevealedEnvironmentValue({ EMPTY_SECRET: "" }, "EMPTY_SECRET")).toBe(true);
+    expect(hasRevealedEnvironmentValue({}, "EMPTY_SECRET")).toBe(false);
+  });
+
+  it("hides only the requested value", () => {
+    const revealed = { FIRST_SECRET: "one", SECOND_SECRET: "two" };
+
+    expect(removeRevealedEnvironmentValue(revealed, "FIRST_SECRET")).toEqual({
+      SECOND_SECRET: "two",
+    });
+    expect(revealed).toEqual({ FIRST_SECRET: "one", SECOND_SECRET: "two" });
+  });
+
+  const createVariable = (key = "SECRET") => ({
+    key,
+    maskedValue: "********",
+    source: ".env",
+    sourcePath: ".env",
+    reserved: false,
+  });
+
+  it("renders reveal button when value is not revealed", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentActionButtons
+        variable={createVariable()}
+        isRevealed={false}
+        onToggleReveal={vi.fn()}
+        onCopy={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Reveal value"');
+    expect(markup).not.toContain('aria-label="Hide value"');
+  });
+
+  it("renders hide button when value is revealed", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentActionButtons
+        variable={createVariable()}
+        isRevealed={true}
+        onToggleReveal={vi.fn()}
+        onCopy={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Hide value"');
+    expect(markup).not.toContain('aria-label="Reveal value"');
+  });
+
+  it("provides copy, edit, delete buttons with accessible labels", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentActionButtons
+        variable={createVariable()}
+        isRevealed={false}
+        onToggleReveal={vi.fn()}
+        onCopy={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Copy value"');
+    expect(markup).toContain('aria-label="Edit value"');
+    expect(markup).toContain('aria-label="Delete value"');
+  });
+
+  it("has title attributes for all buttons", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentActionButtons
+        variable={createVariable()}
+        isRevealed={false}
+        onToggleReveal={vi.fn()}
+        onCopy={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('title="Reveal value"');
+    expect(markup).toContain('title="Copy value"');
+    expect(markup).toContain('title="Edit value"');
+    expect(markup).toContain('title="Delete value"');
+  });
+
+  it("marks SVG icons as aria-hidden for proper accessibility", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentActionButtons
+        variable={createVariable()}
+        isRevealed={false}
+        onToggleReveal={vi.fn()}
+        onCopy={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    const svgCount = (markup.match(/aria-hidden="true"/g) || []).length;
+    expect(svgCount).toBeGreaterThanOrEqual(4);
   });
 });
 
