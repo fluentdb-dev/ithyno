@@ -441,19 +441,24 @@ export function Environment() {
           ) : null}
 
           {reviewOpen ? (
-            <section className="settings-section environment-panel">
-              <h3>Confirm save</h3>
-              <p className="muted">Target file: {snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</p>
-              <ul className="environment-list">
-                {pendingOperations().map((operation) => (
-                  <li key={operation}>{operation}</li>
-                ))}
-              </ul>
-              <div className="settings-actions">
-                <button onClick={() => void saveChanges()} disabled={saving}>Save</button>
-                <button onClick={() => setReviewOpen(false)}>Cancel</button>
+            <div className="modal-backdrop" onClick={() => setReviewOpen(false)}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <h3 className="modal-title">Confirm save</h3>
+                <p className="modal-subtitle">
+                  <code>{snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</code>
+                </p>
+                <ul className="environment-list">
+                  {pendingOperations().map((operation) => (
+                    <li key={operation}>{operation}</li>
+                  ))}
+                </ul>
+                {saveError ? <p className="environment-error">{saveError}</p> : null}
+                <div className="modal-actions">
+                  <button className="btn-secondary" onClick={() => setReviewOpen(false)} disabled={saving}>Cancel</button>
+                  <button className="btn-primary" onClick={() => void saveChanges()} disabled={saving}>Save</button>
+                </div>
               </div>
-            </section>
+            </div>
           ) : null}
 
           {snapshot.profiles.length === 0 ? null : (
