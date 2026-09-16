@@ -48,7 +48,7 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys, parsePtyConnectionIdentity, parsePtyConnectionIntent } from "./sync/pty.js";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
@@ -84,6 +84,7 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
+import { registerProductionShutdown } from "./production-shutdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -123,6 +124,9 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
+registerProductionShutdown(fastify, () => {
+  terminateAllLivePtys();
+});
 await fastify.register(rateLimit, { global: false });
 
 // ---- CSRF protection -------------------------------------------------------
@@ -2082,11 +2086,28 @@ fastify.server.on("upgrade", (request, socket, head) => {
   }
 });
 
-ptyWss.on("connection", async (ws) => {
+ptyWss.on("connection", async (ws, request) => {
   const cwd = openspecDir
     ? resolve(openspecDir, "..") // project root, not openspec/ itself
     : getProjectRoot();
-  const result = await attachPtyToSocket(ws, { cwd, registry: agentRegistry });
+  const identity = parsePtyConnectionIdentity(request?.url, cwd);
+  if (identity.projectRoot !== resolve(cwd)) {
+    try {
+      ws.send(`\r\n[ithyno] terminal project mismatch: ${identity.projectRoot} != ${cwd}\r\n`);
+    } catch {
+      /* ignore */
+    }
+    ws.close();
+    return;
+  }
+  const intent = parsePtyConnectionIntent(request?.url);
+  const result = await attachPtyToSocket(ws, {
+    cwd,
+    registry: agentRegistry,
+    projectId: identity.projectRoot,
+    sessionId: identity.sessionId,
+    intent,
+  });
   if (!result.ok) {
     try {
       ws.send(`\r\n[ithyno] terminal unavailable: ${result.reason}\r\n`);
