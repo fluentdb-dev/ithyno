@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Terminal Session Lost Overlay
 The dashboard's embedded terminal SHALL detect a `/pty` WebSocket
