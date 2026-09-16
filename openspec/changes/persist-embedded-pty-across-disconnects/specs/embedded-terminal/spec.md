@@ -32,6 +32,8 @@ TTL.
 - **WHEN** the TTL expires
 - **THEN** the server kills and reaps the PTY and removes its session entry
 
+## ADDED Requirements
+
 ### Requirement: PTY session identity prevents duplicate processes
 
 The server SHALL associate an embedded PTY with a stable project/session
