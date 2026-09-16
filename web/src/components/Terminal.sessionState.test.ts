@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
   parseTerminalReplayProtocolMessage,
   createTerminalReplayInputGate,
+  createTerminalReplayController,
   readStableTerminalSession,
   rotateStableTerminalSession,
   markStableTerminalSessionEstablished,
@@ -375,5 +376,51 @@ describe("terminal replay protocol and input suppression", () => {
     doneB!();
 
     expect(gate.shouldForward("user input")).toBe(true);
+  });
+});
+
+describe("terminal replay controller (reset-on-reconnect)", () => {
+  it("first replay-start does not reset (initial attach to empty xterm)", () => {
+    const controller = createTerminalReplayController();
+    const resetSpy = vi.fn();
+
+    controller.onReplayStart(resetSpy);
+    expect(resetSpy).not.toHaveBeenCalled();
+  });
+
+  it("after markAttached, replay-start calls reset exactly once", () => {
+    const controller = createTerminalReplayController();
+    const resetSpy = vi.fn();
+
+    controller.markAttached();
+    controller.onReplayStart(resetSpy);
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("multiple reconnects each call reset (reset on every replay-start after attached)", () => {
+    const controller = createTerminalReplayController();
+    const resetSpy = vi.fn();
+
+    controller.markAttached();
+    controller.onReplayStart(resetSpy);
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+
+    controller.onReplayStart(resetSpy);
+    expect(resetSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("fresh controller starts unattached", () => {
+    const controller = createTerminalReplayController();
+    const resetSpy = vi.fn();
+
+    // First instance unattached
+    controller.onReplayStart(resetSpy);
+    expect(resetSpy).not.toHaveBeenCalled();
+
+    // Second instance (independent)
+    const controller2 = createTerminalReplayController();
+    const resetSpy2 = vi.fn();
+    controller2.onReplayStart(resetSpy2);
+    expect(resetSpy2).not.toHaveBeenCalled();
   });
 });

@@ -1165,6 +1165,70 @@ describe("pty session identity and reconnect semantics", () => {
   });
 });
 
+// ---- terminal replay (reset-then-replay reconnect design) ------
+describe("terminal replay", () => {
+  it("sends replay buffer on reattach with replay-start/replay-end boundaries", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-replay-reset-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      const uniqueOutput = "UNIQUE_BUFFER_CONTENT_12345";
+      ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+      const ws1 = makeFakeWs();
+      const sessionId = "test-session-reset-replay";
+
+      const attachResult1 = await attachPtyToSocket(ws1, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId,
+      });
+      expect(attachResult1.ok).toBe(true);
+
+      ws1.sent = [];
+      term.emitData(uniqueOutput);
+
+      ws1.close();
+
+      const ws2 = makeFakeWs();
+      const attachResult2 = await attachPtyToSocket(ws2, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId,
+      });
+      expect(attachResult2.ok).toBe(true);
+
+      const messages2 = ws2.sent.map((msg: any) => {
+        try {
+          return JSON.parse(msg);
+        } catch {
+          return { type: "raw", data: msg };
+        }
+      });
+
+      const hasReattachedStatus = messages2.some((m: any) => m.type === "session-status" && m.status === "reattached");
+      const hasReplayStart = messages2.some((m: any) => m.type === "replay-start");
+      const hasReplayEnd = messages2.some((m: any) => m.type === "replay-end");
+      const hasUniqueOutput = messages2.some((m: any) => m.type === "raw" && m.data.includes(uniqueOutput));
+
+      expect(hasReattachedStatus).toBe(true);
+      expect(hasReplayStart).toBe(true);
+      expect(hasReplayEnd).toBe(true);
+      expect(hasUniqueOutput).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---- terminal replay protocol (prevent query response corruption) --------
 describe("terminal replay protocol", () => {
   beforeEach(() => {

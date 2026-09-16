@@ -117,6 +117,26 @@ export function createTerminalReplayInputGate(): TerminalReplayInputGate {
   };
 }
 
+export interface TerminalReplayController {
+  markAttached(): void;
+  onReplayStart(resetTerminal: () => void): void;
+}
+
+export function createTerminalReplayController(): TerminalReplayController {
+  let attached = false;
+
+  return {
+    markAttached() {
+      attached = true;
+    },
+    onReplayStart(resetTerminal: () => void) {
+      if (attached) {
+        resetTerminal();
+      }
+    },
+  };
+}
+
 export type TerminalOverlayPresentation = {
   showOverlay: boolean;
   title: string;
@@ -374,6 +394,7 @@ export function Terminal() {
     let closedByRestart = false;
     let currentSessionState: TerminalSessionState = "connected";
     let shouldAutoReconnect = true;
+    const replayController = createTerminalReplayController();
     const gate = createTerminalReplayInputGate();
     const sessionStateInfo = readStableTerminalSession(projectRoot);
     const sessionKey = sessionStateInfo.key;
@@ -497,6 +518,10 @@ export function Terminal() {
           const replayMsg = parseTerminalReplayProtocolMessage(raw);
           if (replayMsg === "replay-start") {
             gate.begin();
+            // On reconnect (after attached), reset xterm to empty terminal state before
+            // replay content so old screen and '[reconnecting…]' marker are not duplicated.
+            // On initial attach, replay is written to empty xterm without reset.
+            replayController.onReplayStart(() => term.reset());
             return;
           }
           if (replayMsg === "replay-end") {
@@ -523,6 +548,7 @@ export function Terminal() {
               return;
             }
             if (status.status === "reattached" || status.status === "attached") {
+              replayController.markAttached();
               disconnectedAtMs = null;
               if (reconnectTimer !== null) {
                 window.clearTimeout(reconnectTimer);
