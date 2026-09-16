@@ -3,8 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   EnvironmentEmptyState,
+  EnvironmentNoProfileState,
   EnvironmentValueCell,
   buildPendingOperations,
+  describeEncryptionStatus,
   readDraftState,
   shouldShowRestartRequired,
   writeDraftState,
@@ -16,6 +18,20 @@ describe("environment page helpers", () => {
     const markup = renderToStaticMarkup(<EnvironmentEmptyState />);
     expect(markup).toContain("No env files exist yet");
     expect(markup).toContain("ithyno session variables stay separate");
+  });
+
+  it("renders a dedicated first-profile prompt when no environment exists yet", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentNoProfileState
+        createProfileName=""
+        setCreateProfileName={() => undefined}
+        onCreateProfile={() => undefined}
+        loading={false}
+      />,
+    );
+    expect(markup).toContain("No environment is configured yet");
+    expect(markup).toContain("Create first profile");
+    expect(markup).toContain("Create the first project profile");
   });
 
   it("renders masked values until explicitly revealed", () => {
@@ -48,6 +64,12 @@ describe("environment page helpers", () => {
     expect(shouldShowRestartRequired("rev-1", "rev-2", true)).toBe(true);
     expect(shouldShowRestartRequired("rev-2", "rev-2", true)).toBe(false);
     expect(shouldShowRestartRequired(null, "rev-2", true)).toBe(false);
+  });
+
+  it("explains whether dotenv encryption is available in the runtime environment", () => {
+    expect(describeEncryptionStatus("ready")).toBe("ready");
+    expect(describeEncryptionStatus("missing")).toContain("DOTENVX_KEY");
+    expect(describeEncryptionStatus("missing")).toContain("DOTENV_KEY");
   });
 });
 

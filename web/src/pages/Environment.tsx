@@ -23,7 +23,7 @@ type Snapshot = {
   orderedFiles: string[];
   variables: Variable[];
   diagnostics: Array<{ kind: string; severity: string; message: string; path?: string }>;
-  encryption: { ready: boolean; status: string; sources: string[] };
+  encryption: { ready: boolean; status: "ready" | "missing"; sources: string[] };
   revision: string;
 };
 
@@ -74,6 +74,11 @@ export function buildPendingOperations(targetProfile: string | null | undefined,
   return operations;
 }
 
+export function describeEncryptionStatus(status: "ready" | "missing") {
+  if (status === "ready") return "ready";
+  return "missing (set DOTENVX_KEY / DOTENV_KEY in the app runtime environment)";
+}
+
 export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
   if (!managerRunning || !lastAppliedRevision || !snapshotRevision) return false;
   return lastAppliedRevision !== snapshotRevision;
@@ -99,15 +104,50 @@ function writeLastAppliedRevision(revision: string | null, storage: Storage | nu
 
 export function EnvironmentEmptyState() {
   return (
-    <div style={{ border: "1px solid #d0d7de", background: "#f6f8fa", padding: 16, marginBottom: 16 }}>
+    <div className="environment-empty-state">
       <strong>No env files exist yet.</strong>
       <p>Create the first project profile with the name field above, or add a .env file manually. ithyno session variables stay separate from project variables.</p>
     </div>
   );
 }
 
+export function EnvironmentNoProfileState({
+  createProfileName,
+  setCreateProfileName,
+  onCreateProfile,
+  loading,
+}: {
+  createProfileName: string;
+  setCreateProfileName: (value: string) => void;
+  onCreateProfile: () => void | Promise<void>;
+  loading: boolean;
+}) {
+  return (
+    <section className="settings-section environment-empty-hero">
+      <h3>Profile</h3>
+      <div className="environment-empty-hero-body">
+        <strong>No environment is configured yet.</strong>
+        <p>
+          Create the first project profile to apply dotenv values to new Manager PTYs and AgentRunner workers.
+        </p>
+        <div className="environment-inline-controls environment-inline-controls--stacked">
+          <input
+            className="environment-input"
+            value={createProfileName}
+            onChange={(e) => setCreateProfileName(e.target.value)}
+            placeholder="Create profile name"
+          />
+          <button onClick={() => void onCreateProfile()} disabled={loading}>
+            Create first profile
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function EnvironmentValueCell({ variable, revealedValue }: { variable: Variable; revealedValue?: string }) {
-  return <span>{revealedValue ?? variable.maskedValue}</span>;
+  return <span className="environment-value-cell">{revealedValue ?? variable.maskedValue}</span>;
 }
 
 export function Environment() {
@@ -123,6 +163,7 @@ export function Environment() {
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [createProfileName, setCreateProfileName] = useState("");
+  const [showCreateProfileForm, setShowCreateProfileForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -268,6 +309,7 @@ export function Environment() {
         }
       }
       setCreateProfileName("");
+      setShowCreateProfileForm(false);
     } finally {
       setLoading(false);
     }
@@ -312,140 +354,192 @@ export function Environment() {
   };
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="settings-page environment-page">
       <h2>Development Environment</h2>
-      <p>Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.</p>
+      <p className="muted environment-description">
+        Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
+      </p>
+      {snapshot?.encryption.status === "missing" ? (
+        <p className="environment-status environment-status-warning">
+          ⚠ Encryption: missing — set DOTENVX_KEY / DOTENV_KEY in the app runtime environment.
+        </p>
+      ) : snapshot?.encryption.status === "ready" ? (
+        <p className="environment-status environment-status-ok">Encryption: ready</p>
+      ) : null}
       {managerRunning && restartRequired ? (
-        <div style={{ background: "#fff4d6", border: "1px solid #f0b429", padding: 12, marginBottom: 12 }}>
+        <div className="info-banner">
           Restart required: the Manager is still running and the selected profile or edits will only take effect after a restart.
         </div>
       ) : null}
       {snapshot ? (
         <>
-          <div style={{ marginBottom: 16 }}>
-            <label>
-              Selected profile
-              <select
-                value={snapshot.selection.selectedProfile ?? ""}
-                onChange={(e) => void onSelect(e.target.value || null)}
-                disabled={loading}
-                style={{ marginLeft: 8 }}
-              >
-                <option value="">No profile</option>
-                {snapshot.profiles.map((profile) => (
-                  <option key={profile.name} value={profile.name}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <input
-              value={createProfileName}
-              onChange={(e) => setCreateProfileName(e.target.value)}
-              placeholder="Create profile name"
-              style={{ marginRight: 8 }}
+          {snapshot.profiles.length === 0 ? (
+            <EnvironmentNoProfileState
+              createProfileName={createProfileName}
+              setCreateProfileName={setCreateProfileName}
+              onCreateProfile={createProfile}
+              loading={loading}
             />
-            <button onClick={() => void createProfile()} disabled={loading}>
-              Create profile
-            </button>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label>
-              New variable
-              <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="KEY" style={{ marginLeft: 8, marginRight: 8 }} />
-              <input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="value" style={{ marginRight: 8 }} />
-              <button onClick={stageVariable}>Stage variable</button>
-            </label>
-          </div>
+          ) : (
+            <section className="settings-section">
+              <div className="environment-header-row">
+                <h3>Profile</h3>
+                <button
+                  className="environment-action-link"
+                  onClick={() => setShowCreateProfileForm((cur) => !cur)}
+                  disabled={loading}
+                >
+                  {showCreateProfileForm ? "Close" : "Create profile"}
+                </button>
+              </div>
+
+              {showCreateProfileForm ? (
+                <div className="environment-create-card">
+                  <div className="environment-inline-controls environment-inline-controls--stacked">
+                    <input
+                      className="environment-input"
+                      value={createProfileName}
+                      onChange={(e) => setCreateProfileName(e.target.value)}
+                      placeholder="Create profile name"
+                    />
+                    <button onClick={() => void createProfile()} disabled={loading || !createProfileName.trim()}>
+                      Create profile
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="settings-field">
+                <label>
+                  <span><strong>Active profile</strong></span>
+                  <select
+                    className="environment-select"
+                    value={snapshot.selection.selectedProfile ?? ""}
+                    onChange={(e) => void onSelect(e.target.value || null)}
+                    disabled={loading}
+                  >
+                    <option value="">No profile</option>
+                    {snapshot.profiles.map((profile) => (
+                      <option key={profile.name} value={profile.name}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
+          )}
+
           {(Object.keys(draft.edits).length > 0 || draft.removals.length > 0) ? (
-            <div style={{ marginBottom: 16 }}>
-              <strong>Pending changes</strong>
-              <ul>
-                {pendingOperations().map((operation) => (
-                  <li key={operation}>{operation}</li>
-                ))}
-              </ul>
-              <button onClick={() => setReviewOpen(true)} disabled={saving}>
-                Review save
-              </button>
-            </div>
+            <section className="settings-section">
+              <div className="settings-actions">
+                <button onClick={() => setReviewOpen(true)} disabled={saving}>
+                  Save changes
+                </button>
+              </div>
+            </section>
           ) : null}
-          {snapshot.profiles.length === 0 ? <EnvironmentEmptyState /> : (
-            <>
-              <h3>Profiles</h3>
-              <ul>
-                {snapshot.profiles.map((profile) => (
-                  <li key={profile.name}>
-                    {profile.name} — {profile.path} {profile.selected ? "(selected)" : ""}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {snapshot.profiles.length === 0 ? null : (
-            <>
-              <h3>Variables</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Key</th>
-                    <th>Value</th>
-                    <th>Source</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {snapshot.variables.map((variable) => (
-                    <tr key={variable.key}>
-                      <td>{variable.key}</td>
-                      <td><EnvironmentValueCell variable={variable} revealedValue={revealed[variable.key]} /></td>
-                      <td>{variable.source}</td>
-                      <td>
-                        <button onClick={() => void onReveal(variable.key)} style={{ marginRight: 4 }}>Reveal</button>
-                        <button onClick={() => void onCopy(variable.key)} style={{ marginRight: 4 }}>Copy</button>
-                        <button onClick={() => stageEdit(variable.key)} style={{ marginRight: 4 }}>Edit</button>
-                        <button onClick={() => removeVariable(variable.key)}>Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-          <h3>Diagnostics</h3>
-          <ul>
-            {snapshot.diagnostics.map((diag, index) => (
-              <li key={`${diag.kind}-${index}`}>{diag.message}</li>
-            ))}
-          </ul>
-          <p>Encryption: {snapshot.encryption.status}</p>
-          {saveError ? <p style={{ color: "crimson" }}>{saveError}</p> : null}
+
           {reviewOpen ? (
-            <div style={{ border: "1px solid #d0d7de", background: "#f6f8fa", padding: 16, marginTop: 16 }}>
-              <h4>Save review</h4>
-              <p>Target file: {snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</p>
-              <ul>
+            <section className="settings-section environment-panel">
+              <h3>Confirm save</h3>
+              <p className="muted">Target file: {snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}</p>
+              <ul className="environment-list">
                 {pendingOperations().map((operation) => (
                   <li key={operation}>{operation}</li>
                 ))}
               </ul>
-              <button onClick={() => void saveChanges()} disabled={saving}>Save changes</button>
-              <button onClick={() => setReviewOpen(false)} style={{ marginLeft: 8 }}>Cancel</button>
-            </div>
+              <div className="settings-actions">
+                <button onClick={() => void saveChanges()} disabled={saving}>Save</button>
+                <button onClick={() => setReviewOpen(false)}>Cancel</button>
+              </div>
+            </section>
           ) : null}
+
+          {snapshot.profiles.length === 0 ? null : (
+            <section className="settings-section">
+              <div className="settings-field">
+                <label>
+                  <span>
+                    <strong>New variable</strong>
+                    <p>Stage a single key/value pair before reviewing and saving the profile.</p>
+                  </span>
+                  <div className="environment-inline-controls environment-inline-controls--stacked">
+                    <input
+                      className="environment-input"
+                      value={newKey}
+                      onChange={(e) => setNewKey(e.target.value)}
+                      placeholder="KEY"
+                    />
+                    <input
+                      className="environment-input"
+                      value={newValue}
+                      onChange={(e) => setNewValue(e.target.value)}
+                      placeholder="value"
+                    />
+                    <button onClick={stageVariable}>Stage variable</button>
+                  </div>
+                </label>
+              </div>
+
+              <h3>Variables</h3>
+              {snapshot.variables.length === 0 ? (
+                <div className="environment-empty-state environment-empty-plain">
+                  <strong>No variables defined for this profile yet.</strong>
+                </div>
+              ) : (
+                <div className="environment-table-wrap">
+                  <table className="environment-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Value</th>
+                        <th>Source</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {snapshot.variables.map((variable) => (
+                        <tr key={variable.key}>
+                          <td>{variable.key}</td>
+                          <td><EnvironmentValueCell variable={variable} revealedValue={revealed[variable.key]} /></td>
+                          <td>{variable.source}</td>
+                          <td>
+                            <div className="environment-actions">
+                              <button onClick={() => void onReveal(variable.key)}>Reveal</button>
+                              <button onClick={() => void onCopy(variable.key)}>Copy</button>
+                              <button onClick={() => stageEdit(variable.key)}>Edit</button>
+                              <button onClick={() => removeVariable(variable.key)}>Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+
+          {saveError ? <p className="environment-error">{saveError}</p> : null}
           {editingKey ? (
-            <div style={{ border: "1px solid #d0d7de", background: "#f6f8fa", padding: 16, marginTop: 16 }}>
-              <h4>Edit {editingKey}</h4>
-              <input value={editingValue} onChange={(e) => setEditingValue(e.target.value)} />
-              <button onClick={saveEdit} style={{ marginLeft: 8 }}>Save</button>
-              <button onClick={() => setEditingKey(null)} style={{ marginLeft: 8 }}>Cancel</button>
-            </div>
+            <section className="settings-section environment-panel">
+              <h3>Edit {editingKey}</h3>
+              <div className="environment-inline-controls environment-inline-controls--stacked">
+                <input
+                  className="environment-input"
+                  value={editingValue}
+                  onChange={(e) => setEditingValue(e.target.value)}
+                />
+                <button onClick={saveEdit}>Save</button>
+                <button onClick={() => setEditingKey(null)}>Cancel</button>
+              </div>
+            </section>
           ) : null}
         </>
       ) : (
-        <p>Loading…</p>
+        <p className="muted">Loading…</p>
       )}
     </div>
   );
