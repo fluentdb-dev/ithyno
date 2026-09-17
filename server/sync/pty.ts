@@ -18,7 +18,7 @@ import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
-import { resolveDevelopmentEnvironmentValues } from "../environment/index.js";
+import { resolveDevelopmentEnvironmentValues, sanitizeChildEnvironment } from "../environment/index.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -361,8 +361,8 @@ export async function buildManagerPtyEnv(
   const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
   const base = `http://localhost:${resolvedPort}`;
   const profileEnv = projectRoot ? await resolveDevelopmentEnvironmentValues(projectRoot, inherited) : {};
-  return {
-    ...inherited,
+  const finalEnv: NodeJS.ProcessEnv = {
+    ...sanitizeChildEnvironment(inherited),
     ...profileEnv,
     LANG: inherited.LANG || "en_US.UTF-8",
     TERM: "xterm-256color",
@@ -371,6 +371,7 @@ export async function buildManagerPtyEnv(
     ITHYNO_PORT: resolvedPort,
     ITHYNO_BASE: base,
   };
+  return sanitizeChildEnvironment(finalEnv);
 }
 
 /** Wrap `s` in single quotes when it contains characters a shell would

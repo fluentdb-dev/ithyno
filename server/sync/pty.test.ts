@@ -406,12 +406,69 @@ describe("buildManagerPtyEnv", () => {
     expect(env.ITHYNO_RESERVED).toBeUndefined();
   });
 
-  it("leaves the Manager PTY environment unchanged when no profile is selected", async () => {
+  it("removes inherited dotenvx credential keys from the Manager PTY env while retaining app values", async () => {
+    const previousPrivate = process.env.DOTENV_PRIVATE_KEY;
+    const previousPublic = process.env.DOTENV_PUBLIC_KEY;
+    const previousLegacy = process.env.DOTENVX_KEY;
+    const previousSpecific = process.env.dotenv_private_key_development;
+    process.env.DOTENV_PRIVATE_KEY = "secret-private";
+    process.env.DOTENV_PUBLIC_KEY = "secret-public";
+    process.env.DOTENVX_KEY = "secret-legacy";
+    process.env.dotenv_private_key_development = "secret-specific";
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\nFEATURE=enabled\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    try {
+      const env = await buildManagerPtyEnv(57703, "abc123", dir);
+      expect(env.SELECTED_VALUE).toBe("from-dev");
+      expect(env.FEATURE).toBe("enabled");
+      expect(env.DOTENV_PRIVATE_KEY).toBeUndefined();
+      expect(env.DOTENV_PUBLIC_KEY).toBeUndefined();
+      expect(env.DOTENVX_KEY).toBeUndefined();
+      expect(env.dotenv_private_key_development).toBeUndefined();
+    } finally {
+      if (previousPrivate === undefined) delete process.env.DOTENV_PRIVATE_KEY;
+      else process.env.DOTENV_PRIVATE_KEY = previousPrivate;
+      if (previousPublic === undefined) delete process.env.DOTENV_PUBLIC_KEY;
+      else process.env.DOTENV_PUBLIC_KEY = previousPublic;
+      if (previousLegacy === undefined) delete process.env.DOTENVX_KEY;
+      else process.env.DOTENVX_KEY = previousLegacy;
+      if (previousSpecific === undefined) delete process.env.dotenv_private_key_development;
+      else process.env.dotenv_private_key_development = previousSpecific;
+    }
+  });
+
+  it("removes Windows-style credential casing from the Manager PTY env", async () => {
+    const previousPrivate = process.env.dotenv_private_key;
+    const previousPublic = process.env.Dotenv_Public_Key;
+    const previousLegacy = process.env.dotenv_key;
+    process.env.dotenv_private_key = "secret-private";
+    process.env.Dotenv_Public_Key = "secret-public";
+    process.env.dotenv_key = "secret-legacy";
+
+    try {
+      const env = await buildManagerPtyEnv(57703, "abc123");
+      expect(env.dotenv_private_key).toBeUndefined();
+      expect(env.Dotenv_Public_Key).toBeUndefined();
+      expect(env.dotenv_key).toBeUndefined();
+      expect(Object.keys(env).some((key) => key.toUpperCase() === "DOTENV_PRIVATE_KEY")).toBe(false);
+    } finally {
+      if (previousPrivate === undefined) delete process.env.dotenv_private_key;
+      else process.env.dotenv_private_key = previousPrivate;
+      if (previousPublic === undefined) delete process.env.Dotenv_Public_Key;
+      else process.env.Dotenv_Public_Key = previousPublic;
+      if (previousLegacy === undefined) delete process.env.dotenv_key;
+      else process.env.dotenv_key = previousLegacy;
+    }
+  });
+
+  it("keeps the base project env when no profile is selected", async () => {
     writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
     writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\n", "utf8");
 
     const env = await buildManagerPtyEnv(57703, "abc123", dir);
-    expect(env.BASE_VALUE).toBeUndefined();
+    expect(env.BASE_VALUE).toBe("from-default");
     expect(env.SELECTED_VALUE).toBeUndefined();
   });
 

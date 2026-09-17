@@ -20,9 +20,9 @@
 
 ## 4. Isolate credentials from child processes
 
-- [ ] 4.1 Feed dotenvx-resolved application values into the shared Manager PTY and AgentRunner environment composition paths.
-- [ ] 4.2 Remove every case-insensitive `DOTENV_PRIVATE_KEY` family member and supported legacy key credential from final child environments without removing normal application variables.
-- [ ] 4.3 Add Manager, attached worker, detached worker, adopted worker, worktree, and Windows-casing regression tests proving decrypted values arrive while credentials do not.
+- [x] 4.1 Feed dotenvx-resolved application values into the shared Manager PTY and AgentRunner environment composition paths.
+- [x] 4.2 Remove every case-insensitive `DOTENV_PRIVATE_KEY` family member and supported legacy key credential from final child environments without removing normal application variables.
+- [x] 4.3 Add Manager, attached worker, detached worker, adopted worker, worktree, and Windows-casing regression tests proving decrypted values arrive while credentials do not.
 
 ## 5. Redesign Environment key and profile UI
 

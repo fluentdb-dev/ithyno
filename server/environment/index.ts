@@ -152,6 +152,12 @@ function getSanitizedProcessEnv(inheritedEnv: NodeJS.ProcessEnv): Record<string,
   ) as Record<string, string>;
 }
 
+export function sanitizeChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env ?? {}).filter(([key]) => !isDotenvCredentialName(key)),
+  ) as NodeJS.ProcessEnv;
+}
+
 export function validateProfileName(profile: string | null | undefined): string | null {
   if (profile === null || profile === undefined) return null;
   const trimmed = profile.trim();
