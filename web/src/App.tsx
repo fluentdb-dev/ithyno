@@ -5,7 +5,11 @@ import { useStore } from "./store";
 import { checkAuth, onAuthExpiredHandler } from "./api";
 import { clearSessionToken, getSessionToken } from "./runtime";
 import { recoverDecision } from "./focusRecovery";
-import { insertTextIntoField, type VsCodeClipboardResponse } from "./clipboardBridge";
+import {
+  insertTextIntoField,
+  isClipboardPasteShortcut,
+  type VsCodeClipboardResponse,
+} from "./clipboardBridge";
 import { Overview } from "./pages/Overview";
 import { ChangeDetail } from "./pages/ChangeDetail";
 import { Specs } from "./pages/Specs";
@@ -14,6 +18,7 @@ import { Tags, TagDetailPage } from "./pages/Tags";
 import { Archive } from "./pages/Archive";
 import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
+import { Environment } from "./pages/Environment";
 import { OnboardingProject } from "./pages/OnboardingProject";
 import { Terminal } from "./components/Terminal";
 import { TerminalHiddenAnchor, TerminalSizeToggle } from "./components/TerminalSizeToggle";
@@ -195,10 +200,7 @@ export function App() {
     let pendingElement: HTMLInputElement | HTMLTextAreaElement | null = null;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = typeof navigator !== "undefined" &&
-        (navigator.platform.startsWith("Mac") || navigator.platform === "MacIntel");
-      const isPaste = isMac ? (e.metaKey && e.key === "v") : (e.ctrlKey && e.key === "v");
-      if (!isPaste) return;
+      if (!isClipboardPasteShortcut(e)) return;
 
       const target = document.activeElement;
       if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return;
@@ -371,6 +373,7 @@ export function App() {
           <NavLink to="/tags">Tags</NavLink>
           <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/docs">Docs</NavLink>
+          <NavLink to="/environment">Environment</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="topbar-right">
@@ -434,6 +437,7 @@ export function App() {
             <Route path="/tags/:ns/*" element={<TagDetailPage />} />
             <Route path="/archive" element={<Archive />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/environment" element={<Environment />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         )}

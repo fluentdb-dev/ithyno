@@ -39,6 +39,12 @@ function newRequestId(): string {
 
 export type ClipboardWriter = Pick<Clipboard, "writeText">;
 
+export function isClipboardPasteShortcut(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">,
+): boolean {
+  return !event.altKey && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v";
+}
+
 let activeWriteRequestId: string | null = null;
 let activeWriteReject: ((reason?: unknown) => void) | null = null;
 let activeWriteCancel: (() => void) | null = null;

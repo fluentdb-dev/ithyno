@@ -84,6 +84,7 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
+import { registerEnvironmentRoutes } from "./environment/routes.js";
 import { registerProductionShutdown } from "./production-shutdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,10 @@ registerProductionShutdown(fastify, () => {
   terminateAllLivePtys();
 });
 await fastify.register(rateLimit, { global: false });
+await fastify.register(registerEnvironmentRoutes, {
+  getProjectRoot,
+  getProcessEnv: () => process.env,
+});
 
 // ---- CSRF protection -------------------------------------------------------
 // Built once we know the listening port (see fastify.listen below). Used by

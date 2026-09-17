@@ -39,6 +39,7 @@ const repoRoot = resolve(here, "..");
 // Contract this script enforces. Referenced verbatim in every failure
 // message so a reader can grep the archived change in one step.
 const CONTRACT = "enable-codex-native-subagent-dispatch";
+const DOTENVX_VERSION = "2.23.0";
 
 function log(msg) {
   console.log(`[verify-bundle] ${msg}`);
@@ -161,6 +162,13 @@ function assertTarballShape() {
       );
     }
 
+    const packedManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+    if (packedManifest.dependencies?.["@dotenvx/dotenvx"] !== DOTENVX_VERSION) {
+      throw new Error(
+        `npm tarball must pin @dotenvx/dotenvx at ${DOTENVX_VERSION}`,
+      );
+    }
+
     const paths = walkFiles(packageDir).map((p) => `package/${p}`);
     assertApprovedIthyOpsxSources(paths, "package/", "npm tarball");
     log(`  ✓ ${paths.length} files scanned in ${tgzName}`);
@@ -245,6 +253,16 @@ function assertElectronBundleShape(bundles) {
   for (const b of bundles) {
     const paths = walkFiles(b.appDir);
     assertApprovedIthyOpsxSources(paths, "", `electron bundle (${b.label})`);
+    const dotenvxManifest = join(b.appDir, "node_modules", "@dotenvx", "dotenvx", "package.json");
+    if (!existsSync(dotenvxManifest)) {
+      throw new Error(`electron bundle (${b.label}) is missing @dotenvx/dotenvx`);
+    }
+    const dotenvx = JSON.parse(readFileSync(dotenvxManifest, "utf8"));
+    if (dotenvx.version !== DOTENVX_VERSION) {
+      throw new Error(
+        `electron bundle (${b.label}) has @dotenvx/dotenvx ${dotenvx.version}; expected ${DOTENVX_VERSION}`,
+      );
+    }
     log(`  ✓ ${paths.length} files scanned in ${b.label}`);
   }
   log(

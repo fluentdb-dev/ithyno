@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { AgentRegistry } from "./registry.js";
 import { AgentRunner } from "./runner.js";
 import { MAX_AGENT_TIMEOUT_MS, validateRunPayload } from "./run-validation.js";
+import { writeEnvironmentSelection } from "../environment/index.js";
 
 const execFile = promisify(execFileCb);
 
@@ -63,6 +64,62 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       expect(res.branch).toBe("agent/add-feat");
       expect(res.created).toBe(true);
     }
+  });
+
+  it("injects the selected profile from the dashboard project root into worktree jobs", async () => {
+    writeFileSync(join(dir, ".env"), "ROOT_VALUE=from-root\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "WORKTREE_VALUE=from-dev\nITHYNO_RESERVED=blocked\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: worker
+    command: node
+    args: ["-e", "process.stdout.write(String(process.env.WORKTREE_VALUE ?? 'MISSING'))", "--"]
+    role: code
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    const run = await runner.run("add-env", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+    const job = runner.getJob(run.job.id);
+    const output = job?.output.map((item) => item.chunk).join("");
+    expect(output).toContain("from-dev");
+    expect(output).not.toContain("blocked");
+  });
+
+  it("avoids injecting project environment values when no profile is selected", async () => {
+    writeFileSync(join(dir, ".env"), "ROOT_VALUE=from-root\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "WORKTREE_VALUE=from-dev\n", "utf8");
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: worker
+    command: node
+    args: ["-e", "process.stdout.write(String(process.env.WORKTREE_VALUE ?? 'MISSING'))", "--"]
+    role: code
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    const run = await runner.run("add-env-none", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+    const job = runner.getJob(run.job.id);
+    const output = job?.output.map((item) => item.chunk).join("");
+    expect(output).toContain("MISSING");
   });
 
   it("rejects unsafe change ids before resolving a worktree path", async () => {

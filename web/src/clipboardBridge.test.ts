@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, vi } from "vitest";
-import { computeInsertedValue, shouldApplyClipboardResponse, writeClipboardText } from "./clipboardBridge";
+import {
+  computeInsertedValue,
+  isClipboardPasteShortcut,
+  shouldApplyClipboardResponse,
+  writeClipboardText,
+} from "./clipboardBridge";
 
 describe("writeClipboardText", () => {
   it("uses an injected clipboard writer for non-shell callers", async () => {
@@ -49,6 +54,18 @@ describe("computeInsertedValue — clipboard text insertion", () => {
     const { newValue, cursorPos } = computeInsertedValue("abc", 1, 1, "");
     expect(newValue).toBe("abc");
     expect(cursorPos).toBe(1);
+  });
+});
+
+describe("isClipboardPasteShortcut", () => {
+  it("accepts both Cmd+V and Ctrl+V without relying on navigator.platform", () => {
+    expect(isClipboardPasteShortcut({ key: "v", metaKey: true, ctrlKey: false, altKey: false })).toBe(true);
+    expect(isClipboardPasteShortcut({ key: "V", metaKey: false, ctrlKey: true, altKey: false })).toBe(true);
+  });
+
+  it("rejects unrelated or Alt-modified shortcuts", () => {
+    expect(isClipboardPasteShortcut({ key: "c", metaKey: true, ctrlKey: false, altKey: false })).toBe(false);
+    expect(isClipboardPasteShortcut({ key: "v", metaKey: false, ctrlKey: true, altKey: true })).toBe(false);
   });
 });
 

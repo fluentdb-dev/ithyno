@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       "server/**/*.test.ts",
       "web/src/**/*.test.ts",
+      "web/src/**/*.test.tsx",
       "scripts/**/*.test.mjs",
       "vscode-extension/src/webview-html.test.ts",
     ],

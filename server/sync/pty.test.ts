@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import { writeEnvironmentSelection } from "../environment/index.js";
 import * as ptyModule from "./pty.js";
 import {
   _setTmuxCacheForTest,
@@ -375,32 +376,52 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
 });
 
 describe("buildManagerPtyEnv", () => {
-  it("uses the server's active port/token when explicit values are present", () => {
-    const env = buildManagerPtyEnv(57703, "abc123");
+  it("uses the server's active port/token when explicit values are present", async () => {
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_PORT).toBe("57703");
     expect(env.ITHYNO_BASE).toBe("http://localhost:57703");
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });
 
-  it("falls back to the default port only when no explicit port was supplied", () => {
-    const env = buildManagerPtyEnv(undefined, "abc123");
+  it("falls back to the default port only when no explicit port was supplied", async () => {
+    const env = await buildManagerPtyEnv(undefined, "abc123");
     expect(env.ITHYNO_PORT).toBe("4321");
     expect(env.ITHYNO_BASE).toBe("http://localhost:4321");
   });
 
-  it("removes inherited launcher tokens before handing the env to the Manager PTY", () => {
+  it("removes inherited launcher tokens before handing the env to the Manager PTY", async () => {
     process.env.ITHYNO_LAUNCHER_SESSION_TOKEN = "stale-token";
-    const env = buildManagerPtyEnv(57703, "abc123");
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });
+  it("injects the selected profile into the Manager PTY environment", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\nITHYNO_RESERVED=blocked\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.SELECTED_VALUE).toBe("from-dev");
+    expect(env.BASE_VALUE).toBe("from-default");
+    expect(env.ITHYNO_RESERVED).toBeUndefined();
+  });
+
+  it("leaves the Manager PTY environment unchanged when no profile is selected", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\n", "utf8");
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.BASE_VALUE).toBeUndefined();
+    expect(env.SELECTED_VALUE).toBeUndefined();
+  });
+
   it("does not inherit host harness color suppression into the embedded xterm", async () => {
     const previousNoColor = process.env.NO_COLOR;
     const previousColorTerm = process.env.COLORTERM;
     try {
       process.env.NO_COLOR = "1";
       process.env.COLORTERM = "";
-      const env = buildManagerPtyEnv(57703, "abc123");
+      const env = await buildManagerPtyEnv(57703, "abc123");
       expect(env.NO_COLOR).toBeUndefined();
       expect(env.TERM).toBe("xterm-256color");
       expect(env.COLORTERM).toBe("truecolor");
@@ -411,7 +432,6 @@ describe("buildManagerPtyEnv", () => {
       else process.env.COLORTERM = previousColorTerm;
     }
   });
-
 });
 
 function expectedTmuxStartup(session: string, command: string): string {

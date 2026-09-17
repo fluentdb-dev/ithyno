@@ -18,6 +18,7 @@ import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
+import { resolveDevelopmentEnvironmentValues } from "../environment/index.js";
 
 export type PtyAvailability =
   | { available: true; module: any }
@@ -344,7 +345,11 @@ function tmuxMissingFallback(): string {
   return `printf '${line1}\\n${line2}\\n${line3}\\n'`;
 }
 
-export function buildManagerPtyEnv(port: string | number | undefined, token: string): NodeJS.ProcessEnv {
+export async function buildManagerPtyEnv(
+  port: string | number | undefined,
+  token: string,
+  projectRoot?: string,
+): Promise<NodeJS.ProcessEnv> {
   const inherited = { ...process.env };
   delete inherited.ITHYNO_LAUNCHER_SESSION_TOKEN;
   // Host agent terminals commonly set NO_COLOR=1 and TERM=dumb for their own
@@ -355,8 +360,10 @@ export function buildManagerPtyEnv(port: string | number | undefined, token: str
 
   const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
   const base = `http://localhost:${resolvedPort}`;
+  const profileEnv = projectRoot ? await resolveDevelopmentEnvironmentValues(projectRoot, inherited) : {};
   return {
     ...inherited,
+    ...profileEnv,
     LANG: inherited.LANG || "en_US.UTF-8",
     TERM: "xterm-256color",
     COLORTERM: inherited.COLORTERM || "truecolor",
@@ -829,7 +836,7 @@ export async function attachPtyToSocket(
     }
 
     const { cmd, args } = defaultShell();
-    const env = buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN);
+    const env = await buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN, opts.cwd);
     const term = pty.module.spawn(cmd, args, {
       name: "xterm-256color",
       cols: opts.cols ?? 80,

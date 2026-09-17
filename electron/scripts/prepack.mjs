@@ -51,6 +51,11 @@ execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts", {
   stdio: "inherit",
 });
 
+const stagedDotenvx = resolve(stageDir, "node_modules", "@dotenvx", "dotenvx", "package.json");
+if (!existsSync(stagedDotenvx)) {
+  throw new Error("staged Electron host is missing @dotenvx/dotenvx");
+}
+
 // Copy the compiled node-pty binaries from the root node_modules since compiling them
 // during staging fails due to python version / distutils issues.
 const rootPtyBuild = resolve(repoRoot, "node_modules", "@homebridge", "node-pty-prebuilt-multiarch", "build");
