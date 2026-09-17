@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { FastifyInstance } from "fastify";
 import {
+  deleteEnvironmentProfile,
   encryptEnvironmentFile,
   getEnvironmentSnapshot,
   mutateEnvironmentFile,
@@ -125,4 +126,25 @@ export async function registerEnvironmentRoutes(
       return { error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  const deleteProfileRouteHandler = async (req: { body?: { profile?: string; path?: string } }, reply: any) => {
+    const body = req.body ?? {};
+    const profile = body.profile ?? "default";
+    if (!profile) {
+      reply.code(400);
+      return { error: "missing profile" };
+    }
+    try {
+      return await deleteEnvironmentProfile(getProjectRoot(), profile, {
+        expectedPath: body.path,
+      });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  fastify.post<{ Body: { profile?: string; path?: string } }>('/api/environment/profile-delete', { logLevel: 'silent' }, deleteProfileRouteHandler as any);
+  fastify.post<{ Body: { profile?: string; path?: string } }>('/api/environment/delete-profile', { logLevel: 'silent' }, deleteProfileRouteHandler as any);
+  fastify.delete<{ Body: { profile?: string; path?: string } }>('/api/environment/profile', { logLevel: 'silent' }, deleteProfileRouteHandler as any);
 }

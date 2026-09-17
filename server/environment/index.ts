@@ -19,7 +19,8 @@ export type EnvironmentDiagnostic = {
     | "encryption"
     | "git-tracked-secret"
     | "path-traversal"
-    | "stale-revision";
+    | "stale-revision"
+    | "orphaned-key";
   severity: "warning" | "error";
   message: string;
   path?: string;
@@ -47,6 +48,13 @@ export type DevelopmentEnvironmentSelection = {
   preferences: Record<string, unknown>;
 };
 
+export type DotenvxNativeStatus = {
+  supported: boolean;
+  platform: NodeJS.Platform;
+  tool?: string;
+  reason?: string;
+};
+
 export type DevelopmentEnvironmentState = {
   projectRoot: string;
   profiles: DevelopmentEnvironmentProfile[];
@@ -58,6 +66,9 @@ export type DevelopmentEnvironmentState = {
     ready: boolean;
     status: "ready" | "missing";
     sources: string[];
+    keyIdentifiers: string[];
+    source: string | null;
+    native: DotenvxNativeStatus;
   };
   revision: string;
 };
@@ -136,6 +147,107 @@ function collectDotenvKeySources(inheritedEnv: NodeJS.ProcessEnv, projectRoot: s
   }
 
   return Array.from(combined);
+}
+
+export function normalizeDotenvKeyIdentifier(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  const upper = trimmed.toUpperCase();
+  if (upper === "DOTENV_PRIVATE_KEY") return "DOTENV_PRIVATE_KEY";
+  if (upper.startsWith("DOTENV_PRIVATE_KEY_")) {
+    return upper.replace(/[^A-Z0-9_]/g, "_");
+  }
+  return upper;
+}
+
+export function getProfileKeyIdentifier(profileName: string | null | undefined): string {
+  const normalized = validateProfileName(profileName ?? "default");
+  if (!normalized || normalized === "default") return "DOTENV_PRIVATE_KEY";
+  if (normalized === "local") return "DOTENV_PRIVATE_KEY_LOCAL";
+  return `DOTENV_PRIVATE_KEY_${normalized.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+}
+
+export function getDotenvxNativeSupport(): DotenvxNativeStatus {
+  const platform = process.platform;
+  const needsSecurity = platform === "darwin";
+  const needsSecretTool = platform === "linux";
+  const needsPowerShell = platform === "win32";
+
+  if (needsSecurity) {
+    const ok = existsSync("/usr/bin/security");
+    return {
+      supported: ok,
+      platform,
+      tool: ok ? "/usr/bin/security" : undefined,
+      reason: ok ? undefined : "darwin native requires /usr/bin/security",
+    };
+  }
+  if (needsSecretTool) {
+    const tool = process.env.PATH ? process.env.PATH.split(":" ).map((entry) => join(entry, "secret-tool")).find((candidate) => existsSync(candidate)) : undefined;
+    return {
+      supported: Boolean(tool),
+      platform,
+      tool: tool,
+      reason: tool ? undefined : "linux native requires secret-tool on PATH",
+    };
+  }
+  if (needsPowerShell) {
+    const powershells = ["pwsh.exe", "powershell.exe"];
+    const tool = powershells.find((candidate) => {
+      try {
+        const resolved = require.resolve(candidate);
+        return Boolean(resolved);
+      } catch {
+        return false;
+      }
+    });
+    if (tool) return { supported: true, platform, tool };
+    const pathEntries = (process.env.PATH ?? "").split(/[;:]/).filter(Boolean);
+    const found = pathEntries
+      .map((entry) => join(entry, process.platform === "win32" ? "pwsh.exe" : "pwsh"))
+      .find((candidate) => existsSync(candidate));
+    return {
+      supported: Boolean(found),
+      platform,
+      tool: found,
+      reason: found ? undefined : "windows native requires pwsh or powershell.exe",
+    };
+  }
+  return { supported: false, platform };
+}
+
+export function getDotenvKeyIdentifiers(projectRoot: string, inheritedEnv: NodeJS.ProcessEnv = process.env): string[] {
+  const identifiers = new Set<string>();
+  for (const source of collectDotenvKeySources(inheritedEnv, projectRoot)) {
+    identifiers.add(normalizeDotenvKeyIdentifier(source));
+  }
+  const keyFile = join(projectRoot, ".env.keys");
+  if (!existsSync(keyFile)) return Array.from(identifiers);
+  try {
+    const raw = readFileSync(keyFile, "utf8");
+    for (const match of raw.matchAll(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) {
+      const key = match[1];
+      if (isDotenvCredentialName(key)) identifiers.add(normalizeDotenvKeyIdentifier(key));
+    }
+  } catch {
+    // ignore unreadable key files, diagnostics surface separately.
+  }
+  return Array.from(identifiers).sort();
+}
+
+export function getOrphanedDotenvKeyIdentifiers(projectRoot: string, inheritedEnv: NodeJS.ProcessEnv = process.env): string[] {
+  const knownProfiles = new Set<string>(["DOTENV_PRIVATE_KEY"]);
+  const entries = existsSync(projectRoot) ? readdirSync(projectRoot, { withFileTypes: true }) : [];
+  for (const entry of entries) {
+    if (entry.isDirectory() || entry.name === ".env.keys") continue;
+    if (!entry.name.startsWith(".env.")) continue;
+    const name = entry.name.slice(5);
+    if (name === "local") continue;
+    knownProfiles.add(getProfileKeyIdentifier(name));
+  }
+  if (existsSync(join(projectRoot, ".env"))) knownProfiles.add("DOTENV_PRIVATE_KEY");
+  if (existsSync(join(projectRoot, ".env.local"))) knownProfiles.add("DOTENV_PRIVATE_KEY_LOCAL");
+  return getDotenvKeyIdentifiers(projectRoot, inheritedEnv).filter((identifier) => !knownProfiles.has(identifier));
 }
 
 function getCredentialProcessEnv(inheritedEnv: NodeJS.ProcessEnv): Record<string, string> {
@@ -341,6 +453,43 @@ export async function writeEnvironmentSelection(
   await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
+export async function deleteEnvironmentProfile(
+  projectRoot: string,
+  profile: string,
+  options?: { expectedPath?: string | null },
+): Promise<{ profile: string; path: string }> {
+  const root = resolve(projectRoot);
+  const normalized = validateProfileName(profile);
+  if (!normalized) {
+    throw new Error("Invalid profile name");
+  }
+  const targetPath = resolveProfilePath(root, normalized);
+  if (!targetPath || !isInsideProjectRoot(root, targetPath)) {
+    throw new Error("Unsafe profile path");
+  }
+  const expectedPath = options?.expectedPath ? options.expectedPath.replace(/\\/g, "/").replace(/^\.\//, "") : null;
+  if (expectedPath && expectedPath !== toRelative(root, targetPath)) {
+    throw new Error(`Exact profile path confirmation required for ${toRelative(root, targetPath)}`);
+  }
+  if (!existsSync(targetPath)) {
+    throw new Error(`Profile not found: ${normalized}`);
+  }
+  const stat = lstatSync(targetPath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`Unsafe profile path: ${toRelative(root, targetPath)}`);
+  }
+  const tracked = readTrackedState(root, [targetPath]);
+  if (tracked.has(toRelative(root, targetPath))) {
+    throw new Error(`Refusing to delete tracked profile: ${toRelative(root, targetPath)}`);
+  }
+  await rm(targetPath, { force: true });
+  const selection = await readEnvironmentSelection(root);
+  if (selection.selectedProfile === normalized) {
+    await writeEnvironmentSelection(root, { selectedProfile: null, preferences: selection.preferences ?? {} });
+  }
+  return { profile: normalized, path: toRelative(root, targetPath) };
+}
+
 export async function discoverDevelopmentProfiles(projectRoot: string): Promise<{
   profiles: DevelopmentEnvironmentProfile[];
   diagnostics: EnvironmentDiagnostic[];
@@ -396,6 +545,7 @@ async function collectResolvedEnvironment(
   diagnostics: EnvironmentDiagnostic[];
   variableEntries: DevelopmentEnvironmentVariable[];
   encryptionSources: string[];
+  keyIdentifiers: string[];
   profiles: DevelopmentEnvironmentProfile[];
 }> {
   const root = resolve(projectRoot);
@@ -414,6 +564,7 @@ async function collectResolvedEnvironment(
   }
 
   const encryptionSources = collectDotenvKeySources(inheritedEnv, root);
+  const keyIdentifiers = getDotenvKeyIdentifiers(root, inheritedEnv);
 
   const diagnosticFiles = new Set<string>(orderedFiles);
   const resolvableFiles = new Set<string>();
@@ -474,6 +625,17 @@ async function collectResolvedEnvironment(
     }
   }
 
+  const orphanedKeys = getOrphanedDotenvKeyIdentifiers(root, inheritedEnv);
+  for (const identifier of orphanedKeys) {
+    diagnostics.push({
+      kind: "orphaned-key",
+      severity: "warning",
+      message: `Orphaned dotenvx key identifier: ${identifier}`,
+      key: identifier,
+      path: ".env.keys",
+    });
+  }
+
   const safeOrderedFiles = orderedFiles.filter((filePath) => resolvableFiles.has(filePath));
   for (const filePath of safeOrderedFiles) {
     try {
@@ -529,6 +691,7 @@ async function collectResolvedEnvironment(
         diagnostics,
         variableEntries: [],
         encryptionSources,
+        keyIdentifiers,
         profiles,
       };
     }
@@ -557,6 +720,7 @@ async function collectResolvedEnvironment(
     diagnostics,
     variableEntries: Array.from(variableEntriesByKey.values()),
     encryptionSources,
+    keyIdentifiers,
     profiles,
   };
 }
@@ -565,11 +729,14 @@ export async function composeDevelopmentEnvironment(
   projectRoot: string,
   inheritedEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<DevelopmentEnvironmentState> {
-  void inheritedEnv;
   const root = resolve(projectRoot);
   const selection = await readEnvironmentSelection(root);
-  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, profiles } = await collectResolvedEnvironment(root, selection, inheritedEnv);
+  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, keyIdentifiers, profiles } = await collectResolvedEnvironment(root, selection, inheritedEnv);
   const resolvedEntries = Object.entries(env).sort(([a], [b]) => a.localeCompare(b));
+  const nativeState = getDotenvxNativeSupport();
+  const selectedProfile = selection.selectedProfile ?? "default";
+  const selectedKeyIdentifier = getProfileKeyIdentifier(selectedProfile);
+  const source = encryptionSources.length > 0 ? (keyIdentifiers.includes(selectedKeyIdentifier) ? selectedKeyIdentifier : encryptionSources[0]) : null;
   const targetProfile = selection.selectedProfile ?? "default";
   const targetPath = resolveProfilePath(root, targetProfile);
   const targetContent = targetPath && existsSync(targetPath) && lstatSync(targetPath).isFile()
@@ -596,6 +763,9 @@ export async function composeDevelopmentEnvironment(
       ready: encryptionSources.length > 0,
       status: encryptionSources.length > 0 ? "ready" : "missing",
       sources: encryptionSources,
+      keyIdentifiers,
+      source,
+      native: nativeState,
     },
     revision: sha1(targetContent),
   };

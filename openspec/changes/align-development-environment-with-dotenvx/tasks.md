@@ -14,7 +14,7 @@
 ## 3. Restore standard encryption behavior
 
 - [x] 3.1 Change first-time encryption to invoke bundled dotenvx with explicit project-root `-f` and `-fk` paths without requiring a preconfigured private key.
-- [ ] 3.2 Validate `.env.keys` as a project-root regular non-symlink file, apply restrictive permissions where supported, and append an exact `.env.keys` Git-ignore rule after user confirmation without rewriting unrelated rules.
+- [x] 3.2 Validate `.env.keys` as a project-root regular non-symlink file, apply restrictive permissions where supported, and append an exact `.env.keys` Git-ignore rule after user confirmation without rewriting unrelated rules.
 - [x] 3.3 Refuse unsafe or Git-tracked key files and preserve pre-operation files/state when dotenvx encryption fails.
 - [x] 3.4 Add standard lifecycle tests for existing keys, new profile-specific keys, repeated encryption, missing keys, and wrong keys.
 
@@ -26,10 +26,10 @@
 
 ## 5. Redesign Environment key and profile UI
 
-- [ ] 5.1 Replace generic key-entry-first UI with selected-profile encryption state, key-source status, `.env.keys` guidance, and exact first-encryption/Git-ignore confirmation.
-- [ ] 5.2 Probe bundled dotenvx Native support and expose explicit Native move/copy actions only when the active host can support them; keep `.env.keys` fully usable otherwise.
-- [ ] 5.3 Add an authenticated profile-delete API and exact-path confirmation that accepts only discovered project-root regular env files, clears selection/transient state after success, and never removes keys implicitly.
-- [ ] 5.4 Add UI and API tests for first encryption, ready/missing/wrong key states, native-unavailable fallback, profile deletion, and orphaned-key guidance.
+- [x] 5.1 Replace generic key-entry-first UI with selected-profile encryption state, key-source status, `.env.keys` guidance, and exact first-encryption/Git-ignore confirmation.
+- [x] 5.2 Probe bundled dotenvx Native support and expose explicit Native move/copy actions only when the active host can support them; keep `.env.keys` fully usable otherwise.
+- [x] 5.3 Add an authenticated profile-delete API and exact-path confirmation that accepts only discovered project-root regular env files, clears selection/transient state after success, and never removes keys implicitly.
+- [x] 5.4 Add UI and API tests for first encryption, ready/missing/wrong key states, native-unavailable fallback, profile deletion, and orphaned-key guidance.
 
 ## 6. Retire incompatible secure-key work
 

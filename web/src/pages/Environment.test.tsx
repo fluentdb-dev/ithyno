@@ -73,8 +73,10 @@ describe("environment page helpers", () => {
 
   it("explains whether dotenv encryption is available in the runtime environment", () => {
     expect(describeEncryptionStatus("ready")).toBe("ready");
-    expect(describeEncryptionStatus("missing")).toContain("DOTENVX_KEY");
-    expect(describeEncryptionStatus("missing")).toContain("DOTENV_KEY");
+    expect(describeEncryptionStatus("ready", { source: "DOTENV_PRIVATE_KEY_DEVELOPMENT" })).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
+    expect(describeEncryptionStatus("missing")).toContain("confirm first encryption");
+    expect(describeEncryptionStatus("missing")).not.toContain("DOTENVX_KEY");
+    expect(describeEncryptionStatus("missing")).not.toContain("DOTENV_KEY");
   });
 });
 

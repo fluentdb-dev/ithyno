@@ -25,7 +25,14 @@ type Snapshot = {
   orderedFiles: string[];
   variables: Variable[];
   diagnostics: Array<{ kind: string; severity: string; message: string; path?: string }>;
-  encryption: { ready: boolean; status: "ready" | "missing"; sources: string[] };
+  encryption: {
+    ready: boolean;
+    status: "ready" | "missing";
+    sources: string[];
+    keyIdentifiers?: string[];
+    source?: string | null;
+    native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  };
   revision: string;
 };
 
@@ -96,9 +103,26 @@ export function buildPendingOperations(targetProfile: string | null | undefined,
   return operations;
 }
 
-export function describeEncryptionStatus(status: "ready" | "missing") {
-  if (status === "ready") return "ready";
-  return "missing (set DOTENVX_KEY / DOTENV_KEY in the app runtime environment)";
+export function describeEncryptionStatus(
+  status: "ready" | "missing",
+  details?: {
+    source?: string | null;
+    keyIdentifiers?: string[];
+    native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  },
+) {
+  if (status === "ready") {
+    if (details?.source) return `ready (${details.source})`;
+    return "ready";
+  }
+
+  const keyIdentifiers = details?.keyIdentifiers && details.keyIdentifiers.length > 0
+    ? details.keyIdentifiers.join(", ")
+    : ".env.keys";
+  if (details?.native && !details.native.supported) {
+    return `missing (standard ${keyIdentifiers} is the default local key source; native key storage is unavailable on this host)`;
+  }
+  return `missing (confirm first encryption for the selected profile to create ${keyIdentifiers})`;
 }
 
 export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
@@ -328,6 +352,33 @@ export function EnvironmentDeleteConfirmDialog({
   );
 }
 
+export function EnvironmentProfileDeleteDialog({
+  profile,
+  profilePath,
+  onConfirm,
+  onCancel,
+}: {
+  profile: string;
+  profilePath: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={`Delete profile ${profile}`} onClick={(event) => event.stopPropagation()}>
+        <h3>Delete profile — {profile}</h3>
+        <p>
+          This removes the exact project file <code>{profilePath}</code>. It does not touch <code>.env.keys</code> or native key storage.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger" onClick={onConfirm}>Delete profile</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Environment() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -339,6 +390,7 @@ export function Environment() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletingProfile, setDeletingProfile] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [createProfileName, setCreateProfileName] = useState("");
@@ -474,6 +526,35 @@ export function Environment() {
     await openReview();
   };
 
+  const confirmDeleteProfile = async () => {
+    if (!snapshot || !deletingProfile) return;
+    const profile = deletingProfile;
+    const profilePath = snapshot.profiles.find((item) => item.name === profile)?.path ?? null;
+    setDeletingProfile(null);
+    try {
+      const res = await fetch("/api/environment/profile-delete", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ profile, path: profilePath }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? "Unable to delete profile");
+        return;
+      }
+      setDraft({ edits: {}, removals: [] });
+      setRevealed({});
+      setEditingKey(null);
+      setEditingValue("");
+      await refreshSnapshot();
+      if (managerRunning) {
+        setRestartRequired(true);
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to delete profile");
+    }
+  };
+
   const stageVariable = async () => {
     const key = newKey.trim();
     if (!key) return;
@@ -573,12 +654,14 @@ export function Environment() {
       <p className="muted environment-description">
         Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
       </p>
-      {snapshot?.encryption.status === "missing" ? (
-        <p className="environment-status environment-status-warning">
-          ⚠ Encryption: missing — set DOTENVX_KEY / DOTENV_KEY in the app runtime environment.
+      {snapshot ? (
+        <p className={snapshot.encryption.status === "missing" ? "environment-status environment-status-warning" : "environment-status environment-status-ok"}>
+          {describeEncryptionStatus(snapshot.encryption.status, {
+            source: snapshot.encryption.source,
+            keyIdentifiers: snapshot.encryption.keyIdentifiers,
+            native: snapshot.encryption.native,
+          })}
         </p>
-      ) : snapshot?.encryption.status === "ready" ? (
-        <p className="environment-status environment-status-ok">Encryption: ready</p>
       ) : null}
       {managerRunning && restartRequired ? (
         <div className="info-banner">
@@ -640,6 +723,17 @@ export function Environment() {
                     ))}
                   </select>
                 </label>
+                {snapshot.selection.selectedProfile ? (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setDeletingProfile(snapshot.selection.selectedProfile ?? null)}
+                    disabled={loading}
+                  >
+                    Delete profile
+                  </button>
+                ) : null}
               </div>
             </section>
           )}
@@ -742,6 +836,14 @@ export function Environment() {
 
 
           {saveError ? <p className="environment-error">{saveError}</p> : null}
+          {deletingProfile ? (
+            <EnvironmentProfileDeleteDialog
+              profile={deletingProfile}
+              profilePath={snapshot.profiles.find((profile) => profile.name === deletingProfile)?.path ?? ".env"}
+              onConfirm={() => void confirmDeleteProfile()}
+              onCancel={() => setDeletingProfile(null)}
+            />
+          ) : null}
           {deletingKey ? (
             <EnvironmentDeleteConfirmDialog
               variableKey={deletingKey}
