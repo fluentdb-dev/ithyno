@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   composeDevelopmentEnvironment,
+  encryptEnvironmentFile,
   mutateEnvironmentFile,
   readEnvironmentSelection,
   resolveDevelopmentEnvironmentValues,
@@ -53,6 +54,55 @@ describe("development environment resolver", () => {
         process.env.DOTENVX_KEY = previousDotenvxKey;
       }
     }
+  });
+
+  it("uses real dotenvx .env.keys resolution and recognized profile-specific keys", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+    writeFileSync(join(dir, ".env.development"), "APP=development\nFEATURE=enabled\n", "utf8");
+    const dotenvxCliPath = join(dirname(require.resolve("@dotenvx/dotenvx/package.json")), "src", "cli", "dotenvx.js");
+    execFileSync(process.execPath, [
+      dotenvxCliPath,
+      "encrypt",
+      "-f",
+      join(dir, ".env"),
+      "-f",
+      join(dir, ".env.development"),
+      "-fk",
+      join(dir, ".env.keys"),
+      "--no-native",
+    ], { cwd: dir, stdio: "ignore" });
+    await writeEnvironmentSelection(dir, { selectedProfile: "development", preferences: {} });
+
+    const actual = await resolveDevelopmentEnvironmentValues(dir);
+    expect(actual.APP).toBe("development");
+    expect(actual.FEATURE).toBe("enabled");
+
+    const snapshot = await composeDevelopmentEnvironment(dir);
+    expect(snapshot.encryption.status).toBe("ready");
+    expect(snapshot.encryption.sources).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
+    expect(snapshot.variables.some((item) => item.key === "APP")).toBe(true);
+  });
+
+  it("creates a default .env.keys key file on first-time encryption without a preconfigured key", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=hello\n", "utf8");
+
+    const result = await encryptEnvironmentFile(dir, "default");
+
+    expect(result.status).toBe("ready");
+    expect(existsSync(join(dir, ".env.keys"))).toBe(true);
+    expect(readFileSync(join(dir, ".env.keys"), "utf8")).toContain("DOTENV_PRIVATE_KEY");
+  });
+
+  it("keeps ciphertext out of runtime values when a required key is missing", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "#/-------------------[DOTENV_PUBLIC_KEY]--------------------/\nDOTENV_PUBLIC_KEY=\"deadbeef\"\nAPP=encrypted:abc123\n", "utf8");
+
+    const state = await composeDevelopmentEnvironment(dir);
+
+    expect(state.variables.some((item) => item.key === "APP")).toBe(false);
+    expect(state.diagnostics.some((item) => item.kind === "missing-required-key")).toBe(true);
   });
 
   it("reveals actual values and preserves revision checks", async () => {

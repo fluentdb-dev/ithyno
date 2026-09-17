@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { createRequire } from "node:module";
-import { parse as parseDotenvx } from "@dotenvx/dotenvx";
+import { config as resolveDotenvxConfig } from "@dotenvx/dotenvx";
 
 const require = createRequire(import.meta.url);
 
@@ -81,13 +81,56 @@ const RESERVED_PREFIX = "ITHYNO_";
 const PROFILE_NAME_RE = /^[A-Za-z0-9_.-]+$/;
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_ASSIGNMENT_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
-
 function toRelative(projectRoot: string, filePath: string): string {
   return relative(projectRoot, filePath).replace(/\\/g, "/");
 }
 
 function maskValue(_value: string): string {
   return "********";
+}
+
+function isDotenvCredentialName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return upper === "DOTENVX_KEY"
+    || upper === "DOTENV_KEY"
+    || upper === "DOTENV_PRIVATE_KEY"
+    || upper === "DOTENV_PUBLIC_KEY"
+    || upper === "DOTENVX_KEYS"
+    || upper === "DOTENVX_KEY_FILE"
+    || upper.startsWith("DOTENV_PRIVATE_KEY_")
+    || upper.startsWith("DOTENV_PUBLIC_KEY_");
+}
+
+function isDotenvRuntimeKey(name: string): boolean {
+  const upper = name.toUpperCase();
+  return upper.startsWith("DOTENV_") || upper.startsWith("DOTENVX_");
+}
+
+function collectDotenvKeySources(inheritedEnv: NodeJS.ProcessEnv, projectRoot: string): string[] {
+  const combined = new Set<string>();
+  for (const [key] of Object.entries(inheritedEnv ?? {})) {
+    if (isDotenvCredentialName(key)) {
+      combined.add(key);
+    }
+  }
+
+  const keyFile = join(projectRoot, ".env.keys");
+  if (!existsSync(keyFile)) return Array.from(combined);
+
+  try {
+    const raw = readFileSync(keyFile, "utf8");
+    const matches = raw.matchAll(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm);
+    for (const match of matches) {
+      const key = match[1];
+      if (isDotenvCredentialName(key)) {
+        combined.add(key);
+      }
+    }
+  } catch {
+    // Ignore unreadable/unsafe key files; diagnostics will surface separately.
+  }
+
+  return Array.from(combined);
 }
 
 export function validateProfileName(profile: string | null | undefined): string | null {
@@ -108,6 +151,44 @@ function resolveProfilePath(projectRoot: string, profile: string | null): string
   if (normalized === "default") return join(projectRoot, ".env");
   if (normalized === "local") return join(projectRoot, ".env.local");
   return join(projectRoot, `.env.${normalized}`);
+}
+
+function buildOrderedProfilePaths(projectRoot: string, selectedProfile: string | null): string[] {
+  const root = resolve(projectRoot);
+  const ordered: string[] = [];
+  const basePath = join(root, ".env");
+  const localPath = join(root, ".env.local");
+
+  if (selectedProfile === null || selectedProfile === undefined) {
+    if (existsSync(basePath)) ordered.push(basePath);
+    return ordered;
+  }
+
+  const normalized = validateProfileName(selectedProfile);
+  if (!normalized) {
+    if (existsSync(basePath)) ordered.push(basePath);
+    return ordered;
+  }
+
+  if (normalized === "default") {
+    if (existsSync(basePath)) ordered.push(basePath);
+    return ordered;
+  }
+
+  if (normalized === "local") {
+    if (existsSync(localPath)) ordered.push(localPath);
+    if (existsSync(basePath)) ordered.push(basePath);
+    return ordered;
+  }
+
+  const selectedPath = resolveProfilePath(root, normalized);
+  const selectedLocalPath = join(root, `.env.${normalized}.local`);
+  if (selectedLocalPath && existsSync(selectedLocalPath)) ordered.push(selectedLocalPath);
+  if (selectedPath && existsSync(selectedPath)) ordered.push(selectedPath);
+  if (existsSync(localPath)) ordered.push(localPath);
+  if (existsSync(basePath)) ordered.push(basePath);
+
+  return ordered;
 }
 
 function isInsideProjectRoot(projectRoot: string, filePath: string): boolean {
@@ -258,35 +339,12 @@ async function collectResolvedEnvironment(
 }> {
   const root = resolve(projectRoot);
   const { profiles, diagnostics: discoveredDiagnostics } = await discoverDevelopmentProfiles(root);
-  const orderedFiles: string[] = [];
+  const selectedProfile = validateProfileName(selection.selectedProfile) ?? null;
+  const orderedFiles = buildOrderedProfilePaths(root, selectedProfile);
   const diagnostics: EnvironmentDiagnostic[] = [...discoveredDiagnostics];
   const env: Record<string, string> = {};
   const variableEntriesByKey = new Map<string, DevelopmentEnvironmentVariable>();
-  const selectedProfile = validateProfileName(selection.selectedProfile) ?? null;
-
-  const addFile = (filePath: string): void => {
-    if (!orderedFiles.includes(filePath)) orderedFiles.push(filePath);
-  };
-
-  if (selectedProfile !== null) {
-    if (existsSync(join(root, ".env"))) {
-      addFile(join(root, ".env"));
-    }
-    if (existsSync(join(root, ".env.local"))) {
-      addFile(join(root, ".env.local"));
-    }
-    if (selectedProfile && selectedProfile !== "default" && selectedProfile !== "local") {
-      const profilePath = resolveProfilePath(root, selectedProfile);
-      if (profilePath && existsSync(profilePath)) {
-        addFile(profilePath);
-      }
-    } else if (selectedProfile === "local") {
-      const profilePath = resolveProfilePath(root, "local");
-      if (profilePath && existsSync(profilePath)) {
-        addFile(profilePath);
-      }
-    }
-  }
+  const keySourceByKey = new Map<string, string>();
 
   for (const profile of profiles) {
     if (selectedProfile && profile.name === selectedProfile) {
@@ -294,20 +352,13 @@ async function collectResolvedEnvironment(
     }
   }
 
-  const encryptionSources: string[] = [];
-  const encryptionKeys = [
-    "DOTENVX_KEY",
-    "DOTENV_KEY",
-    "DOTENV_PRIVATE_KEY",
-    "DOTENV_PUBLIC_KEY",
-    "DOTENVX_KEYS",
-    "DOTENVX_KEY_FILE",
-  ].filter((key) => Boolean(inheritedEnv[key]));
-  if (encryptionKeys.length > 0) {
-    encryptionSources.push(...encryptionKeys);
-  }
+  const encryptionSources = collectDotenvKeySources(inheritedEnv, root);
 
   const diagnosticFiles = new Set<string>(orderedFiles);
+  const keyFilePath = join(root, ".env.keys");
+  if (existsSync(keyFilePath)) {
+    diagnosticFiles.add(keyFilePath);
+  }
   for (const profile of profiles) {
     const profilePath = resolve(root, profile.path);
     if (existsSync(profilePath)) {
@@ -330,10 +381,14 @@ async function collectResolvedEnvironment(
         path: toRelative(root, filePath),
       });
     }
+
+    if (filePath === keyFilePath) continue;
+
     try {
       const raw = await readFile(filePath, "utf8");
-      const parsed = parseDotenvx(raw) as Record<string, string>;
-      const reservedKeys = Object.keys(parsed).filter((key) => key.startsWith(RESERVED_PREFIX));
+      const reservedKeys = Array.from(raw.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm))
+        .map((match) => match[1])
+        .filter((key) => key.startsWith(RESERVED_PREFIX));
       if (reservedKeys.length > 0) {
         diagnostics.push({
           kind: "reserved-key",
@@ -354,29 +409,72 @@ async function collectResolvedEnvironment(
     }
   }
 
-  for (const filePath of orderedFiles) {
+  for (let index = orderedFiles.length - 1; index >= 0; index -= 1) {
+    const filePath = orderedFiles[index];
     try {
       const raw = await readFile(filePath, "utf8");
-      const parsed = parseDotenvx(raw) as Record<string, string>;
-      for (const [key, value] of Object.entries(parsed)) {
-        if (key.startsWith(RESERVED_PREFIX)) continue;
-        env[key] = value;
-        variableEntriesByKey.set(key, {
-          key,
-          maskedValue: maskValue(value),
-          source: toRelative(root, filePath),
-          sourcePath: filePath,
-          reserved: false,
-        });
+      const matches = Array.from(raw.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*$/gm));
+      for (const match of matches) {
+        const key = match[1];
+        if (key.startsWith(RESERVED_PREFIX) || isDotenvRuntimeKey(key)) continue;
+        if (!keySourceByKey.has(key)) {
+          keySourceByKey.set(key, filePath);
+        }
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
+    } catch {
+      // Ignore file-scope source detection for unreadable files; diagnostics already reported.
+    }
+  }
+
+  if (orderedFiles.length > 0) {
+    const sanitizedProcessEnv: Record<string, string> = Object.fromEntries(
+      Object.entries(inheritedEnv ?? {})
+        .filter(([key, value]) => !isDotenvCredentialName(key) && typeof value === "string"),
+    ) as Record<string, string>;
+    const resolved = resolveDotenvxConfig({
+      path: orderedFiles,
+      envKeysFile: keyFilePath,
+      processEnv: sanitizedProcessEnv,
+      strict: false,
+      ignore: [],
+    });
+    const configError = resolved && typeof resolved === "object" && "error" in resolved ? resolved.error : undefined;
+    const shouldRejectConfig = configError && typeof configError === "object"
+      && ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"].includes(String((configError as { code?: string }).code ?? ""));
+    if (shouldRejectConfig) {
       diagnostics.push({
-        kind: code === "EACCES" || code === "EPERM" ? "unreadable-file" : "unsupported-syntax",
+        kind: "missing-required-key",
         severity: "error",
-        message: `Unable to parse ${toRelative(root, filePath)}: ${message}`,
-        path: toRelative(root, filePath),
+        message: "A matching dotenvx private key is required for the selected encrypted profile.",
+        path: ".env.keys",
+      });
+    }
+
+    if (shouldRejectConfig) {
+      return {
+        orderedFiles,
+        env: {},
+        diagnostics,
+        variableEntries: [],
+        encryptionSources,
+        profiles,
+      };
+    }
+
+    const parsed = resolved && typeof resolved === "object" && "parsed" in resolved && resolved.parsed && typeof resolved.parsed === "object"
+      ? (resolved.parsed as Record<string, string>)
+      : {};
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key.startsWith(RESERVED_PREFIX) || isDotenvRuntimeKey(key)) continue;
+      env[key] = String(value);
+      const sourcePath = keySourceByKey.get(key) ?? orderedFiles[0];
+      variableEntriesByKey.set(key, {
+        key,
+        maskedValue: maskValue(String(value)),
+        source: toRelative(root, sourcePath),
+        sourcePath,
+        reserved: false,
       });
     }
   }
@@ -602,28 +700,49 @@ export async function encryptEnvironmentFile(
   if (!profilePath || !isInsideProjectRoot(root, profilePath)) {
     throw new Error("Invalid profile target");
   }
-  const keyCandidates = [
-    inheritedEnv.DOTENVX_KEY,
-    inheritedEnv.DOTENV_KEY,
-    inheritedEnv.DOTENV_PRIVATE_KEY,
-    inheritedEnv.DOTENV_PUBLIC_KEY,
-    inheritedEnv.DOTENVX_KEYS,
-    inheritedEnv.DOTENVX_KEY_FILE,
-  ].filter((value): value is string => Boolean(value));
-  if (keyCandidates.length === 0) {
-    return {
-      status: "missing",
-      path: toRelative(root, profilePath),
-      ready: false,
-      revision: sha1(""),
-      message: "No dotenvx encryption keys are configured.",
-    };
+
+  const keyFilePath = join(root, ".env.keys");
+  if (!isInsideProjectRoot(root, keyFilePath)) {
+    throw new Error("Unsafe dotenvx key file path");
   }
-  const cliPath = require.resolve("@dotenvx/dotenvx/src/cli/dotenvx.js");
+  if (existsSync(keyFilePath) && lstatSync(keyFilePath).isSymbolicLink()) {
+    throw new Error("Unsafe dotenvx key file: .env.keys is a symlink");
+  }
+  if (existsSync(keyFilePath) && !lstatSync(keyFilePath).isFile()) {
+    throw new Error("Unsafe dotenvx key file: .env.keys is not a regular file");
+  }
+
+  const gitignorePath = join(root, ".gitignore");
+  let ignoreText = "";
+  if (existsSync(gitignorePath)) {
+    ignoreText = await readFile(gitignorePath, "utf8");
+  }
+  const ignoreLine = ".env.keys";
+  if (!ignoreText.split(/\r?\n/).includes(ignoreLine)) {
+    const nextIgnore = `${ignoreText}${ignoreText && !ignoreText.endsWith("\n") ? "\n" : ""}${ignoreLine}\n`;
+    await writeFile(gitignorePath, nextIgnore, "utf8");
+  }
+
+  if (existsSync(keyFilePath)) {
+    const tracked = readTrackedState(root, [keyFilePath]);
+    if (tracked.has(".env.keys")) {
+      throw new Error("Refusing to encrypt using a tracked .env.keys file");
+    }
+  }
+
+  const cliEntry = require.resolve("@dotenvx/dotenvx/package.json");
+  const cliPath = join(dirname(cliEntry), "src", "cli", "dotenvx.js");
+  const childEnv = { ...process.env, ...inheritedEnv };
+  for (const key of Object.keys(childEnv)) {
+    if (isDotenvCredentialName(key) || isDotenvRuntimeKey(key)) {
+      delete childEnv[key];
+    }
+  }
+
   try {
-    execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath], {
+    execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath, "-fk", keyFilePath, "--no-native"], {
       cwd: root,
-      env: { ...process.env, ...inheritedEnv },
+      env: childEnv,
       stdio: "pipe",
     });
   } catch (err) {
@@ -636,7 +755,11 @@ export async function encryptEnvironmentFile(
       message,
     };
   }
+
   const nextContent = existsSync(profilePath) ? await readFile(profilePath, "utf8") : "";
+  if (existsSync(keyFilePath)) {
+    await chmod(keyFilePath, 0o600);
+  }
   return {
     status: "ready",
     path: toRelative(root, profilePath),
