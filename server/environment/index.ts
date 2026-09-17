@@ -508,14 +508,16 @@ async function collectResolvedEnvironment(
     const configErrorCode = configError && typeof configError === "object"
       ? String((configError as { code?: string }).code ?? "")
       : "";
+    const keySourcesAvailable = collectDotenvKeySources(inheritedEnv, root).length > 0;
     const shouldRejectConfig = ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"].includes(configErrorCode);
     if (shouldRejectConfig) {
+      const isMissingKey = configErrorCode === "MISSING_PRIVATE_KEY" || (!keySourcesAvailable && configErrorCode === "DECRYPTION_FAILED");
       diagnostics.push({
-        kind: configErrorCode === "DECRYPTION_FAILED" ? "decryption-failed" : "missing-required-key",
+        kind: isMissingKey ? "missing-required-key" : "decryption-failed",
         severity: "error",
-        message: configErrorCode === "DECRYPTION_FAILED"
-          ? "The available dotenvx private key could not decrypt the selected encrypted profile."
-          : "A matching dotenvx private key is required for the selected encrypted profile.",
+        message: isMissingKey
+          ? "A matching dotenvx private key (DOTENV_PRIVATE_KEY) is required for the selected encrypted profile."
+          : "The available dotenvx private key (DOTENV_PRIVATE_KEY) could not decrypt the selected encrypted profile.",
         path: ".env.keys",
       });
     }

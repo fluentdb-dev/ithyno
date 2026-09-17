@@ -94,6 +94,7 @@ export function startLogTail(logPath: string, onData: (data: string) => void): {
   });
   watcher.on("add", readDelta);
   watcher.on("change", readDelta);
+  queueMicrotask(readDelta);
   return { dispose: () => { disposed = true; void watcher.close(); } };
 }
 

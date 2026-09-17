@@ -45,6 +45,53 @@ private-key lookup, native-store lookup, precedence, and decryption errors.
 Syntax parsing may still be used for narrow source-location or editing work,
 but parsed encrypted strings MUST NOT be treated as runtime values.
 
+#### Pinned dotenvx 2.23.0 contract (implementation-facing)
+
+The production implementation is intentionally locked to the bundled
+`@dotenvx/dotenvx` package version and uses the same API/CLI surfaces that the
+worktree's contract tests exercise. The adapter imports the library as
+`config as resolveDotenvxConfig` from `@dotenvx/dotenvx` and resolves the
+selected profile set with:
+
+```ts
+const resolved = resolveDotenvxConfig({
+  path: safeOrderedFiles,
+  envKeysFile: keyFilePath,
+  processEnv: { ...sanitizedParentEnv, ...credentialEnv },
+  noNative: inheritedEnv.DOTENVX_NO_NATIVE === "1" || inheritedEnv.DOTENVX_NO_NATIVE === "true",
+  quiet: true,
+  strict: false,
+  ignore: [],
+});
+```
+
+The runtime contract is `resolved.parsed` for decrypted application values and
+`resolved.error.code` for secret-safe failure classification. We only treat
+`MISSING_PRIVATE_KEY` and `DECRYPTION_FAILED` as blocking resolution errors; we
+never return ciphertext, decrypted key material, or raw key-file values as
+application data.
+
+The encryption path uses the bundled CLI entrypoint at
+`join(dirname(require.resolve("@dotenvx/dotenvx/package.json")), "src", "cli", "dotenvx.js")`
+and invokes it with repeated explicit files:
+
+```bash
+node <dotenvx-cli> encrypt -f <profilePath> -fk <projectRoot/.env.keys> [--no-native]
+```
+
+The repeated `-f` / `-fk` pattern is required because first-time encryption and
+re-encryption both target the concrete profile plus the canonical key file; the
+worktree tests deliberately keep the default `.env.keys` path and call the same
+flags for every path, including profile-specific keys.
+
+Capability probing and test determinism follow the same rule: when
+`DOTENVX_NO_NATIVE` is set to `"1"` or `"true"`, the code adds `--no-native`
+to the bundled CLI invocation; the tests assert that this deterministically
+bypasses native resolution instead of depending on the host environment. The
+standard, non-`--no-native` path remains supported in production when the host
+has compatible Native support, but all temporary-project contract tests force the
+non-native path to keep the behavior version-stable across hosts.
+
 Alternative: wrap every Manager and worker command in `dotenvx run`. Rejected
 because ithyno already composes dashboard, selected-profile, agent, and
 authoritative session variables at shared spawn boundaries. Resolving into an

@@ -85,6 +85,29 @@ describe("development environment resolver", () => {
     expect(snapshot.variables.some((item) => item.key === "APP")).toBe(true);
   });
 
+  it("handles repeated encryption and existing/new profile-specific keys without leaking secrets", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+    writeFileSync(join(dir, ".env.development"), "APP=development\nFEATURE=enabled\n", "utf8");
+
+    const first = await encryptEnvironmentFile(dir, "default");
+    const second = await encryptEnvironmentFile(dir, "development");
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+
+    const keyFile = readFileSync(join(dir, ".env.keys"), "utf8");
+    expect(keyFile).toContain("DOTENV_PRIVATE_KEY=");
+    expect(keyFile).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT=");
+
+    const value = await composeDevelopmentEnvironment(dir, {
+      DOTENV_PRIVATE_KEY: /DOTENV_PRIVATE_KEY=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
+      DOTENV_PRIVATE_KEY_DEVELOPMENT: /DOTENV_PRIVATE_KEY_DEVELOPMENT=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
+    });
+    expect(value.variables.some((item) => item.key === "APP")).toBe(true);
+    expect(value.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
+    expect(value.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY_DEVELOPMENT")).toBe(false);
+  });
+
   it("uses inherited standard and suffixed private keys without exposing them as runtime values", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
@@ -142,9 +165,10 @@ describe("development environment resolver", () => {
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("# existing\n");
   });
 
-  it("uses a real encrypted key and distinguishes a wrong valid private key from a missing key", async () => {
+  it("distinguishes missing and wrong keys without ever exposing a secret value", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+
     execFileSync(process.execPath, [
       getDotenvxCliPath(),
       "encrypt",
@@ -154,6 +178,12 @@ describe("development environment resolver", () => {
       join(dir, ".env.keys"),
       "--no-native",
     ], { cwd: dir, stdio: "ignore" });
+    rmSync(join(dir, ".env.keys"), { force: true });
+
+    const missing = await composeDevelopmentEnvironment(dir, {});
+    expect(missing.diagnostics.some((diag) => diag.kind === "missing-required-key")).toBe(true);
+    expect(missing.diagnostics.some((diag) => diag.message.includes("DOTENV_PRIVATE_KEY"))).toBe(true);
+    expect(missing.diagnostics.some((diag) => diag.message.includes("APP=base"))).toBe(false);
 
     const wrongKeyDir = mkdtempSync(join(tmpdir(), "ithyno-env-wrong-"));
     writeFileSync(join(wrongKeyDir, ".env"), "APP=other\n", "utf8");
@@ -169,10 +199,11 @@ describe("development environment resolver", () => {
     const wrongKey = readFileSync(join(wrongKeyDir, ".env.keys"), "utf8").match(/DOTENV_PRIVATE_KEY=(.*)/)?.[1]?.trim();
     writeFileSync(join(dir, ".env.keys"), `DOTENV_PRIVATE_KEY=${wrongKey ?? "wrong"}\n`, "utf8");
 
-    const state = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: wrongKey ?? "wrong" });
-    expect(state.variables.some((item) => item.key === "APP")).toBe(false);
-    expect(state.diagnostics.some((item) => item.kind === "decryption-failed")).toBe(true);
-    expect(state.diagnostics.some((item) => item.message.includes("could not decrypt"))).toBe(true);
+    const wrong = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: wrongKey ?? "wrong" });
+    expect(wrong.variables.some((item) => item.key === "APP")).toBe(false);
+    expect(wrong.diagnostics.some((item) => item.kind === "decryption-failed")).toBe(true);
+    expect(wrong.diagnostics.some((item) => item.message.includes("could not decrypt"))).toBe(true);
+    expect(wrong.diagnostics.some((item) => item.message.includes(wrongKey ?? "wrong"))).toBe(false);
   });
 
   it("rejects tracked or symlinked .env.keys before any mutation", async () => {
