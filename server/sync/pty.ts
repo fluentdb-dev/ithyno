@@ -13,8 +13,8 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
-import type { WebSocket } from "ws";
+import { dirname, join, resolve } from "node:path";
+import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
@@ -25,8 +25,15 @@ export type PtyAvailability =
   | { available: false; reason: string };
 
 let cached: PtyAvailability | null = null;
+let injectedPty: PtyAvailability | null = null;
+
+export function _setPtyForTest(next: PtyAvailability | null): void {
+  injectedPty = next;
+  cached = next;
+}
 
 export async function loadPty(): Promise<PtyAvailability> {
+  if (injectedPty) return injectedPty;
   if (cached) return cached;
   try {
     const mod = await import("@homebridge/node-pty-prebuilt-multiarch");
@@ -345,6 +352,11 @@ export async function buildManagerPtyEnv(
 ): Promise<NodeJS.ProcessEnv> {
   const inherited = { ...process.env };
   delete inherited.ITHYNO_LAUNCHER_SESSION_TOKEN;
+  // Host agent terminals commonly set NO_COLOR=1 and TERM=dumb for their own
+  // captured output. Those values describe the parent harness, not the
+  // browser-backed xterm that receives this PTY, and would incorrectly force
+  // interactive CLIs into monochrome mode.
+  delete inherited.NO_COLOR;
 
   const resolvedPort = port === undefined || port === "" ? "4321" : String(port);
   const base = `http://localhost:${resolvedPort}`;
@@ -354,6 +366,7 @@ export async function buildManagerPtyEnv(
     ...profileEnv,
     LANG: inherited.LANG || "en_US.UTF-8",
     TERM: "xterm-256color",
+    COLORTERM: inherited.COLORTERM || "truecolor",
     ITHYNO_SESSION_TOKEN: token,
     ITHYNO_PORT: resolvedPort,
     ITHYNO_BASE: base,
@@ -384,12 +397,196 @@ function withEnter(s: string): string {
 
 type ClientMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "terminate"; reason?: string; sessionKey?: string; intent?: "create" | "reattach" }
+  | { type: "restart"; reason?: string; sessionKey?: string; intent?: "create" | "reattach" };
+
+export function parsePtyConnectionIntent(
+  url: string | undefined,
+): "create" | "reattach" {
+  const search = url?.split("?")[1] ?? "";
+  const params = new URLSearchParams(search);
+  const value = params.get("intent");
+  if (value === "reattach") return "reattach";
+  return "create";
+}
+
+export function resolvePtySessionKey(
+  cwd: string,
+  opts?: { projectId?: string; projectRoot?: string; sessionId?: string; sessionKey?: string },
+): { projectRoot: string; sessionId: string; sessionKey: string } {
+  const projectRoot = String(opts?.projectId ?? opts?.projectRoot ?? cwd ?? "").trim() || cwd;
+  const sessionId = String(opts?.sessionId ?? opts?.sessionKey ?? "default").trim() || "default";
+  return {
+    projectRoot: resolve(projectRoot),
+    sessionId,
+    sessionKey: `${resolve(projectRoot)}::${sessionId}`,
+  };
+}
+
+export function parsePtyConnectionIdentity(
+  url: string | undefined,
+  cwd: string,
+): { projectRoot: string; sessionId: string; sessionKey: string } {
+  const search = url?.split("?")[1] ?? "";
+  const params = new URLSearchParams(search);
+  const projectRoot = params.get("projectRoot") ?? params.get("project") ?? params.get("cwd") ?? cwd;
+  const sessionId = params.get("sessionId") ?? params.get("session") ?? params.get("id") ?? "default";
+  return resolvePtySessionKey(cwd, { projectId: projectRoot, sessionId });
+}
+
+let idleTtlMs = Number(process.env.ITHYNO_PTY_IDLE_TTL_MS ?? 10 * 60 * 1000);
+
+export function getPtyIdleTtlMs(): number {
+  if (!Number.isFinite(idleTtlMs) || idleTtlMs <= 0) {
+    return 10 * 60 * 1000;
+  }
+  return idleTtlMs;
+}
+
+export function _setPtyIdleTtlForTest(ms: number | null): void {
+  idleTtlMs = ms === null ? Number(process.env.ITHYNO_PTY_IDLE_TTL_MS ?? 10 * 60 * 1000) : ms;
+}
+
+export function setPtyIdleTtlForTest(ms: number | null): void {
+  _setPtyIdleTtlForTest(ms);
+}
+
+export function _resetPtyRuntimeForTest(): void {
+  injectedPty = null;
+  cached = null;
+  live.length = 0;
+  liveBySession.clear();
+  creationLocks.clear();
+  lostSessionKeys.clear();
+}
 
 // Registry of live PTY sessions. The last entry is the most recently active
 // terminal — that's what /api/pty/inject writes to.
-type LiveTerminal = { term: any; ws: WebSocket; cwd: string };
+type LiveTerminal = {
+  term: any;
+  ws: WebSocket | null;
+  cwd: string;
+  sessionKey: string;
+  sessionId: string;
+  idleTimer: NodeJS.Timeout | null;
+  replayChunks: string[];
+  replayChars: number;
+};
 const live: LiveTerminal[] = [];
+const liveBySession = new Map<string, LiveTerminal>();
+const creationLocks = new Map<string, Promise<void>>();
+const lostSessionKeys = new Map<string, number>();
+const MAX_LOST_SESSION_KEYS = 128;
+const LOST_SESSION_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+const MAX_PTY_REPLAY_CHARS = 512 * 1024;
+
+function appendReplayOutput(entry: LiveTerminal, data: string): void {
+  if (!data) return;
+  entry.replayChunks.push(data);
+  entry.replayChars += data.length;
+  while (entry.replayChars > MAX_PTY_REPLAY_CHARS && entry.replayChunks.length > 1) {
+    const removed = entry.replayChunks.shift();
+    if (removed) entry.replayChars -= removed.length;
+  }
+  if (entry.replayChars > MAX_PTY_REPLAY_CHARS && entry.replayChunks.length === 1) {
+    const only = entry.replayChunks[0];
+    entry.replayChunks[0] = only.slice(-MAX_PTY_REPLAY_CHARS);
+    entry.replayChars = entry.replayChunks[0].length;
+  }
+}
+
+function replayTerminalOutput(entry: LiveTerminal, ws: WebSocket): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "replay-start" }));
+  } catch {
+    return;
+  }
+  for (const chunk of entry.replayChunks) {
+    try {
+      ws.send(chunk);
+    } catch {
+      return;
+    }
+  }
+  try {
+    ws.send(JSON.stringify({ type: "replay-end" }));
+  } catch {
+    return;
+  }
+}
+
+function pruneLostSessionKeys(now = Date.now()): void {
+  for (const [sessionKey, stampedAt] of [...lostSessionKeys.entries()]) {
+    if (now - stampedAt > LOST_SESSION_TOMBSTONE_TTL_MS) {
+      lostSessionKeys.delete(sessionKey);
+    }
+  }
+  while (lostSessionKeys.size > MAX_LOST_SESSION_KEYS) {
+    const oldestKey = lostSessionKeys.keys().next().value;
+    if (oldestKey === undefined) break;
+    lostSessionKeys.delete(oldestKey);
+  }
+}
+
+function markLostSessionKey(sessionKey: string): void {
+  pruneLostSessionKeys();
+  lostSessionKeys.set(sessionKey, Date.now());
+  pruneLostSessionKeys();
+}
+
+function clearLostSessionKey(sessionKey: string): void {
+  lostSessionKeys.delete(sessionKey);
+}
+
+function sendSessionStatus(
+  ws: WebSocket | null,
+  status: "attached" | "reattached" | "missing" | "terminated",
+  sessionKey: string,
+  sessionId: string,
+  reason?: string,
+): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "session-status", status, sessionKey, sessionId, reason }));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearIdleTimer(entry: LiveTerminal): void {
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+}
+
+function removeLiveEntry(entry: LiveTerminal): void {
+  clearIdleTimer(entry);
+  entry.ws = null;
+  const i = live.indexOf(entry);
+  if (i >= 0) live.splice(i, 1);
+  if (liveBySession.get(entry.sessionKey) === entry) {
+    liveBySession.delete(entry.sessionKey);
+  }
+}
+
+function scheduleIdleCleanup(entry: LiveTerminal): void {
+  if (entry.ws) return;
+  if (entry.idleTimer) return;
+  entry.idleTimer = setTimeout(() => {
+    if (entry.ws) return;
+    const current = liveBySession.get(entry.sessionKey);
+    if (current !== entry) return;
+    try {
+      entry.term.kill();
+    } catch {
+      /* ignore */
+    }
+    removeLiveEntry(entry);
+  }, getPtyIdleTtlMs());
+}
 
 function bump(entry: LiveTerminal): void {
   const i = live.indexOf(entry);
@@ -471,21 +668,17 @@ export function activeTerminalCount(): number {
  * state after the sockets flush.
  */
 export function terminateAllLivePtys(oldProjectRoot?: string): void {
-  // Snapshot before iterating — the ws.on("close") handler mutates
-  // `live` as each socket finishes closing, and we don't want the
-  // iteration to skip entries due to concurrent splice().
   const snapshot = live.slice();
   for (const entry of snapshot) {
+    markLostSessionKey(entry.sessionKey);
+    clearIdleTimer(entry);
     try { entry.term.kill(); } catch { /* already dead */ }
-    try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+    if (entry.ws) {
+      try { entry.ws.close(1000, "project switch"); } catch { /* already closing */ }
+    }
+    removeLiveEntry(entry);
   }
 
-  // Also kill the tmux session for the outgoing project root, so a
-  // future `tmux new-session -A -s <name>` for a different project
-  // does not attach to a lingering pane with the wrong cwd. Best
-  // effort — swallow errors (session not found, tmux missing, env
-  // override that we cannot mirror here, etc.).
-  // See scope-tmux-session-name-per-project.
   if (oldProjectRoot) {
     const sessionName = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(oldProjectRoot);
     try {
@@ -497,9 +690,9 @@ export function terminateAllLivePtys(oldProjectRoot?: string): void {
 }
 
 /**
- * Attach a WebSocket to a freshly-spawned PTY. The socket sends raw stdout
- * bytes as text frames and accepts a small JSON control protocol for input
- * and resize. The PTY dies when the socket closes.
+ * Attach a WebSocket to a PTY session. A socket close detaches the client but
+ * leaves the server-owned PTY alive so reconnects reuse it. An explicit restart
+ * changes the session identity so a fresh PTY is spawned instead.
  */
 export async function attachPtyToSocket(
   ws: WebSocket,
@@ -507,117 +700,267 @@ export async function attachPtyToSocket(
     cwd: string;
     cols?: number;
     rows?: number;
+    projectId?: string;
+    projectRoot?: string;
+    sessionId?: string;
+    sessionKey?: string;
+    intent?: "create" | "reattach";
     /** When present, ptyStartup() derives the startup command + auto-inject
      *  line from `registry.managerAgent()`. Pass null to use the env-var /
      *  hardcoded fallback chain. See add-manager-agent-config. */
     registry?: AgentRegistry | null;
   },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  // Guard (guard-terminal-autolaunch-on-agents-yaml round 2): refuse to
-  // spawn a PTY at all when the project has no `agents.yaml`. The client
-  // dashboard already gates the aside render on `hasAgentsYaml`, so this
-  // branch normally does not fire — it is a defense-in-depth against
-  // direct `/pty` WebSocket clients.
   if (!hasAgentsYaml(opts.cwd)) {
     console.log(`[pty] spawn skipped — no agents.yaml at ${opts.cwd}`);
     return { ok: false, reason: "no-agents-yaml" };
   }
 
-  const pty = await loadPty();
-  if (!pty.available) return { ok: false, reason: pty.reason };
-
-  const { cmd, args } = defaultShell();
-  const env = await buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN, opts.cwd);
-  const term = pty.module.spawn(cmd, args, {
-    name: "xterm-256color",
-    cols: opts.cols ?? 80,
-    rows: opts.rows ?? 24,
-    cwd: opts.cwd,
-    env,
+  const identity = resolvePtySessionKey(opts.cwd, {
+    projectId: opts.projectId ?? opts.projectRoot ?? opts.cwd,
+    sessionId: opts.sessionId ?? opts.sessionKey ?? "default",
   });
+  const intent = opts.intent ?? parsePtyConnectionIntent(ws.url);
 
-  const entry: LiveTerminal = { term, ws, cwd: opts.cwd };
-  live.push(entry);
+  const attachToExisting = (existing: LiveTerminal): boolean => {
+    if (existing.cwd !== opts.cwd && existing.cwd !== identity.projectRoot) {
+      return false;
+    }
+    clearLostSessionKey(identity.sessionKey);
+    const previous = existing.ws;
+    if (previous && previous !== ws) {
+      try { previous.close(1000, "reattach"); } catch { /* ignore */ }
+    }
+    existing.ws = ws;
+    existing.cwd = opts.cwd;
+    clearIdleTimer(existing);
+    bump(existing);
+    replayTerminalOutput(existing, ws);
+    sendSessionStatus(ws, "reattached", identity.sessionKey, identity.sessionId, "reattached");
 
-  // Auto-launch the resolved startup command so the Terminal panel has
-  // a receiver from the moment it opens. The 300 ms delay lets the shell
-  // finish printing its prompt so the typed line appears at the prompt,
-  // not before it. If the manager entry declared an `initialInput`,
-  // inject it 300 ms after the startup command so the Manager has time
-  // to boot and render its own prompt.
-  //
-  // Guard (guard-terminal-autolaunch-on-agents-yaml): skip the Claude
-  // injection when the project has no agents.yaml. The PTY still spawns
-  // a plain shell — manual use is never blocked.
-  const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
-  if (startup) {
-    if (!hasAgentsYaml(opts.cwd)) {
-      console.log(
-        `[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`,
-      );
-    } else {
-      setTimeout(() => {
+    const attach = (raw: Buffer | string) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
+      } catch {
+        return;
+      }
+      if (existing.ws !== ws) return;
+      if (msg.type === "terminate" || msg.type === "restart") {
+        const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
+        try { existing.term.kill(); } catch { /* ignore */ }
+        markLostSessionKey(existing.sessionKey);
+        removeLiveEntry(existing);
+        sendSessionStatus(ws, "terminated", existing.sessionKey, existing.sessionId, reason);
+        try { ws.close(1000, reason); } catch { /* ignore */ }
+        return;
+      }
+      if (msg.type === "input") {
+        bump(existing);
+        existing.term.write(msg.data);
+      } else if (msg.type === "resize") {
+        const cols = Math.max(1, Math.floor(msg.cols));
+        const rows = Math.max(1, Math.floor(msg.rows));
         try {
-          console.log(`[pty] auto-launching: ${startup}`);
-          term.write(withEnter(startup));
+          existing.term.resize(cols, rows);
         } catch {
-          /* term already dead */
+          /* ignore transient resize errors */
         }
-        if (initialInput) {
-          setTimeout(() => {
-            try {
-              console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
-              term.write(withEnter(initialInput));
-            } catch {
-              /* term already dead */
-            }
-          }, 300);
-        }
-      }, 300);
+      }
+    };
+
+    ws.on("message", attach);
+    ws.on("close", () => {
+      if (existing.ws !== ws) return;
+      existing.ws = null;
+      scheduleIdleCleanup(existing);
+    });
+    return true;
+  };
+
+  pruneLostSessionKeys();
+  const sameSessionIdProjectConflict = live.some(
+    (entry) =>
+      entry.sessionKey.endsWith(`::${identity.sessionId}`) &&
+      entry.cwd !== opts.cwd &&
+      entry.cwd !== identity.projectRoot,
+  );
+  if (sameSessionIdProjectConflict) {
+    return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+  }
+
+  const current = liveBySession.get(identity.sessionKey);
+  if (current) {
+    const ok = attachToExisting(current);
+    if (!ok) {
+      return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+    }
+    return { ok: true };
+  }
+
+  if (intent === "reattach") {
+    const exactLive = liveBySession.has(identity.sessionKey);
+    const tombstoned = lostSessionKeys.has(identity.sessionKey);
+    if (!exactLive || tombstoned) {
+      sendSessionStatus(ws, "missing", identity.sessionKey, identity.sessionId, "session-missing");
+      try { ws.close(1000, "session lost"); } catch { /* ignore */ }
+      return { ok: false, reason: "session-missing" };
     }
   }
 
-  term.onData((data: string) => {
-    if (ws.readyState === ws.OPEN) ws.send(data);
-  });
-  term.onExit(() => {
+  if (creationLocks.has(identity.sessionKey)) {
+    const pending = creationLocks.get(identity.sessionKey)!;
     try {
-      ws.close();
-    } catch {
-      /* ignore */
+      await pending;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason };
     }
-  });
+    const rechecked = liveBySession.get(identity.sessionKey);
+    if (rechecked) {
+      if (rechecked.ws !== ws) {
+        const ok = attachToExisting(rechecked);
+        if (!ok) {
+          return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+        }
+      }
+      return { ok: true };
+    }
+  }
 
-  ws.on("message", (raw: Buffer | string) => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
-    } catch {
-      return;
+  const createTask = (async () => {
+    if (liveBySession.has(identity.sessionKey)) return;
+    const pty = await loadPty();
+    if (!pty.available) {
+      throw new Error(pty.reason);
     }
-    if (msg.type === "input") {
-      bump(entry);
-      term.write(msg.data);
-    } else if (msg.type === "resize") {
-      const cols = Math.max(1, Math.floor(msg.cols));
-      const rows = Math.max(1, Math.floor(msg.rows));
-      try {
-        term.resize(cols, rows);
-      } catch {
-        /* ignore transient resize errors */
+
+    const { cmd, args } = defaultShell();
+    const env = await buildManagerPtyEnv(process.env.PORT, SESSION_TOKEN, opts.cwd);
+    const term = pty.module.spawn(cmd, args, {
+      name: "xterm-256color",
+      cols: opts.cols ?? 80,
+      rows: opts.rows ?? 24,
+      cwd: opts.cwd,
+      env,
+    });
+
+    const entry: LiveTerminal = {
+      term,
+      ws,
+      cwd: opts.cwd,
+      sessionKey: identity.sessionKey,
+      sessionId: identity.sessionId,
+      idleTimer: null,
+      replayChunks: [],
+      replayChars: 0,
+    };
+    clearLostSessionKey(identity.sessionKey);
+    live.push(entry);
+    liveBySession.set(identity.sessionKey, entry);
+
+    const { startup, initialInput } = ptyStartup(opts.registry ?? null, opts.cwd);
+    if (startup) {
+      if (!hasAgentsYaml(opts.cwd)) {
+        console.log(`[pty] auto-launch skipped — no agents.yaml at ${opts.cwd}`);
+      } else {
+        setTimeout(() => {
+          try {
+            console.log(`[pty] auto-launching: ${startup}`);
+            term.write(withEnter(startup));
+          } catch {
+            /* term already dead */
+          }
+          if (initialInput) {
+            setTimeout(() => {
+              try {
+                console.log(`[pty] auto-injecting initialInput: ${initialInput}`);
+                term.write(withEnter(initialInput));
+              } catch {
+                /* term already dead */
+              }
+            }, 300);
+          }
+        }, 300);
       }
     }
-  });
 
-  ws.on("close", () => {
-    const i = live.indexOf(entry);
-    if (i >= 0) live.splice(i, 1);
-    try {
-      term.kill();
-    } catch {
-      /* already dead */
+    term.onData((data: string) => {
+      appendReplayOutput(entry, data);
+      const active = entry.ws;
+      if (active && active.readyState === WebSocket.OPEN) active.send(data);
+    });
+    term.onExit(() => {
+      const exitSocket = entry.ws;
+      markLostSessionKey(entry.sessionKey);
+      if (exitSocket) {
+        sendSessionStatus(exitSocket, "missing", entry.sessionKey, entry.sessionId, "pty-exit");
+      }
+      removeLiveEntry(entry);
+      if (exitSocket) {
+        try { exitSocket.close(); } catch { /* ignore */ }
+      }
+    });
+
+    ws.on("message", (raw: Buffer | string) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
+      } catch {
+        return;
+      }
+      if (msg.type === "terminate" || msg.type === "restart") {
+        const reason = msg.reason ?? (msg.type === "restart" ? "reload" : "terminate");
+        markLostSessionKey(entry.sessionKey);
+        try { term.kill(); } catch { /* ignore */ }
+        removeLiveEntry(entry);
+        sendSessionStatus(ws, "terminated", entry.sessionKey, entry.sessionId, reason);
+        try { ws.close(1000, reason); } catch { /* ignore */ }
+        return;
+      }
+      if (msg.type === "input") {
+        bump(entry);
+        term.write(msg.data);
+      } else if (msg.type === "resize") {
+        const cols = Math.max(1, Math.floor(msg.cols));
+        const rows = Math.max(1, Math.floor(msg.rows));
+        try {
+          term.resize(cols, rows);
+        } catch {
+          /* ignore transient resize errors */
+        }
+      }
+    });
+
+    ws.on("close", () => {
+      if (entry.ws !== ws) return;
+      entry.ws = null;
+      scheduleIdleCleanup(entry);
+    });
+
+    sendSessionStatus(ws, "attached", identity.sessionKey, identity.sessionId, "attached");
+  })();
+
+  creationLocks.set(identity.sessionKey, createTask);
+  try {
+    await createTask;
+    const created = liveBySession.get(identity.sessionKey);
+    if (created) {
+      if (created.ws !== ws) {
+        const ok = attachToExisting(created);
+        if (!ok) {
+          return { ok: false, reason: `project mismatch for session ${identity.sessionKey}` };
+        }
+      }
+      return { ok: true };
     }
-  });
-
-  return { ok: true };
+    return { ok: false, reason: "session creation failed" };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason };
+  } finally {
+    if (creationLocks.get(identity.sessionKey) === createTask) {
+      creationLocks.delete(identity.sessionKey);
+    }
+  }
 }

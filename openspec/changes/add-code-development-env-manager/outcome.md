@@ -8,9 +8,9 @@
 - The resolver needed explicit reserved-key filtering so `ITHYNO_*` values remained authoritative and could not be overridden by project env files.
 
 ## 🔁 Differently
-- The UI is intentionally lightweight and focuses on selection, masked inspection, and explicit reveal rather than full editor workflows.
+- The UI uses staged edit/delete workflows with an explicit save review so profile changes are visible before disk mutation.
 - Plaintext values remain server-side only; the API and UI expose masked metadata by default.
 
 ## 🌱 Follow-ups
-- Expand the UI to support richer edit/delete workflows and more detailed diagnostics.
+- Add OS credential-store integrations so dotenvx keys do not need to live in the general application environment.
 - Add broader end-to-end coverage around reveal/mutation flows and packaged runtime behavior.

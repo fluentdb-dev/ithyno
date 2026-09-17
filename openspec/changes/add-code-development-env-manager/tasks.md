@@ -35,12 +35,12 @@
 
 ## 6. Packaging and documentation
 
-- [ ] 6.1 Include the pinned dotenvx runtime in npm, Electron, and VSIX staging and add bundle-content guards.
-- [ ] 6.2 Document the Development Environment screen, `.env*` source-of-truth model, restart behavior, Git warnings, and `ITHYNO_*` reservation.
-- [ ] 6.3 Add `outcome.md` with Worked, Surprises, Differently, and Follow-ups sections for archive-time completion.
+- [x] 6.1 Include the pinned dotenvx runtime in npm, Electron, and VSIX staging and add bundle-content guards.
+- [x] 6.2 Document the Development Environment screen, `.env*` source-of-truth model, restart behavior, Git warnings, and `ITHYNO_*` reservation.
+- [x] 6.3 Add `outcome.md` with Worked, Surprises, Differently, and Follow-ups sections for archive-time completion.
 
 ## 7. Verification
 
-- [ ] 7.1 Run focused environment/API/UI/PTY/AgentRunner tests and the full test suite on supported host platforms.
-- [ ] 7.2 Run `npm run typecheck`, `npm run build`, and strict OpenSpec validation.
-- [ ] 7.3 Build Electron and VSIX packages and verify dotenvx resolution plus secret-safe behavior from the packaged artifacts.
+- [x] 7.1 Run focused environment/API/UI/PTY/AgentRunner tests and the full test suite on supported host platforms.
+- [x] 7.2 Run `npm run typecheck`, `npm run build`, and strict OpenSpec validation.
+- [x] 7.3 Build Electron and VSIX packages and verify dotenvx resolution plus secret-safe behavior from the packaged artifacts.

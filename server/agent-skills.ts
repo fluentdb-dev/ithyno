@@ -103,7 +103,8 @@ export const CLI_ADAPTERS: Record<string, CliAdapter> = {
   agy: {
     openspecTool: "antigravity",
     rendererCli: "antigravity",
-    openspecPaths: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md"],
+    openspecPaths: [".agent/workflows/opsx-propose.md", ".agent/workflows/opsx-apply.md",
+      ".agents/workflows/opsx-propose.md", ".agents/workflows/opsx-apply.md"],
   },
   copilot: {
     openspecTool: "github-copilot",
@@ -165,14 +166,28 @@ export const CLI_LAYOUTS: Record<string, OpenspecLayout[]> = {
   ],
   agy: [
     {
-      name: "skills-v1",
+      name: "skills-v1-plural",
+      required: [
+        ".agents/skills/openspec-propose/SKILL.md",
+        ".agents/skills/openspec-apply-change/SKILL.md",
+      ],
+    },
+    {
+      name: "skills-v1-singular",
       required: [
         ".agent/skills/openspec-propose/SKILL.md",
         ".agent/skills/openspec-apply-change/SKILL.md",
       ],
     },
     {
-      name: "legacy-workflows",
+      name: "legacy-workflows-plural",
+      required: [
+        ".agents/workflows/opsx-propose.md",
+        ".agents/workflows/opsx-apply.md",
+      ],
+    },
+    {
+      name: "legacy-workflows-singular",
       required: [
         ".agent/workflows/opsx-propose.md",
         ".agent/workflows/opsx-apply.md",
@@ -588,8 +603,10 @@ async function runOpenspecInit(
       : {};
 
     // Use npx to resolve the locally-installed openspec package.
-    // Never use shell: true — argument array only.
-    const cmd = process.platform === "win32" ? "npx.cmd" : "npx";
+    // On Windows, .cmd files require shell: true (Node.js CVE-2024-27980
+    // tightened argument validation for .cmd/.bat without a shell).
+    const isWin = process.platform === "win32";
+    const cmd = isWin ? "npx.cmd" : "npx";
     let child: ReturnType<typeof spawn>;
     try {
       child = _test_exports.spawn(
@@ -599,6 +616,7 @@ async function runOpenspecInit(
           cwd: projectRoot,
           env: { ...process.env, ...extraEnv },
           stdio: ["ignore", "pipe", "pipe"],
+          ...(isWin ? { shell: true } : {}),
         },
       );
     } catch (err) {

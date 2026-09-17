@@ -88,6 +88,11 @@ execSync("npm install --omit=dev --no-audit --no-fund --ignore-scripts --force",
   stdio: "inherit",
 });
 
+const stagedDotenvx = resolve(stageDir, "node_modules", "@dotenvx", "dotenvx", "package.json");
+if (!existsSync(stagedDotenvx)) {
+  throw new Error("staged VS Code host is missing @dotenvx/dotenvx");
+}
+
 const stagedNodeModules = resolve(stageDir, "node_modules");
 const validatedEsbuildPackages = assertEsbuildRuntimeVersions(stagedNodeModules, esbuildVersion);
 console.log(
