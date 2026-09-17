@@ -17,6 +17,8 @@ import {
 
 let dir: string;
 
+const getDotenvxCliPath = (): string => join(dirname(require.resolve("@dotenvx/dotenvx/package.json")), "src", "cli", "dotenvx.js");
+
 afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
@@ -60,9 +62,8 @@ describe("development environment resolver", () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
     writeFileSync(join(dir, ".env.development"), "APP=development\nFEATURE=enabled\n", "utf8");
-    const dotenvxCliPath = join(dirname(require.resolve("@dotenvx/dotenvx/package.json")), "src", "cli", "dotenvx.js");
     execFileSync(process.execPath, [
-      dotenvxCliPath,
+      getDotenvxCliPath(),
       "encrypt",
       "-f",
       join(dir, ".env"),
@@ -84,6 +85,39 @@ describe("development environment resolver", () => {
     expect(snapshot.variables.some((item) => item.key === "APP")).toBe(true);
   });
 
+  it("uses inherited standard and suffixed private keys without exposing them as runtime values", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+    writeFileSync(join(dir, ".env.development"), "APP=development\nFEATURE=enabled\n", "utf8");
+    execFileSync(process.execPath, [
+      getDotenvxCliPath(),
+      "encrypt",
+      "-f",
+      join(dir, ".env"),
+      "-f",
+      join(dir, ".env.development"),
+      "-fk",
+      join(dir, ".env.keys"),
+      "--no-native",
+    ], { cwd: dir, stdio: "ignore" });
+
+    const keyFile = readFileSync(join(dir, ".env.keys"), "utf8");
+    const standardKey = /DOTENV_PRIVATE_KEY=(.*)/.exec(keyFile)?.[1]?.trim();
+    const developmentKey = /DOTENV_PRIVATE_KEY_DEVELOPMENT=(.*)/.exec(keyFile)?.[1]?.trim();
+
+    const inheritedEnv = {
+      DOTENV_PRIVATE_KEY: standardKey,
+      DOTENV_PRIVATE_KEY_DEVELOPMENT: developmentKey,
+    } as NodeJS.ProcessEnv;
+    await writeEnvironmentSelection(dir, { selectedProfile: "development", preferences: {} });
+
+    const state = await composeDevelopmentEnvironment(dir, inheritedEnv);
+    expect(state.variables.some((item) => item.key === "APP")).toBe(true);
+    expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
+    expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY_DEVELOPMENT")).toBe(false);
+    expect(state.variables.find((item) => item.key === "APP")?.source).toBe(".env.development");
+  });
+
   it("creates a default .env.keys key file on first-time encryption without a preconfigured key", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=hello\n", "utf8");
@@ -95,14 +129,90 @@ describe("development environment resolver", () => {
     expect(readFileSync(join(dir, ".env.keys"), "utf8")).toContain("DOTENV_PRIVATE_KEY");
   });
 
-  it("keeps ciphertext out of runtime values when a required key is missing", async () => {
+  it("restores .env, .env.keys, and .gitignore when encryption fails", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
-    writeFileSync(join(dir, ".env"), "#/-------------------[DOTENV_PUBLIC_KEY]--------------------/\nDOTENV_PUBLIC_KEY=\"deadbeef\"\nAPP=encrypted:abc123\n", "utf8");
+    mkdirSync(join(dir, ".env"), { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), "# existing\n", "utf8");
 
-    const state = await composeDevelopmentEnvironment(dir);
+    const result = await encryptEnvironmentFile(dir, "default");
 
+    expect(result.status).toBe("failed");
+    expect(existsSync(join(dir, ".env"))).toBe(true);
+    expect(existsSync(join(dir, ".env.keys"))).toBe(false);
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("# existing\n");
+  });
+
+  it("uses a real encrypted key and reports a normalized missing-key failure for a wrong valid private key", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+    execFileSync(process.execPath, [
+      getDotenvxCliPath(),
+      "encrypt",
+      "-f",
+      join(dir, ".env"),
+      "-fk",
+      join(dir, ".env.keys"),
+      "--no-native",
+    ], { cwd: dir, stdio: "ignore" });
+
+    const wrongKeyDir = mkdtempSync(join(tmpdir(), "ithyno-env-wrong-"));
+    writeFileSync(join(wrongKeyDir, ".env"), "APP=other\n", "utf8");
+    execFileSync(process.execPath, [
+      getDotenvxCliPath(),
+      "encrypt",
+      "-f",
+      join(wrongKeyDir, ".env"),
+      "-fk",
+      join(wrongKeyDir, ".env.keys"),
+      "--no-native",
+    ], { cwd: wrongKeyDir, stdio: "ignore" });
+    const wrongKey = readFileSync(join(wrongKeyDir, ".env.keys"), "utf8").match(/DOTENV_PRIVATE_KEY=(.*)/)?.[1]?.trim();
+    writeFileSync(join(dir, ".env.keys"), `DOTENV_PRIVATE_KEY=${wrongKey ?? "wrong"}\n`, "utf8");
+
+    const state = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: wrongKey ?? "wrong" });
     expect(state.variables.some((item) => item.key === "APP")).toBe(false);
     expect(state.diagnostics.some((item) => item.kind === "missing-required-key")).toBe(true);
+    expect(state.diagnostics.some((item) => item.message.includes("dotenvx private key"))).toBe(true);
+  });
+
+  it("rejects tracked or symlinked .env.keys before any mutation", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=one\n", "utf8");
+    await encryptEnvironmentFile(dir, "default");
+
+    execFileSync("git", ["init"], { cwd: dir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+    execFileSync("git", ["add", "-f", ".env.keys"], { cwd: dir });
+    await expect(encryptEnvironmentFile(dir, "default")).rejects.toThrow(/tracked/);
+
+    const symlinkDir = mkdtempSync(join(tmpdir(), "ithyno-env-link-"));
+    writeFileSync(join(symlinkDir, ".env"), "APP=two\n", "utf8");
+    const target = join(symlinkDir, "secret.keys");
+    writeFileSync(target, "DOTENV_PRIVATE_KEY=abc\n", "utf8");
+    symlinkSync(target, join(symlinkDir, ".env.keys"));
+    await expect(encryptEnvironmentFile(symlinkDir, "default")).rejects.toThrow(/symlink/);
+  });
+
+  it("reports unreadable key-file state for a blocked .env.keys", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=three\n", "utf8");
+    writeFileSync(join(dir, ".env.keys"), "DOTENV_PRIVATE_KEY=deadbeef\n", "utf8");
+    const mode = 0o000;
+    const keyPath = join(dir, ".env.keys");
+    await import("node:fs/promises").then(({ chmod: chmodAsync }) => chmodAsync(keyPath, mode));
+
+    const state = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: "deadbeef" });
+    expect(state.diagnostics.some((diag) => diag.kind === "unreadable-file" || diag.kind === "missing-required-key")).toBe(true);
+  });
+
+  it("keeps orphaned .env.keys entries out of runtime values and marks the source as key-file-based", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env.keys"), "DOTENV_PRIVATE_KEY=deadbeef\n", "utf8");
+    const state = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: "deadbeef" });
+    expect(state.encryption.sources).toContain("DOTENV_PRIVATE_KEY");
+    expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
+    expect(state.variables.some((item) => item.key === "APP")).toBe(false);
   });
 
   it("reveals actual values and preserves revision checks", async () => {

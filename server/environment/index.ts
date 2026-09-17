@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { config as resolveDotenvxConfig } from "@dotenvx/dotenvx";
@@ -118,6 +118,10 @@ function collectDotenvKeySources(inheritedEnv: NodeJS.ProcessEnv, projectRoot: s
   if (!existsSync(keyFile)) return Array.from(combined);
 
   try {
+    const stat = lstatSync(keyFile);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      return Array.from(combined);
+    }
     const raw = readFileSync(keyFile, "utf8");
     const matches = raw.matchAll(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm);
     for (const match of matches) {
@@ -131,6 +135,20 @@ function collectDotenvKeySources(inheritedEnv: NodeJS.ProcessEnv, projectRoot: s
   }
 
   return Array.from(combined);
+}
+
+function getCredentialProcessEnv(inheritedEnv: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(inheritedEnv ?? {})
+      .filter(([key, value]) => isDotenvCredentialName(key) && typeof value === "string"),
+  ) as Record<string, string>;
+}
+
+function getSanitizedProcessEnv(inheritedEnv: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(inheritedEnv ?? {})
+      .filter(([key, value]) => !isDotenvCredentialName(key) && typeof value === "string"),
+  ) as Record<string, string>;
 }
 
 export function validateProfileName(profile: string | null | undefined): string | null {
@@ -241,6 +259,31 @@ async function inspectFile(projectRoot: string, filePath: string): Promise<{ ok:
           },
         };
       }
+      return {
+        ok: false,
+        realPath,
+        diagnostic: {
+          kind: "path-traversal",
+          severity: "error",
+          message: `Unsafe symlinked project file: ${toRelative(projectRoot, filePath)}`,
+          path: toRelative(projectRoot, filePath),
+        },
+      };
+    }
+    if (stat.isFile()) {
+      try {
+        await readFile(filePath, "utf8");
+      } catch {
+        return {
+          ok: false,
+          diagnostic: {
+            kind: "unreadable-file",
+            severity: "error",
+            message: `File is not readable: ${toRelative(projectRoot, filePath)}`,
+            path: toRelative(projectRoot, filePath),
+          },
+        };
+      }
     }
   } catch {
     // Fall through to the general read path.
@@ -314,6 +357,7 @@ export async function discoverDevelopmentProfiles(projectRoot: string): Promise<
   }
   for (const entry of files) {
     if (entry.isDirectory()) continue;
+    if (entry.name === ".env.keys") continue;
     if (!entry.name.startsWith(".env.")) continue;
     const name = entry.name.slice(5);
     if (name === "local") continue;
@@ -409,8 +453,7 @@ async function collectResolvedEnvironment(
     }
   }
 
-  for (let index = orderedFiles.length - 1; index >= 0; index -= 1) {
-    const filePath = orderedFiles[index];
+  for (const filePath of orderedFiles) {
     try {
       const raw = await readFile(filePath, "utf8");
       const matches = Array.from(raw.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*$/gm));
@@ -427,14 +470,14 @@ async function collectResolvedEnvironment(
   }
 
   if (orderedFiles.length > 0) {
-    const sanitizedProcessEnv: Record<string, string> = Object.fromEntries(
-      Object.entries(inheritedEnv ?? {})
-        .filter(([key, value]) => !isDotenvCredentialName(key) && typeof value === "string"),
-    ) as Record<string, string>;
     const resolved = resolveDotenvxConfig({
       path: orderedFiles,
       envKeysFile: keyFilePath,
-      processEnv: sanitizedProcessEnv,
+      processEnv: {
+        ...getSanitizedProcessEnv(inheritedEnv),
+        ...getCredentialProcessEnv(inheritedEnv),
+      },
+      noNative: inheritedEnv.DOTENVX_NO_NATIVE === "1" || inheritedEnv.DOTENVX_NO_NATIVE === "true",
       strict: false,
       ignore: [],
     });
@@ -705,47 +748,92 @@ export async function encryptEnvironmentFile(
   if (!isInsideProjectRoot(root, keyFilePath)) {
     throw new Error("Unsafe dotenvx key file path");
   }
-  if (existsSync(keyFilePath) && lstatSync(keyFilePath).isSymbolicLink()) {
-    throw new Error("Unsafe dotenvx key file: .env.keys is a symlink");
-  }
-  if (existsSync(keyFilePath) && !lstatSync(keyFilePath).isFile()) {
-    throw new Error("Unsafe dotenvx key file: .env.keys is not a regular file");
-  }
-
-  const gitignorePath = join(root, ".gitignore");
-  let ignoreText = "";
-  if (existsSync(gitignorePath)) {
-    ignoreText = await readFile(gitignorePath, "utf8");
-  }
-  const ignoreLine = ".env.keys";
-  if (!ignoreText.split(/\r?\n/).includes(ignoreLine)) {
-    const nextIgnore = `${ignoreText}${ignoreText && !ignoreText.endsWith("\n") ? "\n" : ""}${ignoreLine}\n`;
-    await writeFile(gitignorePath, nextIgnore, "utf8");
-  }
-
   if (existsSync(keyFilePath)) {
+    const keyStat = lstatSync(keyFilePath);
+    if (keyStat.isSymbolicLink()) {
+      throw new Error("Unsafe dotenvx key file: .env.keys is a symlink");
+    }
+    if (!keyStat.isFile()) {
+      throw new Error("Unsafe dotenvx key file: .env.keys is not a regular file");
+    }
     const tracked = readTrackedState(root, [keyFilePath]);
     if (tracked.has(".env.keys")) {
       throw new Error("Refusing to encrypt using a tracked .env.keys file");
     }
   }
 
-  const cliEntry = require.resolve("@dotenvx/dotenvx/package.json");
-  const cliPath = join(dirname(cliEntry), "src", "cli", "dotenvx.js");
-  const childEnv = { ...process.env, ...inheritedEnv };
-  for (const key of Object.keys(childEnv)) {
-    if (isDotenvCredentialName(key) || isDotenvRuntimeKey(key)) {
-      delete childEnv[key];
-    }
-  }
+  const gitignorePath = join(root, ".gitignore");
+  const originalProfileExists = existsSync(profilePath);
+  const originalKeyExists = existsSync(keyFilePath);
+  const originalGitignoreExists = existsSync(gitignorePath);
+  const originalProfile = originalProfileExists ? await readFile(profilePath, "utf8").catch(() => null) : null;
+  const originalKeyFile = originalKeyExists ? await readFile(keyFilePath, "utf8").catch(() => null) : null;
+  const originalGitignore = originalGitignoreExists ? await readFile(gitignorePath, "utf8").catch(() => null) : null;
+  const originalProfileMode = originalProfileExists ? lstatSync(profilePath).mode & 0o777 : null;
+  const originalKeyMode = originalKeyExists ? lstatSync(keyFilePath).mode & 0o777 : null;
+  const originalGitignoreMode = originalGitignoreExists ? lstatSync(gitignorePath).mode & 0o777 : null;
+  const ignoreLine = ".env.keys";
+  const gitignoreDirty = originalGitignore ? !originalGitignore.split(/\r?\n/).includes(ignoreLine) : true;
+
+  const rollback = async (): Promise<void> => {
+    const restoreFile = async (
+      path: string,
+      content: string | null,
+      mode: number | null,
+      existedBefore: boolean,
+    ): Promise<void> => {
+      if (content === null && existedBefore) {
+        if (mode !== null) {
+          await chmod(path, mode);
+        }
+        return;
+      }
+      if (content === null) {
+        if (existsSync(path)) {
+          await rm(path, { force: true });
+        }
+        return;
+      }
+      await writeFile(path, content, "utf8");
+      if (mode !== null) {
+        await chmod(path, mode);
+      }
+    };
+
+    await restoreFile(profilePath, originalProfile, originalProfileMode, originalProfileExists);
+    await restoreFile(keyFilePath, originalKeyFile, originalKeyMode, originalKeyExists);
+    await restoreFile(gitignorePath, originalGitignore, originalGitignoreMode, originalGitignoreExists);
+  };
 
   try {
-    execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath, "-fk", keyFilePath, "--no-native"], {
-      cwd: root,
-      env: childEnv,
-      stdio: "pipe",
-    });
+    if (gitignoreDirty) {
+      const nextIgnore = `${originalGitignore ?? ""}${originalGitignore && !originalGitignore.endsWith("\n") ? "\n" : ""}${ignoreLine}\n`;
+      await writeFile(gitignorePath, nextIgnore, "utf8");
+    }
+
+    const cliEntry = require.resolve("@dotenvx/dotenvx/package.json");
+    const cliPath = join(dirname(cliEntry), "src", "cli", "dotenvx.js");
+    const childEnv = { ...process.env, ...inheritedEnv };
+    for (const key of Object.keys(childEnv)) {
+      if (isDotenvCredentialName(key) || isDotenvRuntimeKey(key)) {
+        delete childEnv[key];
+      }
+    }
+    if (inheritedEnv.DOTENVX_NO_NATIVE === "1" || inheritedEnv.DOTENVX_NO_NATIVE === "true") {
+      execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath, "-fk", keyFilePath, "--no-native"], {
+        cwd: root,
+        env: childEnv,
+        stdio: "pipe",
+      });
+    } else {
+      execFileSync(process.execPath, [cliPath, "encrypt", "-f", profilePath, "-fk", keyFilePath], {
+        cwd: root,
+        env: childEnv,
+        stdio: "pipe",
+      });
+    }
   } catch (err) {
+    await rollback();
     const message = err instanceof Error ? err.message : String(err);
     return {
       status: "failed",
@@ -756,10 +844,11 @@ export async function encryptEnvironmentFile(
     };
   }
 
-  const nextContent = existsSync(profilePath) ? await readFile(profilePath, "utf8") : "";
   if (existsSync(keyFilePath)) {
     await chmod(keyFilePath, 0o600);
   }
+
+  const nextContent = existsSync(profilePath) ? await readFile(profilePath, "utf8") : "";
   return {
     status: "ready",
     path: toRelative(root, profilePath),
