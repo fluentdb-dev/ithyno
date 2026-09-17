@@ -15,6 +15,7 @@ export type EnvironmentDiagnostic = {
     | "unsupported-syntax"
     | "reserved-key"
     | "missing-required-key"
+    | "decryption-failed"
     | "encryption"
     | "git-tracked-secret"
     | "path-traversal"
@@ -284,6 +285,16 @@ async function inspectFile(projectRoot: string, filePath: string): Promise<{ ok:
           },
         };
       }
+    } else {
+      return {
+        ok: false,
+        diagnostic: {
+          kind: "unsupported-syntax",
+          severity: "error",
+          message: `Expected a regular file: ${toRelative(projectRoot, filePath)}`,
+          path: toRelative(projectRoot, filePath),
+        },
+      };
     }
   } catch {
     // Fall through to the general read path.
@@ -399,6 +410,7 @@ async function collectResolvedEnvironment(
   const encryptionSources = collectDotenvKeySources(inheritedEnv, root);
 
   const diagnosticFiles = new Set<string>(orderedFiles);
+  const resolvableFiles = new Set<string>();
   const keyFilePath = join(root, ".env.keys");
   if (existsSync(keyFilePath)) {
     diagnosticFiles.add(keyFilePath);
@@ -416,6 +428,9 @@ async function collectResolvedEnvironment(
     if (inspection.diagnostic) {
       diagnostics.push(inspection.diagnostic);
       continue;
+    }
+    if (orderedFiles.includes(filePath)) {
+      resolvableFiles.add(filePath);
     }
     if (trackedFiles.has(toRelative(root, filePath))) {
       diagnostics.push({
@@ -453,7 +468,8 @@ async function collectResolvedEnvironment(
     }
   }
 
-  for (const filePath of orderedFiles) {
+  const safeOrderedFiles = orderedFiles.filter((filePath) => resolvableFiles.has(filePath));
+  for (const filePath of safeOrderedFiles) {
     try {
       const raw = await readFile(filePath, "utf8");
       const matches = Array.from(raw.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*$/gm));
@@ -469,26 +485,31 @@ async function collectResolvedEnvironment(
     }
   }
 
-  if (orderedFiles.length > 0) {
+  if (safeOrderedFiles.length > 0) {
     const resolved = resolveDotenvxConfig({
-      path: orderedFiles,
+      path: safeOrderedFiles,
       envKeysFile: keyFilePath,
       processEnv: {
         ...getSanitizedProcessEnv(inheritedEnv),
         ...getCredentialProcessEnv(inheritedEnv),
       },
       noNative: inheritedEnv.DOTENVX_NO_NATIVE === "1" || inheritedEnv.DOTENVX_NO_NATIVE === "true",
+      quiet: true,
       strict: false,
       ignore: [],
     });
     const configError = resolved && typeof resolved === "object" && "error" in resolved ? resolved.error : undefined;
-    const shouldRejectConfig = configError && typeof configError === "object"
-      && ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"].includes(String((configError as { code?: string }).code ?? ""));
+    const configErrorCode = configError && typeof configError === "object"
+      ? String((configError as { code?: string }).code ?? "")
+      : "";
+    const shouldRejectConfig = ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"].includes(configErrorCode);
     if (shouldRejectConfig) {
       diagnostics.push({
-        kind: "missing-required-key",
+        kind: configErrorCode === "DECRYPTION_FAILED" ? "decryption-failed" : "missing-required-key",
         severity: "error",
-        message: "A matching dotenvx private key is required for the selected encrypted profile.",
+        message: configErrorCode === "DECRYPTION_FAILED"
+          ? "The available dotenvx private key could not decrypt the selected encrypted profile."
+          : "A matching dotenvx private key is required for the selected encrypted profile.",
         path: ".env.keys",
       });
     }
@@ -511,7 +532,7 @@ async function collectResolvedEnvironment(
     for (const [key, value] of Object.entries(parsed)) {
       if (key.startsWith(RESERVED_PREFIX) || isDotenvRuntimeKey(key)) continue;
       env[key] = String(value);
-      const sourcePath = keySourceByKey.get(key) ?? orderedFiles[0];
+      const sourcePath = keySourceByKey.get(key) ?? safeOrderedFiles[0];
       variableEntriesByKey.set(key, {
         key,
         maskedValue: maskValue(String(value)),

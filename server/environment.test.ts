@@ -142,7 +142,7 @@ describe("development environment resolver", () => {
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("# existing\n");
   });
 
-  it("uses a real encrypted key and reports a normalized missing-key failure for a wrong valid private key", async () => {
+  it("uses a real encrypted key and distinguishes a wrong valid private key from a missing key", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
     execFileSync(process.execPath, [
@@ -171,8 +171,8 @@ describe("development environment resolver", () => {
 
     const state = await composeDevelopmentEnvironment(dir, { DOTENV_PRIVATE_KEY: wrongKey ?? "wrong" });
     expect(state.variables.some((item) => item.key === "APP")).toBe(false);
-    expect(state.diagnostics.some((item) => item.kind === "missing-required-key")).toBe(true);
-    expect(state.diagnostics.some((item) => item.message.includes("dotenvx private key"))).toBe(true);
+    expect(state.diagnostics.some((item) => item.kind === "decryption-failed")).toBe(true);
+    expect(state.diagnostics.some((item) => item.message.includes("could not decrypt"))).toBe(true);
   });
 
   it("rejects tracked or symlinked .env.keys before any mutation", async () => {

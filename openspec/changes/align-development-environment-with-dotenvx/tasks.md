@@ -2,21 +2,21 @@
 
 - [x] 1.1 Add temporary-project integration fixtures that use the bundled dotenvx to encrypt a plaintext `.env` and `.env.development`, generate `.env.keys`, and resolve the original values.
 - [x] 1.2 Add failing regression tests proving the current parser-only resolver returns ciphertext, first encryption is incorrectly blocked without a pre-existing key, and suffixed `DOTENV_PRIVATE_KEY_*` credentials are not modelled safely.
-- [x] 1.3 Document and pin the bundled dotenvx APIs and CLI arguments used for config resolution, `-f`, `-fk`, native capability probing, and deterministic `--no-native` tests.
+- [ ] 1.3 Document and pin the bundled dotenvx APIs and CLI arguments used for config resolution, `-f`, `-fk`, native capability probing, and deterministic `--no-native` tests.
 
 ## 2. Replace the environment resolver
 
 - [x] 2.1 Implement one dotenvx adapter that resolves the ordered base/selected profiles into an isolated object using the project-root `.env.keys` path and normalized secret-safe errors.
 - [x] 2.2 Separate syntax/source metadata from resolved runtime values so ciphertext is never returned as an application value after decryption failure.
 - [x] 2.3 Replace the fixed key allowlist with profile-aware `DOTENV_PRIVATE_KEY` family handling plus explicitly supported legacy credentials.
-- [x] 2.4 Add diagnostics for missing, wrong, unreadable, symlinked, tracked, and orphaned key-file state without exposing private values.
+- [ ] 2.4 Add diagnostics for missing, wrong, unreadable, symlinked, tracked, and orphaned key-file state without exposing private values.
 
 ## 3. Restore standard encryption behavior
 
 - [x] 3.1 Change first-time encryption to invoke bundled dotenvx with explicit project-root `-f` and `-fk` paths without requiring a preconfigured private key.
-- [x] 3.2 Validate `.env.keys` as a project-root regular non-symlink file, apply restrictive permissions where supported, and append an exact `.env.keys` Git-ignore rule after user confirmation without rewriting unrelated rules.
+- [ ] 3.2 Validate `.env.keys` as a project-root regular non-symlink file, apply restrictive permissions where supported, and append an exact `.env.keys` Git-ignore rule after user confirmation without rewriting unrelated rules.
 - [x] 3.3 Refuse unsafe or Git-tracked key files and preserve pre-operation files/state when dotenvx encryption fails.
-- [x] 3.4 Add standard lifecycle tests for existing keys, new profile-specific keys, repeated encryption, missing keys, and wrong keys.
+- [ ] 3.4 Add standard lifecycle tests for existing keys, new profile-specific keys, repeated encryption, missing keys, and wrong keys.
 
 ## 4. Isolate credentials from child processes
 
