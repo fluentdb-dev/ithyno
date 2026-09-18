@@ -2,10 +2,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  EncryptionConfirmationDialog,
   EnvironmentActionButtons,
   EnvironmentDeleteConfirmDialog,
   EnvironmentEmptyState,
+  EnvironmentNativeActionButtons,
   EnvironmentNoProfileState,
+  EnvironmentProfileDeleteDialog,
   EnvironmentValueCell,
   buildPendingOperations,
   describeEncryptionStatus,
@@ -74,9 +77,64 @@ describe("environment page helpers", () => {
   it("explains whether dotenv encryption is available in the runtime environment", () => {
     expect(describeEncryptionStatus("ready")).toBe("ready");
     expect(describeEncryptionStatus("ready", { source: "DOTENV_PRIVATE_KEY_DEVELOPMENT" })).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
-    expect(describeEncryptionStatus("missing")).toContain("confirm first encryption");
+    expect(describeEncryptionStatus("missing")).toContain("matching dotenvx private key");
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENVX_KEY");
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENV_KEY");
+  });
+
+  it("renders an exact first-encryption confirmation with profile, key file, and gitignore details", () => {
+    const markup = renderToStaticMarkup(
+      <EncryptionConfirmationDialog
+        profile="development"
+        profilePath=".env.development"
+        keyFilePath=".env.keys"
+        gitignoreEntry=".env.keys"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Encrypt profile — development");
+    expect(markup).toContain(".env.development");
+    expect(markup).toContain(".env.keys");
+    expect(markup).toContain("Append the exact Git ignore entry");
+    expect(markup).toContain(".gitignore");
+  });
+
+  it("only shows native move/copy actions when supported and keeps them explicit", () => {
+    const supported = renderToStaticMarkup(
+      <EnvironmentNativeActionButtons
+        native={{ supported: true, platform: "darwin", tool: "/usr/bin/security" }}
+        profile="development"
+        profilePath=".env.development"
+        onAction={vi.fn()}
+      />,
+    );
+    const unsupported = renderToStaticMarkup(
+      <EnvironmentNativeActionButtons
+        native={{ supported: false, platform: "linux", reason: "missing" }}
+        profile="development"
+        profilePath=".env.development"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(supported).toContain("Move to native");
+    expect(supported).toContain("Copy to native");
+    expect(unsupported).not.toContain("Move to native");
+  });
+
+  it("explains exact profile deletion without touching keys", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentProfileDeleteDialog
+        profile="development"
+        profilePath=".env.development"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Delete profile — development");
+    expect(markup).toContain(".env.development");
+    expect(markup).toContain(".env.keys");
+    expect(markup).toContain("does not touch");
   });
 });
 

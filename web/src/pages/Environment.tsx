@@ -122,7 +122,7 @@ export function describeEncryptionStatus(
   if (details?.native && !details.native.supported) {
     return `missing (standard ${keyIdentifiers} is the default local key source; native key storage is unavailable on this host)`;
   }
-  return `missing (confirm first encryption for the selected profile to create ${keyIdentifiers})`;
+  return `missing (selected profile needs a matching dotenvx private key; standard source is ${keyIdentifiers})`;
 }
 
 export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
@@ -352,6 +352,62 @@ export function EnvironmentDeleteConfirmDialog({
   );
 }
 
+export function EncryptionConfirmationDialog({
+  profile,
+  profilePath,
+  keyFilePath,
+  gitignoreEntry,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  profile: string;
+  profilePath: string;
+  keyFilePath: string;
+  gitignoreEntry: string;
+  onConfirm: () => void | Promise<void>;
+  onCancel: () => void;
+  loading?: boolean;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={`Encrypt ${profile}`} onClick={(event) => event.stopPropagation()}>
+        <h3>Encrypt profile — {profile}</h3>
+        <p>
+          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={() => void onConfirm()} disabled={loading}>Encrypt profile</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function EnvironmentNativeActionButtons({
+  native,
+  profile,
+  profilePath,
+  onAction,
+  busy,
+}: {
+  native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  profile: string;
+  profilePath: string;
+  onAction: (action: "up" | "push") => void | Promise<void>;
+  busy?: "up" | "push" | null;
+}) {
+  if (!native?.supported) return null;
+  return (
+    <div className="environment-inline-controls" style={{ marginTop: 8 }}>
+      <button type="button" className="btn-secondary" onClick={() => void onAction("up")} disabled={busy === "up"}>Move to native</button>
+      <button type="button" className="btn-secondary" onClick={() => void onAction("push")} disabled={busy === "push"}>Copy to native</button>
+      <span className="muted">{profile} · {profilePath}</span>
+    </div>
+  );
+}
+
 export function EnvironmentProfileDeleteDialog({
   profile,
   profilePath,
@@ -391,6 +447,9 @@ export function Environment() {
   const [editingValue, setEditingValue] = useState("");
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [deletingProfile, setDeletingProfile] = useState<string | null>(null);
+  const [confirmEncryption, setConfirmEncryption] = useState(false);
+  const [encrypting, setEncrypting] = useState(false);
+  const [nativeActioning, setNativeActioning] = useState<"up" | "push" | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [createProfileName, setCreateProfileName] = useState("");
@@ -532,7 +591,7 @@ export function Environment() {
     const profilePath = snapshot.profiles.find((item) => item.name === profile)?.path ?? null;
     setDeletingProfile(null);
     try {
-      const res = await fetch("/api/environment/profile-delete", {
+      const res = await fetch("/api/environment/profile", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ profile, path: profilePath }),
@@ -552,6 +611,55 @@ export function Environment() {
       }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Unable to delete profile");
+    }
+  };
+
+  const runNativeAction = async (action: "up" | "push") => {
+    if (!snapshot || !snapshot.selection.selectedProfile) return;
+    setNativeActioning(action);
+    try {
+      const profile = snapshot.selection.selectedProfile;
+      const profilePath = snapshot.profiles.find((item) => item.name === profile)?.path ?? null;
+      const res = await fetch("/api/environment/native", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ action, profile, path: profilePath }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? `Unable to ${action} native key`);
+        return;
+      }
+      await refreshSnapshot();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : `Unable to ${action} native key`);
+    } finally {
+      setNativeActioning(null);
+    }
+  };
+
+  const confirmEncryptProfile = async () => {
+    if (!snapshot) return;
+    const profile = snapshot.selection.selectedProfile ?? "default";
+    setEncrypting(true);
+    setConfirmEncryption(false);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/environment/encrypt", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ profile }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? "Unable to encrypt profile");
+        return;
+      }
+      await refreshSnapshot();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to encrypt profile");
+    } finally {
+      setEncrypting(false);
     }
   };
 
@@ -655,13 +763,20 @@ export function Environment() {
         Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
       </p>
       {snapshot ? (
-        <p className={snapshot.encryption.status === "missing" ? "environment-status environment-status-warning" : "environment-status environment-status-ok"}>
-          {describeEncryptionStatus(snapshot.encryption.status, {
-            source: snapshot.encryption.source,
-            keyIdentifiers: snapshot.encryption.keyIdentifiers,
-            native: snapshot.encryption.native,
-          })}
-        </p>
+        <div>
+          <p className={snapshot.encryption.status === "missing" ? "environment-status environment-status-warning" : "environment-status environment-status-ok"}>
+            {describeEncryptionStatus(snapshot.encryption.status, {
+              source: snapshot.encryption.source,
+              keyIdentifiers: snapshot.encryption.keyIdentifiers,
+              native: snapshot.encryption.native,
+            })}
+          </p>
+          {snapshot.encryption.status === "missing" && snapshot.selection.selectedProfile ? (
+            <button type="button" className="btn-primary" onClick={() => setConfirmEncryption(true)} disabled={encrypting}>
+              Encrypt selected profile
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {managerRunning && restartRequired ? (
         <div className="info-banner">
@@ -704,6 +819,16 @@ export function Environment() {
                     </button>
                   </div>
                 </div>
+              ) : null}
+
+              {snapshot.selection.selectedProfile ? (
+                <EnvironmentNativeActionButtons
+                  native={snapshot.encryption.native}
+                  profile={snapshot.selection.selectedProfile}
+                  profilePath={snapshot.profiles.find((profile) => profile.name === snapshot.selection.selectedProfile)?.path ?? ".env"}
+                  onAction={runNativeAction}
+                  busy={nativeActioning}
+                />
               ) : null}
 
               <div className="settings-field">
@@ -836,6 +961,17 @@ export function Environment() {
 
 
           {saveError ? <p className="environment-error">{saveError}</p> : null}
+          {confirmEncryption && snapshot ? (
+            <EncryptionConfirmationDialog
+              profile={snapshot.selection.selectedProfile ?? "default"}
+              profilePath={snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}
+              keyFilePath=".env.keys"
+              gitignoreEntry=".env.keys"
+              loading={encrypting}
+              onConfirm={() => void confirmEncryptProfile()}
+              onCancel={() => setConfirmEncryption(false)}
+            />
+          ) : null}
           {deletingProfile ? (
             <EnvironmentProfileDeleteDialog
               profile={deletingProfile}

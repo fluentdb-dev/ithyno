@@ -167,14 +167,17 @@ export function getProfileKeyIdentifier(profileName: string | null | undefined):
   return `DOTENV_PRIVATE_KEY_${normalized.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
-export function getDotenvxNativeSupport(): DotenvxNativeStatus {
-  const platform = process.platform;
+export function getDotenvxNativeSupport(
+  platform: NodeJS.Platform = process.platform,
+  pathValue: string = process.env.PATH ?? "",
+  exists = existsSync,
+): DotenvxNativeStatus {
   const needsSecurity = platform === "darwin";
   const needsSecretTool = platform === "linux";
   const needsPowerShell = platform === "win32";
 
   if (needsSecurity) {
-    const ok = existsSync("/usr/bin/security");
+    const ok = exists("/usr/bin/security");
     return {
       supported: ok,
       platform,
@@ -183,34 +186,28 @@ export function getDotenvxNativeSupport(): DotenvxNativeStatus {
     };
   }
   if (needsSecretTool) {
-    const tool = process.env.PATH ? process.env.PATH.split(":" ).map((entry) => join(entry, "secret-tool")).find((candidate) => existsSync(candidate)) : undefined;
+    const tool = (pathValue ? pathValue.split(":") : [])
+      .map((entry) => join(entry, "secret-tool"))
+      .find((candidate) => exists(candidate));
     return {
       supported: Boolean(tool),
       platform,
-      tool: tool,
+      tool,
       reason: tool ? undefined : "linux native requires secret-tool on PATH",
     };
   }
   if (needsPowerShell) {
-    const powershells = ["pwsh.exe", "powershell.exe"];
-    const tool = powershells.find((candidate) => {
-      try {
-        const resolved = require.resolve(candidate);
-        return Boolean(resolved);
-      } catch {
-        return false;
-      }
-    });
-    if (tool) return { supported: true, platform, tool };
-    const pathEntries = (process.env.PATH ?? "").split(/[;:]/).filter(Boolean);
+    const pathEntries = (pathValue || "").split(";").filter(Boolean);
     const found = pathEntries
-      .map((entry) => join(entry, process.platform === "win32" ? "pwsh.exe" : "pwsh"))
-      .find((candidate) => existsSync(candidate));
+      .flatMap((entry) => ["pwsh.exe", "powershell.exe"].map((candidate) => join(entry, candidate)))
+      .find((candidate) => exists(candidate));
+    if (found) {
+      return { supported: true, platform, tool: found };
+    }
     return {
-      supported: Boolean(found),
+      supported: false,
       platform,
-      tool: found,
-      reason: found ? undefined : "windows native requires pwsh or powershell.exe",
+      reason: "windows native requires pwsh.exe or powershell.exe on PATH",
     };
   }
   return { supported: false, platform };
@@ -236,17 +233,44 @@ export function getDotenvKeyIdentifiers(projectRoot: string, inheritedEnv: NodeJ
 }
 
 export function getOrphanedDotenvKeyIdentifiers(projectRoot: string, inheritedEnv: NodeJS.ProcessEnv = process.env): string[] {
-  const knownProfiles = new Set<string>(["DOTENV_PRIVATE_KEY"]);
+  const knownProfiles = new Set<string>();
   const entries = existsSync(projectRoot) ? readdirSync(projectRoot, { withFileTypes: true }) : [];
   for (const entry of entries) {
     if (entry.isDirectory() || entry.name === ".env.keys") continue;
     if (!entry.name.startsWith(".env.")) continue;
+    const candidatePath = join(projectRoot, entry.name);
+    if (!existsSync(candidatePath)) continue;
+    try {
+      const stat = lstatSync(candidatePath);
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+    } catch {
+      continue;
+    }
     const name = entry.name.slice(5);
-    if (name === "local") continue;
-    knownProfiles.add(getProfileKeyIdentifier(name));
+    const normalized = validateProfileName(name);
+    if (!normalized) continue;
+    if (normalized === "default") knownProfiles.add("DOTENV_PRIVATE_KEY");
+    else if (normalized === "local") knownProfiles.add("DOTENV_PRIVATE_KEY_LOCAL");
+    else knownProfiles.add(getProfileKeyIdentifier(normalized));
   }
-  if (existsSync(join(projectRoot, ".env"))) knownProfiles.add("DOTENV_PRIVATE_KEY");
-  if (existsSync(join(projectRoot, ".env.local"))) knownProfiles.add("DOTENV_PRIVATE_KEY_LOCAL");
+  const defaultPath = join(projectRoot, ".env");
+  if (existsSync(defaultPath)) {
+    try {
+      const stat = lstatSync(defaultPath);
+      if (stat.isFile() && !stat.isSymbolicLink()) knownProfiles.add("DOTENV_PRIVATE_KEY");
+    } catch {
+      // ignore malformed files
+    }
+  }
+  const localPath = join(projectRoot, ".env.local");
+  if (existsSync(localPath)) {
+    try {
+      const stat = lstatSync(localPath);
+      if (stat.isFile() && !stat.isSymbolicLink()) knownProfiles.add("DOTENV_PRIVATE_KEY_LOCAL");
+    } catch {
+      // ignore malformed files
+    }
+  }
   return getDotenvKeyIdentifiers(projectRoot, inheritedEnv).filter((identifier) => !knownProfiles.has(identifier));
 }
 
@@ -547,6 +571,7 @@ async function collectResolvedEnvironment(
   encryptionSources: string[];
   keyIdentifiers: string[];
   profiles: DevelopmentEnvironmentProfile[];
+  status: "ready" | "missing";
 }> {
   const root = resolve(projectRoot);
   const { profiles, diagnostics: discoveredDiagnostics } = await discoverDevelopmentProfiles(root);
@@ -653,6 +678,8 @@ async function collectResolvedEnvironment(
     }
   }
 
+  let resolutionStatus: "ready" | "missing" = "ready";
+
   if (safeOrderedFiles.length > 0) {
     const resolved = resolveDotenvxConfig({
       path: safeOrderedFiles,
@@ -693,6 +720,7 @@ async function collectResolvedEnvironment(
         encryptionSources,
         keyIdentifiers,
         profiles,
+        status: "missing",
       };
     }
 
@@ -722,6 +750,7 @@ async function collectResolvedEnvironment(
     encryptionSources,
     keyIdentifiers,
     profiles,
+    status: resolutionStatus,
   };
 }
 
@@ -731,7 +760,7 @@ export async function composeDevelopmentEnvironment(
 ): Promise<DevelopmentEnvironmentState> {
   const root = resolve(projectRoot);
   const selection = await readEnvironmentSelection(root);
-  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, keyIdentifiers, profiles } = await collectResolvedEnvironment(root, selection, inheritedEnv);
+  const { orderedFiles, env, diagnostics, variableEntries, encryptionSources, keyIdentifiers, profiles, status } = await collectResolvedEnvironment(root, selection, inheritedEnv);
   const resolvedEntries = Object.entries(env).sort(([a], [b]) => a.localeCompare(b));
   const nativeState = getDotenvxNativeSupport();
   const selectedProfile = selection.selectedProfile ?? "default";
@@ -760,8 +789,8 @@ export async function composeDevelopmentEnvironment(
     }),
     diagnostics,
     encryption: {
-      ready: encryptionSources.length > 0,
-      status: encryptionSources.length > 0 ? "ready" : "missing",
+      ready: status === "ready",
+      status,
       sources: encryptionSources,
       keyIdentifiers,
       source,
@@ -926,6 +955,67 @@ function serializeEnvValue(value: string): string {
     throw new Error("Multiline values are not supported");
   }
   return JSON.stringify(value);
+}
+
+export async function runDotenvxNativeAction(
+  projectRoot: string,
+  action: "up" | "push",
+  profile: string,
+  inheritedEnv: NodeJS.ProcessEnv = process.env,
+): Promise<{ action: "up" | "push"; profile: string; path: string; status: "ready" }> {
+  const root = resolve(projectRoot);
+  const normalizedProfile = validateProfileName(profile);
+  if (!normalizedProfile) {
+    throw new Error("Invalid profile target");
+  }
+  if (action !== "up" && action !== "push") {
+    throw new Error(`Unsupported native action: ${String(action)}`);
+  }
+  const discovered = await discoverDevelopmentProfiles(root);
+  const discoveredProfile = discovered.profiles.find((candidate) => candidate.name === normalizedProfile && candidate.exists);
+  if (!discoveredProfile) {
+    throw new Error(`Profile not found: ${normalizedProfile}`);
+  }
+  const resolvedTarget = resolveProfilePath(root, normalizedProfile);
+  if (!resolvedTarget || !isInsideProjectRoot(root, resolvedTarget)) {
+    throw new Error("Unsafe profile path");
+  }
+  const targetStat = lstatSync(resolvedTarget);
+  if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
+    throw new Error(`Unsafe profile path: ${toRelative(root, resolvedTarget)}`);
+  }
+  const keyFilePath = join(root, ".env.keys");
+  if (!existsSync(keyFilePath)) {
+    throw new Error("Missing .env.keys file for native action");
+  }
+  const keyStat = lstatSync(keyFilePath);
+  if (keyStat.isSymbolicLink() || !keyStat.isFile()) {
+    throw new Error("Unsafe dotenvx key file: .env.keys is not a regular file");
+  }
+
+  const cliEntry = require.resolve("@dotenvx/dotenvx/package.json");
+  const cliPath = join(dirname(cliEntry), "src", "cli", "dotenvx.js");
+  const childEnv = { ...process.env, ...inheritedEnv };
+  for (const key of Object.keys(childEnv)) {
+    if (isDotenvCredentialName(key) || isDotenvRuntimeKey(key)) {
+      delete childEnv[key];
+    }
+  }
+  try {
+    execFileSync(process.execPath, [cliPath, "native", action, "-f", resolvedTarget, "-fk", keyFilePath], {
+      cwd: root,
+      env: childEnv,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
+    const sanitized = raw.replace(/(?:DOTENV_PRIVATE_KEY(?:_[A-Z0-9_]+)?\s*=\s*)([^\s]+)/gi, "DOTENV_PRIVATE_KEY=[REDACTED]")
+      .replace(/(?:DOTENVX_KEY|DOTENV_KEY)\s*=\s*[^\s]+/gi, "$1=[REDACTED]")
+      .replace(/\b(?:key|secret|token|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+    throw new Error(`Native ${action} failed: ${sanitized}`);
+  }
+
+  return { action, profile: normalizedProfile, path: toRelative(root, resolvedTarget), status: "ready" };
 }
 
 export async function encryptEnvironmentFile(
