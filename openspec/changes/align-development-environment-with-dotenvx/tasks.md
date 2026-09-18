@@ -33,12 +33,12 @@
 
 ## 6. Retire incompatible secure-key work
 
-- [ ] 6.1 Remove the abandoned single-generic-key assumptions from active documentation and code, retaining only pieces that use named dotenvx private-key semantics.
-- [ ] 6.2 Retire the superseded `secure-extension-dotenvx-keys` and `secure-electron-dotenvx-keys` active change directories after confirming every retained requirement is represented here.
-- [ ] 6.3 Record in `outcome.md` which host-specific storage work was replaced by dotenvx Native and which, if any, remains a future enhancement.
+- [x] 6.1 Remove the abandoned single-generic-key assumptions from active documentation and code, retaining only pieces that use named dotenvx private-key semantics.
+- [x] 6.2 Retire the superseded `secure-extension-dotenvx-keys` and `secure-electron-dotenvx-keys` active change directories after confirming every retained requirement is represented here.
+- [x] 6.3 Record in `outcome.md` which host-specific storage work was replaced by dotenvx Native and which, if any, remains a future enhancement.
 
 ## 7. Documentation, packaging, and verification
 
-- [ ] 7.1 Update user documentation for encrypted `.env*`, ignored `.env.keys`, environment-specific private keys, dotenvx Native, CI secret variables, and profile deletion.
-- [ ] 7.2 Add package-staging smoke tests that run the standard key-file lifecycle against bundled dotenvx in Electron and VS Code hosts without a global dotenvx installation.
+- [x] 7.1 Update user documentation for encrypted `.env*`, ignored `.env.keys`, environment-specific private keys, dotenvx Native, CI secret variables, and profile deletion.
+- [x] 7.2 Add package-staging smoke tests that run the standard key-file lifecycle against bundled dotenvx in Electron and VS Code hosts without a global dotenvx installation.
 - [ ] 7.3 Run focused environment/UI/PTY/AgentRunner tests, the full test suite, typecheck, web/Electron/VS Code builds, package guards, and strict OpenSpec validation.
