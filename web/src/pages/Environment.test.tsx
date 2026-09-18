@@ -5,6 +5,7 @@ import {
   EncryptionConfirmationDialog,
   EnvironmentActionButtons,
   EnvironmentDeleteConfirmDialog,
+  EnvironmentDiagnostics,
   EnvironmentEmptyState,
   EnvironmentNativeActionButtons,
   EnvironmentNoProfileState,
@@ -76,6 +77,7 @@ describe("environment page helpers", () => {
 
   it("explains whether dotenv encryption is available in the runtime environment", () => {
     expect(describeEncryptionStatus("ready")).toBe("ready");
+    expect(describeEncryptionStatus("ready", { encrypted: false })).toContain("plaintext");
     expect(describeEncryptionStatus("ready", { source: "DOTENV_PRIVATE_KEY_DEVELOPMENT" })).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
     expect(describeEncryptionStatus("missing")).toContain("matching dotenvx private key");
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENVX_KEY");
@@ -135,6 +137,19 @@ describe("environment page helpers", () => {
     expect(markup).toContain(".env.development");
     expect(markup).toContain(".env.keys");
     expect(markup).toContain("does not touch");
+  });
+
+  it("shows wrong-key and orphaned-key guidance without secret values", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentDiagnostics diagnostics={[
+        { kind: "decryption-failed", severity: "error", message: "The available profile key could not decrypt the selected profile." },
+        { kind: "orphaned-key", severity: "warning", message: "Orphaned dotenvx key identifier: DOTENV_PRIVATE_KEY_OLD", path: ".env.keys" },
+      ]} />,
+    );
+    expect(markup).toContain("decryption-failed");
+    expect(markup).toContain("orphaned-key");
+    expect(markup).toContain("DOTENV_PRIVATE_KEY_OLD");
+    expect(markup).not.toContain("private-key-value");
   });
 });
 

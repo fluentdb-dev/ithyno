@@ -9,9 +9,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   composeDevelopmentEnvironment,
   encryptEnvironmentFile,
+  getDotenvxNativeSupport,
   mutateEnvironmentFile,
   readEnvironmentSelection,
   resolveDevelopmentEnvironmentValues,
+  runDotenvxNativeAction,
   writeEnvironmentSelection,
 } from "./environment/index.js";
 
@@ -81,6 +83,9 @@ describe("development environment resolver", () => {
 
     const snapshot = await composeDevelopmentEnvironment(dir);
     expect(snapshot.encryption.status).toBe("ready");
+    expect(snapshot.encryption.encrypted).toBe(true);
+    expect(snapshot.encryption.keyFileExists).toBe(true);
+    expect(snapshot.encryption.source).toBe(".env.keys");
     expect(snapshot.encryption.sources).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
     expect(snapshot.variables.some((item) => item.key === "APP")).toBe(true);
   });
@@ -99,6 +104,8 @@ describe("development environment resolver", () => {
     expect(keyFile).toContain("DOTENV_PRIVATE_KEY=");
     expect(keyFile).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT=");
 
+    await writeEnvironmentSelection(dir, { selectedProfile: "development", preferences: {} });
+
     const value = await composeDevelopmentEnvironment(dir, {
       DOTENV_PRIVATE_KEY: /DOTENV_PRIVATE_KEY=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
       DOTENV_PRIVATE_KEY_DEVELOPMENT: /DOTENV_PRIVATE_KEY_DEVELOPMENT=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
@@ -106,6 +113,12 @@ describe("development environment resolver", () => {
     expect(value.variables.some((item) => item.key === "APP")).toBe(true);
     expect(value.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
     expect(value.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY_DEVELOPMENT")).toBe(false);
+    const resolved = await resolveDevelopmentEnvironmentValues(dir, {
+      DOTENV_PRIVATE_KEY: /DOTENV_PRIVATE_KEY=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
+      DOTENV_PRIVATE_KEY_DEVELOPMENT: /DOTENV_PRIVATE_KEY_DEVELOPMENT=(.*)/.exec(keyFile)?.[1]?.trim() ?? "",
+    });
+    expect(resolved.APP).toBe("development");
+    expect(resolved.FEATURE).toBe("enabled");
   });
 
   it("uses inherited standard and suffixed private keys without exposing them as runtime values", async () => {
@@ -145,11 +158,17 @@ describe("development environment resolver", () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=hello\n", "utf8");
 
+    await writeEnvironmentSelection(dir, { selectedProfile: "default", preferences: {} });
+    const before = await composeDevelopmentEnvironment(dir);
+    expect(before.encryption.encrypted).toBe(false);
+
     const result = await encryptEnvironmentFile(dir, "default");
 
     expect(result.status).toBe("ready");
     expect(existsSync(join(dir, ".env.keys"))).toBe(true);
     expect(readFileSync(join(dir, ".env.keys"), "utf8")).toContain("DOTENV_PRIVATE_KEY");
+    const after = await composeDevelopmentEnvironment(dir);
+    expect(after.encryption.encrypted).toBe(true);
   });
 
   it("restores .env, .env.keys, and .gitignore when encryption fails", async () => {
@@ -216,6 +235,8 @@ describe("development environment resolver", () => {
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
     execFileSync("git", ["add", "-f", ".env.keys"], { cwd: dir });
     await expect(encryptEnvironmentFile(dir, "default")).rejects.toThrow(/tracked/);
+    const trackedState = await composeDevelopmentEnvironment(dir);
+    expect(trackedState.diagnostics.some((diag) => diag.kind === "git-tracked-secret" && diag.path === ".env.keys")).toBe(true);
 
     const symlinkDir = mkdtempSync(join(tmpdir(), "ithyno-env-link-"));
     writeFileSync(join(symlinkDir, ".env"), "APP=two\n", "utf8");
@@ -223,6 +244,8 @@ describe("development environment resolver", () => {
     writeFileSync(target, "DOTENV_PRIVATE_KEY=abc\n", "utf8");
     symlinkSync(target, join(symlinkDir, ".env.keys"));
     await expect(encryptEnvironmentFile(symlinkDir, "default")).rejects.toThrow(/symlink/);
+    const symlinkState = await composeDevelopmentEnvironment(symlinkDir);
+    expect(symlinkState.diagnostics.some((diag) => diag.kind === "path-traversal" && diag.path === ".env.keys")).toBe(true);
   });
 
   it("reports unreadable key-file state for a blocked .env.keys", async () => {
@@ -244,6 +267,24 @@ describe("development environment resolver", () => {
     expect(state.encryption.sources).toContain("DOTENV_PRIVATE_KEY");
     expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
     expect(state.variables.some((item) => item.key === "APP")).toBe(false);
+    expect(state.diagnostics.some((item) => item.kind === "orphaned-key" && item.key === "DOTENV_PRIVATE_KEY")).toBe(true);
+  });
+
+  it("probes dotenvx Native support without reading or writing any secrets", () => {
+    const existing = new Set(["/usr/bin/security", "/usr/bin/secret-tool", "C:\\Tools\\powershell.exe"]);
+    const exists: typeof existsSync = (path) => existing.has(String(path));
+    expect(getDotenvxNativeSupport("darwin", "", exists).supported).toBe(true);
+    expect(getDotenvxNativeSupport("linux", "/usr/bin", exists).tool).toBe("/usr/bin/secret-tool");
+    expect(getDotenvxNativeSupport("win32", "C:\\Tools", exists).tool).toBe("C:\\Tools\\powershell.exe");
+    expect(getDotenvxNativeSupport("linux", "/missing", exists).supported).toBe(false);
+  });
+
+  it("rejects a Native action before execution when the exact profile path does not match", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
+    writeFileSync(join(dir, ".env"), "APP=base\n", "utf8");
+    writeFileSync(join(dir, ".env.keys"), "DOTENV_PRIVATE_KEY=placeholder\n", "utf8");
+    await expect(runDotenvxNativeAction(dir, "push", "default", ".env.other"))
+      .rejects.toThrow(/Exact profile path confirmation/);
   });
 
   it("reveals actual values and preserves revision checks", async () => {

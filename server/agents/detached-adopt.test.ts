@@ -88,6 +88,8 @@ describe("detached job adoption", () => {
     await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
     const previousPrivate = process.env.DOTENV_PRIVATE_KEY;
     const previousLegacy = process.env.DOTENVX_KEY;
+    let sourceRunner: AgentRunner | null = null;
+    let adoptedRunner: AgentRunner | null = null;
     process.env.DOTENV_PRIVATE_KEY = "secret-private";
     process.env.DOTENVX_KEY = "secret-legacy";
     try {
@@ -100,17 +102,17 @@ describe("detached job adoption", () => {
 `);
       const registry = new AgentRegistry(dir);
       await registry.load();
-      const runner = new AgentRunner(dir, registry, () => undefined);
-      const run = await runner.run("add-adopted-detached", "worker", "code", "worktree");
+      sourceRunner = new AgentRunner(dir, registry, () => undefined);
+      const run = await sourceRunner.run("add-adopted-detached", "worker", "code", "worktree");
       expect(run.ok).toBe(true);
       if (!run.ok) return;
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const adopted = await runnerFor(dir);
-      await adopted.adoptDetached();
-      const active = adopted.activeJobForChange("add-adopted-detached");
+      adoptedRunner = await runnerFor(dir);
+      await adoptedRunner.adoptDetached();
+      const active = adoptedRunner.activeJobForChange("add-adopted-detached");
       expect(active).toMatchObject({ changeId: "add-adopted-detached", detached: true, status: "running" });
-      const job = adopted.getJob(active!.id);
+      const job = adoptedRunner.getJob(active!.id);
       const output = job?.output.map((item) => item.chunk).join("") ?? "";
       expect(output).toContain("from-dev");
       expect(output).toContain("enabled");
@@ -118,8 +120,9 @@ describe("detached job adoption", () => {
       expect(output).not.toContain("secret-legacy");
       if (job?.detachedMeta) process.kill(job.detachedMeta.pid, "SIGTERM");
       await new Promise((resolve) => setTimeout(resolve, 200));
-      adopted.shutdown();
     } finally {
+      adoptedRunner?.shutdown();
+      sourceRunner?.shutdown();
       if (previousPrivate === undefined) delete process.env.DOTENV_PRIVATE_KEY;
       else process.env.DOTENV_PRIVATE_KEY = previousPrivate;
       if (previousLegacy === undefined) delete process.env.DOTENVX_KEY;

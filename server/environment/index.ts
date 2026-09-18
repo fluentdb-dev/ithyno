@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, win32 } from "node:path";
 import { createRequire } from "node:module";
 import { config as resolveDotenvxConfig } from "@dotenvx/dotenvx";
 
@@ -65,6 +65,8 @@ export type DevelopmentEnvironmentState = {
   encryption: {
     ready: boolean;
     status: "ready" | "missing";
+    encrypted: boolean;
+    keyFileExists: boolean;
     sources: string[];
     keyIdentifiers: string[];
     source: string | null;
@@ -199,7 +201,7 @@ export function getDotenvxNativeSupport(
   if (needsPowerShell) {
     const pathEntries = (pathValue || "").split(";").filter(Boolean);
     const found = pathEntries
-      .flatMap((entry) => ["pwsh.exe", "powershell.exe"].map((candidate) => join(entry, candidate)))
+      .flatMap((entry) => ["pwsh.exe", "powershell.exe"].map((candidate) => win32.join(entry, candidate)))
       .find((candidate) => exists(candidate));
     if (found) {
       return { supported: true, platform, tool: found };
@@ -221,6 +223,8 @@ export function getDotenvKeyIdentifiers(projectRoot: string, inheritedEnv: NodeJ
   const keyFile = join(projectRoot, ".env.keys");
   if (!existsSync(keyFile)) return Array.from(identifiers);
   try {
+    const stat = lstatSync(keyFile);
+    if (stat.isSymbolicLink() || !stat.isFile()) return Array.from(identifiers);
     const raw = readFileSync(keyFile, "utf8");
     for (const match of raw.matchAll(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) {
       const key = match[1];
@@ -480,7 +484,7 @@ export async function writeEnvironmentSelection(
 export async function deleteEnvironmentProfile(
   projectRoot: string,
   profile: string,
-  options?: { expectedPath?: string | null },
+  options: { expectedPath: string },
 ): Promise<{ profile: string; path: string }> {
   const root = resolve(projectRoot);
   const normalized = validateProfileName(profile);
@@ -491,8 +495,8 @@ export async function deleteEnvironmentProfile(
   if (!targetPath || !isInsideProjectRoot(root, targetPath)) {
     throw new Error("Unsafe profile path");
   }
-  const expectedPath = options?.expectedPath ? options.expectedPath.replace(/\\/g, "/").replace(/^\.\//, "") : null;
-  if (expectedPath && expectedPath !== toRelative(root, targetPath)) {
+  const expectedPath = options.expectedPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!expectedPath || expectedPath !== toRelative(root, targetPath)) {
     throw new Error(`Exact profile path confirmation required for ${toRelative(root, targetPath)}`);
   }
   if (!existsSync(targetPath)) {
@@ -765,12 +769,26 @@ export async function composeDevelopmentEnvironment(
   const nativeState = getDotenvxNativeSupport();
   const selectedProfile = selection.selectedProfile ?? "default";
   const selectedKeyIdentifier = getProfileKeyIdentifier(selectedProfile);
-  const source = encryptionSources.length > 0 ? (keyIdentifiers.includes(selectedKeyIdentifier) ? selectedKeyIdentifier : encryptionSources[0]) : null;
   const targetProfile = selection.selectedProfile ?? "default";
   const targetPath = resolveProfilePath(root, targetProfile);
   const targetContent = targetPath && existsSync(targetPath) && lstatSync(targetPath).isFile()
     ? await readFile(targetPath, "utf8")
     : "";
+  const encrypted = /(?:^|\n)\s*DOTENV_PUBLIC_KEY(?:_[A-Z0-9_]+)?\s*=|encrypted:/i.test(targetContent);
+  const keyFilePath = join(root, ".env.keys");
+  const keyFileExists = existsSync(keyFilePath) && !lstatSync(keyFilePath).isSymbolicLink() && lstatSync(keyFilePath).isFile();
+  const keyFileHasSelectedKey = keyFileExists
+    && new RegExp(`^(?:export\\s+)?${selectedKeyIdentifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`, "mi").test(await readFile(keyFilePath, "utf8").catch(() => ""));
+  const inheritedHasSelectedKey = Object.keys(inheritedEnv).some(
+    (key) => normalizeDotenvKeyIdentifier(key) === selectedKeyIdentifier && isDotenvCredentialName(key),
+  );
+  const source = keyFileHasSelectedKey
+    ? ".env.keys"
+    : inheritedHasSelectedKey
+      ? "process environment"
+      : encrypted && status === "ready" && nativeState.supported
+        ? "dotenvx Native"
+        : null;
   const variableMap = new Map(variableEntries.map((item) => [item.key, item]));
   const state: DevelopmentEnvironmentState = {
     projectRoot: root,
@@ -791,6 +809,8 @@ export async function composeDevelopmentEnvironment(
     encryption: {
       ready: status === "ready",
       status,
+      encrypted,
+      keyFileExists,
       sources: encryptionSources,
       keyIdentifiers,
       source,
@@ -961,6 +981,7 @@ export async function runDotenvxNativeAction(
   projectRoot: string,
   action: "up" | "push",
   profile: string,
+  expectedPath: string,
   inheritedEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<{ action: "up" | "push"; profile: string; path: string; status: "ready" }> {
   const root = resolve(projectRoot);
@@ -979,6 +1000,13 @@ export async function runDotenvxNativeAction(
   const resolvedTarget = resolveProfilePath(root, normalizedProfile);
   if (!resolvedTarget || !isInsideProjectRoot(root, resolvedTarget)) {
     throw new Error("Unsafe profile path");
+  }
+  const normalizedExpectedPath = expectedPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalizedExpectedPath || normalizedExpectedPath !== toRelative(root, resolvedTarget)) {
+    throw new Error(`Exact profile path confirmation required for ${toRelative(root, resolvedTarget)}`);
+  }
+  if (!getDotenvxNativeSupport().supported) {
+    throw new Error("Native key storage is unavailable on this host");
   }
   const targetStat = lstatSync(resolvedTarget);
   if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
@@ -1010,7 +1038,7 @@ export async function runDotenvxNativeAction(
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     const sanitized = raw.replace(/(?:DOTENV_PRIVATE_KEY(?:_[A-Z0-9_]+)?\s*=\s*)([^\s]+)/gi, "DOTENV_PRIVATE_KEY=[REDACTED]")
-      .replace(/(?:DOTENVX_KEY|DOTENV_KEY)\s*=\s*[^\s]+/gi, "$1=[REDACTED]")
+      .replace(/(?:DOTENVX_KEY|DOTENV_KEY)\s*=\s*[^\s]+/gi, "DOTENV_KEY=[REDACTED]")
       .replace(/\b(?:key|secret|token|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
     throw new Error(`Native ${action} failed: ${sanitized}`);
   }

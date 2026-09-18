@@ -28,6 +28,8 @@ type Snapshot = {
   encryption: {
     ready: boolean;
     status: "ready" | "missing";
+    encrypted: boolean;
+    keyFileExists: boolean;
     sources: string[];
     keyIdentifiers?: string[];
     source?: string | null;
@@ -106,11 +108,13 @@ export function buildPendingOperations(targetProfile: string | null | undefined,
 export function describeEncryptionStatus(
   status: "ready" | "missing",
   details?: {
+    encrypted?: boolean;
     source?: string | null;
     keyIdentifiers?: string[];
     native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
   },
 ) {
+  if (details?.encrypted === false) return "plaintext (confirm encryption to create .env.keys)";
   if (status === "ready") {
     if (details?.source) return `ready (${details.source})`;
     return "ready";
@@ -374,7 +378,7 @@ export function EncryptionConfirmationDialog({
       <div className="modal" role="dialog" aria-modal="true" aria-label={`Encrypt ${profile}`} onClick={(event) => event.stopPropagation()}>
         <h3>Encrypt profile — {profile}</h3>
         <p>
-          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
+          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and Append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
         </p>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
@@ -405,6 +409,26 @@ export function EnvironmentNativeActionButtons({
       <button type="button" className="btn-secondary" onClick={() => void onAction("push")} disabled={busy === "push"}>Copy to native</button>
       <span className="muted">{profile} · {profilePath}</span>
     </div>
+  );
+}
+
+export function EnvironmentDiagnostics({
+  diagnostics,
+}: {
+  diagnostics: Array<{ kind: string; severity: string; message: string; path?: string }>;
+}) {
+  if (diagnostics.length === 0) return null;
+  return (
+    <section className="settings-section environment-panel" aria-label="Environment diagnostics">
+      <h3>Environment diagnostics</h3>
+      <ul className="environment-list">
+        {diagnostics.map((diagnostic, index) => (
+          <li key={`${diagnostic.kind}-${diagnostic.path ?? ""}-${index}`}>
+            <strong>{diagnostic.kind}</strong>: {diagnostic.message}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -765,13 +789,14 @@ export function Environment() {
       {snapshot ? (
         <div>
           <p className={snapshot.encryption.status === "missing" ? "environment-status environment-status-warning" : "environment-status environment-status-ok"}>
-            {describeEncryptionStatus(snapshot.encryption.status, {
+          {describeEncryptionStatus(snapshot.encryption.status, {
+            encrypted: snapshot.encryption.encrypted,
               source: snapshot.encryption.source,
               keyIdentifiers: snapshot.encryption.keyIdentifiers,
               native: snapshot.encryption.native,
             })}
           </p>
-          {snapshot.encryption.status === "missing" && snapshot.selection.selectedProfile ? (
+          {!snapshot.encryption.encrypted && snapshot.selection.selectedProfile ? (
             <button type="button" className="btn-primary" onClick={() => setConfirmEncryption(true)} disabled={encrypting}>
               Encrypt selected profile
             </button>
@@ -785,6 +810,7 @@ export function Environment() {
       ) : null}
       {snapshot ? (
         <>
+          <EnvironmentDiagnostics diagnostics={snapshot.diagnostics} />
           {snapshot.profiles.length === 0 ? (
             <EnvironmentNoProfileState
               createProfileName={createProfileName}
@@ -821,7 +847,7 @@ export function Environment() {
                 </div>
               ) : null}
 
-              {snapshot.selection.selectedProfile ? (
+              {snapshot.selection.selectedProfile && snapshot.encryption.encrypted && snapshot.encryption.ready && snapshot.encryption.keyFileExists ? (
                 <EnvironmentNativeActionButtons
                   native={snapshot.encryption.native}
                   profile={snapshot.selection.selectedProfile}

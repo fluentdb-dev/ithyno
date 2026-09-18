@@ -16,6 +16,7 @@ import {
 export type EnvironmentRouteOptions = {
   getProjectRoot: () => string;
   getProcessEnv?: () => NodeJS.ProcessEnv;
+  getNativeSupport?: typeof getDotenvxNativeSupport;
 };
 
 export async function registerEnvironmentRoutes(
@@ -24,6 +25,7 @@ export async function registerEnvironmentRoutes(
 ): Promise<void> {
   const getProjectRoot = options.getProjectRoot;
   const getProcessEnv = options.getProcessEnv ?? (() => process.env);
+  const getNativeSupport = options.getNativeSupport ?? getDotenvxNativeSupport;
 
   fastify.get("/api/environment", { logLevel: "silent" }, async () => {
     return getEnvironmentSnapshot(getProjectRoot(), getProcessEnv());
@@ -138,13 +140,16 @@ export async function registerEnvironmentRoutes(
       reply.code(400);
       return { error: "invalid native action" };
     }
-    if (!getDotenvxNativeSupport().supported) {
+    if (!body.path) {
+      reply.code(400);
+      return { error: "missing exact profile path confirmation" };
+    }
+    if (!getNativeSupport().supported) {
       reply.code(400);
       return { error: "native key storage is unavailable on this host" };
     }
     try {
-      const result = await runDotenvxNativeAction(getProjectRoot(), action, profile, getProcessEnv());
-      return { ...result, path: body.path ?? result.path };
+      return await runDotenvxNativeAction(getProjectRoot(), action, profile, body.path, getProcessEnv());
     } catch (err) {
       reply.code(400);
       return { error: err instanceof Error ? err.message : String(err) };

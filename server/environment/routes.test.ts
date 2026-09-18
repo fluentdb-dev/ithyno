@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readEnvironmentSelection, writeEnvironmentSelection } from "./index.js";
 import { registerEnvironmentRoutes } from "./routes.js";
 
@@ -17,11 +17,16 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function buildApp() {
+async function buildApp(options: { nativeSupported?: boolean } = {}) {
   const app = Fastify({ logger: false });
   await app.register(registerEnvironmentRoutes, {
     getProjectRoot: () => dir,
     getProcessEnv: () => process.env,
+    getNativeSupport: () => ({
+      supported: options.nativeSupported ?? false,
+      platform: process.platform,
+      reason: options.nativeSupported ? undefined : "native key storage is unavailable on this host",
+    }),
   });
   await app.ready();
   return app;
@@ -94,6 +99,10 @@ describe("environment routes", () => {
       expect(unsafe.statusCode).toBe(400);
       expect(unsafe.json().error).toMatch(/exact profile path|Unsafe|profile/i);
 
+      const missingPath = await app.inject({ method: "POST", url: "/api/environment/profile", payload: { profile: "dev" } });
+      expect(missingPath.statusCode).toBe(400);
+      expect(missingPath.json().error).toMatch(/exact profile path/i);
+
       const missing = await app.inject({ method: "POST", url: "/api/environment/profile", payload: { profile: "missing", path: ".env.missing" } });
       expect(missing.statusCode).toBe(400);
       expect(missing.json().error).toMatch(/missing|not found|Invalid/i);
@@ -105,11 +114,6 @@ describe("environment routes", () => {
   it("rejects unsupported native actions and unsupported host capability", async () => {
     writeFileSync(join(dir, ".env"), "APP=local\n", "utf8");
     const app = await buildApp();
-    const nativeSupport = vi.spyOn(await import("./index.js"), "getDotenvxNativeSupport").mockReturnValue({
-      supported: false,
-      platform: process.platform,
-      reason: "native key storage is unavailable on this host",
-    });
     try {
       const invalid = await app.inject({ method: "POST", url: "/api/environment/native", payload: { profile: "default", action: "bad" } });
       expect(invalid.statusCode).toBe(400);
@@ -117,9 +121,12 @@ describe("environment routes", () => {
 
       const unsupported = await app.inject({ method: "POST", url: "/api/environment/native", payload: { profile: "default", action: "up" } });
       expect(unsupported.statusCode).toBe(400);
-      expect(unsupported.json().error).toMatch(/native key storage is unavailable|unsupported/i);
+      expect(unsupported.json().error).toMatch(/exact profile path/i);
+
+      const unavailable = await app.inject({ method: "POST", url: "/api/environment/native", payload: { profile: "default", path: ".env", action: "up" } });
+      expect(unavailable.statusCode).toBe(400);
+      expect(unavailable.json().error).toMatch(/native key storage is unavailable|unsupported/i);
     } finally {
-      nativeSupport.mockRestore();
       await app.close();
     }
   });
