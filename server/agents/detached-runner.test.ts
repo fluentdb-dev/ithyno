@@ -8,7 +8,12 @@ import { startDetached, startLogTail } from "./detached-runner.js";
 const dirs: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 describe("detached runner", () => {
@@ -39,7 +44,9 @@ describe("detached runner", () => {
     // This is the equivalent of server shutdown: the detached child is not
     // killed when the parent drops its process handle.
     process.kill(meta.pid, 0);
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     process.kill(meta.pid, "SIGTERM");
+    await exited;
     await unlink(join(dir, ".agent-meta.json")).catch(() => undefined);
   });
 });

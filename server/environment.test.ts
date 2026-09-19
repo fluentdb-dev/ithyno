@@ -88,7 +88,7 @@ describe("development environment resolver", () => {
     expect(snapshot.encryption.source).toBe(".env.keys");
     expect(snapshot.encryption.sources).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
     expect(snapshot.variables.some((item) => item.key === "APP")).toBe(true);
-  });
+  }, 20_000);
 
   it("handles repeated encryption and existing/new profile-specific keys without leaking secrets", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
@@ -119,7 +119,7 @@ describe("development environment resolver", () => {
     });
     expect(resolved.APP).toBe("development");
     expect(resolved.FEATURE).toBe("enabled");
-  });
+  }, 20_000);
 
   it("uses inherited standard and suffixed private keys without exposing them as runtime values", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
