@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, win32 } from "node:path";
+import { dirname, join, posix, relative, resolve, win32 } from "node:path";
 import { createRequire } from "node:module";
 import { config as resolveDotenvxConfig } from "@dotenvx/dotenvx";
 
@@ -189,7 +189,7 @@ export function getDotenvxNativeSupport(
   }
   if (needsSecretTool) {
     const tool = (pathValue ? pathValue.split(":") : [])
-      .map((entry) => join(entry, "secret-tool"))
+      .map((entry) => posix.join(entry, "secret-tool"))
       .find((candidate) => exists(candidate));
     return {
       supported: Boolean(tool),

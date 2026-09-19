@@ -248,7 +248,7 @@ describe("development environment resolver", () => {
     expect(symlinkState.diagnostics.some((diag) => diag.kind === "path-traversal" && diag.path === ".env.keys")).toBe(true);
   });
 
-  it("reports unreadable key-file state for a blocked .env.keys", async () => {
+  it.skipIf(process.platform === "win32")("reports unreadable key-file state for a blocked .env.keys", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "APP=three\n", "utf8");
     writeFileSync(join(dir, ".env.keys"), "DOTENV_PRIVATE_KEY=deadbeef\n", "utf8");

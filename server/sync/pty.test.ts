@@ -1183,7 +1183,7 @@ describe("pty session identity and reconnect semantics", () => {
     const idA = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
     const idB = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
     expect(idA).toEqual(idB);
-    expect(idA.sessionKey).toContain("/tmp/project-a::shell-1");
+    expect(idA.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-1`);
   });
 
   it("parses the reconnect identity from the websocket URL", () => {
@@ -1191,7 +1191,7 @@ describe("pty session identity and reconnect semantics", () => {
       "ws://localhost:4321/pty?projectRoot=/tmp/project-a&sessionId=shell-2",
       "/tmp/project-a",
     );
-    expect(parsed.projectRoot).toBe("/tmp/project-a");
+    expect(parsed.projectRoot).toBe(resolve("/tmp/project-a"));
     expect(parsed.sessionId).toBe("shell-2");
     expect(parsed.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-2`);
   });
