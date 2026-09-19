@@ -95,6 +95,10 @@ SHALL avoid always-visible success banners and generic password fields.
 - **WHEN** the selected encrypted profile is missing a usable matching key or cannot be decrypted
 - **THEN** the UI displays an actionable warning or diagnostic for that failure
 
+#### Scenario: Selected profile is not encrypted
+- **WHEN** the active profile contains plaintext values and is not encrypted
+- **THEN** the UI displays an encryption warning and keeps the adjacent `Encrypt profile` action available
+
 #### Scenario: Active profile actions are presented together
 - **WHEN** a project-root env profile is selected
 - **THEN** the profile selector presents applicable encryption and delete actions beside the active profile, uses the standard Environment control styling, and represents deletion with a labelled trash icon that still requires confirmation

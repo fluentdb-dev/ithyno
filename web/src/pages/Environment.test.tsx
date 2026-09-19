@@ -86,9 +86,11 @@ describe("environment page helpers", () => {
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENV_KEY");
   });
 
-  it("keeps normal encryption state quiet and shows only states requiring attention", () => {
-    expect(shouldShowEncryptionStatus("ready")).toBe(false);
-    expect(shouldShowEncryptionStatus("missing")).toBe(true);
+  it("keeps encrypted-ready state quiet but warns for selected plaintext or missing-key profiles", () => {
+    expect(shouldShowEncryptionStatus("ready", true, "development")).toBe(false);
+    expect(shouldShowEncryptionStatus("ready", false, "development")).toBe(true);
+    expect(shouldShowEncryptionStatus("missing", true, "development")).toBe(true);
+    expect(shouldShowEncryptionStatus("ready", false, null)).toBe(false);
   });
 
   it("renders an exact first-encryption confirmation with profile, key file, and gitignore details", () => {

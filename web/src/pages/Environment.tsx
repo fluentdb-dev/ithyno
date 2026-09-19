@@ -129,8 +129,12 @@ export function describeEncryptionStatus(
   return `missing (selected profile needs a matching dotenvx private key; standard source is ${keyIdentifiers})`;
 }
 
-export function shouldShowEncryptionStatus(status: "ready" | "missing"): boolean {
-  return status === "missing";
+export function shouldShowEncryptionStatus(
+  status: "ready" | "missing",
+  encrypted: boolean,
+  selectedProfile: string | null,
+): boolean {
+  return selectedProfile !== null && (!encrypted || status === "missing");
 }
 
 export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
@@ -867,7 +871,11 @@ export function Environment() {
       <p className="muted environment-description">
         Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
       </p>
-      {snapshot && shouldShowEncryptionStatus(snapshot.encryption.status) ? (
+      {snapshot && shouldShowEncryptionStatus(
+        snapshot.encryption.status,
+        snapshot.encryption.encrypted,
+        snapshot.selection.selectedProfile,
+      ) ? (
         <p className="environment-status environment-status-warning">
           {describeEncryptionStatus(snapshot.encryption.status, {
             encrypted: snapshot.encryption.encrypted,
