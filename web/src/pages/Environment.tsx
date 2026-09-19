@@ -25,7 +25,16 @@ type Snapshot = {
   orderedFiles: string[];
   variables: Variable[];
   diagnostics: Array<{ kind: string; severity: string; message: string; path?: string }>;
-  encryption: { ready: boolean; status: "ready" | "missing"; sources: string[] };
+  encryption: {
+    ready: boolean;
+    status: "ready" | "missing";
+    encrypted: boolean;
+    keyFileExists: boolean;
+    sources: string[];
+    keyIdentifiers?: string[];
+    source?: string | null;
+    native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  };
   revision: string;
 };
 
@@ -96,9 +105,36 @@ export function buildPendingOperations(targetProfile: string | null | undefined,
   return operations;
 }
 
-export function describeEncryptionStatus(status: "ready" | "missing") {
-  if (status === "ready") return "ready";
-  return "missing (set DOTENVX_KEY / DOTENV_KEY in the app runtime environment)";
+export function describeEncryptionStatus(
+  status: "ready" | "missing",
+  details?: {
+    encrypted?: boolean;
+    source?: string | null;
+    keyIdentifiers?: string[];
+    native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  },
+) {
+  if (details?.encrypted === false) return "plaintext (confirm encryption to create .env.keys)";
+  if (status === "ready") {
+    if (details?.source) return `ready (${details.source})`;
+    return "ready";
+  }
+
+  const keyIdentifiers = details?.keyIdentifiers && details.keyIdentifiers.length > 0
+    ? details.keyIdentifiers.join(", ")
+    : ".env.keys";
+  if (details?.native && !details.native.supported) {
+    return `missing (standard ${keyIdentifiers} is the default local key source; OS secure key storage is unavailable on this host)`;
+  }
+  return `missing (selected profile needs a matching dotenvx private key; standard source is ${keyIdentifiers})`;
+}
+
+export function shouldShowEncryptionStatus(
+  status: "ready" | "missing",
+  encrypted: boolean,
+  selectedProfile: string | null,
+): boolean {
+  return selectedProfile !== null && (!encrypted || status === "missing");
 }
 
 export function shouldShowRestartRequired(lastAppliedRevision: string | null, snapshotRevision: string | null, managerRunning: boolean): boolean {
@@ -148,7 +184,7 @@ export function EnvironmentNoProfileState({
     <section className="settings-section environment-empty-hero">
       <h3>Profile</h3>
       <div className="environment-empty-hero-body">
-        <strong>No environment is configured yet.</strong>
+        <strong>No secrets profile is configured yet.</strong>
         <p>
           Create the first project profile to apply dotenv values to new Manager PTYs and AgentRunner workers.
         </p>
@@ -328,6 +364,183 @@ export function EnvironmentDeleteConfirmDialog({
   );
 }
 
+export function EncryptionConfirmationDialog({
+  profile,
+  profilePath,
+  keyFilePath,
+  gitignoreEntry,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  profile: string;
+  profilePath: string;
+  keyFilePath: string;
+  gitignoreEntry: string;
+  onConfirm: () => void | Promise<void>;
+  onCancel: () => void;
+  loading?: boolean;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={`Encrypt ${profile}`} onClick={(event) => event.stopPropagation()}>
+        <h3>Encrypt profile — {profile}</h3>
+        <p>
+          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={() => void onConfirm()} disabled={loading}>Encrypt profile</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function EnvironmentNativeActionButtons({
+  native,
+  profile,
+  profilePath,
+  onAction,
+  busy,
+}: {
+  native?: { supported: boolean; platform: NodeJS.Platform; tool?: string; reason?: string };
+  profile: string;
+  profilePath: string;
+  onAction: (action: "up" | "push") => void | Promise<void>;
+  busy?: "up" | "push" | null;
+}) {
+  if (!native?.supported) return null;
+  return (
+    <div className="environment-native-card">
+      <div>
+        <strong>OS secure key storage</strong>
+        <p className="muted">
+          Optional for <code>{profilePath}</code>. Move removes this profile key from <code>.env.keys</code> after storing it in the OS. Copy keeps <code>.env.keys</code> and stores an additional OS copy.
+        </p>
+      </div>
+      <div className="environment-inline-controls environment-inline-controls--stacked">
+        <button type="button" className="environment-action-link" onClick={() => void onAction("up")} disabled={busy !== null && busy !== undefined}>
+          Move key to OS storage
+        </button>
+        <button type="button" className="environment-action-link" onClick={() => void onAction("push")} disabled={busy !== null && busy !== undefined}>
+          Copy key to OS storage
+        </button>
+        <span className="muted">Profile: {profile}</span>
+      </div>
+    </div>
+  );
+}
+
+export function EnvironmentProfileControls({
+  profiles,
+  selectedProfile,
+  loading,
+  encrypting,
+  canEncrypt,
+  onSelect,
+  onEncrypt,
+  onDelete,
+}: {
+  profiles: Profile[];
+  selectedProfile: string | null;
+  loading: boolean;
+  encrypting: boolean;
+  canEncrypt: boolean;
+  onSelect: (profile: string | null) => void | Promise<void>;
+  onEncrypt: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="settings-field environment-profile-field">
+      <label htmlFor="environment-active-profile"><strong>Active profile</strong></label>
+      <div className="environment-profile-controls">
+        <select
+          id="environment-active-profile"
+          className="environment-select"
+          value={selectedProfile ?? ""}
+          onChange={(event) => void onSelect(event.target.value || null)}
+          disabled={loading}
+        >
+          <option value="">No profile</option>
+          {profiles.map((profile) => (
+            <option key={profile.name} value={profile.name}>{profile.name}</option>
+          ))}
+        </select>
+        {selectedProfile && canEncrypt ? (
+          <button
+            type="button"
+            className="environment-action-link"
+            onClick={onEncrypt}
+            disabled={encrypting}
+          >
+            Encrypt profile
+          </button>
+        ) : null}
+        {selectedProfile ? (
+          <button
+            type="button"
+            className="environment-action-button environment-action-button--delete"
+            onClick={onDelete}
+            disabled={loading}
+            aria-label={`Delete active profile ${selectedProfile}`}
+            title="Delete active profile"
+          >
+            <DeleteIcon />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function EnvironmentDiagnostics({
+  diagnostics,
+}: {
+  diagnostics: Array<{ kind: string; severity: string; message: string; path?: string }>;
+}) {
+  if (diagnostics.length === 0) return null;
+  return (
+    <section className="settings-section environment-panel" aria-label="Secrets diagnostics">
+      <h3>Secrets diagnostics</h3>
+      <ul className="environment-list">
+        {diagnostics.map((diagnostic, index) => (
+          <li key={`${diagnostic.kind}-${diagnostic.path ?? ""}-${index}`}>
+            <strong>{diagnostic.kind}</strong>: {diagnostic.message}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function EnvironmentProfileDeleteDialog({
+  profile,
+  profilePath,
+  onConfirm,
+  onCancel,
+}: {
+  profile: string;
+  profilePath: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={`Delete profile ${profile}`} onClick={(event) => event.stopPropagation()}>
+        <h3>Delete profile — {profile}</h3>
+        <p>
+          This removes the exact project file <code>{profilePath}</code>. It does not touch <code>.env.keys</code> or native key storage.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger" onClick={onConfirm}>Delete profile</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Environment() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -339,6 +552,10 @@ export function Environment() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletingProfile, setDeletingProfile] = useState<string | null>(null);
+  const [confirmEncryption, setConfirmEncryption] = useState(false);
+  const [encrypting, setEncrypting] = useState(false);
+  const [nativeActioning, setNativeActioning] = useState<"up" | "push" | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [createProfileName, setCreateProfileName] = useState("");
@@ -474,6 +691,87 @@ export function Environment() {
     await openReview();
   };
 
+  const confirmDeleteProfile = async () => {
+    if (!snapshot || !deletingProfile) return;
+    const profile = deletingProfile;
+    const profilePath = snapshot.profiles.find((item) => item.name === profile)?.path ?? null;
+    setDeletingProfile(null);
+    try {
+      const res = await fetch("/api/environment/profile", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ profile, path: profilePath }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? "Unable to delete profile");
+        return;
+      }
+      setDraft({ edits: {}, removals: [] });
+      setRevealed({});
+      setEditingKey(null);
+      setEditingValue("");
+      await refreshSnapshot();
+      if (managerRunning) {
+        setRestartRequired(true);
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to delete profile");
+    }
+  };
+
+  const runNativeAction = async (action: "up" | "push") => {
+    if (!snapshot || !snapshot.selection.selectedProfile) return;
+    const actionDescription = action === "up"
+      ? "move the key to OS secure storage"
+      : "copy the key to OS secure storage";
+    setNativeActioning(action);
+    try {
+      const profile = snapshot.selection.selectedProfile;
+      const profilePath = snapshot.profiles.find((item) => item.name === profile)?.path ?? null;
+      const res = await fetch("/api/environment/native", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ action, profile, path: profilePath }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? `Unable to ${actionDescription}`);
+        return;
+      }
+      await refreshSnapshot();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : `Unable to ${actionDescription}`);
+    } finally {
+      setNativeActioning(null);
+    }
+  };
+
+  const confirmEncryptProfile = async () => {
+    if (!snapshot) return;
+    const profile = snapshot.selection.selectedProfile ?? "default";
+    setEncrypting(true);
+    setConfirmEncryption(false);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/environment/encrypt", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ profile }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(payload.error ?? "Unable to encrypt profile");
+        return;
+      }
+      await refreshSnapshot();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to encrypt profile");
+    } finally {
+      setEncrypting(false);
+    }
+  };
+
   const stageVariable = async () => {
     const key = newKey.trim();
     if (!key) return;
@@ -569,16 +867,23 @@ export function Environment() {
 
   return (
     <div className="settings-page environment-page">
-      <h2>Development Environment</h2>
+      <h2>Secrets</h2>
       <p className="muted environment-description">
         Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
       </p>
-      {snapshot?.encryption.status === "missing" ? (
+      {snapshot && shouldShowEncryptionStatus(
+        snapshot.encryption.status,
+        snapshot.encryption.encrypted,
+        snapshot.selection.selectedProfile,
+      ) ? (
         <p className="environment-status environment-status-warning">
-          ⚠ Encryption: missing — set DOTENVX_KEY / DOTENV_KEY in the app runtime environment.
+          {describeEncryptionStatus(snapshot.encryption.status, {
+            encrypted: snapshot.encryption.encrypted,
+            source: snapshot.encryption.source,
+            keyIdentifiers: snapshot.encryption.keyIdentifiers,
+            native: snapshot.encryption.native,
+          })}
         </p>
-      ) : snapshot?.encryption.status === "ready" ? (
-        <p className="environment-status environment-status-ok">Encryption: ready</p>
       ) : null}
       {managerRunning && restartRequired ? (
         <div className="info-banner">
@@ -587,6 +892,7 @@ export function Environment() {
       ) : null}
       {snapshot ? (
         <>
+          <EnvironmentDiagnostics diagnostics={snapshot.diagnostics} />
           {snapshot.profiles.length === 0 ? (
             <EnvironmentNoProfileState
               createProfileName={createProfileName}
@@ -623,24 +929,26 @@ export function Environment() {
                 </div>
               ) : null}
 
-              <div className="settings-field">
-                <label>
-                  <span><strong>Active profile</strong></span>
-                  <select
-                    className="environment-select"
-                    value={snapshot.selection.selectedProfile ?? ""}
-                    onChange={(e) => void onSelect(e.target.value || null)}
-                    disabled={loading}
-                  >
-                    <option value="">No profile</option>
-                    {snapshot.profiles.map((profile) => (
-                      <option key={profile.name} value={profile.name}>
-                        {profile.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <EnvironmentProfileControls
+                profiles={snapshot.profiles}
+                selectedProfile={snapshot.selection.selectedProfile}
+                loading={loading}
+                encrypting={encrypting}
+                canEncrypt={!snapshot.encryption.encrypted}
+                onSelect={onSelect}
+                onEncrypt={() => setConfirmEncryption(true)}
+                onDelete={() => setDeletingProfile(snapshot.selection.selectedProfile)}
+              />
+
+              {snapshot.selection.selectedProfile && snapshot.encryption.encrypted && snapshot.encryption.ready && snapshot.encryption.keyFileExists ? (
+                <EnvironmentNativeActionButtons
+                  native={snapshot.encryption.native}
+                  profile={snapshot.selection.selectedProfile}
+                  profilePath={snapshot.profiles.find((profile) => profile.name === snapshot.selection.selectedProfile)?.path ?? ".env"}
+                  onAction={runNativeAction}
+                  busy={nativeActioning}
+                />
+              ) : null}
             </section>
           )}
 
@@ -742,6 +1050,25 @@ export function Environment() {
 
 
           {saveError ? <p className="environment-error">{saveError}</p> : null}
+          {confirmEncryption && snapshot ? (
+            <EncryptionConfirmationDialog
+              profile={snapshot.selection.selectedProfile ?? "default"}
+              profilePath={snapshot.profiles.find((profile) => profile.name === (snapshot.selection.selectedProfile ?? "default"))?.path ?? ".env"}
+              keyFilePath=".env.keys"
+              gitignoreEntry=".env.keys"
+              loading={encrypting}
+              onConfirm={() => void confirmEncryptProfile()}
+              onCancel={() => setConfirmEncryption(false)}
+            />
+          ) : null}
+          {deletingProfile ? (
+            <EnvironmentProfileDeleteDialog
+              profile={deletingProfile}
+              profilePath={snapshot.profiles.find((profile) => profile.name === deletingProfile)?.path ?? ".env"}
+              onConfirm={() => void confirmDeleteProfile()}
+              onCancel={() => setDeletingProfile(null)}
+            />
+          ) : null}
           {deletingKey ? (
             <EnvironmentDeleteConfirmDialog
               variableKey={deletingKey}

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
+  deleteEnvironmentProfile,
   encryptEnvironmentFile,
+  getDotenvxNativeSupport,
   getEnvironmentSnapshot,
   mutateEnvironmentFile,
   readEnvironmentSelection,
   revealEnvironmentValue,
+  runDotenvxNativeAction,
   validateProfileName,
   writeEnvironmentSelection,
 } from "./index.js";
@@ -13,6 +16,7 @@ import {
 export type EnvironmentRouteOptions = {
   getProjectRoot: () => string;
   getProcessEnv?: () => NodeJS.ProcessEnv;
+  getNativeSupport?: typeof getDotenvxNativeSupport;
 };
 
 export async function registerEnvironmentRoutes(
@@ -21,6 +25,7 @@ export async function registerEnvironmentRoutes(
 ): Promise<void> {
   const getProjectRoot = options.getProjectRoot;
   const getProcessEnv = options.getProcessEnv ?? (() => process.env);
+  const getNativeSupport = options.getNativeSupport ?? getDotenvxNativeSupport;
 
   fastify.get("/api/environment", { logLevel: "silent" }, async () => {
     return getEnvironmentSnapshot(getProjectRoot(), getProcessEnv());
@@ -38,27 +43,28 @@ export async function registerEnvironmentRoutes(
   fastify.post<{ Body: { selectedProfile?: string | null; preferences?: Record<string, unknown> } }>(
     "/api/environment/selection",
     async (req, reply) => {
-    const body = req.body ?? {};
-    const current = await readEnvironmentSelection(getProjectRoot());
-    const nextProfile = body.selectedProfile === null || body.selectedProfile === ""
-      ? null
-      : body.selectedProfile === undefined
-        ? current.selectedProfile ?? null
-        : validateProfileName(body.selectedProfile);
-    if (body.selectedProfile !== null && body.selectedProfile !== undefined && body.selectedProfile !== "" && !nextProfile) {
-      reply.code(400);
-      return { error: "invalid profile" };
-    }
-    const next = {
-      selectedProfile: body.selectedProfile === undefined ? current.selectedProfile ?? null : nextProfile,
-      preferences: { ...current.preferences, ...(body.preferences ?? {}) },
-    };
-    await writeEnvironmentSelection(getProjectRoot(), next);
-    return {
-      selection: next,
-      snapshot: await getEnvironmentSnapshot(getProjectRoot(), getProcessEnv()),
-    };
-  });
+      const body = req.body ?? {};
+      const current = await readEnvironmentSelection(getProjectRoot());
+      const nextProfile = body.selectedProfile === null || body.selectedProfile === ""
+        ? null
+        : body.selectedProfile === undefined
+          ? current.selectedProfile ?? null
+          : validateProfileName(body.selectedProfile);
+      if (body.selectedProfile !== null && body.selectedProfile !== undefined && body.selectedProfile !== "" && !nextProfile) {
+        reply.code(400);
+        return { error: "invalid profile" };
+      }
+      const next = {
+        selectedProfile: body.selectedProfile === undefined ? current.selectedProfile ?? null : nextProfile,
+        preferences: { ...current.preferences, ...(body.preferences ?? {}) },
+      };
+      await writeEnvironmentSelection(getProjectRoot(), next);
+      return {
+        selection: next,
+        snapshot: await getEnvironmentSnapshot(getProjectRoot(), getProcessEnv()),
+      };
+    },
+  );
 
   fastify.post<{ Body: { key?: string } }>(
     "/api/environment/reveal",
@@ -125,4 +131,50 @@ export async function registerEnvironmentRoutes(
       return { error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  fastify.post<{ Body: { profile?: string; path?: string; action?: "up" | "push" } }>("/api/environment/native", { logLevel: "silent" }, async (req, reply) => {
+    const body = req.body ?? {};
+    const action = body.action;
+    const profile = body.profile ?? "default";
+    if (!action || (action !== "up" && action !== "push")) {
+      reply.code(400);
+      return { error: "invalid native action" };
+    }
+    if (!body.path) {
+      reply.code(400);
+      return { error: "missing exact profile path confirmation" };
+    }
+    if (!getNativeSupport().supported) {
+      reply.code(400);
+      return { error: "native key storage is unavailable on this host" };
+    }
+    try {
+      return await runDotenvxNativeAction(getProjectRoot(), action, profile, body.path, getProcessEnv());
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  const deleteProfileRouteHandler = async (req: { body?: { profile?: string; path?: string } }, reply: FastifyReply) => {
+    const body = req.body ?? {};
+    const profile = body.profile;
+    const expectedPath = body.path;
+    if (!profile) {
+      reply.code(400);
+      return { error: "missing profile" };
+    }
+    if (!expectedPath) {
+      reply.code(400);
+      return { error: "missing exact profile path confirmation" };
+    }
+    try {
+      return await deleteEnvironmentProfile(getProjectRoot(), profile, { expectedPath });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  fastify.post<{ Body: { profile?: string; path?: string } }>("/api/environment/profile", { logLevel: "silent" }, deleteProfileRouteHandler);
 }

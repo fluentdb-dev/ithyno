@@ -47,7 +47,9 @@ runtime.
 
 - Reworks `server/environment` resolution, encryption, diagnostics, and tests.
 - Updates Manager PTY and AgentRunner environment composition boundaries.
-- Revises the Environment page and the Electron/VS Code key-management bridges.
+- Renames the user-facing Environment workspace to Secrets and revises its
+  Electron/VS Code key-management bridges while preserving internal environment
+  routes and API identifiers.
 - Adds end-to-end fixtures covering `.env.keys`, profile-specific keys,
   optional native storage, and first-time encryption.
 - Supersedes the unimplemented secure-key proposals named above; the existing

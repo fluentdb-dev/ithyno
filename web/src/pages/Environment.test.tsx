@@ -2,10 +2,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  EncryptionConfirmationDialog,
   EnvironmentActionButtons,
   EnvironmentDeleteConfirmDialog,
+  EnvironmentDiagnostics,
   EnvironmentEmptyState,
+  EnvironmentNativeActionButtons,
   EnvironmentNoProfileState,
+  EnvironmentProfileControls,
+  EnvironmentProfileDeleteDialog,
   EnvironmentValueCell,
   buildPendingOperations,
   describeEncryptionStatus,
@@ -13,6 +18,7 @@ import {
   readDraftState,
   removeRevealedEnvironmentValue,
   stageEnvironmentRemoval,
+  shouldShowEncryptionStatus,
   shouldShowRestartRequired,
   writeDraftState,
   type DraftState,
@@ -34,7 +40,7 @@ describe("environment page helpers", () => {
         loading={false}
       />,
     );
-    expect(markup).toContain("No environment is configured yet");
+    expect(markup).toContain("No secrets profile is configured yet");
     expect(markup).toContain("Create first profile");
     expect(markup).toContain("Create the first project profile");
   });
@@ -73,8 +79,109 @@ describe("environment page helpers", () => {
 
   it("explains whether dotenv encryption is available in the runtime environment", () => {
     expect(describeEncryptionStatus("ready")).toBe("ready");
-    expect(describeEncryptionStatus("missing")).toContain("DOTENVX_KEY");
-    expect(describeEncryptionStatus("missing")).toContain("DOTENV_KEY");
+    expect(describeEncryptionStatus("ready", { encrypted: false })).toContain("plaintext");
+    expect(describeEncryptionStatus("ready", { source: "DOTENV_PRIVATE_KEY_DEVELOPMENT" })).toContain("DOTENV_PRIVATE_KEY_DEVELOPMENT");
+    expect(describeEncryptionStatus("missing")).toContain("matching dotenvx private key");
+    expect(describeEncryptionStatus("missing")).not.toContain("DOTENVX_KEY");
+    expect(describeEncryptionStatus("missing")).not.toContain("DOTENV_KEY");
+  });
+
+  it("keeps encrypted-ready state quiet but warns for selected plaintext or missing-key profiles", () => {
+    expect(shouldShowEncryptionStatus("ready", true, "development")).toBe(false);
+    expect(shouldShowEncryptionStatus("ready", false, "development")).toBe(true);
+    expect(shouldShowEncryptionStatus("missing", true, "development")).toBe(true);
+    expect(shouldShowEncryptionStatus("ready", false, null)).toBe(false);
+  });
+
+  it("renders an exact first-encryption confirmation with profile, key file, and gitignore details", () => {
+    const markup = renderToStaticMarkup(
+      <EncryptionConfirmationDialog
+        profile="development"
+        profilePath=".env.development"
+        keyFilePath=".env.keys"
+        gitignoreEntry=".env.keys"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Encrypt profile — development");
+    expect(markup).toContain(".env.development");
+    expect(markup).toContain(".env.keys");
+    expect(markup).toContain("append the exact Git ignore entry");
+    expect(markup).toContain(".gitignore");
+  });
+
+  it("explains OS secure storage move/copy behavior only when supported", () => {
+    const supported = renderToStaticMarkup(
+      <EnvironmentNativeActionButtons
+        native={{ supported: true, platform: "darwin", tool: "/usr/bin/security" }}
+        profile="development"
+        profilePath=".env.development"
+        onAction={vi.fn()}
+      />,
+    );
+    const unsupported = renderToStaticMarkup(
+      <EnvironmentNativeActionButtons
+        native={{ supported: false, platform: "linux", reason: "missing" }}
+        profile="development"
+        profilePath=".env.development"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(supported).toContain("OS secure key storage");
+    expect(supported).toContain("Move key to OS storage");
+    expect(supported).toContain("Copy key to OS storage");
+    expect(supported).toContain("removes this profile key from");
+    expect(supported).toContain("keeps");
+    expect(unsupported).not.toContain("OS secure key storage");
+  });
+
+  it("places encryption and a labelled trash action beside the active profile", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentProfileControls
+        profiles={[{ name: "development", path: ".env.development", exists: true, isBase: false, selected: true }]}
+        selectedProfile="development"
+        loading={false}
+        encrypting={false}
+        canEncrypt={true}
+        onSelect={vi.fn()}
+        onEncrypt={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Active profile");
+    expect(markup).toContain("Encrypt profile");
+    expect(markup).toContain('aria-label="Delete active profile development"');
+    expect(markup).not.toContain("Delete profile</button>");
+  });
+
+  it("explains exact profile deletion without touching keys", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentProfileDeleteDialog
+        profile="development"
+        profilePath=".env.development"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Delete profile — development");
+    expect(markup).toContain(".env.development");
+    expect(markup).toContain(".env.keys");
+    expect(markup).toContain("does not touch");
+  });
+
+  it("shows wrong-key and orphaned-key guidance without secret values", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentDiagnostics diagnostics={[
+        { kind: "decryption-failed", severity: "error", message: "The available profile key could not decrypt the selected profile." },
+        { kind: "orphaned-key", severity: "warning", message: "Orphaned dotenvx key identifier: DOTENV_PRIVATE_KEY_OLD", path: ".env.keys" },
+      ]} />,
+    );
+    expect(markup).toContain("decryption-failed");
+    expect(markup).toContain("Secrets diagnostics");
+    expect(markup).toContain("orphaned-key");
+    expect(markup).toContain("DOTENV_PRIVATE_KEY_OLD");
+    expect(markup).not.toContain("private-key-value");
   });
 });
 

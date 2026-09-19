@@ -3240,6 +3240,39 @@ a.modal-btn:hover {
 .environment-inline-controls--stacked {
   justify-content: flex-start;
 }
+.environment-profile-field > label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.environment-profile-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.environment-profile-controls .environment-select {
+  flex: 1 1 240px;
+}
+.environment-profile-controls .environment-action-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+.environment-native-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.environment-native-card p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .environment-list {
   margin: 0;
   padding-left: 1.25rem;

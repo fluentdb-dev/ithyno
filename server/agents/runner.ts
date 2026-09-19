@@ -15,7 +15,7 @@ import { parseTasks } from "../parser/tasks.js";
 import { isSafeChangeId } from "../util/change-id.js";
 import { detachedCommandMatches, startDetached, startLogTail, type DetachedMeta } from "./detached-runner.js";
 import { pidAlive, readDetachedMeta, removeMeta } from "./detached-runner.js";
-import { resolveDevelopmentEnvironmentValues } from "../environment/index.js";
+import { resolveDevelopmentEnvironmentValues, sanitizeChildEnvironment } from "../environment/index.js";
 
 const execFile = promisify(execFileCb);
 
@@ -541,12 +541,17 @@ export class AgentRunner {
     // stdin is only piped when the runtime declared promptStyle: stdin;
     // otherwise it stays "ignore" (the reverted PTY chain's decision).
     const profileEnv = await resolveDevelopmentEnvironmentValues(this.projectRoot, process.env);
+    const childEnv = sanitizeChildEnvironment({
+      ...process.env,
+      ...profileEnv,
+      ...resolved.env,
+    });
     const child = def.detached
       ? await startDetached({
           command: resolved.command,
           args: finalArgs,
           cwd: worktreePath,
-          env: { ...process.env, ...profileEnv, ...resolved.env },
+          env: childEnv,
           jobId: id,
           changeId,
           agentName,
@@ -556,11 +561,7 @@ export class AgentRunner {
         })
       : spawnChild(resolved.command, finalArgs, {
       cwd: worktreePath,
-      env: {
-        ...process.env,
-        ...profileEnv,
-        ...resolved.env,
-      },
+      env: childEnv,
       stdio: [useStdinForPrompt ? "pipe" : "ignore", "pipe", "pipe"],
     });
     this.processes.set(id, child);
