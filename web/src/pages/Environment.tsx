@@ -378,7 +378,7 @@ export function EncryptionConfirmationDialog({
       <div className="modal" role="dialog" aria-modal="true" aria-label={`Encrypt ${profile}`} onClick={(event) => event.stopPropagation()}>
         <h3>Encrypt profile — {profile}</h3>
         <p>
-          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and Append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
+          This will encrypt <code>{profilePath}</code> with the bundled dotenvx CLI, create or update <code>{keyFilePath}</code>, and append the exact Git ignore entry <code>{gitignoreEntry}</code> to <code>.gitignore</code>.
         </p>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>

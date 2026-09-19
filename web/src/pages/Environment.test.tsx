@@ -98,7 +98,7 @@ describe("environment page helpers", () => {
     expect(markup).toContain("Encrypt profile — development");
     expect(markup).toContain(".env.development");
     expect(markup).toContain(".env.keys");
-    expect(markup).toContain("Append the exact Git ignore entry");
+    expect(markup).toContain("append the exact Git ignore entry");
     expect(markup).toContain(".gitignore");
   });
 

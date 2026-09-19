@@ -3,15 +3,16 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const rootDir = new URL("..", import.meta.url).pathname;
+const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const tempDirs = [];
 
 function run(cmd, args, opts = {}) {
   return execFileSync(cmd, args, {
     cwd: opts.cwd ?? rootDir,
     encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: opts.stdio ?? ["pipe", "pipe", "pipe"],
     env: { ...process.env, ...(opts.env ?? {}) },
   });
 }
@@ -27,11 +28,13 @@ function stageHost(hostName) {
   const pkgJson = join(hostRoot, "package.json");
   assert.ok(existsSync(pkgJson), `missing ${hostRoot}/package.json`);
 
-  run("npm", ["run", "prepack:host"], { cwd: hostRoot });
+  run("npm", ["run", "prepack:host"], { cwd: hostRoot, stdio: "inherit" });
   const stageDir = join(hostRoot, "host");
   const stagedPkg = join(stageDir, "node_modules", "@dotenvx", "dotenvx", "package.json");
   assert.ok(existsSync(stagedPkg), `${hostName} staging should contain bundled @dotenvx/dotenvx`);
-  return { stageDir };
+  const cliPath = join(stageDir, "node_modules", "@dotenvx", "dotenvx", "src", "cli", "dotenvx.js");
+  assert.ok(existsSync(cliPath), `${hostName} staging should contain the bundled dotenvx CLI`);
+  return { stageDir, cliPath };
 }
 
 function main() {
@@ -48,7 +51,7 @@ function main() {
 
   try {
     for (const hostName of hosts) {
-      const { stageDir } = stageHost(hostName);
+      const { stageDir, cliPath } = stageHost(hostName);
       const tempStage = join(stageDir, "tmp-smoke");
       mkdirSync(tempStage, { recursive: true });
       const stagedProfile = join(tempStage, ".env.development");
@@ -57,13 +60,13 @@ function main() {
       writeFileSync(join(tempStage, ".env"), "APP=production\nFEATURE=false\n", "utf8");
       writeFileSync(stagedProfile, "APP=development\nFEATURE=enabled\n", "utf8");
 
-      run("npm", ["exec", "--", "dotenvx", "encrypt", "-f", stagedProfile, "-fk", stagedKey, "--no-native"], {
+      run(process.execPath, [cliPath, "encrypt", "-f", stagedProfile, "-fk", stagedKey, "--no-native"], {
         cwd: stageDir,
         env: { DOTENV_PRIVATE_KEY: "" },
       });
 
       assert.ok(existsSync(stagedKey), `${hostName} staging should create .env.keys`);
-      const decrypted = run("npm", ["exec", "--", "dotenvx", "decrypt", "-f", stagedProfile, "-fk", stagedKey, "--no-native", "--stdout"], {
+      const decrypted = run(process.execPath, [cliPath, "decrypt", "-f", stagedProfile, "-fk", stagedKey, "--no-native", "--stdout"], {
         cwd: stageDir,
         env: { DOTENV_PRIVATE_KEY: "" },
       });

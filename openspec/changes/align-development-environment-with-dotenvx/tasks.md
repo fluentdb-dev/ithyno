@@ -41,4 +41,4 @@
 
 - [x] 7.1 Update user documentation for encrypted `.env*`, ignored `.env.keys`, environment-specific private keys, dotenvx Native, CI secret variables, and profile deletion.
 - [x] 7.2 Add package-staging smoke tests that run the standard key-file lifecycle against bundled dotenvx in Electron and VS Code hosts without a global dotenvx installation.
-- [ ] 7.3 Run focused environment/UI/PTY/AgentRunner tests, the full test suite, typecheck, web/Electron/VS Code builds, package guards, and strict OpenSpec validation.
+- [x] 7.3 Run focused environment/UI/PTY/AgentRunner tests, the full test suite, typecheck, web/Electron/VS Code builds, package guards, and strict OpenSpec validation.
