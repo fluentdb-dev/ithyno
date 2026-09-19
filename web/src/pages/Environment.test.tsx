@@ -9,6 +9,7 @@ import {
   EnvironmentEmptyState,
   EnvironmentNativeActionButtons,
   EnvironmentNoProfileState,
+  EnvironmentProfileControls,
   EnvironmentProfileDeleteDialog,
   EnvironmentValueCell,
   buildPendingOperations,
@@ -102,7 +103,7 @@ describe("environment page helpers", () => {
     expect(markup).toContain(".gitignore");
   });
 
-  it("only shows native move/copy actions when supported and keeps them explicit", () => {
+  it("explains OS secure storage move/copy behavior only when supported", () => {
     const supported = renderToStaticMarkup(
       <EnvironmentNativeActionButtons
         native={{ supported: true, platform: "darwin", tool: "/usr/bin/security" }}
@@ -119,9 +120,31 @@ describe("environment page helpers", () => {
         onAction={vi.fn()}
       />,
     );
-    expect(supported).toContain("Move to native");
-    expect(supported).toContain("Copy to native");
-    expect(unsupported).not.toContain("Move to native");
+    expect(supported).toContain("OS secure key storage");
+    expect(supported).toContain("Move key to OS storage");
+    expect(supported).toContain("Copy key to OS storage");
+    expect(supported).toContain("removes this profile key from");
+    expect(supported).toContain("keeps");
+    expect(unsupported).not.toContain("OS secure key storage");
+  });
+
+  it("places encryption and a labelled trash action beside the active profile", () => {
+    const markup = renderToStaticMarkup(
+      <EnvironmentProfileControls
+        profiles={[{ name: "development", path: ".env.development", exists: true, isBase: false, selected: true }]}
+        selectedProfile="development"
+        loading={false}
+        encrypting={false}
+        canEncrypt={true}
+        onSelect={vi.fn()}
+        onEncrypt={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("Active profile");
+    expect(markup).toContain("Encrypt profile");
+    expect(markup).toContain('aria-label="Delete active profile development"');
+    expect(markup).not.toContain("Delete profile</button>");
   });
 
   it("explains exact profile deletion without touching keys", () => {

@@ -30,6 +30,7 @@
 - [x] 5.2 Probe bundled dotenvx Native support and expose explicit Native move/copy actions only when the active host can support them; keep `.env.keys` fully usable otherwise.
 - [x] 5.3 Add an authenticated profile-delete API and exact-path confirmation that accepts only discovered project-root regular env files, clears selection/transient state after success, and never removes keys implicitly.
 - [x] 5.4 Add UI and API tests for first encryption, ready/missing/wrong key states, native-unavailable fallback, profile deletion, and orphaned-key guidance.
+- [x] 5.5 Place encryption and confirmed profile deletion beside the active-profile selector using standard controls, and replace ambiguous Native action labels with explicit OS secure-storage behavior.
 
 ## 6. Retire incompatible secure-key work
 

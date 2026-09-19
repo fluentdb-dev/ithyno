@@ -124,7 +124,7 @@ export function describeEncryptionStatus(
     ? details.keyIdentifiers.join(", ")
     : ".env.keys";
   if (details?.native && !details.native.supported) {
-    return `missing (standard ${keyIdentifiers} is the default local key source; native key storage is unavailable on this host)`;
+    return `missing (standard ${keyIdentifiers} is the default local key source; OS secure key storage is unavailable on this host)`;
   }
   return `missing (selected profile needs a matching dotenvx private key; standard source is ${keyIdentifiers})`;
 }
@@ -404,10 +404,84 @@ export function EnvironmentNativeActionButtons({
 }) {
   if (!native?.supported) return null;
   return (
-    <div className="environment-inline-controls" style={{ marginTop: 8 }}>
-      <button type="button" className="btn-secondary" onClick={() => void onAction("up")} disabled={busy === "up"}>Move to native</button>
-      <button type="button" className="btn-secondary" onClick={() => void onAction("push")} disabled={busy === "push"}>Copy to native</button>
-      <span className="muted">{profile} · {profilePath}</span>
+    <div className="environment-native-card">
+      <div>
+        <strong>OS secure key storage</strong>
+        <p className="muted">
+          Optional for <code>{profilePath}</code>. Move removes this profile key from <code>.env.keys</code> after storing it in the OS. Copy keeps <code>.env.keys</code> and stores an additional OS copy.
+        </p>
+      </div>
+      <div className="environment-inline-controls environment-inline-controls--stacked">
+        <button type="button" className="environment-action-link" onClick={() => void onAction("up")} disabled={busy !== null && busy !== undefined}>
+          Move key to OS storage
+        </button>
+        <button type="button" className="environment-action-link" onClick={() => void onAction("push")} disabled={busy !== null && busy !== undefined}>
+          Copy key to OS storage
+        </button>
+        <span className="muted">Profile: {profile}</span>
+      </div>
+    </div>
+  );
+}
+
+export function EnvironmentProfileControls({
+  profiles,
+  selectedProfile,
+  loading,
+  encrypting,
+  canEncrypt,
+  onSelect,
+  onEncrypt,
+  onDelete,
+}: {
+  profiles: Profile[];
+  selectedProfile: string | null;
+  loading: boolean;
+  encrypting: boolean;
+  canEncrypt: boolean;
+  onSelect: (profile: string | null) => void | Promise<void>;
+  onEncrypt: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="settings-field environment-profile-field">
+      <label htmlFor="environment-active-profile"><strong>Active profile</strong></label>
+      <div className="environment-profile-controls">
+        <select
+          id="environment-active-profile"
+          className="environment-select"
+          value={selectedProfile ?? ""}
+          onChange={(event) => void onSelect(event.target.value || null)}
+          disabled={loading}
+        >
+          <option value="">No profile</option>
+          {profiles.map((profile) => (
+            <option key={profile.name} value={profile.name}>{profile.name}</option>
+          ))}
+        </select>
+        {selectedProfile && canEncrypt ? (
+          <button
+            type="button"
+            className="environment-action-link"
+            onClick={onEncrypt}
+            disabled={encrypting}
+          >
+            Encrypt profile
+          </button>
+        ) : null}
+        {selectedProfile ? (
+          <button
+            type="button"
+            className="environment-action-button environment-action-button--delete"
+            onClick={onDelete}
+            disabled={loading}
+            aria-label={`Delete active profile ${selectedProfile}`}
+            title="Delete active profile"
+          >
+            <DeleteIcon />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -640,6 +714,9 @@ export function Environment() {
 
   const runNativeAction = async (action: "up" | "push") => {
     if (!snapshot || !snapshot.selection.selectedProfile) return;
+    const actionDescription = action === "up"
+      ? "move the key to OS secure storage"
+      : "copy the key to OS secure storage";
     setNativeActioning(action);
     try {
       const profile = snapshot.selection.selectedProfile;
@@ -651,12 +728,12 @@ export function Environment() {
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({})) as { error?: string };
-        setSaveError(payload.error ?? `Unable to ${action} native key`);
+        setSaveError(payload.error ?? `Unable to ${actionDescription}`);
         return;
       }
       await refreshSnapshot();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : `Unable to ${action} native key`);
+      setSaveError(err instanceof Error ? err.message : `Unable to ${actionDescription}`);
     } finally {
       setNativeActioning(null);
     }
@@ -796,11 +873,6 @@ export function Environment() {
               native: snapshot.encryption.native,
             })}
           </p>
-          {!snapshot.encryption.encrypted && snapshot.selection.selectedProfile ? (
-            <button type="button" className="btn-primary" onClick={() => setConfirmEncryption(true)} disabled={encrypting}>
-              Encrypt selected profile
-            </button>
-          ) : null}
         </div>
       ) : null}
       {managerRunning && restartRequired ? (
@@ -847,6 +919,17 @@ export function Environment() {
                 </div>
               ) : null}
 
+              <EnvironmentProfileControls
+                profiles={snapshot.profiles}
+                selectedProfile={snapshot.selection.selectedProfile}
+                loading={loading}
+                encrypting={encrypting}
+                canEncrypt={!snapshot.encryption.encrypted}
+                onSelect={onSelect}
+                onEncrypt={() => setConfirmEncryption(true)}
+                onDelete={() => setDeletingProfile(snapshot.selection.selectedProfile)}
+              />
+
               {snapshot.selection.selectedProfile && snapshot.encryption.encrypted && snapshot.encryption.ready && snapshot.encryption.keyFileExists ? (
                 <EnvironmentNativeActionButtons
                   native={snapshot.encryption.native}
@@ -856,36 +939,6 @@ export function Environment() {
                   busy={nativeActioning}
                 />
               ) : null}
-
-              <div className="settings-field">
-                <label>
-                  <span><strong>Active profile</strong></span>
-                  <select
-                    className="environment-select"
-                    value={snapshot.selection.selectedProfile ?? ""}
-                    onChange={(e) => void onSelect(e.target.value || null)}
-                    disabled={loading}
-                  >
-                    <option value="">No profile</option>
-                    {snapshot.profiles.map((profile) => (
-                      <option key={profile.name} value={profile.name}>
-                        {profile.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {snapshot.selection.selectedProfile ? (
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ marginTop: 8 }}
-                    onClick={() => setDeletingProfile(snapshot.selection.selectedProfile ?? null)}
-                    disabled={loading}
-                  >
-                    Delete profile
-                  </button>
-                ) : null}
-              </div>
             </section>
           )}
 

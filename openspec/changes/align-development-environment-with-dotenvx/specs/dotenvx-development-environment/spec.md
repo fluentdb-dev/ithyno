@@ -91,6 +91,14 @@ always-visible generic password field.
 - **WHEN** the selected profile has a matching key in `.env.keys`
 - **THEN** the UI reports local key-file readiness and offers only applicable migration or management actions
 
+#### Scenario: Active profile actions are presented together
+- **WHEN** a project-root env profile is selected
+- **THEN** the profile selector presents applicable encryption and delete actions beside the active profile, uses the standard Environment control styling, and represents deletion with a labelled trash icon that still requires confirmation
+
+#### Scenario: Native storage actions are explained
+- **WHEN** dotenvx Native is supported and the selected profile can use it
+- **THEN** the UI describes the destination as OS secure key storage and distinguishes moving the key out of `.env.keys` from copying it while retaining `.env.keys`
+
 #### Scenario: First encryption is requested
 - **WHEN** the selected plaintext profile has no private key
 - **THEN** the UI explains that dotenvx will create `.env.keys` and add the required Git ignore entry before asking for confirmation

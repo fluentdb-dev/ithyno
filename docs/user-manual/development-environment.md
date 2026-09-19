@@ -54,9 +54,11 @@ the profile and review the changes again instead of overwriting the newer file.
 - Legacy `DOTENVX_KEY` / `DOTENV_KEY` inputs are accepted only as compatibility
   inputs while the default workflow stays `DOTENV_PRIVATE_KEY` and
   `DOTENV_PRIVATE_KEY_<PROFILE>` semantics.
-- dotenvx Native is preferred when the host supports it: `Native up` moves a key
-  into the local OS store, and `Native push` copies it there. If native support
-  is unavailable, `.env.keys` remains the supported fallback.
+- Optional OS secure key storage is available when the host supports dotenvx
+  Native. **Move key to OS storage** removes the profile key from `.env.keys`
+  after storing it in the OS. **Copy key to OS storage** keeps `.env.keys` and
+  stores an additional OS copy. If OS storage is unavailable, `.env.keys`
+  remains the supported workflow.
 - CI and automation should inject secret material via environment variables or
   the platform secret store, not by committing real keys or storing them in the
   project tree.
