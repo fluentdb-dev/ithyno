@@ -3,6 +3,38 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0-alpha.0] - 2026-09-19
+
+### Added
+
+- Added the Secrets workspace for selecting and editing project `.env*`
+  profiles, encrypting them with bundled dotenvx, and using ignored
+  profile-aware `.env.keys` credentials without exposing private keys to
+  Manager or worker processes.
+- Added optional dotenvx Native key migration, confirmed profile deletion, and
+  diagnostics for missing, invalid, tracked, or orphaned key material.
+- Added opt-in CLI waiting notifications and project-scoped notification hooks
+  for Claude, Codex, Antigravity, and supported host applications.
+- Added detached AgentRunner workers with adoption metadata so active jobs can
+  survive dashboard-server restarts.
+
+### Changed
+
+- Kept embedded Manager PTYs alive across dashboard disconnects and added
+  explicit reconnecting, session-lost, and terminal-restart states.
+- Renamed the user-facing development environment workspace to **Secrets**
+  while preserving the existing `/environment` route and API compatibility.
+
+### Fixed
+
+- Preserved dashboard dialog input across focus changes and ordinary host
+  visibility transitions.
+- Added a VS Code clipboard bridge for copy actions inside packaged webviews.
+- Improved VS Code host theme detection, Windows CLI discovery, and terminal
+  startup after project initialization.
+- Stabilized real dotenvx integration tests under parallel CI load and made
+  detached-process cleanup more reliable on Windows.
+
 ## [0.8.1-alpha.4] - 2026-08-27
 
 ### Fixed
