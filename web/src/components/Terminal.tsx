@@ -240,7 +240,7 @@ export function readStableTerminalSession(
   storage: StableTerminalSessionStorage | null = getStableTerminalSessionStorage(),
 ): StableTerminalSession {
   const storageKey = terminalSessionStorageKey(projectRoot);
-  const fallbackKey = `${projectRoot || "workspace"}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const fallbackKey = `${projectRoot || "workspace"}:${Date.now()}:${globalThis.crypto.randomUUID()}`;
   if (!storage) {
     return { key: fallbackKey, intent: "create", established: false };
   }
@@ -280,7 +280,7 @@ export function rotateStableTerminalSession(
   storage: StableTerminalSessionStorage | null = getStableTerminalSessionStorage(),
 ): string {
   const storageKey = terminalSessionStorageKey(projectRoot);
-  const fresh = `${projectRoot || "workspace"}:reload:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const fresh = `${projectRoot || "workspace"}:reload:${Date.now()}:${globalThis.crypto.randomUUID()}`;
   if (!storage) return fresh;
   const next: StableTerminalSession = { key: fresh, intent: "create", established: false };
   storage.setItem(storageKey, JSON.stringify(next));
