@@ -8,9 +8,10 @@ dotenvx encryption uses `.env.keys` entries such as `DOTENV_PRIVATE_KEY` and
 `DOTENV_PRIVATE_KEY_DEVELOPMENT`.
 
 The correction crosses the server adapter, PTY and AgentRunner spawn paths,
-the Environment UI, and optional Electron/VS Code storage. It must preserve the
-existing guarantees that secret values are not logged or broadcast and that
-only resolved application values—not decryption credentials—reach agents.
+the user-facing Secrets UI, and optional Electron/VS Code storage. It must
+preserve the existing guarantees that secret values are not logged or broadcast
+and that only resolved application values—not decryption credentials—reach
+agents.
 
 ## Goals / Non-Goals
 
@@ -160,6 +161,13 @@ are not implementation inputs after this change is accepted. Reusable IPC,
 storage, and test code may be ported only after it satisfies this design. Their
 obsolete active change directories and unmerged implementation branches will be
 retired separately from the implementation commit so the history remains clear.
+
+### D8: Rename the workspace without changing compatibility identifiers
+
+The dashboard navigation, page heading, diagnostics heading, and user
+documentation call the workspace **Secrets**. Internal component names, CSS
+classes, server modules, APIs, and the `/environment` route remain unchanged so
+existing integrations and saved links continue to work.
 
 ## Risks / Trade-offs
 

@@ -184,7 +184,7 @@ export function EnvironmentNoProfileState({
     <section className="settings-section environment-empty-hero">
       <h3>Profile</h3>
       <div className="environment-empty-hero-body">
-        <strong>No environment is configured yet.</strong>
+        <strong>No secrets profile is configured yet.</strong>
         <p>
           Create the first project profile to apply dotenv values to new Manager PTYs and AgentRunner workers.
         </p>
@@ -501,8 +501,8 @@ export function EnvironmentDiagnostics({
 }) {
   if (diagnostics.length === 0) return null;
   return (
-    <section className="settings-section environment-panel" aria-label="Environment diagnostics">
-      <h3>Environment diagnostics</h3>
+    <section className="settings-section environment-panel" aria-label="Secrets diagnostics">
+      <h3>Secrets diagnostics</h3>
       <ul className="environment-list">
         {diagnostics.map((diagnostic, index) => (
           <li key={`${diagnostic.kind}-${diagnostic.path ?? ""}-${index}`}>
@@ -867,7 +867,7 @@ export function Environment() {
 
   return (
     <div className="settings-page environment-page">
-      <h2>Development Environment</h2>
+      <h2>Secrets</h2>
       <p className="muted environment-description">
         Discover project .env profiles, select one for new Manager PTYs and AgentRunner workers, reveal values explicitly, and save changes after a review.
       </p>

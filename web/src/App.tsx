@@ -373,7 +373,7 @@ export function App() {
           <NavLink to="/tags">Tags</NavLink>
           <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/docs">Docs</NavLink>
-          <NavLink to="/environment">Environment</NavLink>
+          <NavLink to="/environment">Secrets</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="topbar-right">

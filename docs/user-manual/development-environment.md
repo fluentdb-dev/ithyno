@@ -1,6 +1,6 @@
-# Development Environment
+# Secrets
 
-The **Environment** workspace manages code-development variables stored in the
+The **Secrets** workspace manages code-development variables stored in the
 project's dotenv-compatible `.env*` files. These values are separate from
 ithyno's own session variables and agent configuration.
 

@@ -24,7 +24,7 @@
 - [x] 4.2 Remove every case-insensitive `DOTENV_PRIVATE_KEY` family member and supported legacy key credential from final child environments without removing normal application variables.
 - [x] 4.3 Add Manager, attached worker, detached worker, adopted worker, worktree, and Windows-casing regression tests proving decrypted values arrive while credentials do not.
 
-## 5. Redesign Environment key and profile UI
+## 5. Redesign Secrets key and profile UI
 
 - [x] 5.1 Replace generic key-entry-first UI with selected-profile encryption state, key-source status, `.env.keys` guidance, and exact first-encryption/Git-ignore confirmation.
 - [x] 5.2 Probe bundled dotenvx Native support and expose explicit Native move/copy actions only when the active host can support them; keep `.env.keys` fully usable otherwise.
@@ -33,6 +33,7 @@
 - [x] 5.5 Place encryption and confirmed profile deletion beside the active-profile selector using standard controls, and replace ambiguous Native action labels with explicit OS secure-storage behavior.
 - [x] 5.6 Hide routine encryption success/plaintext status banners and render status messaging only when the selected profile requires attention.
 - [x] 5.7 Restore an actionable warning for a selected plaintext profile while continuing to hide the routine encrypted-ready success banner.
+- [x] 5.8 Rename user-facing workspace labels and documentation from Environment to Secrets while preserving the internal `/environment` route and API identifiers.
 
 ## 6. Retire incompatible secure-key work
 

@@ -83,7 +83,7 @@ every optional secure-storage integration.
 - **THEN** it preserves the corresponding dotenvx private-key identifiers and supplies only operation-required credentials through a bounded secret-safe bridge
 
 ### Requirement: Key management UI prioritizes actionable state
-The Environment UI SHALL show the active profile and applicable actions, SHALL
+The Secrets UI SHALL show the active profile and applicable actions, SHALL
 surface key-source or remediation details when user action is required, and
 SHALL avoid always-visible success banners and generic password fields.
 
@@ -101,7 +101,11 @@ SHALL avoid always-visible success banners and generic password fields.
 
 #### Scenario: Active profile actions are presented together
 - **WHEN** a project-root env profile is selected
-- **THEN** the profile selector presents applicable encryption and delete actions beside the active profile, uses the standard Environment control styling, and represents deletion with a labelled trash icon that still requires confirmation
+- **THEN** the profile selector presents applicable encryption and delete actions beside the active profile, uses the standard Secrets control styling, and represents deletion with a labelled trash icon that still requires confirmation
+
+#### Scenario: Workspace uses the Secrets label
+- **WHEN** the user opens the dashboard navigation or the dotenvx workspace
+- **THEN** the interface identifies it as `Secrets` while preserving the existing `/environment` route and internal environment API contracts
 
 #### Scenario: Native storage actions are explained
 - **WHEN** dotenvx Native is supported and the selected profile can use it

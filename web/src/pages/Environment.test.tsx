@@ -40,7 +40,7 @@ describe("environment page helpers", () => {
         loading={false}
       />,
     );
-    expect(markup).toContain("No environment is configured yet");
+    expect(markup).toContain("No secrets profile is configured yet");
     expect(markup).toContain("Create first profile");
     expect(markup).toContain("Create the first project profile");
   });
@@ -178,6 +178,7 @@ describe("environment page helpers", () => {
       ]} />,
     );
     expect(markup).toContain("decryption-failed");
+    expect(markup).toContain("Secrets diagnostics");
     expect(markup).toContain("orphaned-key");
     expect(markup).toContain("DOTENV_PRIVATE_KEY_OLD");
     expect(markup).not.toContain("private-key-value");
