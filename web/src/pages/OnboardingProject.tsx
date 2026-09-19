@@ -20,6 +20,7 @@
 // unrelated to whether a Manager CLI can run at all, so it doesn't
 // belong in that gating step.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAppliedTheme } from "../hooks/useAppliedTheme";
 import { getSessionToken } from "../runtime";
 import {
   closeOnboarding,
@@ -78,6 +79,7 @@ function icon(status: StepStatus): string {
 }
 
 export function OnboardingProject() {
+  useAppliedTheme();
   const [target, channelParam] = useMemo(() => {
     const p = new URLSearchParams(window.location.search);
     return [p.get("target") ?? "", p.get("channel") ?? null];
@@ -434,7 +436,15 @@ export function OnboardingProject() {
           <button
             type="button"
             disabled={!canOpen}
-            onClick={() => openProject(channel, target)}
+            onClick={() => {
+              // Notify the VS Code extension that initialization completed so
+              // it can auto-launch the terminal. The iframe then navigates via
+              // openProject() (browser channel) preserving the original transition.
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "ithyno:init-complete" }, "*");
+              }
+              openProject(channel, target);
+            }}
           >
             Open Project
           </button>

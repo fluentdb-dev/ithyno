@@ -21,16 +21,17 @@ panel, using the active workspace folder as the OpenSpec project root.
 - **THEN** the extension uses the first workspace folder as the project root (multi-root selection is future work)
 
 ### Requirement: Lazy Server Activation
-The system SHALL NOT start the dashboard server on extension activation; the
-server SHALL start only when the user first invokes `openspecUI.show`.
 
-#### Scenario: Activation is cheap
-- **WHEN** the extension activates (e.g. VS Code launches with it installed)
-- **THEN** no server process is spawned and no port is bound
+The server process spawned on first `ithyno.show` SHALL receive a `PATH`
+environment whose Windows user-level augmentation entries are appended using
+the actual key name found in `process.env` (case-insensitive search for
+`"path"`), so that no duplicate `Path`/`PATH` entry is created.
 
-#### Scenario: First show triggers spawn
-- **WHEN** the user invokes `openspecUI.show` for the first time in the session
-- **THEN** the extension picks a free port, spawns the server, and waits for `/api/health` to succeed before opening the webview
+#### Scenario: Windows PATH key is title-case
+
+- **GIVEN** `process.env` contains a key named `Path` (not `PATH`)
+- **WHEN** `buildServerEnv()` augments the PATH
+- **THEN** the augmentation is written to the `Path` key and no separate `PATH` key is created
 
 ### Requirement: Server Lifecycle Bound to Extension
 The system SHALL terminate the spawned server when the extension deactivates
@@ -320,4 +321,137 @@ re-create it on the next trigger (button press OR next
 - **And** a fresh terminal is created eagerly
 - **And** it runs `claude --resume <uuid>` (same UUID from
   `.ithyno/session-id`)
+
+### Requirement: VSIX Esbuild Runtime Version Alignment
+
+The VS Code extension packaging flow SHALL stage the JavaScript `esbuild` package and every bundled platform-specific `@esbuild/*` binary package at one identical, exact version. The packaging flow MUST stop before creating the VSIX if the authoritative version cannot be resolved, a required package is missing, or any staged package version differs.
+
+#### Scenario: Fresh Ubuntu release packaging
+
+- **GIVEN** release dependencies were installed from the repository lockfile
+- **WHEN** the Ubuntu runner stages the cross-platform VSIX dependencies
+- **THEN** `node_modules/esbuild` and every explicitly bundled `node_modules/@esbuild/*` package use the same exact version
+- **AND** the resulting VSIX can start the esbuild service on each supported platform without a host/binary version mismatch
+
+#### Scenario: Staged package version drifts
+
+- **GIVEN** the staged JavaScript package or one platform binary reports a version different from the authoritative esbuild version
+- **WHEN** prepack validates the staged runtime
+- **THEN** prepack exits unsuccessfully before `vsce package` runs
+- **AND** the error identifies the mismatched package and both versions
+
+#### Scenario: Authoritative package is unavailable
+
+- **GIVEN** the lockfile-backed root esbuild installation is missing or unreadable
+- **WHEN** VSIX prepack begins
+- **THEN** prepack exits unsuccessfully with an actionable dependency-installation error
+- **AND** it does not substitute a hard-coded fallback version
+
+### Requirement: VS Code Webview Dialog Clipboard Paste
+
+The VS Code extension SHALL allow users to paste system clipboard text with the platform paste shortcut into a focused dashboard `input` or `textarea`, including fields inside modal dialogs hosted by the nested dashboard iframe.
+
+When the nested webview cannot reliably perform native paste, the extension SHALL provide a clipboard request/response bridge backed by `vscode.env.clipboard.readText()`. The bridge MUST preserve the focused field's existing value outside the selected range and MUST notify controlled form state of the inserted value.
+
+#### Scenario: Paste a model name into Agent Args
+
+- **GIVEN** the packaged VSIX dashboard has an Agent configuration dialog open
+- **AND** the Args field is focused with an insertion caret
+- **WHEN** the user presses `Cmd+V` on macOS or `Ctrl+V` on Windows or Linux with `--model sonnet` on the clipboard
+- **THEN** the Args field receives `--model sonnet` at the caret
+- **AND** saving the dialog uses the pasted value
+
+#### Scenario: Replace selected dialog text
+
+- **GIVEN** a focused dashboard text field contains selected text
+- **WHEN** the VS Code clipboard bridge returns pasted text
+- **THEN** only the selected range is replaced
+- **AND** text before and after the selection is preserved
+
+#### Scenario: Focus changes before clipboard response
+
+- **GIVEN** a clipboard read request is pending for a dialog field
+- **WHEN** that field is removed or loses ownership before the response arrives
+- **THEN** the stale response does not modify another field
+- **AND** the extension does not throw an uncaught error
+
+#### Scenario: Non-VS Code shells retain native paste
+
+- **GIVEN** the dashboard is running in a browser or Electron
+- **WHEN** the user uses the platform paste shortcut in a text control
+- **THEN** the browser's native paste behavior is used
+- **AND** no VS Code clipboard request is emitted
+
+### Requirement: Packaged Runtime Helpers Remain Executable
+
+The VS Code extension packaging flow SHALL preserve executable permissions for bundled POSIX runtime helpers regardless of the operating system used to build the VSIX.
+
+#### Scenario: Ubuntu packages a cross-platform VSIX
+
+- **GIVEN** the release workflow stages macOS and Linux esbuild packages on an Ubuntu runner
+- **WHEN** the extension VSIX is created
+- **THEN** each bundled `@esbuild/*/bin/esbuild` entry has executable permission
+- **AND** installing the VSIX on macOS or Linux does not fail to spawn esbuild with `EACCES`
+
+### Requirement: Onboarding Webview Respects VS Code Theme
+
+The onboarding iframe URL SHALL include `?vscode=1` so that `isVsCodeShell()`
+returns `true` inside the React app and `useAppliedTheme()` subscribes to
+`vscode:theme-changed` messages.
+
+#### Scenario: Onboarding panel opens in VS Code
+
+- **GIVEN** the extension opens the onboarding webview panel
+- **WHEN** the iframe URL is constructed by `renderOnboardingHtml`
+- **THEN** the URL contains `vscode=1` as a query parameter
+
+### Requirement: Terminal Auto-Launch After Initialization
+
+The extension SHALL auto-launch the VS Code terminal when the user clicks
+"Open Project" after completing project initialization from the "No OpenSpec
+project" decision panel, subject to the `ithyno.autoLaunchTerminal` setting
+and the presence of `agents.yaml`, without disrupting the iframe's own
+navigation back to the dashboard.
+
+#### Scenario: Initialization completes in main webview, user clicks Open Project
+
+- **GIVEN** the user opened a folder with no `agents.yaml`
+- **AND** the ithyno dashboard is showing the "No OpenSpec project" panel
+- **AND** the user clicked "Initialize openspec here" and completed initialization
+- **WHEN** the user clicks "Open Project"
+- **THEN** the extension receives `ithyno:init-complete` and auto-launches the terminal
+- **AND** the iframe navigates to the initialized dashboard as before
+
+### Requirement: VSIX dashboard clipboard writes use the Extension Host
+
+The VS Code extension SHALL route copy requests originating in the dashboard
+iframe through the Extension Host and SHALL write text using
+`vscode.env.clipboard.writeText()`.
+
+#### Scenario: Copy succeeds in a VSIX dashboard
+
+- **WHEN** a user activates a dashboard copy control in the VSIX
+- **THEN** the iframe sends a correlated clipboard-write request to the
+  Extension Host
+- **AND** the Extension Host writes the requested text to the system clipboard
+- **AND** the dashboard receives a success response and shows its copied state
+
+#### Scenario: Clipboard write is rejected
+
+- **WHEN** the Extension Host clipboard API rejects a write request
+- **THEN** the dashboard receives a correlated failure response
+- **AND** the copy control reports the existing clipboard error to the user
+
+#### Scenario: Browser and Electron copy behavior is preserved
+
+- **WHEN** the dashboard runs outside the VS Code extension channel
+- **THEN** copy controls continue using the existing browser clipboard path
+- **AND** no VS Code clipboard message is emitted
+
+#### Scenario: Stale write response
+
+- **WHEN** a clipboard response arrives after its originating copy request is
+  no longer current
+- **THEN** the dashboard ignores the response and does not change a later copy
+  operation's state
 

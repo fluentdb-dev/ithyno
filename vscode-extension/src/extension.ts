@@ -188,7 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] },
     );
-    panel.webview.html = renderWebviewHtml(server.url);
+    panel.webview.html = renderWebviewHtml(server.url, vscode.env.appName);
 
     const s: PanelSession = { panel, server, terminal: null, workspaceRoot };
     session = s;
@@ -218,7 +218,16 @@ export function activate(context: vscode.ExtensionContext): void {
         t.show(true);
       }
       if (msg.type === "ithyno:reload-session") {
-        panel.webview.html = renderWebviewHtml(s.server.url);
+        panel.webview.html = renderWebviewHtml(s.server.url, vscode.env.appName);
+      }
+      if (msg.type === "ithyno:init-complete") {
+        // Initialization finished inside the main iframe (NoProjectDecisionPanel
+        // flow). Auto-launch the terminal now that agents.yaml exists.
+        // The iframe handles its own navigation back to the dashboard.
+        if (autoLaunch && workspaceHasAgentsYaml(workspaceRoot)) {
+          const t = ensureTerminal(s);
+          t.show(true);
+        }
       }
       if (msg.type === "ithyno:clipboard-read-request" && typeof msg.requestId === "string") {
         const reqId = msg.requestId as string;
@@ -229,6 +238,24 @@ export function activate(context: vscode.ExtensionContext): void {
             text,
           });
         });
+      }
+      if (
+        msg.type === "ithyno:clipboard-write-request" &&
+        typeof msg.requestId === "string" &&
+        typeof msg.text === "string"
+      ) {
+        const reqId = msg.requestId as string;
+        void vscode.env.clipboard.writeText(msg.text as string).then(
+          () => s.panel.webview.postMessage({
+            type: "ithyno:clipboard-write-response",
+            requestId: reqId,
+          }),
+          (err: unknown) => s.panel.webview.postMessage({
+            type: "ithyno:clipboard-write-response",
+            requestId: reqId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
       }
     });
 
@@ -280,7 +307,7 @@ export function activate(context: vscode.ExtensionContext): void {
           t.show(true);
         }
         if (msg.type === "ithyno:reload-session" && session) {
-          webviewView.webview.html = renderWebviewHtml(session.server.url);
+          webviewView.webview.html = renderWebviewHtml(session.server.url, vscode.env.appName);
         }
       });
     }

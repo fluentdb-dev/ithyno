@@ -1,0 +1,92 @@
+import { describe, expect, it, afterEach, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readDetachedMeta, startDetached, startLogTail } from "./detached-runner.js";
+
+const dirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
+});
+
+describe("detached runner", () => {
+  it("writes metadata and leaves the child alive after the parent releases its handle", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ithyno-detached-runner-"));
+    dirs.push(dir);
+    const { meta, child } = await startDetached({
+      args: ["-e", "setTimeout(() => {}, 5000)"],
+      cwd: dir,
+      env: process.env,
+      jobId: "job-test",
+      changeId: "add-test",
+      agentName: "node",
+      command: process.execPath,
+    });
+
+    expect(child.pid).toBe(meta.pid);
+    expect(existsSync(join(dir, ".agent-meta.json"))).toBe(true);
+    const onDisk = JSON.parse(readFileSync(join(dir, ".agent-meta.json"), "utf8"));
+    expect(onDisk).toMatchObject({
+      jobId: "job-test",
+      changeId: "add-test",
+      agentName: "node",
+      pid: meta.pid,
+      logPath: join(dir, ".agent.log"),
+    });
+
+    // This is the equivalent of server shutdown: the detached child is not
+    // killed when the parent drops its process handle.
+    process.kill(meta.pid, 0);
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    process.kill(meta.pid, "SIGTERM");
+    await exited;
+    await unlink(join(dir, ".agent-meta.json")).catch(() => undefined);
+  });
+
+  it("ignores filesystem paths supplied by persisted metadata", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ithyno-detached-meta-"));
+    dirs.push(dir);
+    const metaPath = join(dir, ".agent-meta.json");
+    writeFileSync(metaPath, JSON.stringify({
+      jobId: "job-test",
+      changeId: "add-test",
+      agentName: "node",
+      command: process.execPath,
+      pid: process.pid,
+      startedAt: Date.now(),
+      logPath: join(tmpdir(), "untrusted.log"),
+      metaPath: join(tmpdir(), "untrusted-meta.json"),
+    }));
+
+    await expect(readDetachedMeta(metaPath)).resolves.toMatchObject({
+      logPath: join(dir, ".agent.log"),
+      metaPath,
+    });
+  });
+});
+
+describe("startLogTail", () => {
+  it("delivers appended chunks in order", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ithyno-log-tail-"));
+    dirs.push(dir);
+    const logPath = join(dir, ".agent.log");
+    writeFileSync(logPath, "first\n");
+    const chunks: string[] = [];
+    const tail = startLogTail(logPath, (chunk) => chunks.push(chunk));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      writeFileSync(logPath, "second\n", { flag: "a" });
+      await vi.waitFor(() => expect(chunks.join("")).toContain("second\n"), { timeout: 2000 });
+      expect(chunks.join("")).toBe("first\nsecond\n");
+    } finally {
+      tail.dispose();
+    }
+  });
+});

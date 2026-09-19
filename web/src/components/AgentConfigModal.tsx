@@ -171,6 +171,7 @@ export function AgentConfigModal({
       mode: effectiveMode,
       prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
       description: form.description.trim() || undefined,
+      detached: includesManager ? undefined : form.detached,
     };
     if (form.command.trim()) {
       payload.command = form.command.trim();
@@ -334,6 +335,18 @@ export function AgentConfigModal({
             </button>
             {showAdvanced && (
               <div className="agent-config-advanced-body">
+                {!includesManager && (
+                  <label className="agent-config-field agent-config-checkbox-field">
+                    <span>
+                      <input
+                        type="checkbox"
+                        checked={form.detached}
+                        onChange={(e) => setForm({ ...form, detached: e.target.checked })}
+                      />{" "}
+                      Keep this Worker running across server restarts (detached)
+                    </span>
+                  </label>
+                )}
                 <label className="agent-config-field">
                   <span>Description (optional)</span>
                   <input
@@ -372,6 +385,7 @@ type FormState = {
   args: string;
   prompts: Record<string, string>;
   description: string;
+  detached: boolean;
 };
 
 /**
@@ -422,6 +436,7 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       args: "",
       prompts: {},
       description: "",
+      detached: false,
     };
   }
   // Defensive read: the server may still be running the pre-reshape
@@ -450,5 +465,6 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     args: (seed.args ?? []).join(" "),
     prompts: promptsFromSeed,
     description: seed.description ?? "",
+    detached: seed.detached === true,
   };
 }

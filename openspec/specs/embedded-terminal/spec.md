@@ -163,14 +163,35 @@ The system SHALL bind `Cmd/Ctrl+Shift+K` (with terminal focus) to trigger termin
 
 ### Requirement: PTY process cleanup on disconnect
 
-The server SHALL kill the spawned PTY child process when its associated `/pty` WebSocket closes, so that repeatedly restarting the terminal does not accumulate zombie PTYs.
+The server SHALL keep the spawned PTY child process alive when its associated
+`/pty` WebSocket closes temporarily, so a reconnect can reuse the same shell.
+The server SHALL kill and reap the PTY only on explicit terminal restart,
+project switch, server shutdown, PTY exit, or expiry of the disconnected idle
+TTL.
 
-#### Scenario: No PTY leak on restart
+#### Scenario: WebSocket disconnect does not kill PTY
 
-- **GIVEN** a PTY child process spawned for a `/pty` WebSocket
-- **WHEN** the WebSocket closes (client disconnect, server shutdown, or user-initiated restart)
-- **THEN** the PTY child process is killed and its OS entry is reaped
-- **AND** the operator can restart the terminal an arbitrary number of times without observing accumulated PTY processes in `ps`
+- **GIVEN** a PTY child process is running for a project session
+- **WHEN** its `/pty` WebSocket closes unexpectedly
+- **THEN** the PTY child remains alive and the server retains the session entry
+
+#### Scenario: Reconnect reuses PTY
+
+- **GIVEN** a project session has a live PTY with no attached WebSocket
+- **WHEN** a new `/pty` WebSocket connects with the same session identity
+- **THEN** the server attaches it to the existing PTY without spawning a second process
+
+#### Scenario: Explicit restart still cleans up
+
+- **GIVEN** a PTY child process is running
+- **WHEN** the user invokes terminal restart
+- **THEN** the server kills and reaps the PTY, clears the session entry, and creates a fresh PTY
+
+#### Scenario: Disconnected idle TTL cleans up
+
+- **GIVEN** a PTY has no attached WebSocket for longer than the configured idle TTL
+- **WHEN** the TTL expires
+- **THEN** the server kills and reaps the PTY and removes its session entry
 
 ### Requirement: Terminal size toggle in the header
 
@@ -440,4 +461,33 @@ values reach psmux without any POSIX shell or bash intermediary.
 - **AND** tmux is enabled and found on PATH
 - **WHEN** `ptyStartup` is called
 - **THEN** the returned startup string is the POSIX tmux session wrap, unchanged from existing behavior
+
+### Requirement: PTY session identity prevents duplicate processes
+
+The server SHALL associate an embedded PTY with a stable project/session
+identity and SHALL NOT spawn more than one live PTY for that identity.
+
+#### Scenario: Concurrent reconnects
+
+- **GIVEN** two clients connect for the same project/session identity
+- **WHEN** both connection handlers run concurrently
+- **THEN** exactly one PTY exists and the newest socket replaces the prior attachment
+
+### Requirement: New Manager PTYs receive the selected development environment
+Before spawning a Manager PTY, the server SHALL resolve the selected project
+profile through the shared development-environment resolver and include its
+code-development variables in the child environment. Authoritative dashboard
+session variables SHALL take precedence over all project values.
+
+#### Scenario: Manager starts with selected profile
+- **WHEN** a profile containing `APP_MODE=development` is selected and a new Manager PTY starts
+- **THEN** the Manager process receives `APP_MODE=development`
+
+#### Scenario: Project attempts to override dashboard identity
+- **WHEN** the selected profile contains an `ITHYNO_*` key
+- **THEN** the Manager receives the authoritative server-provided value rather than the profile value
+
+#### Scenario: No profile is selected
+- **WHEN** a Manager PTY starts without a selected development profile
+- **THEN** its existing environment behavior remains unchanged
 

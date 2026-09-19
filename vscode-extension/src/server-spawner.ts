@@ -92,6 +92,40 @@ function resolvePackageRoot(extensionPath: string): string {
 /** Match the `?token=<hex>` printed on the launch line. */
 const TOKEN_RE = /token=([a-f0-9]+)/i;
 
+/**
+ * Build the environment for the spawned server process.
+ *
+ * On Windows, VS Code's extension host inherits the registry PATH but never
+ * sources shell profiles, so directories like %APPDATA%\npm (npm global bin)
+ * and %USERPROFILE%\.local\bin may be absent. Augment PATH with these
+ * well-known user-level directories when they exist and are not already present.
+ * Non-Windows platforms receive process.env unchanged.
+ */
+function buildServerEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (process.platform !== "win32") return env;
+
+  const candidates = [
+    process.env["APPDATA"] ? `${process.env["APPDATA"]}\\npm` : null,
+    process.env["USERPROFILE"] ? `${process.env["USERPROFILE"]}\\.local\\bin` : null,
+  ].filter((d): d is string => d !== null);
+
+  // Windows env var names are case-insensitive but the actual key casing varies
+  // (e.g. "Path" vs "PATH"). Find the real key name to avoid creating a
+  // duplicate entry that could shadow the original PATH.
+  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  const currentPath = env[pathKey] ?? "";
+  const pathDirs = currentPath.split(";").map((s) => s.toLowerCase());
+  const additions = candidates.filter(
+    (d) => fs.existsSync(d) && !pathDirs.includes(d.toLowerCase()),
+  );
+
+  if (additions.length > 0) {
+    env[pathKey] = [...additions, currentPath].filter(Boolean).join(";");
+  }
+  return env;
+}
+
 export async function spawnServer(opts: {
   extensionPath: string;
   workspaceRoot: string;
@@ -103,7 +137,7 @@ export async function spawnServer(opts: {
   // Pass port + project root as CLI args, not env: bin/ithyno.js uses
   // commander whose --port default ("4321") overwrites env.PORT. Passing
   // --port explicitly is the only way to actually pin the picked port.
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  const env: NodeJS.ProcessEnv = buildServerEnv();
   delete env.ITHYNO_DEV;
 
   const child = spawn(

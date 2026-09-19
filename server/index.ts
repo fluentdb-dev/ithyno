@@ -48,7 +48,7 @@ import { scanDocs, readDocsFile, docsRelPath } from "./parser/docs.js";
 import { collectTags, getTagDetail } from "./parser/tags.js";
 import { applyToggle } from "./sync/surgicalEdit.js";
 import { Watcher, ProjectRootWatcher } from "./sync/watcher.js";
-import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys } from "./sync/pty.js";
+import { loadPty, attachPtyToSocket, injectIntoActive, injectIntoManager, activeTerminalCount, ptyStartup, commandExistsOnPath, terminateAllLivePtys, parsePtyConnectionIdentity, parsePtyConnectionIntent } from "./sync/pty.js";
 import { resolveGitBash } from "./util/resolve-git-bash.js";
 import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
@@ -84,6 +84,8 @@ import {
   setManagerActivity,
   type ManagerActivity,
 } from "./manager-activity.js";
+import { registerEnvironmentRoutes } from "./environment/routes.js";
+import { registerProductionShutdown } from "./production-shutdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -123,7 +125,14 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
+registerProductionShutdown(fastify, () => {
+  terminateAllLivePtys();
+});
 await fastify.register(rateLimit, { global: false });
+await fastify.register(registerEnvironmentRoutes, {
+  getProjectRoot,
+  getProcessEnv: () => process.env,
+});
 
 // ---- CSRF protection -------------------------------------------------------
 // Built once we know the listening port (see fastify.listen below). Used by
@@ -338,6 +347,7 @@ try {
   );
 }
 const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+await agentRunner.adoptDetached();
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
 // having to shell out. Awaited so that the very first `/api/agents/jobs`
@@ -1438,6 +1448,67 @@ fastify.post("/api/agents/config", async (req, reply) => {
   return { ok: true };
 });
 
+// Independent per-agent notification-hook toggle. Skill installation does not
+// affect this state; the hook is currently supported only for Claude.
+fastify.get("/api/agent-hooks", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+  const init = await import("../bin/init.js");
+  const script = init.platformNotifyScript(process.platform);
+  const configured = agentRegistry.publicConfig().agents;
+  const doctor = await runDoctor();
+  const hookAgents = ["claude", "codex", "copilot", "agy"]
+    .filter((command) => doctor.agents[command as keyof typeof doctor.agents]?.installed)
+    .map((command) => configured.find((agent) => agent.command === command) ?? { name: command, command });
+  const agents = hookAgents.map(async (agent) => {
+    const supported = agent.command === "claude" || agent.command === "codex" || agent.command === "copilot" || agent.command === "agy" || agent.command === "antigravity";
+    if (!supported || !script) return { agentName: agent.name, command: agent.command, supported: false, enabled: false };
+    const scriptAbs = join(getProjectRoot(), ".ithyno", script.destRel.replace(/^\.ithyno\//, ""));
+    const state = agent.command === "claude"
+      ? await init.claudeNotifyHookStatus(getProjectRoot(), scriptAbs)
+      : agent.command === "codex"
+        ? await init.codexNotifyHookStatus(getProjectRoot(), scriptAbs)
+        : agent.command === "copilot"
+        ? await init.copilotNotifyHookStatus(getProjectRoot(), scriptAbs)
+        : await init.agyNotifyHookStatus(getProjectRoot(), scriptAbs);
+    return { agentName: agent.name, command: agent.command, supported: state.supported, enabled: state.enabled };
+  });
+  return { hooks: await Promise.all(agents) };
+});
+
+fastify.post<{ Body: { agentName?: unknown; enabled?: unknown; context?: unknown; hostAppName?: unknown } }>("/api/agent-hooks/toggle", async (req, reply) => {
+  if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+  const { agentName, enabled, context, hostAppName } = req.body ?? {};
+  if (typeof agentName !== "string" || typeof enabled !== "boolean") {
+    return reply.code(400).send({ error: "agentName and enabled are required" });
+  }
+  if (context !== undefined && (typeof context !== "string" || !["electron", "vscode", "cli"].includes(context))) return reply.code(400).send({ error: "invalid notification context" });
+  if (hostAppName !== undefined && (typeof hostAppName !== "string" || hostAppName.length > 120)) return reply.code(400).send({ error: "invalid notification host app" });
+  const notifyOptions = { context: context as "electron" | "vscode" | "cli" | undefined, hostAppName: hostAppName as string | undefined };
+  const agent = agentRegistry.publicConfig().agents.find((item) => item.name === agentName);
+  const command = agent?.command ?? (typeof agentName === "string" ? agentName : undefined);
+  if (!command || !["claude", "codex", "copilot", "agy", "antigravity"].includes(command)) return reply.code(400).send({ error: "notification hook is unsupported for this agent" });
+  const init = await import("../bin/init.js");
+  const script = init.platformNotifyScript(process.platform);
+  if (!script) return reply.code(400).send({ error: "notification hook is unsupported on this platform" });
+  const scaffold = await init.scaffoldNotifyScript(getProjectRoot());
+  if (!scaffold) return reply.code(500).send({ error: "notification script could not be installed" });
+  if (command === "claude") {
+    if (enabled) await init.installClaudeNotifyHook(getProjectRoot(), scaffold.destAbs, false, notifyOptions);
+    else await init.removeClaudeNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else if (command === "codex") {
+    if (enabled) await init.installCodexNotifyHook(getProjectRoot(), scaffold.destAbs, false, notifyOptions);
+    else await init.removeCodexNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else if (command === "copilot") {
+    if (enabled) await init.installCopilotNotifyHook(getProjectRoot(), scaffold.destAbs, false, notifyOptions);
+    else await init.removeCopilotNotifyHook(getProjectRoot(), scaffold.destAbs);
+  } else if (enabled) {
+    await init.installAgyNotifyHook(getProjectRoot(), scaffold.destAbs, false, notifyOptions);
+  } else {
+    await init.removeAgyNotifyHook(getProjectRoot(), scaffold.destAbs);
+  }
+  return { ok: true, enabled };
+});
+
 // Parallel-execution config toggle (add-parallel-execution-config).
 // Writes the top-level `parallelExecution: boolean` field in agents.yaml
 // and reloads the registry so the change is reflected on next fetch.
@@ -1535,6 +1606,9 @@ fastify.get("/api/manager/status", async (req, reply) => {
         command: managerEntry.command,
         args: managerEntry.args,
         hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
+        detached: managerEntry.detached,
+        mode: managerEntry.mode,
+        roles: managerEntry.roles,
         initialInput: managerEntry.initialInput,
         prompt: managerEntry.prompt,
         role: managerEntry.role,
@@ -2017,11 +2091,28 @@ fastify.server.on("upgrade", (request, socket, head) => {
   }
 });
 
-ptyWss.on("connection", async (ws) => {
+ptyWss.on("connection", async (ws, request) => {
   const cwd = openspecDir
     ? resolve(openspecDir, "..") // project root, not openspec/ itself
     : getProjectRoot();
-  const result = await attachPtyToSocket(ws, { cwd, registry: agentRegistry });
+  const identity = parsePtyConnectionIdentity(request?.url, cwd);
+  if (identity.projectRoot !== resolve(cwd)) {
+    try {
+      ws.send(`\r\n[ithyno] terminal project mismatch: ${identity.projectRoot} != ${cwd}\r\n`);
+    } catch {
+      /* ignore */
+    }
+    ws.close();
+    return;
+  }
+  const intent = parsePtyConnectionIntent(request?.url);
+  const result = await attachPtyToSocket(ws, {
+    cwd,
+    registry: agentRegistry,
+    projectId: identity.projectRoot,
+    sessionId: identity.sessionId,
+    intent,
+  });
   if (!result.ok) {
     try {
       ws.send(`\r\n[ithyno] terminal unavailable: ${result.reason}\r\n`);

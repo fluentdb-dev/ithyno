@@ -11,6 +11,7 @@
  * per the propose's rollout plan.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { discoverSkillSourcesDetailed } from "./discover.js";
 import { copyClaudeIthyOpsxCommandsToAgent, migrateLegacyAntigravityDir } from "./migrate-agy.js";
@@ -36,6 +37,75 @@ async function readIfExists(path: string): Promise<string | null> {
 
 function utf8Bytes(s: string): number {
   return Buffer.byteLength(s, "utf8");
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity isolation bridge files
+// ---------------------------------------------------------------------------
+
+interface BridgeJsonEntry {
+  path: string;
+  [key: string]: unknown;
+}
+
+interface BridgeJson {
+  entries: BridgeJsonEntry[];
+  [key: string]: unknown;
+}
+
+const ITHYNO_AG_SKILLS_PATH = ".ithyno/antigravity/skills";
+
+/**
+ * Merge an ithyno entry into a bridge JSON file (.agents/skills.json or
+ * .agents/plugins.json), preserving any user-authored entries.
+ */
+async function mergeBridgeJson(
+  filePath: string,
+  entryPath: string,
+  staleEntryPaths?: string[],
+): Promise<void> {
+  let existing: BridgeJson = { entries: [] };
+  const raw = await readIfExists(filePath);
+  if (raw) {
+    try {
+      existing = JSON.parse(raw) as BridgeJson;
+      if (!Array.isArray(existing.entries)) existing.entries = [];
+    } catch {
+      existing = { entries: [] };
+    }
+  }
+  // Remove stale ithyno entries from previous versions
+  let changed = false;
+  if (staleEntryPaths) {
+    const before = existing.entries.length;
+    existing.entries = existing.entries.filter(
+      (e) => !staleEntryPaths.includes(e.path),
+    );
+    if (existing.entries.length !== before) changed = true;
+  }
+  // Add current entry if not already present
+  if (existing.entries.some((e) => e.path === entryPath)) {
+    if (!changed) return;
+  } else {
+    existing.entries.push({ path: entryPath });
+  }
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * Register ithyno's isolated skill directory with Antigravity's
+ * global config so it discovers skills from .ithyno/antigravity/skills/.
+ * Uses absolute path since global config cannot resolve relative paths.
+ */
+async function emitAntigravityBridgeFiles(projectRoot: string): Promise<void> {
+  const geminiConfig = join(homedir(), ".gemini", "config");
+  const absSkillsPath = join(projectRoot, ITHYNO_AG_SKILLS_PATH);
+  await mergeBridgeJson(
+    join(geminiConfig, "skills.json"),
+    absSkillsPath,
+    [ITHYNO_AG_SKILLS_PATH],
+  );
 }
 
 export async function installSkills(opts: InstallOptions): Promise<InstallResult> {
@@ -161,6 +231,19 @@ export async function installSkills(opts: InstallOptions): Promise<InstallResult
         await writeFile(abs, file.content, "utf-8");
         result.written.push({ cli, path: file.path, bytes: contentBytes });
       }
+    }
+  }
+
+  // Antigravity isolation: emit bridge files so Antigravity discovers
+  // skills and hooks from .ithyno/antigravity/ instead of .agents/.
+  if (opts.selectedClis.includes("antigravity") && !opts.dryRun) {
+    try {
+      await emitAntigravityBridgeFiles(opts.projectRoot);
+    } catch (err) {
+      result.errors.push({
+        cli: "antigravity",
+        message: `bridge file emission failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }
 

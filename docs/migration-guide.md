@@ -56,6 +56,10 @@ non-standard layout — read the sections below.
 
 ## Prerequisites
 
+For Claude runs using `-p`, `detached: true` can keep the worker alive across
+dashboard server saves and restarts; `dev:test` is no longer strictly required
+for that workflow.
+
 - **Node 18+** is available locally.
 - **git 2.5+** (worktree support).
 - The target project is **ideally** a git repository. It does not have to

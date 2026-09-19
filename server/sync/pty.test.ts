@@ -1,20 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import Fastify from "fastify";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AgentRegistry } from "../agents/registry.js";
 import { hasAgentsYaml } from "../agents/registry.js";
+import { writeEnvironmentSelection } from "../environment/index.js";
+import * as ptyModule from "./pty.js";
 import {
   _setTmuxCacheForTest,
   attachPtyToSocket,
   ptyStartup,
   resolveManagerStartup,
+  resolvePtySessionKey,
+  parsePtyConnectionIdentity,
   terminateAllLivePtys,
   activeTerminalCount,
   tmuxSessionName,
   buildManagerPtyEnv,
+  setPtyIdleTtlForTest,
 } from "./pty.js";
+import { registerProductionShutdown } from "../production-shutdown.js";
 
 /**
  * Priority chain for the Terminal panel's PTY startup command
@@ -29,6 +37,7 @@ let savedEnv: string | undefined;
 let savedSession: string | undefined;
 
 beforeEach(() => {
+  ptyModule._resetPtyRuntimeForTest();
   dir = mkdtempSync(join(tmpdir(), "ithyno-pty-test-"));
   savedEnv = process.env.ITHYNO_TERMINAL_STARTUP;
   savedSession = process.env.ITHYNO_TMUX_SESSION;
@@ -38,6 +47,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  ptyModule._resetPtyRuntimeForTest();
+  setPtyIdleTtlForTest(null);
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
   if (savedEnv !== undefined) process.env.ITHYNO_TERMINAL_STARTUP = savedEnv;
   else delete process.env.ITHYNO_TERMINAL_STARTUP;
@@ -51,6 +63,64 @@ async function loadWith(yaml: string): Promise<AgentRegistry> {
   const reg = new AgentRegistry(dir);
   await reg.load();
   return reg;
+}
+
+function makeFakeWs() {
+  const handlers = new Map<string, Array<(...args: any[]) => void>>();
+  const ws: any = {
+    readyState: 1,
+    sent: [] as any[],
+    close: vi.fn((code?: number, reason?: string) => {
+      ws.readyState = 3;
+      for (const handler of handlers.get("close") ?? []) handler(code, reason);
+    }),
+    send: vi.fn((payload: any) => {
+      ws.sent.push(payload);
+    }),
+    on: (event: string, handler: (...args: any[]) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return ws;
+    },
+    emitMessage: (payload: any) => {
+      for (const handler of handlers.get("message") ?? []) handler(payload);
+    },
+    emitClose: () => {
+      for (const handler of handlers.get("close") ?? []) handler(1000, "close");
+    },
+  };
+  return ws;
+}
+
+function makeFakePty() {
+  const rx = new EventEmitter();
+  const term: any = {
+    kill: vi.fn(() => {
+      term.killed = true;
+      rx.emit("exit");
+    }),
+    write: vi.fn((data: string) => {
+      term.writes.push(data);
+      return true;
+    }),
+    resize: vi.fn((cols: number, rows: number) => {
+      term.resizeCalls.push({ cols, rows });
+    }),
+    writes: [] as string[],
+    resizeCalls: [] as Array<{ cols: number; rows: number }>,
+    killed: false,
+    onData: (fn: (data: string) => void) => {
+      term.dataHandler = fn;
+    },
+    emitData: (data: string) => {
+      if (term.dataHandler) term.dataHandler(data);
+    },
+    onExit: (fn: () => void) => {
+      rx.on("exit", fn);
+    },
+  };
+  return term;
 }
 
 describe("ptyStartup — priority chain", () => {
@@ -306,24 +376,118 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
 });
 
 describe("buildManagerPtyEnv", () => {
-  it("uses the server's active port/token when explicit values are present", () => {
-    const env = buildManagerPtyEnv(57703, "abc123");
+  it("uses the server's active port/token when explicit values are present", async () => {
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_PORT).toBe("57703");
     expect(env.ITHYNO_BASE).toBe("http://localhost:57703");
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
   });
 
-  it("falls back to the default port only when no explicit port was supplied", () => {
-    const env = buildManagerPtyEnv(undefined, "abc123");
+  it("falls back to the default port only when no explicit port was supplied", async () => {
+    const env = await buildManagerPtyEnv(undefined, "abc123");
     expect(env.ITHYNO_PORT).toBe("4321");
     expect(env.ITHYNO_BASE).toBe("http://localhost:4321");
   });
 
-  it("removes inherited launcher tokens before handing the env to the Manager PTY", () => {
+  it("removes inherited launcher tokens before handing the env to the Manager PTY", async () => {
     process.env.ITHYNO_LAUNCHER_SESSION_TOKEN = "stale-token";
-    const env = buildManagerPtyEnv(57703, "abc123");
+    const env = await buildManagerPtyEnv(57703, "abc123");
     expect(env.ITHYNO_LAUNCHER_SESSION_TOKEN).toBeUndefined();
     expect(env.ITHYNO_SESSION_TOKEN).toBe("abc123");
+  });
+  it("injects the selected profile into the Manager PTY environment", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\nITHYNO_RESERVED=blocked\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.SELECTED_VALUE).toBe("from-dev");
+    expect(env.BASE_VALUE).toBe("from-default");
+    expect(env.ITHYNO_RESERVED).toBeUndefined();
+  });
+
+  it("removes inherited dotenvx credential keys from the Manager PTY env while retaining app values", async () => {
+    const previousPrivate = process.env.DOTENV_PRIVATE_KEY;
+    const previousPublic = process.env.DOTENV_PUBLIC_KEY;
+    const previousLegacy = process.env.DOTENVX_KEY;
+    const previousSpecific = process.env.dotenv_private_key_development;
+    process.env.DOTENV_PRIVATE_KEY = "secret-private";
+    process.env.DOTENV_PUBLIC_KEY = "secret-public";
+    process.env.DOTENVX_KEY = "secret-legacy";
+    process.env.dotenv_private_key_development = "secret-specific";
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\nFEATURE=enabled\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    try {
+      const env = await buildManagerPtyEnv(57703, "abc123", dir);
+      expect(env.SELECTED_VALUE).toBe("from-dev");
+      expect(env.FEATURE).toBe("enabled");
+      expect(env.DOTENV_PRIVATE_KEY).toBeUndefined();
+      expect(env.DOTENV_PUBLIC_KEY).toBeUndefined();
+      expect(env.DOTENVX_KEY).toBeUndefined();
+      expect(env.dotenv_private_key_development).toBeUndefined();
+    } finally {
+      if (previousPrivate === undefined) delete process.env.DOTENV_PRIVATE_KEY;
+      else process.env.DOTENV_PRIVATE_KEY = previousPrivate;
+      if (previousPublic === undefined) delete process.env.DOTENV_PUBLIC_KEY;
+      else process.env.DOTENV_PUBLIC_KEY = previousPublic;
+      if (previousLegacy === undefined) delete process.env.DOTENVX_KEY;
+      else process.env.DOTENVX_KEY = previousLegacy;
+      if (previousSpecific === undefined) delete process.env.dotenv_private_key_development;
+      else process.env.dotenv_private_key_development = previousSpecific;
+    }
+  });
+
+  it("removes Windows-style credential casing from the Manager PTY env", async () => {
+    const previousPrivate = process.env.dotenv_private_key;
+    const previousPublic = process.env.Dotenv_Public_Key;
+    const previousLegacy = process.env.dotenv_key;
+    process.env.dotenv_private_key = "secret-private";
+    process.env.Dotenv_Public_Key = "secret-public";
+    process.env.dotenv_key = "secret-legacy";
+
+    try {
+      const env = await buildManagerPtyEnv(57703, "abc123");
+      expect(env.dotenv_private_key).toBeUndefined();
+      expect(env.Dotenv_Public_Key).toBeUndefined();
+      expect(env.dotenv_key).toBeUndefined();
+      expect(Object.keys(env).some((key) => key.toUpperCase() === "DOTENV_PRIVATE_KEY")).toBe(false);
+    } finally {
+      if (previousPrivate === undefined) delete process.env.dotenv_private_key;
+      else process.env.dotenv_private_key = previousPrivate;
+      if (previousPublic === undefined) delete process.env.Dotenv_Public_Key;
+      else process.env.Dotenv_Public_Key = previousPublic;
+      if (previousLegacy === undefined) delete process.env.dotenv_key;
+      else process.env.dotenv_key = previousLegacy;
+    }
+  });
+
+  it("keeps the base project env when no profile is selected", async () => {
+    writeFileSync(join(dir, ".env"), "BASE_VALUE=from-default\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "SELECTED_VALUE=from-dev\n", "utf8");
+
+    const env = await buildManagerPtyEnv(57703, "abc123", dir);
+    expect(env.BASE_VALUE).toBe("from-default");
+    expect(env.SELECTED_VALUE).toBeUndefined();
+  });
+
+  it("does not inherit host harness color suppression into the embedded xterm", async () => {
+    const previousNoColor = process.env.NO_COLOR;
+    const previousColorTerm = process.env.COLORTERM;
+    try {
+      process.env.NO_COLOR = "1";
+      process.env.COLORTERM = "";
+      const env = await buildManagerPtyEnv(57703, "abc123");
+      expect(env.NO_COLOR).toBeUndefined();
+      expect(env.TERM).toBe("xterm-256color");
+      expect(env.COLORTERM).toBe("truecolor");
+    } finally {
+      if (previousNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = previousNoColor;
+      if (previousColorTerm === undefined) delete process.env.COLORTERM;
+      else process.env.COLORTERM = previousColorTerm;
+    }
   });
 });
 
@@ -641,6 +805,588 @@ describe("terminateAllLivePtys", () => {
     // the test env). This documents the empty-array contract.
     expect(() => terminateAllLivePtys()).not.toThrow();
     expect(activeTerminalCount()).toBe(0);
+  });
+});
+
+describe("attachPtyToSocket lifecycle", () => {
+  it("detaches without killing the PTY on normal socket close", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const result = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "detached-shell" });
+    expect(result.ok).toBe(true);
+
+    ws.emitClose();
+    expect(term.kill).not.toHaveBeenCalled();
+    expect(activeTerminalCount()).toBe(1);
+  });
+
+  it("rejects reattach without a live PTY after restart and only creates fresh when intent=create", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const spawn = vi.fn(() => makeFakePty());
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const reattach = makeFakeWs();
+    const reattachResult = await attachPtyToSocket(reattach, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "persisted-shell",
+      intent: "reattach",
+    });
+    expect(reattachResult.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+
+    const create = makeFakeWs();
+    const createResult = await attachPtyToSocket(create, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "persisted-shell",
+      intent: "create",
+    });
+    expect(createResult.ok).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects reattach when the matching session is missing even if another PTY is still live", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const termA = makeFakePty();
+    const termB = makeFakePty();
+    const spawn = vi.fn((cmd?: string) => {
+      return cmd === "bash" ? termB : termA;
+    });
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const live = makeFakeWs();
+    const liveResult = await attachPtyToSocket(live, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "other-live-session",
+      intent: "create",
+    });
+    expect(liveResult.ok).toBe(true);
+
+    const missing = makeFakeWs();
+    const missingResult = await attachPtyToSocket(missing, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "missing-session",
+      intent: "reattach",
+    });
+    expect(missingResult.ok).toBe(false);
+    if (!missingResult.ok) expect(missingResult.reason).toBe("session-missing");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("converts a rejected concurrent create lock into a structured failure", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+
+    const boom = new Error("pty launch failed");
+    const spawn = vi.fn(() => {
+      throw boom;
+    });
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    const [firstResult, secondResult] = await Promise.all([
+      attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "concurrent-failure" }),
+      attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "concurrent-failure" }),
+    ]);
+
+    expect(firstResult.ok).toBe(false);
+    expect(secondResult.ok).toBe(false);
+    if (!firstResult.ok) expect(firstResult.reason).toBe("pty launch failed");
+    if (!secondResult.ok) expect(secondResult.reason).toBe("pty launch failed");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("reattaches to the same PTY and forwards output to the replacement socket", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+
+    const firstResult = await attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "shell-1" });
+    expect(firstResult.ok).toBe(true);
+
+    const secondResult = await attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "shell-1" });
+    expect(secondResult.ok).toBe(true);
+
+    term.emitData("hello again");
+    expect(second.send).toHaveBeenCalled();
+    expect(first.send).not.toHaveBeenCalledWith("hello again");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays buffered ANSI output when a new xterm socket reattaches", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const first = makeFakeWs();
+    const firstResult = await attachPtyToSocket(first, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "ansi-replay-shell",
+      intent: "create",
+    });
+    expect(firstResult.ok).toBe(true);
+
+    const coloredFrame = "\u001b[2J\u001b[31mred status\u001b[0m";
+    term.emitData(coloredFrame);
+    first.emitClose();
+
+    const second = makeFakeWs();
+    const secondResult = await attachPtyToSocket(second, {
+      cwd: dir,
+      projectRoot: dir,
+      sessionId: "ansi-replay-shell",
+      intent: "reattach",
+    });
+
+    expect(secondResult.ok).toBe(true);
+    expect(second.sent).toContain(coloredFrame);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards input and resize after reattach", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    const firstResult = await attachPtyToSocket(first, { cwd: dir, projectRoot: dir, sessionId: "input-shell" });
+    expect(firstResult.ok).toBe(true);
+
+    const secondResult = await attachPtyToSocket(second, { cwd: dir, projectRoot: dir, sessionId: "input-shell" });
+    expect(secondResult.ok).toBe(true);
+
+    second.emitMessage(JSON.stringify({ type: "input", data: "echo hi\n" }));
+    second.emitMessage(JSON.stringify({ type: "resize", cols: 120, rows: 40 }));
+
+    expect(term.write).toHaveBeenCalledWith("echo hi\n");
+    expect(term.resize).toHaveBeenCalledWith(120, 40);
+  });
+
+  it("rejects a same-session attach from another project root", async () => {
+    const otherRoot = join(tmpdir(), `ithyno-pty-other-${Date.now()}`);
+    mkdirSync(otherRoot, { recursive: true });
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    writeFileSync(
+      join(otherRoot, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const ok = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "project-shell" });
+    expect(ok.ok).toBe(true);
+
+    const mismatch = makeFakeWs();
+    const next = await attachPtyToSocket(mismatch, {
+      cwd: otherRoot,
+      projectRoot: otherRoot,
+      sessionId: "project-shell",
+    });
+    expect(next.ok).toBe(false);
+    if (!next.ok) expect(next.reason).toContain("project mismatch");
+    rmSync(otherRoot, { recursive: true, force: true });
+  });
+
+  it("kills and removes an idle PTY once the TTL expires", async () => {
+    setPtyIdleTtlForTest(5);
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const result = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "ttl-shell" });
+    expect(result.ok).toBe(true);
+
+    ws.emitClose();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(term.kill).toHaveBeenCalledTimes(1);
+    expect(activeTerminalCount()).toBe(0);
+  });
+
+  it("creates only one PTY for concurrent same-key attaches", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    const spawn = vi.fn(() => term);
+    ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+    const a = makeFakeWs();
+    const b = makeFakeWs();
+    const [first, second] = await Promise.all([
+      attachPtyToSocket(a, { cwd: dir, projectRoot: dir, sessionId: "concurrent-shell" }),
+      attachPtyToSocket(b, { cwd: dir, projectRoot: dir, sessionId: "concurrent-shell" }),
+    ]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(activeTerminalCount()).toBe(1);
+  });
+
+  it("handles explicit reload as a terminate-and-restart action and clears the tombstone", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+    );
+    const term = makeFakePty();
+    ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+    const ws = makeFakeWs();
+    const attachResult = await attachPtyToSocket(ws, { cwd: dir, projectRoot: dir, sessionId: "reload-shell" });
+    expect(attachResult.ok).toBe(true);
+
+    const key = `${resolve(dir)}::reload-shell`;
+    ws.emitMessage(JSON.stringify({ type: "restart", reason: "reload", sessionKey: key }));
+    expect(term.kill).toHaveBeenCalledTimes(1);
+    expect(ws.close).toHaveBeenCalledWith(1000, "reload");
+  });
+});
+
+describe("server shutdown cleanup", () => {
+  it("registers the production close hook without importing the entrypoint", async () => {
+    const app = Fastify({ logger: false });
+    const spy = vi.fn();
+
+    registerProductionShutdown(app, spy);
+    await app.ready();
+    await app.close();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls terminateAllLivePtys when the Fastify server closes", async () => {
+    const app = Fastify({ logger: false });
+    const spy = vi.spyOn(ptyModule, "terminateAllLivePtys");
+    registerProductionShutdown(app, () => {
+      ptyModule.terminateAllLivePtys();
+    });
+
+    await app.ready();
+    await app.close();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("pty session identity and reconnect semantics", () => {
+  beforeEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  afterEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  it("keeps project/session identity stable for reconnects", () => {
+    const idA = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
+    const idB = resolvePtySessionKey("/tmp/project-a", { sessionId: "shell-1" });
+    expect(idA).toEqual(idB);
+    expect(idA.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-1`);
+  });
+
+  it("parses the reconnect identity from the websocket URL", () => {
+    const parsed = parsePtyConnectionIdentity(
+      "ws://localhost:4321/pty?projectRoot=/tmp/project-a&sessionId=shell-2",
+      "/tmp/project-a",
+    );
+    expect(parsed.projectRoot).toBe(resolve("/tmp/project-a"));
+    expect(parsed.sessionId).toBe("shell-2");
+    expect(parsed.sessionKey).toBe(`${resolve("/tmp/project-a")}::shell-2`);
+  });
+
+  it("sends raw client sessionId in session-status messages, not the composite server key", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-session-id-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+      const ws = makeFakeWs();
+      const clientSessionId = "test-shell-123";
+      const attachResult = await attachPtyToSocket(ws, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId: clientSessionId,
+      });
+      expect(attachResult.ok).toBe(true);
+
+      // Verify that session-status message contains the raw client sessionId,
+      // not the composite server key (which includes the resolved project root)
+      expect(ws.sent.length).toBeGreaterThan(0);
+      const statusMessage = ws.sent.find((msg: string) => {
+        try {
+          const parsed = JSON.parse(msg);
+          return parsed.type === "session-status";
+        } catch {
+          return false;
+        }
+      });
+      expect(statusMessage).toBeDefined();
+      const parsed = JSON.parse(statusMessage);
+      expect(parsed.sessionId).toBe(clientSessionId);
+      expect(parsed.sessionId).not.toContain("::");
+      expect(parsed.sessionId).not.toContain(tempDir);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---- terminal replay (reset-then-replay reconnect design) ------
+describe("terminal replay", () => {
+  it("sends replay buffer on reattach with replay-start/replay-end boundaries", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-replay-reset-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      const uniqueOutput = "UNIQUE_BUFFER_CONTENT_12345";
+      ptyModule._setPtyForTest({ available: true, module: { spawn: vi.fn(() => term) } as any });
+
+      const ws1 = makeFakeWs();
+      const sessionId = "test-session-reset-replay";
+
+      const attachResult1 = await attachPtyToSocket(ws1, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId,
+      });
+      expect(attachResult1.ok).toBe(true);
+
+      ws1.sent = [];
+      term.emitData(uniqueOutput);
+
+      ws1.close();
+
+      const ws2 = makeFakeWs();
+      const attachResult2 = await attachPtyToSocket(ws2, {
+        cwd: tempDir,
+        projectRoot: tempDir,
+        sessionId,
+      });
+      expect(attachResult2.ok).toBe(true);
+
+      const messages2 = ws2.sent.map((msg: any) => {
+        try {
+          return JSON.parse(msg);
+        } catch {
+          return { type: "raw", data: msg };
+        }
+      });
+
+      const hasReattachedStatus = messages2.some((m: any) => m.type === "session-status" && m.status === "reattached");
+      const hasReplayStart = messages2.some((m: any) => m.type === "replay-start");
+      const hasReplayEnd = messages2.some((m: any) => m.type === "replay-end");
+      const hasUniqueOutput = messages2.some((m: any) => m.type === "raw" && m.data.includes(uniqueOutput));
+
+      expect(hasReattachedStatus).toBe(true);
+      expect(hasReplayStart).toBe(true);
+      expect(hasReplayEnd).toBe(true);
+      expect(hasUniqueOutput).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---- terminal replay protocol (prevent query response corruption) --------
+describe("terminal replay protocol", () => {
+  beforeEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  afterEach(() => {
+    ptyModule._resetPtyRuntimeForTest();
+  });
+
+  it("sends replay-start and replay-end boundary messages around buffered output", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "pty-replay-test-"));
+    try {
+      writeFileSync(
+        join(tempDir, "agents.yaml"),
+        `agents:
+  - name: manager
+    role: manager
+    command: claude
+    args: []
+`,
+      );
+      const term = makeFakePty();
+      const spawn = vi.fn(() => term);
+      ptyModule._setPtyForTest({ available: true, module: { spawn } as any });
+
+      // First connection: write some output to the replay buffer
+      const first = makeFakeWs();
+      const attachFirst = await attachPtyToSocket(first, { cwd: tempDir, projectRoot: tempDir, sessionId: "test-1" });
+      expect(attachFirst.ok).toBe(true);
+
+      // Simulate terminal output (including ANSI with control sequences)
+      term.emitData("Hello, ");
+      term.emitData("\x1b[1;31m");
+      term.emitData("world"); // Red text
+      term.emitData("\x1b[0m"); // Reset
+      term.emitData("\n");
+
+      // Disconnect first socket
+      first.close();
+
+      // Second connection: should replay buffered output with boundary messages
+      const second = makeFakeWs();
+      const attachSecond = await attachPtyToSocket(second, { cwd: tempDir, projectRoot: tempDir, sessionId: "test-1" });
+      expect(attachSecond.ok).toBe(true);
+
+      // Verify replay protocol structure in sent messages:
+      // 1. session-status "reattached"
+      // 2. replay-start boundary
+      // 3. buffered ANSI chunks (raw strings, not JSON)
+      // 4. replay-end boundary
+      // 5. possibly more messages
+
+      expect(second.sent.length).toBeGreaterThan(0);
+
+      const messages = second.sent.map((msg: string) => {
+        try {
+          return JSON.parse(msg);
+        } catch {
+          return { type: "raw", data: msg };
+        }
+      });
+
+      // Find replay-start and replay-end
+      const replayStartIdx = messages.findIndex((m: any) => m.type === "replay-start");
+      const replayEndIdx = messages.findIndex((m: any) => m.type === "replay-end");
+
+      expect(replayStartIdx).toBeGreaterThanOrEqual(0);
+      expect(replayEndIdx).toBeGreaterThan(replayStartIdx);
+
+      // Verify that replay chunks are between start and end
+      const replayChunks = messages.slice(replayStartIdx + 1, replayEndIdx);
+      expect(replayChunks.length).toBeGreaterThan(0);
+
+      // First replay chunk should contain the initial output
+      const firstChunk = replayChunks[0];
+      expect(firstChunk.type).toBe("raw");
+      expect(firstChunk.data).toContain("Hello");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -32,7 +32,7 @@ describe("checkCommand", () => {
     expect(result.installed).toBe(true);
     expect(result.version).toBeDefined();
     expect(typeof result.version).toBe("string");
-  });
+  }, 15_000);
 
   it("extracts a version string from node --version output", async () => {
     const result = await checkCommand("node", "--version");

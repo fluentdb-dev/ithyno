@@ -119,6 +119,8 @@ agents:
     roles: [code]
     command: claude
     args: ["--dangerously-skip-permissions", "-p", "/ithy-opsx:apply ${change_id}"]
+    # Optional: survives ithyno server restarts, but has no TTY or stdin.
+    # detached: true
 
   # Multi-role example: one CLI covers code + review + verify. Dispatched
   # role determines which built-in prompt fires (or override via prompts).

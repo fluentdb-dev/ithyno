@@ -13,6 +13,7 @@
 import type { ImportedProjectNotification as NotificationData } from "../store";
 import { isElectronShell } from "../runtime/electron";
 import { isVsCodeShell } from "../runtime/shell";
+import { writeClipboardText } from "../clipboardBridge";
 
 type Props = {
   notification: NotificationData;
@@ -43,7 +44,7 @@ async function openProject(targetPath: string): Promise<void> {
 
   // Browser fallback: copy path to clipboard.
   try {
-    await navigator.clipboard.writeText(targetPath);
+    await writeClipboardText(targetPath);
   } catch {
     /* ignore — clipboard might be unavailable in certain contexts */
   }

@@ -34,6 +34,8 @@ export type AgentDef = {
   /** Args for the spawned command. */
   args?: string[];
   env?: Record<string, string>;
+  /** Run out-of-process with file-backed output so it survives server restarts. */
+  detached?: boolean;
   /** Spawn mode (required). single-prompt → headless with `-p`; live-shell
    *  → PTY session, prompt typed into stdin after boot. */
   mode: AgentMode;
@@ -121,6 +123,7 @@ const KNOWN_AGENT_KEYS = new Set([
   "role",
   "roles",
   "initialInput",
+  "detached",
 ]);
 
 /** Built-in per-role prompt defaults. When the agent does not declare
@@ -431,6 +434,17 @@ function normalizeAgent(
 
   const description = typeof o.description === "string" ? o.description : undefined;
 
+  let detached: boolean | undefined;
+  if (o.detached !== undefined) {
+    if (typeof o.detached !== "boolean") {
+      throw new Error(`${label}.detached must be a boolean`);
+    }
+    detached = o.detached;
+    if (detached && process.platform === "win32") {
+      warnings.push(`${label}.detached is not supported on Windows; process adoption may be unavailable`);
+    }
+  }
+
   const primaryRole = roles[0];
   return {
     name: o.name,
@@ -438,6 +452,7 @@ function normalizeAgent(
     command,
     args,
     env,
+    detached,
     mode,
     roles,
     prompts: Object.keys(prompts).length > 0 ? prompts : undefined,

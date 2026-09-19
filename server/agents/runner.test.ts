@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { AgentRegistry } from "./registry.js";
 import { AgentRunner } from "./runner.js";
 import { MAX_AGENT_TIMEOUT_MS, validateRunPayload } from "./run-validation.js";
+import { writeEnvironmentSelection } from "../environment/index.js";
 
 const execFile = promisify(execFileCb);
 
@@ -63,6 +64,163 @@ describe("AgentRunner execution-root policy (Task 2.4)", () => {
       expect(res.branch).toBe("agent/add-feat");
       expect(res.created).toBe(true);
     }
+  });
+
+  it("injects the selected profile from the dashboard project root into worktree jobs", async () => {
+    writeFileSync(join(dir, ".env"), "ROOT_VALUE=from-root\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "WORKTREE_VALUE=from-dev\nITHYNO_RESERVED=blocked\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: worker
+    command: node
+    args: ["-e", "process.stdout.write(String(process.env.WORKTREE_VALUE ?? 'MISSING'))", "--"]
+    role: code
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    const run = await runner.run("add-env", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+    const job = runner.getJob(run.job.id);
+    const output = job?.output.map((item) => item.chunk).join("");
+    expect(output).toContain("from-dev");
+    expect(output).not.toContain("blocked");
+  });
+
+  it("removes inherited dotenvx credentials from worktree child env while keeping resolved values", async () => {
+    const previousPrivate = process.env.DOTENV_PRIVATE_KEY;
+    const previousLegacy = process.env.DOTENVX_KEY;
+    const previousSpecific = process.env.dotenv_private_key_development;
+    process.env.DOTENV_PRIVATE_KEY = "secret-private";
+    process.env.DOTENVX_KEY = "secret-legacy";
+    process.env.dotenv_private_key_development = "secret-specific";
+    writeFileSync(join(dir, ".env"), "APP_VALUE=base\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "APP_VALUE=from-dev\nFEATURE_FLAG=enabled\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: worker
+    command: node
+    args: ["-e", "process.stdout.write(JSON.stringify({ APP_VALUE: process.env.APP_VALUE ?? 'MISSING', FEATURE_FLAG: process.env.FEATURE_FLAG ?? 'MISSING', hasPrivate: !!process.env.DOTENV_PRIVATE_KEY, hasLegacy: !!process.env.DOTENVX_KEY, hasSpecific: !!process.env.dotenv_private_key_development }))", "--"]
+    role: code
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    try {
+      const run = await runner.run("add-env-sanitized", "worker", "code", "worktree");
+      expect(run.ok).toBe(true);
+      if (!run.ok) return;
+      await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+      const job = runner.getJob(run.job.id);
+      const output = job?.output.map((item) => item.chunk).join("") ?? "";
+      const jsonText = output.slice(output.lastIndexOf("{"));
+      const payload = JSON.parse(jsonText) as {
+        APP_VALUE?: string;
+        FEATURE_FLAG?: string;
+        hasPrivate?: boolean;
+        hasLegacy?: boolean;
+        hasSpecific?: boolean;
+      };
+      expect(payload.APP_VALUE).toBe("from-dev");
+      expect(payload.FEATURE_FLAG).toBe("enabled");
+      expect(payload.hasPrivate).toBe(false);
+      expect(payload.hasLegacy).toBe(false);
+      expect(payload.hasSpecific).toBe(false);
+      expect(JSON.stringify(payload)).not.toContain("secret-private");
+      expect(JSON.stringify(payload)).not.toContain("secret-legacy");
+      expect(JSON.stringify(payload)).not.toContain("secret-specific");
+    } finally {
+      if (previousPrivate === undefined) delete process.env.DOTENV_PRIVATE_KEY;
+      else process.env.DOTENV_PRIVATE_KEY = previousPrivate;
+      if (previousLegacy === undefined) delete process.env.DOTENVX_KEY;
+      else process.env.DOTENVX_KEY = previousLegacy;
+      if (previousSpecific === undefined) delete process.env.dotenv_private_key_development;
+      else process.env.dotenv_private_key_development = previousSpecific;
+    }
+  });
+
+  it("removes inherited dotenvx credentials from detached worktree child env while keeping resolved values", async () => {
+    const previousPrivate = process.env.DOTENV_PRIVATE_KEY;
+    const previousLegacy = process.env.DOTENVX_KEY;
+    process.env.DOTENV_PRIVATE_KEY = "secret-private";
+    process.env.DOTENVX_KEY = "secret-legacy";
+    writeFileSync(join(dir, ".env"), "APP_VALUE=base\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "APP_VALUE=from-dev\nFEATURE_FLAG=enabled\n", "utf8");
+    await writeEnvironmentSelection(dir, { selectedProfile: "dev", preferences: {} });
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: detached-worker
+    command: node
+    args: ["-e", "process.stdout.write(JSON.stringify({ APP_VALUE: process.env.APP_VALUE ?? 'MISSING', FEATURE_FLAG: process.env.FEATURE_FLAG ?? 'MISSING', hasPrivate: !!process.env.DOTENV_PRIVATE_KEY, hasLegacy: !!process.env.DOTENVX_KEY }))", "--"]
+    role: code
+    detached: true
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    try {
+      const run = await runner.run("add-detached-env", "detached-worker", "code", "worktree");
+      expect(run.ok).toBe(true);
+      if (!run.ok) return;
+      await runner.waitForCompletion(run.job.id, { timeoutMs: 10000 });
+
+      const job = runner.getJob(run.job.id);
+      const output = job?.output.map((item) => item.chunk).join("");
+      expect(output).toContain("from-dev");
+      expect(output).toContain("enabled");
+      expect(output).not.toContain("secret-private");
+      expect(output).not.toContain("secret-legacy");
+    } finally {
+      if (previousPrivate === undefined) delete process.env.DOTENV_PRIVATE_KEY;
+      else process.env.DOTENV_PRIVATE_KEY = previousPrivate;
+      if (previousLegacy === undefined) delete process.env.DOTENVX_KEY;
+      else process.env.DOTENVX_KEY = previousLegacy;
+    }
+  });
+
+  it("avoids injecting project environment values when no profile is selected", async () => {
+    writeFileSync(join(dir, ".env"), "ROOT_VALUE=from-root\n", "utf8");
+    writeFileSync(join(dir, ".env.dev"), "WORKTREE_VALUE=from-dev\n", "utf8");
+
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: worker
+    command: node
+    args: ["-e", "process.stdout.write(String(process.env.WORKTREE_VALUE ?? 'MISSING'))", "--"]
+    role: code
+`,
+    );
+    registry = new AgentRegistry(dir);
+    await registry.load();
+    runner = new AgentRunner(dir, registry, () => {});
+
+    const run = await runner.run("add-env-none", "worker", "code", "worktree");
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    await runner.waitForCompletion(run.job.id, { timeoutMs: 5000 });
+
+    const job = runner.getJob(run.job.id);
+    const output = job?.output.map((item) => item.chunk).join("");
+    expect(output).toContain("MISSING");
   });
 
   it("rejects unsafe change ids before resolving a worktree path", async () => {
