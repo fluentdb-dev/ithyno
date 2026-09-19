@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDetached, startLogTail } from "./detached-runner.js";
+import { readDetachedMeta, startDetached, startLogTail } from "./detached-runner.js";
 
 const dirs: string[] = [];
 
@@ -48,6 +48,27 @@ describe("detached runner", () => {
     process.kill(meta.pid, "SIGTERM");
     await exited;
     await unlink(join(dir, ".agent-meta.json")).catch(() => undefined);
+  });
+
+  it("ignores filesystem paths supplied by persisted metadata", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ithyno-detached-meta-"));
+    dirs.push(dir);
+    const metaPath = join(dir, ".agent-meta.json");
+    writeFileSync(metaPath, JSON.stringify({
+      jobId: "job-test",
+      changeId: "add-test",
+      agentName: "node",
+      command: process.execPath,
+      pid: process.pid,
+      startedAt: Date.now(),
+      logPath: join(tmpdir(), "untrusted.log"),
+      metaPath: join(tmpdir(), "untrusted-meta.json"),
+    }));
+
+    await expect(readDetachedMeta(metaPath)).resolves.toMatchObject({
+      logPath: join(dir, ".agent.log"),
+      metaPath,
+    });
   });
 });
 

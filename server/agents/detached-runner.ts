@@ -2,7 +2,7 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 
 export type DetachedMeta = {
@@ -103,9 +103,17 @@ export async function readDetachedMeta(path: string): Promise<DetachedMeta | nul
     const value = JSON.parse(await readFile(path, "utf8")) as Partial<DetachedMeta>;
     if (typeof value.jobId !== "string" || typeof value.changeId !== "string" ||
         typeof value.agentName !== "string" || !Number.isInteger(value.pid) ||
-        typeof value.startedAt !== "number" || typeof value.logPath !== "string" ||
+        typeof value.startedAt !== "number" ||
         typeof value.command !== "string") return null;
-    return { ...value, metaPath: path } as DetachedMeta;
+    // Metadata lives inside an ithyno-managed worktree, but its contents can
+    // be modified by repository code. Never trust stored filesystem paths:
+    // derive both files from the server-selected metadata location.
+    const worktreePath = dirname(path);
+    return {
+      ...value,
+      logPath: join(worktreePath, ".agent.log"),
+      metaPath: path,
+    } as DetachedMeta;
   } catch {
     return null;
   }
