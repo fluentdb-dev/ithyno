@@ -31,6 +31,7 @@
 - [x] 5.3 Add an authenticated profile-delete API and exact-path confirmation that accepts only discovered project-root regular env files, clears selection/transient state after success, and never removes keys implicitly.
 - [x] 5.4 Add UI and API tests for first encryption, ready/missing/wrong key states, native-unavailable fallback, profile deletion, and orphaned-key guidance.
 - [x] 5.5 Place encryption and confirmed profile deletion beside the active-profile selector using standard controls, and replace ambiguous Native action labels with explicit OS secure-storage behavior.
+- [x] 5.6 Hide routine encryption success/plaintext status banners and render status messaging only when the selected profile requires attention.
 
 ## 6. Retire incompatible secure-key work
 

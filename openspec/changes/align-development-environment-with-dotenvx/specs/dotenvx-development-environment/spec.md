@@ -82,14 +82,18 @@ every optional secure-storage integration.
 - **WHEN** a supported host adapter stores private keys outside `.env.keys`
 - **THEN** it preserves the corresponding dotenvx private-key identifiers and supplies only operation-required credentials through a bounded secret-safe bridge
 
-### Requirement: Key management UI starts from source and status
-The Environment UI SHALL show the active profile, encryption state, key source,
-and remediation before presenting any key-entry action, and SHALL avoid an
-always-visible generic password field.
+### Requirement: Key management UI prioritizes actionable state
+The Environment UI SHALL show the active profile and applicable actions, SHALL
+surface key-source or remediation details when user action is required, and
+SHALL avoid always-visible success banners and generic password fields.
 
 #### Scenario: Local key file is ready
 - **WHEN** the selected profile has a matching key in `.env.keys`
-- **THEN** the UI reports local key-file readiness and offers only applicable migration or management actions
+- **THEN** the UI offers only applicable migration or management actions without displaying a persistent `ready (.env.keys)` success banner
+
+#### Scenario: Encryption requires attention
+- **WHEN** the selected encrypted profile is missing a usable matching key or cannot be decrypted
+- **THEN** the UI displays an actionable warning or diagnostic for that failure
 
 #### Scenario: Active profile actions are presented together
 - **WHEN** a project-root env profile is selected

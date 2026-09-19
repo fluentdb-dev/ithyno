@@ -18,6 +18,7 @@ import {
   readDraftState,
   removeRevealedEnvironmentValue,
   stageEnvironmentRemoval,
+  shouldShowEncryptionStatus,
   shouldShowRestartRequired,
   writeDraftState,
   type DraftState,
@@ -83,6 +84,11 @@ describe("environment page helpers", () => {
     expect(describeEncryptionStatus("missing")).toContain("matching dotenvx private key");
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENVX_KEY");
     expect(describeEncryptionStatus("missing")).not.toContain("DOTENV_KEY");
+  });
+
+  it("keeps normal encryption state quiet and shows only states requiring attention", () => {
+    expect(shouldShowEncryptionStatus("ready")).toBe(false);
+    expect(shouldShowEncryptionStatus("missing")).toBe(true);
   });
 
   it("renders an exact first-encryption confirmation with profile, key file, and gitignore details", () => {
