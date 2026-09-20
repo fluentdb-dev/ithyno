@@ -65,7 +65,7 @@
   - Reopened: there is no packaged smoke-test evidence for installed artifact layouts in this branch.
 - [x] 7.3 Document the security boundary, same-OS-user limitation, project routing, CLI commands, MCP setup/removal, sandbox remediation, and compatibility migration in the user/developer documentation.
   - Verified: the migration guide and new bridge security docs describe the same-user runtime limit, canonical project routing, no-port fallback, MCP install/remove flow, and compatibility migration guidance.
-- [ ] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
-  - Reopened: keep this task open until the full bridge/CLI/MCP/security validation bundle is rerun and passes on the patched branch.
+- [x] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
+  - Verified: the full validation bundle passed on the patched branch after strict descriptor identity and prune-proofing updates.
 - [ ] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
   - Reopened: no evidence of end-to-end project verification exists in this branch yet.

@@ -14,10 +14,6 @@ import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode } from "./agents/runner.js";
 import { validateRunPayload } from "./agents/run-validation.js";
 
-if (process.platform !== "win32") {
-  process.on("SIGPIPE", () => undefined);
-}
-
 export type BridgeProtocolVersion = "1";
 
 export type BridgeRuntimeDescriptor = {
@@ -509,56 +505,80 @@ export async function handleBridgeOperation(
 
 export type BridgeRuntimeValidationCode = "ok" | "permission" | "validation" | "timeout" | "stale" | "unavailable";
 
-export type BridgeRuntimeValidationResult =
-  | { ok: true; code: "ok"; runtime: BridgeRuntimeDescriptor; error?: undefined }
-  | { ok: false; code: Exclude<BridgeRuntimeValidationCode, "ok">; runtime: BridgeRuntimeDescriptor; error: string };
+export type BridgeResponseMismatchKind =
+  | "protocolVersion"
+  | "requestId"
+  | "projectRoot"
+  | "projectHash"
+  | "generation"
+  | "processStartIdentity";
 
-export function validateBridgeRuntimeDescriptor(descriptor: Partial<BridgeRuntimeDescriptor>): { ok: true } | { ok: false; code: "validation" | "permission" | "stale"; error: string } {
+export type BridgeRuntimeValidationResult =
+  | { ok: true; code: "ok"; runtime: BridgeRuntimeDescriptor; error?: undefined; canPrune: false; provenStale: false }
+  | { ok: false; code: Exclude<BridgeRuntimeValidationCode, "ok">; runtime: BridgeRuntimeDescriptor; error: string; canPrune: boolean; provenStale: boolean };
+
+export function validateBridgeRuntimeDescriptor(descriptor: Partial<BridgeRuntimeDescriptor>): { ok: true; canPrune: false; provenStale: false } | { ok: false; code: "validation" | "permission" | "stale"; error: string; canPrune: boolean; provenStale: boolean } {
   if (!descriptor || typeof descriptor !== "object") {
-    return { ok: false, code: "validation", error: "runtime descriptor is missing" };
+    return { ok: false, code: "validation", error: "runtime descriptor is missing", canPrune: false, provenStale: false };
   }
   if (!isBridgeRuntimeDescriptor(descriptor)) {
-    return { ok: false, code: "validation", error: "runtime descriptor is malformed" };
+    return { ok: false, code: "validation", error: "runtime descriptor is malformed", canPrune: false, provenStale: false };
+  }
+  const canonicalRoot = canonicalProjectRoot(descriptor.projectRoot);
+  if (descriptor.projectRoot !== canonicalRoot) {
+    return { ok: false, code: "validation", error: "runtime descriptor projectRoot is not canonicalized", canPrune: false, provenStale: false };
+  }
+  if (descriptor.projectHash !== stableProjectHash(descriptor.projectRoot)) {
+    return { ok: false, code: "validation", error: "runtime descriptor projectHash does not match the canonical project root", canPrune: false, provenStale: false };
+  }
+  if (descriptor.ipcAddress !== buildBridgeIpcAddress(descriptor.projectRoot)) {
+    return { ok: false, code: "validation", error: "runtime descriptor IPC address does not match the canonical project root", canPrune: false, provenStale: false };
   }
   if (!isBridgeRuntimeAlive(descriptor)) {
-    return { ok: false, code: "stale", error: "runtime descriptor points to a dead process" };
+    return { ok: false, code: "stale", error: "runtime descriptor points to a dead process", canPrune: true, provenStale: true };
   }
   const liveIdentity = currentProcessStartIdentity(descriptor.pid);
   if (!liveIdentity) {
-    return { ok: false, code: "permission", error: "runtime process identity could not be proven; permission or sandboxing blocked the start-identity check" };
+    return { ok: false, code: "permission", error: "runtime process identity could not be proven; permission or sandboxing blocked the start-identity check", canPrune: false, provenStale: false };
   }
   if (descriptor.processStartIdentity !== liveIdentity) {
-    return { ok: false, code: "stale", error: "runtime descriptor process identity differs from the live process" };
+    return { ok: false, code: "stale", error: "runtime descriptor process identity differs from the live process", canPrune: true, provenStale: true };
   }
-  return { ok: true };
+  return { ok: true, canPrune: false, provenStale: false };
 }
 
 export async function readBridgeRuntime(projectPath?: string, cwd = process.cwd()): Promise<BridgeRuntimeDescriptor | null> {
-  const file = bridgeRuntimeFile(projectPath, cwd);
+  const requestedProjectRoot = canonicalProjectRoot(projectPath, cwd);
+  const expectedProjectHash = stableProjectHash(requestedProjectRoot);
+  const expectedIpcAddress = buildBridgeIpcAddress(requestedProjectRoot);
+  const file = bridgeRuntimeFile(requestedProjectRoot, cwd);
   if (!existsSync(file)) return null;
   try {
     const raw = await readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<BridgeRuntimeDescriptor>;
     if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.projectRoot !== "string" || typeof parsed.projectHash !== "string") return null;
-    if (typeof parsed.ipcAddress !== "string" || typeof parsed.pid !== "number") return null;
-    if (typeof parsed.processStartIdentity !== "string" || typeof parsed.protocolVersion !== "string") return null;
+    if (parsed.protocolVersion !== BRIDGE_PROTOCOL_VERSION) return null;
+    if (typeof parsed.projectRoot !== "string" || parsed.projectRoot !== requestedProjectRoot) return null;
+    if (typeof parsed.projectHash !== "string" || parsed.projectHash !== expectedProjectHash) return null;
+    if (typeof parsed.ipcAddress !== "string" || parsed.ipcAddress !== expectedIpcAddress) return null;
+    if (typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
+    if (typeof parsed.processStartIdentity !== "string" || !parsed.processStartIdentity.trim()) return null;
+    if (typeof parsed.generation !== "number" || !Number.isInteger(parsed.generation) || parsed.generation < 1) return null;
     const descriptor: BridgeRuntimeDescriptor = {
       projectRoot: parsed.projectRoot,
       projectHash: parsed.projectHash,
       ipcAddress: parsed.ipcAddress,
       pid: parsed.pid,
       processStartIdentity: parsed.processStartIdentity,
-      protocolVersion: parsed.protocolVersion === "1" ? "1" : "1",
-      generation: typeof parsed.generation === "number" ? parsed.generation : 1,
+      protocolVersion: parsed.protocolVersion,
+      generation: parsed.generation,
     };
     const validation = validateBridgeRuntimeDescriptor(descriptor);
     if (!validation.ok) {
-      if (validation.code === "stale") {
-        await pruneBridgeRuntime(descriptor.projectRoot, cwd);
-        return null;
+      if (validation.provenStale && validation.canPrune) {
+        await pruneBridgeRuntime(requestedProjectRoot, cwd);
       }
-      return descriptor;
+      return null;
     }
     return descriptor;
   } catch {
@@ -666,7 +686,7 @@ export async function pruneStaleBridgeRuntimes(): Promise<number> {
       if (typeof parsed.pid !== "number" || typeof parsed.processStartIdentity !== "string") continue;
       if (typeof parsed.generation !== "number" || !Number.isInteger(parsed.generation) || parsed.generation < 1) continue;
       const validation = validateBridgeRuntimeDescriptor(parsed as Partial<BridgeRuntimeDescriptor>);
-      if (!validation.ok && validation.code === "stale") {
+      if (!validation.ok && validation.provenStale && validation.canPrune) {
         await rm(file, { force: true });
         pruned += 1;
       }
@@ -719,12 +739,15 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
         const parsed = JSON.parse(text.trim()) as Partial<BridgeResponse>;
         const validated = validateBridgeResponse(request, parsed);
         if (validated.error) {
-          const message = String(validated.error).toLowerCase();
-          if (message.includes("generation") || message.includes("identity")) {
-            finish({ ok: false, code: "stale", runtime, error: validated.error });
-            return;
-          }
-          finish({ ok: false, code: "validation", runtime, error: validated.error });
+          const canPrune = validated.mismatch === "generation" || validated.mismatch === "processStartIdentity";
+          finish({
+            ok: false,
+            code: canPrune ? "stale" : "validation",
+            runtime,
+            error: validated.error,
+            canPrune,
+            provenStale: canPrune,
+          });
           return;
         }
         if (!validated.response.ok) {
@@ -732,29 +755,71 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
             : validated.response.code === "timeout" ? "timeout"
             : validated.response.code === "stale" ? "stale"
             : "validation";
-          finish({ ok: false, code, runtime, error: validated.response.error ?? "ownership probe rejected the live descriptor" });
+          finish({
+            ok: false,
+            code,
+            runtime,
+            error: validated.response.error ?? "ownership probe rejected the live descriptor",
+            canPrune: false,
+            provenStale: false,
+          });
           return;
         }
-        finish({ ok: true, code: "ok", runtime });
+        finish({ ok: true, code: "ok", runtime, canPrune: false, provenStale: false });
       } catch {
-        finish({ ok: false, code: "validation", runtime, error: "ownership probe received a malformed or fragmented response" });
+        finish({
+          ok: false,
+          code: "validation",
+          runtime,
+          error: "ownership probe received a malformed or fragmented response",
+          canPrune: false,
+          provenStale: false,
+        });
       }
     };
-    const timeoutResult: BridgeRuntimeValidationResult = { ok: false, code: "timeout", runtime, error: "ownership probe timed out before a complete response frame was received" };
+    const timeoutResult: BridgeRuntimeValidationResult = {
+      ok: false,
+      code: "timeout",
+      runtime,
+      error: "ownership probe timed out before a complete response frame was received",
+      canPrune: false,
+      provenStale: false,
+    };
     const timer = setTimeout(() => finish(timeoutResult), 1500);
     socket.setTimeout(1500);
     socket.on("timeout", () => finish(timeoutResult));
     socket.on("error", (error) => {
       const code = (error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code ?? "").toUpperCase() : "").trim();
       if (code === "EACCES" || code === "EPERM") {
-        finish({ ok: false, code: "permission", runtime, error: "bridge runtime ownership could not be proven because the socket was not readable by the current user" });
+        finish({
+          ok: false,
+          code: "permission",
+          runtime,
+          error: "bridge runtime ownership could not be proven because the socket was not readable by the current user",
+          canPrune: false,
+          provenStale: false,
+        });
         return;
       }
       if (code === "ENOENT" || code === "ENOTFOUND" || code === "ECONNREFUSED") {
-        finish({ ok: false, code: "stale", runtime, error: "runtime socket is missing or stale; ownership could not be proven and no destructive pruning was performed" });
+        finish({
+          ok: false,
+          code: "stale",
+          runtime,
+          error: "runtime socket is missing or stale; ownership could not be proven and no destructive pruning was performed",
+          canPrune: false,
+          provenStale: false,
+        });
         return;
       }
-      finish({ ok: false, code: "validation", runtime, error: error instanceof Error ? error.message : "bridge IPC endpoint could not be reached" });
+      finish({
+        ok: false,
+        code: "validation",
+        runtime,
+        error: error instanceof Error ? error.message : "bridge IPC endpoint could not be reached",
+        canPrune: false,
+        provenStale: false,
+      });
     });
     socket.on("connect", () => {
       socket.write(payload);
@@ -762,7 +827,14 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
     socket.on("data", (chunk) => {
       buffer += String(chunk);
       if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
-        finish({ ok: false, code: "validation", runtime, error: "ownership probe exceeded the bridge protocol size limit while buffering a newline-delimited response" });
+        finish({
+          ok: false,
+          code: "validation",
+          runtime,
+          error: "ownership probe exceeded the bridge protocol size limit while buffering a newline-delimited response",
+          canPrune: false,
+          provenStale: false,
+        });
         return;
       }
       while (buffer.includes("\n")) {
@@ -781,7 +853,14 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
           handleResponse(tail);
           return;
         }
-        finish({ ok: false, code: "validation", runtime, error: "ownership probe ended before a complete newline-delimited response was received" });
+        finish({
+          ok: false,
+          code: "validation",
+          runtime,
+          error: "ownership probe ended before a complete newline-delimited response was received",
+          canPrune: false,
+          provenStale: false,
+        });
       }
     });
   });
@@ -806,6 +885,24 @@ export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): P
 
   const runtime = await lookupBridgeRuntime(projectRoot);
   if (!runtime) {
+    const runtimeFile = bridgeRuntimeFile(projectRoot, cwd);
+    const fileExists = existsSync(runtimeFile);
+    if (fileExists) {
+      try {
+        await readFile(runtimeFile, "utf8");
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code ?? "").toUpperCase() : "";
+        if (code === "EACCES" || code === "EPERM") {
+          return {
+            ok: false,
+            projectRoot,
+            projectHash: stableProjectHash(projectRoot),
+            error: "bridge runtime descriptor exists but could not be read by the current user; permission is required before liveness can be proven",
+            code: "permission",
+          };
+        }
+      }
+    }
     return {
       ok: false,
       projectRoot,
@@ -817,8 +914,7 @@ export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): P
 
   const socketChecked = await probeBridgeRuntimeOwnership(runtime);
   if (!socketChecked.ok) {
-    const isPositiveStaleProof = socketChecked.code === "stale" && /(generation|process identity|identity)/iu.test(socketChecked.error || "");
-    if (isPositiveStaleProof) {
+    if (socketChecked.provenStale && socketChecked.canPrune) {
       await pruneBridgeRuntime(projectRoot, cwd);
     }
     return {
@@ -883,28 +979,31 @@ export function buildBridgeErrorEnvelope(request: BridgeRequest, code: BridgeCom
   };
 }
 
-export function validateBridgeResponse(request: BridgeRequest, response: unknown): { response: BridgeResponse; error?: string } {
+export function validateBridgeResponse(
+  request: BridgeRequest,
+  response: unknown,
+): { response: BridgeResponse; error?: string; mismatch?: BridgeResponseMismatchKind } {
   if (!response || typeof response !== "object") {
-    return { response: null as never, error: "bridge response was not an object" };
+    return { response: null as never, error: "bridge response was not an object", mismatch: "protocolVersion" };
   }
   const parsed = response as Partial<BridgeResponse>;
   if (parsed.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
-    return { response: null as never, error: "bridge response protocol version did not match" };
+    return { response: null as never, error: "bridge response protocol version did not match", mismatch: "protocolVersion" };
   }
   if (parsed.requestId !== request.requestId) {
-    return { response: null as never, error: "bridge response request ID did not match" };
+    return { response: null as never, error: "bridge response request ID did not match", mismatch: "requestId" };
   }
   if (parsed.projectRoot !== request.projectRoot) {
-    return { response: null as never, error: "bridge response project root did not match" };
+    return { response: null as never, error: "bridge response project root did not match", mismatch: "projectRoot" };
   }
   if (parsed.projectHash !== request.projectHash) {
-    return { response: null as never, error: "bridge response project hash did not match" };
+    return { response: null as never, error: "bridge response project hash did not match", mismatch: "projectHash" };
   }
   if (parsed.generation !== request.generation) {
-    return { response: null as never, error: "bridge response generation did not match the live descriptor" };
+    return { response: null as never, error: "bridge response generation did not match the live descriptor", mismatch: "generation" };
   }
   if (parsed.processStartIdentity !== request.processStartIdentity) {
-    return { response: null as never, error: "bridge response process identity did not match the live descriptor" };
+    return { response: null as never, error: "bridge response process identity did not match the live descriptor", mismatch: "processStartIdentity" };
   }
   return {
     response: {

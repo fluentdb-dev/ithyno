@@ -12,8 +12,8 @@ import {
   currentProcessStartIdentity,
   parseLinuxProcessStartIdentity,
   bridgeStatus,
-  bridgeRuntimeDirectory,
   bridgeRuntimeFile,
+  buildBridgeIpcAddress,
   startBridgeServer,
   stopBridgeServer,
   callBridgeOperation,
@@ -143,7 +143,7 @@ describe("bridge runtime registry", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-runtime-"));
     try {
       const descriptor = await registerBridgeRuntime(projectRoot, projectRoot, {
-        ipcAddress: join(bridgeRuntimeDirectory(), "unit.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: currentProcessStartIdentity(process.pid) ?? "test-start",
         generation: 1,
@@ -160,14 +160,68 @@ describe("bridge runtime registry", () => {
     }
   });
 
+  it("rejects malformed protocol and generation metadata without coercion", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-bad-runtime-"));
+    const file = bridgeRuntimeFile(projectRoot, projectRoot);
+    try {
+      writeFileSync(file, JSON.stringify({
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-proto",
+        protocolVersion: "99",
+        generation: 0,
+      }));
+      expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
+      expect(existsSync(file)).toBe(true);
+
+      writeFileSync(file, JSON.stringify({
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-gen",
+        protocolVersion: "1",
+        generation: 0,
+      }));
+      expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects cross-project runtime descriptors before any liveness or handshake use", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-cross-project-"));
+    const otherRoot = mkdtempSync(join(tmpdir(), "ithyno-other-project-"));
+    const file = bridgeRuntimeFile(projectRoot, projectRoot);
+    try {
+      writeFileSync(file, JSON.stringify({
+        projectRoot: canonicalProjectRoot(otherRoot, otherRoot),
+        projectHash: stableProjectHash(otherRoot),
+        ipcAddress: buildBridgeIpcAddress(otherRoot),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-cross",
+        protocolVersion: "1",
+        generation: 1,
+      }));
+      expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(otherRoot, { recursive: true, force: true });
+    }
+  });
+
   it("prunes stale descriptors on dead or mismatched lifecycle identities", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-stale-"));
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
       const descriptor = {
-        projectRoot,
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
-        ipcAddress: join(bridgeRuntimeDirectory(), "stale.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: "dead-identity",
         protocolVersion: "1",
@@ -178,7 +232,7 @@ describe("bridge runtime registry", () => {
       expect(existsSync(file)).toBe(false);
 
       const second = await registerBridgeRuntime(projectRoot, projectRoot, {
-        ipcAddress: join(bridgeRuntimeDirectory(), "fresh.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         generation: 1,
       });
@@ -205,12 +259,10 @@ describe("bridge runtime registry", () => {
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-perm-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
     process.env.XDG_RUNTIME_DIR = runtimeDir;
-    const socketDir = join(runtimeDir, "locked");
-    mkdirSync(socketDir, { recursive: true, mode: 0o000 });
     const runtime = {
-      projectRoot,
+      projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
       projectHash: stableProjectHash(projectRoot),
-      ipcAddress: join(socketDir, "bridge.sock"),
+      ipcAddress: join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`),
       pid: process.pid,
       processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-perm",
       protocolVersion: "1",
@@ -219,6 +271,7 @@ describe("bridge runtime registry", () => {
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
       writeFileSync(file, JSON.stringify(runtime));
+      chmodSync(file, 0o000);
       const status = await bridgeStatus(projectRoot, projectRoot);
       expect(status.ok).toBe(false);
       expect(status.code).toBe("permission");
@@ -226,7 +279,11 @@ describe("bridge runtime registry", () => {
     } finally {
       if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
       else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
-      chmodSync(socketDir, 0o700);
+      try {
+        chmodSync(file, 0o600);
+      } catch {
+        // ignore cleanup when the runtime descriptor has already been made unreadable
+      }
       rmSync(runtimeDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -252,7 +309,7 @@ describe("bridge runtime registry", () => {
         server.listen(socketPath, () => resolve());
       });
       const runtime = {
-        projectRoot,
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: socketPath,
         pid: process.pid,
@@ -283,7 +340,7 @@ describe("bridge runtime registry", () => {
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-timeout-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
     process.env.XDG_RUNTIME_DIR = runtimeDir;
-    const socketPath = join(runtimeDir, "timeout.sock");
+    const socketPath = join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`);
     const openSockets = new Set<import("node:net").Socket>();
     const server = createServer((socket) => {
       openSockets.add(socket);
@@ -297,7 +354,7 @@ describe("bridge runtime registry", () => {
         server.listen(socketPath, () => resolve());
       });
       const runtime = {
-        projectRoot,
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: socketPath,
         pid: process.pid,
@@ -337,7 +394,7 @@ describe("bridge runtime registry", () => {
       writeFileSync(file, JSON.stringify({
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
-        ipcAddress: join(bridgeRuntimeDirectory(), "blocked.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: "manual-start",
         protocolVersion: "1",
@@ -528,13 +585,13 @@ describe("bridge runtime registry", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-generation-"));
     try {
       const initial = await registerBridgeRuntime(projectRoot, projectRoot, {
-        ipcAddress: join(bridgeRuntimeDirectory(), "gen-1.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-1",
         generation: 1,
       });
       const replacement = await registerBridgeRuntime(projectRoot, projectRoot, {
-        ipcAddress: join(bridgeRuntimeDirectory(), "gen-2.sock"),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-2",
         generation: 2,
@@ -588,7 +645,7 @@ describe("bridge runtime registry", () => {
     process.env.XDG_RUNTIME_DIR = runtimeDir;
     try {
       const descriptor = {
-        projectRoot,
+        projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`),
         pid: process.pid,
