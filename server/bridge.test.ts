@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import { connect as netConnect } from "node:net";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
+import { connect as netConnect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
   callBridgeOperation,
   sanitizeBridgeValue,
   unregisterBridgeRuntime,
+  probeBridgeRuntimeOwnership,
 } from "./bridge.js";
 
 async function rawBridgeRequest(address: string, payload: string): Promise<string> {
@@ -195,6 +196,158 @@ describe("bridge runtime registry", () => {
       expect(result.ok).toBe(false);
       expect(result.code).toBe("unavailable");
     } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("maps permission-denied socket probes to permission without pruning the descriptor", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-permission-"));
+    const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-perm-"));
+    const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+    const socketDir = join(runtimeDir, "locked");
+    mkdirSync(socketDir, { recursive: true, mode: 0o000 });
+    const runtime = {
+      projectRoot,
+      projectHash: stableProjectHash(projectRoot),
+      ipcAddress: join(socketDir, "bridge.sock"),
+      pid: process.pid,
+      processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-perm",
+      protocolVersion: "1",
+      generation: 1,
+    } as const;
+    const file = bridgeRuntimeFile(projectRoot, projectRoot);
+    try {
+      writeFileSync(file, JSON.stringify(runtime));
+      const status = await bridgeStatus(projectRoot, projectRoot);
+      expect(status.ok).toBe(false);
+      expect(status.code).toBe("permission");
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      chmodSync(socketDir, 0o700);
+      rmSync(runtimeDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats fragmented ownership responses as validation and leaves the descriptor intact", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-fragmented-"));
+    const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-frag-"));
+    const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+    const socketPath = join(runtimeDir, "fragmented.sock");
+    const openSockets = new Set<import("node:net").Socket>();
+    const server = createServer((socket) => {
+      openSockets.add(socket);
+      socket.on("close", () => openSockets.delete(socket));
+      socket.on("error", () => undefined);
+      socket.write('{"protocolVersion":"1","requestId":"');
+      socket.end();
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, () => resolve());
+      });
+      const runtime = {
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: socketPath,
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-frag",
+        protocolVersion: "1" as const,
+        generation: 1,
+      };
+      const file = bridgeRuntimeFile(projectRoot, projectRoot);
+      writeFileSync(file, JSON.stringify(runtime));
+      const probe = await probeBridgeRuntimeOwnership(runtime);
+      expect(probe.ok).toBe(false);
+      expect(probe.code).toBe("validation");
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      for (const socket of openSockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+      });
+      if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      rmSync(runtimeDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("times out without pruning a live runtime descriptor", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-timeout-"));
+    const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-timeout-"));
+    const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+    const socketPath = join(runtimeDir, "timeout.sock");
+    const openSockets = new Set<import("node:net").Socket>();
+    const server = createServer((socket) => {
+      openSockets.add(socket);
+      socket.on("close", () => openSockets.delete(socket));
+      socket.on("error", () => undefined);
+      // intentionally never respond so the client times out without deleting the descriptor
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, () => resolve());
+      });
+      const runtime = {
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: socketPath,
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-timeout",
+        protocolVersion: "1" as const,
+        generation: 1,
+      };
+      const file = bridgeRuntimeFile(projectRoot, projectRoot);
+      writeFileSync(file, JSON.stringify(runtime));
+      const probe = await probeBridgeRuntimeOwnership(runtime);
+      expect(probe.ok).toBe(false);
+      expect(probe.code).toBe("timeout");
+      const status = await bridgeStatus(projectRoot, projectRoot);
+      expect(status.ok).toBe(false);
+      expect(status.code).toBe("timeout");
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      for (const socket of openSockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+      });
+      if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      rmSync(runtimeDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete malformed or unreadable descriptors during unregister", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-bad-descriptor-"));
+    const file = bridgeRuntimeFile(projectRoot, projectRoot);
+    try {
+      writeFileSync(file, "{not-json");
+      await expect(unregisterBridgeRuntime(projectRoot, projectRoot, 1, "manual-start")).resolves.toBe(false);
+      expect(existsSync(file)).toBe(true);
+
+      writeFileSync(file, JSON.stringify({
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: join(bridgeRuntimeDirectory(), "blocked.sock"),
+        pid: process.pid,
+        processStartIdentity: "manual-start",
+        protocolVersion: "1",
+        generation: 1,
+      }));
+      chmodSync(file, 0o000);
+      await expect(unregisterBridgeRuntime(projectRoot, projectRoot, 1, "manual-start")).resolves.toBe(false);
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      chmodSync(file, 0o600);
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });

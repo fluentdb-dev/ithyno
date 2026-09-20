@@ -14,6 +14,10 @@ import { AgentRegistry } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode } from "./agents/runner.js";
 import { validateRunPayload } from "./agents/run-validation.js";
 
+if (process.platform !== "win32") {
+  process.on("SIGPIPE", () => undefined);
+}
+
 export type BridgeProtocolVersion = "1";
 
 export type BridgeRuntimeDescriptor = {
@@ -503,6 +507,32 @@ export async function handleBridgeOperation(
   }
 }
 
+export type BridgeRuntimeValidationCode = "ok" | "permission" | "validation" | "timeout" | "stale" | "unavailable";
+
+export type BridgeRuntimeValidationResult =
+  | { ok: true; code: "ok"; runtime: BridgeRuntimeDescriptor; error?: undefined }
+  | { ok: false; code: Exclude<BridgeRuntimeValidationCode, "ok">; runtime: BridgeRuntimeDescriptor; error: string };
+
+export function validateBridgeRuntimeDescriptor(descriptor: Partial<BridgeRuntimeDescriptor>): { ok: true } | { ok: false; code: "validation" | "permission" | "stale"; error: string } {
+  if (!descriptor || typeof descriptor !== "object") {
+    return { ok: false, code: "validation", error: "runtime descriptor is missing" };
+  }
+  if (!isBridgeRuntimeDescriptor(descriptor)) {
+    return { ok: false, code: "validation", error: "runtime descriptor is malformed" };
+  }
+  if (!isBridgeRuntimeAlive(descriptor)) {
+    return { ok: false, code: "stale", error: "runtime descriptor points to a dead process" };
+  }
+  const liveIdentity = currentProcessStartIdentity(descriptor.pid);
+  if (!liveIdentity) {
+    return { ok: false, code: "permission", error: "runtime process identity could not be proven; permission or sandboxing blocked the start-identity check" };
+  }
+  if (descriptor.processStartIdentity !== liveIdentity) {
+    return { ok: false, code: "stale", error: "runtime descriptor process identity differs from the live process" };
+  }
+  return { ok: true };
+}
+
 export async function readBridgeRuntime(projectPath?: string, cwd = process.cwd()): Promise<BridgeRuntimeDescriptor | null> {
   const file = bridgeRuntimeFile(projectPath, cwd);
   if (!existsSync(file)) return null;
@@ -522,9 +552,13 @@ export async function readBridgeRuntime(projectPath?: string, cwd = process.cwd(
       protocolVersion: parsed.protocolVersion === "1" ? "1" : "1",
       generation: typeof parsed.generation === "number" ? parsed.generation : 1,
     };
-    if (!isBridgeRuntimeCurrent(descriptor)) {
-      await pruneBridgeRuntime(descriptor.projectRoot);
-      return null;
+    const validation = validateBridgeRuntimeDescriptor(descriptor);
+    if (!validation.ok) {
+      if (validation.code === "stale") {
+        await pruneBridgeRuntime(descriptor.projectRoot, cwd);
+        return null;
+      }
+      return descriptor;
     }
     return descriptor;
   } catch {
@@ -567,38 +601,38 @@ export async function registerBridgeRuntime(projectPath?: string, cwd = process.
 }
 
 export async function unregisterBridgeRuntime(
-  projectPath?: string,
-  cwd = process.cwd(),
-  generation: number | undefined = undefined,
-  processStartIdentity: string | undefined = undefined,
-): Promise<void> {
+  projectPath: string | undefined,
+  cwd: string,
+  generation: number,
+  processStartIdentity: string,
+): Promise<boolean> {
   const file = bridgeRuntimeFile(projectPath, cwd);
-  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 1 || typeof processStartIdentity !== "string" || !processStartIdentity.trim()) {
-    return;
+  if (!Number.isInteger(generation) || generation < 1 || typeof processStartIdentity !== "string" || !processStartIdentity.trim()) {
+    return false;
   }
   try {
     const raw = await readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<BridgeRuntimeDescriptor>;
     if (!parsed || typeof parsed !== "object") {
-      await rm(file, { force: true });
-      return;
+      return false;
     }
     if (typeof parsed.generation !== "number" || parsed.generation !== generation) {
-      return;
+      return false;
     }
     if (typeof parsed.processStartIdentity !== "string" || parsed.processStartIdentity !== processStartIdentity) {
-      return;
+      return false;
     }
     if (typeof parsed.pid !== "number" || parsed.pid !== process.pid) {
-      return;
+      return false;
     }
     const liveIdentity = currentProcessStartIdentity(process.pid);
     if (!liveIdentity || parsed.processStartIdentity !== liveIdentity) {
-      return;
+      return false;
     }
     await rm(file, { force: true });
+    return true;
   } catch {
-    await rm(file, { force: true });
+    return false;
   }
 }
 
@@ -628,14 +662,16 @@ export async function pruneStaleBridgeRuntimes(): Promise<number> {
     try {
       const raw = await readFile(file, "utf8");
       const parsed = JSON.parse(raw) as Partial<BridgeRuntimeDescriptor>;
-      if (!parsed || typeof parsed.pid !== "number" || !isBridgeRuntimeCurrent(parsed as Partial<BridgeRuntimeDescriptor>)) {
+      if (!parsed || typeof parsed !== "object") continue;
+      if (typeof parsed.pid !== "number" || typeof parsed.processStartIdentity !== "string") continue;
+      if (typeof parsed.generation !== "number" || !Number.isInteger(parsed.generation) || parsed.generation < 1) continue;
+      const validation = validateBridgeRuntimeDescriptor(parsed as Partial<BridgeRuntimeDescriptor>);
+      if (!validation.ok && validation.code === "stale") {
         await rm(file, { force: true });
         pruned += 1;
-        continue;
       }
     } catch {
-      await rm(file, { force: true });
-      pruned += 1;
+      // A malformed or unreadable descriptor is not proof of stale ownership; fail closed.
     }
   }
   return pruned;
@@ -653,7 +689,7 @@ export function bridgeUnsupportedReason(): string | undefined {
   return undefined;
 }
 
-export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescriptor): Promise<boolean> {
+export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescriptor): Promise<BridgeRuntimeValidationResult> {
   const request: BridgeRequest = {
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     requestId: randomUUID(),
@@ -669,31 +705,84 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
   return await new Promise((resolve) => {
     const socket = netConnect(runtime.ipcAddress);
     let settled = false;
-    const finish = (ok: boolean) => {
+    let buffer = "";
+    const finish = (result: BridgeRuntimeValidationResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       socket.destroy();
-      resolve(ok);
+      resolve(result);
     };
-    const timer = setTimeout(() => finish(false), 1500);
-    socket.on("error", () => finish(false));
+    const handleResponse = (text: string): void => {
+      if (!text.trim()) return;
+      try {
+        const parsed = JSON.parse(text.trim()) as Partial<BridgeResponse>;
+        const validated = validateBridgeResponse(request, parsed);
+        if (validated.error) {
+          const message = String(validated.error).toLowerCase();
+          if (message.includes("generation") || message.includes("identity")) {
+            finish({ ok: false, code: "stale", runtime, error: validated.error });
+            return;
+          }
+          finish({ ok: false, code: "validation", runtime, error: validated.error });
+          return;
+        }
+        if (!validated.response.ok) {
+          const code = validated.response.code === "permission" ? "permission"
+            : validated.response.code === "timeout" ? "timeout"
+            : validated.response.code === "stale" ? "stale"
+            : "validation";
+          finish({ ok: false, code, runtime, error: validated.response.error ?? "ownership probe rejected the live descriptor" });
+          return;
+        }
+        finish({ ok: true, code: "ok", runtime });
+      } catch {
+        finish({ ok: false, code: "validation", runtime, error: "ownership probe received a malformed or fragmented response" });
+      }
+    };
+    const timeoutResult: BridgeRuntimeValidationResult = { ok: false, code: "timeout", runtime, error: "ownership probe timed out before a complete response frame was received" };
+    const timer = setTimeout(() => finish(timeoutResult), 1500);
+    socket.setTimeout(1500);
+    socket.on("timeout", () => finish(timeoutResult));
+    socket.on("error", (error) => {
+      const code = (error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code ?? "").toUpperCase() : "").trim();
+      if (code === "EACCES" || code === "EPERM") {
+        finish({ ok: false, code: "permission", runtime, error: "bridge runtime ownership could not be proven because the socket was not readable by the current user" });
+        return;
+      }
+      if (code === "ENOENT" || code === "ENOTFOUND" || code === "ECONNREFUSED") {
+        finish({ ok: false, code: "stale", runtime, error: "runtime socket is missing or stale; ownership could not be proven and no destructive pruning was performed" });
+        return;
+      }
+      finish({ ok: false, code: "validation", runtime, error: error instanceof Error ? error.message : "bridge IPC endpoint could not be reached" });
+    });
     socket.on("connect", () => {
       socket.write(payload);
     });
     socket.on("data", (chunk) => {
-      const text = String(chunk).trim();
-      if (!text) return;
-      try {
-        const parsed = JSON.parse(text) as Partial<BridgeResponse>;
-        const validated = validateBridgeResponse(request, parsed);
-        finish(!validated.error && Boolean(parsed.ok));
-      } catch {
-        finish(false);
+      buffer += String(chunk);
+      if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
+        finish({ ok: false, code: "validation", runtime, error: "ownership probe exceeded the bridge protocol size limit while buffering a newline-delimited response" });
+        return;
+      }
+      while (buffer.includes("\n")) {
+        const newlineIndex = buffer.indexOf("\n");
+        const frame = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!frame) continue;
+        handleResponse(frame);
+        return;
       }
     });
     socket.on("close", () => {
-      if (!settled) finish(false);
+      if (!settled) {
+        const tail = buffer.trim();
+        if (tail) {
+          handleResponse(tail);
+          return;
+        }
+        finish({ ok: false, code: "validation", runtime, error: "ownership probe ended before a complete newline-delimited response was received" });
+      }
     });
   });
 }
@@ -727,14 +816,17 @@ export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): P
   }
 
   const socketChecked = await probeBridgeRuntimeOwnership(runtime);
-  if (!socketChecked) {
-    await pruneBridgeRuntime(projectRoot, cwd);
+  if (!socketChecked.ok) {
+    const isPositiveStaleProof = socketChecked.code === "stale" && /(generation|process identity|identity)/iu.test(socketChecked.error || "");
+    if (isPositiveStaleProof) {
+      await pruneBridgeRuntime(projectRoot, cwd);
+    }
     return {
       ok: false,
       projectRoot,
       projectHash: runtime.projectHash,
-      error: "live bridge runtime ownership could not be proven over the project socket; no fixed-port or localhost fallback is used",
-      code: "stale",
+      error: socketChecked.error || "live bridge runtime ownership could not be proven over the project socket; no fixed-port or localhost fallback is used",
+      code: socketChecked.code === "permission" ? "permission" : socketChecked.code === "timeout" ? "timeout" : socketChecked.code === "stale" ? "stale" : "validation",
     };
   }
 
@@ -1018,7 +1110,13 @@ export async function startBridgeServer(
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     generation: 1,
   };
+  const trackedSockets = new Set<import("node:net").Socket>();
   const server = createServer((socket) => {
+    trackedSockets.add(socket);
+    socket.on("close", () => trackedSockets.delete(socket));
+    socket.on("error", () => {
+      if (!socket.destroyed) socket.destroy();
+    });
     let buffer = "";
     const respondWithError = (request: BridgeRequest | null, message: string, code: BridgeCommandResult["code"] = "validation") => {
       if (socket.destroyed || socket.writableEnded) return;
@@ -1139,16 +1237,24 @@ export async function startBridgeServer(
     value: publishedDescriptor,
     configurable: true,
   });
+  Object.defineProperty(server, "__bridgeRuntimeSockets", {
+    value: trackedSockets,
+    configurable: true,
+  });
   return { server, descriptor };
 }
 
 export async function stopBridgeServer(server: ReturnType<typeof createServer>): Promise<void> {
   const descriptor = (server as ReturnType<typeof createServer> & { __bridgeRuntimeDescriptor?: BridgeRuntimeDescriptor }).__bridgeRuntimeDescriptor;
+  const sockets = (server as ReturnType<typeof createServer> & { __bridgeRuntimeSockets?: Set<import("node:net").Socket> }).__bridgeRuntimeSockets;
   if (descriptor) {
     await unregisterBridgeRuntime(descriptor.projectRoot, process.cwd(), descriptor.generation, descriptor.processStartIdentity);
   }
+  if (sockets) {
+    for (const socket of sockets) socket.destroy();
+  }
   await new Promise<void>((resolve, reject) => {
-    server.close((err) => (err ? reject(err) : resolve()));
+    server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
   }).catch(() => undefined);
 }
 
