@@ -10,6 +10,7 @@ import {
   registerBridgeRuntime,
   lookupBridgeRuntime,
   currentProcessStartIdentity,
+  parseLinuxProcessStartIdentity,
   bridgeStatus,
   bridgeRuntimeDirectory,
   bridgeRuntimeFile,
@@ -73,6 +74,32 @@ async function rawBridgeSequence(address: string, payloads: string[]): Promise<s
       socket.destroy();
       resolve(responses);
     }, 2000);
+  });
+}
+
+async function rawBridgeNoNewlineRequest(address: string, payload: string): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const socket = netConnect(address);
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve(buffer.trim());
+    }, 1000);
+    socket.on("connect", () => socket.write(payload));
+    socket.on("data", (chunk) => {
+      buffer += String(chunk);
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(buffer.trim());
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("close", () => {
+      clearTimeout(timer);
+      resolve(buffer.trim());
+    });
   });
 }
 
@@ -222,6 +249,8 @@ describe("bridge runtime registry", () => {
         operation: "status",
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: descriptor.processStartIdentity,
         params: {},
         deadlineMs: 1000,
       }));
@@ -233,6 +262,8 @@ describe("bridge runtime registry", () => {
         operation: "nope",
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: descriptor.processStartIdentity,
         params: {},
         deadlineMs: 1000,
       }));
@@ -245,6 +276,8 @@ describe("bridge runtime registry", () => {
         operation: "status",
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: descriptor.processStartIdentity,
         params: { payload: oversized },
         deadlineMs: 1000,
       }));
@@ -257,6 +290,8 @@ describe("bridge runtime registry", () => {
           operation: "status",
           projectRoot,
           projectHash: stableProjectHash(projectRoot),
+          generation: descriptor.generation,
+          processStartIdentity: descriptor.processStartIdentity,
           params: {},
           deadlineMs: 1000,
         }),
@@ -266,6 +301,8 @@ describe("bridge runtime registry", () => {
           operation: "status",
           projectRoot,
           projectHash: stableProjectHash(projectRoot),
+          generation: descriptor.generation,
+          processStartIdentity: descriptor.processStartIdentity,
           params: {},
           deadlineMs: 1000,
         }),
@@ -278,6 +315,8 @@ describe("bridge runtime registry", () => {
         operation: "status",
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: descriptor.processStartIdentity,
         params: {},
         deadlineMs: 1,
       }));
@@ -287,6 +326,98 @@ describe("bridge runtime registry", () => {
       await unregisterBridgeRuntime(projectRoot, process.cwd());
       rmSync(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  it("requires the current descriptor generation and process identity to match an owning server", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-owned-"));
+    const { server, descriptor } = await startBridgeServer(projectRoot, process.cwd());
+    try {
+      const staleGeneration = await rawBridgeRequest(descriptor.ipcAddress, JSON.stringify({
+        protocolVersion: "1",
+        requestId: "stale-generation",
+        operation: "status",
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation + 1,
+        processStartIdentity: descriptor.processStartIdentity,
+        params: {},
+        deadlineMs: 1000,
+      }));
+      expect(staleGeneration).toContain("generation or process identity");
+
+      const staleProcess = await rawBridgeRequest(descriptor.ipcAddress, JSON.stringify({
+        protocolVersion: "1",
+        requestId: "stale-process",
+        operation: "status",
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: `${descriptor.processStartIdentity}-stale`,
+        params: {},
+        deadlineMs: 1000,
+      }));
+      expect(staleProcess).toContain("generation or process identity");
+    } finally {
+      await stopBridgeServer(server);
+      await unregisterBridgeRuntime(projectRoot, process.cwd(), descriptor.generation, descriptor.processStartIdentity);
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("removes only the matching generation instead of deleting a replacement descriptor", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-generation-"));
+    try {
+      const initial = await registerBridgeRuntime(projectRoot, projectRoot, {
+        ipcAddress: join(bridgeRuntimeDirectory(), "gen-1.sock"),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-1",
+        generation: 1,
+      });
+      const replacement = await registerBridgeRuntime(projectRoot, projectRoot, {
+        ipcAddress: join(bridgeRuntimeDirectory(), "gen-2.sock"),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-2",
+        generation: 2,
+      });
+
+      await unregisterBridgeRuntime(projectRoot, projectRoot, initial.generation, initial.processStartIdentity);
+      expect((await lookupBridgeRuntime(projectRoot, projectRoot))?.generation).toBe(replacement.generation);
+
+      await unregisterBridgeRuntime(projectRoot, projectRoot, replacement.generation, replacement.processStartIdentity);
+      expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
+    } finally {
+      await unregisterBridgeRuntime(projectRoot, projectRoot).catch(() => undefined);
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects oversized request frames before a newline arrives", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-oversized-"));
+    const { server, descriptor } = await startBridgeServer(projectRoot, process.cwd());
+    try {
+      const payload = JSON.stringify({
+        protocolVersion: "1",
+        requestId: "oversized-no-newline",
+        operation: "status",
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        generation: descriptor.generation,
+        processStartIdentity: descriptor.processStartIdentity,
+        params: { huge: "x".repeat(400 * 1024) },
+        deadlineMs: 1000,
+      });
+      const response = await rawBridgeNoNewlineRequest(descriptor.ipcAddress, payload);
+      expect(response).toContain("malformed or exceeded");
+    } finally {
+      await stopBridgeServer(server);
+      await unregisterBridgeRuntime(projectRoot, process.cwd(), descriptor.generation, descriptor.processStartIdentity);
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("parses Linux /proc/<pid>/stat starttime when the executable name contains spaces", () => {
+    const raw = "1234 (my process name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4321";
+    expect(parseLinuxProcessStartIdentity(raw, 1234)).toBe("1234:4321");
   });
 
   it("strips ITHYNO_* env from subprocesses and avoids a fixed port fallback", () => {

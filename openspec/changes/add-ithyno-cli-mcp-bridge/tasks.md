@@ -12,7 +12,7 @@
 - [x] 2.1 Implement atomic, user-scoped runtime descriptor registration containing only project identity, IPC address, PID, process-start identity, protocol version, and generation.
   - Verified: runtime descriptors are now written through a same-directory `.tmp` file and atomic rename; files are created with `0600` permissions and the runtime directory remains `0700`.
 - [x] 2.2 Implement descriptor lookup, exact canonical-project validation, liveness handshake, orderly unregister, and proven-stale pruning without fixed-port or recency fallback.
-  - Verified: bridge lookups canonicalize project roots, compare current process start identities and generation before reusing descriptors, and stale out-of-date entries are pruned.
+  - Verified: server descriptors are published only after listening, requests carry and validate generation/process identity, responses are checked end-to-end, stale entries are pruned safely, and generation-safe unregister behavior is covered by regression tests.
 - [x] 2.3 Implement the macOS/Linux Unix-domain socket server and client with `0700` runtime-directory and `0600` socket permissions, bounded messages, deadlines, and cleanup.
 - [ ] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
   - Reopened: not supported on this branch until the Windows ACL mechanism is validated and the bridge write path is enabled with evidence.
