@@ -306,9 +306,28 @@ export async function handleBridgeOperation(
         cfg.agents.find((agent) => agent.roles.includes(data.role ?? "code"))?.name ??
         cfg.agents[0].name;
       const runner = context.runner ?? new AgentRunner(projectRootCanonical, registry, () => undefined);
-      const result = await runner.run(data.changeId, agentName, data.role ?? "code", data.executionMode ?? "worktree", data.prompt ?? undefined);
+      const result = await runner.run(
+        data.changeId,
+        agentName,
+        data.role ?? "code",
+        data.executionMode ?? "worktree",
+        data.prompt ?? undefined,
+      );
       if (!result.ok) throw new Error(result.reason);
-      return { ok: true, jobId: result.job.id, changeId: data.changeId, role: result.job.role ?? (data.role ?? "code"), status: result.job.status };
+      const response = {
+        ok: true,
+        jobId: result.job.id,
+        changeId: data.changeId,
+        role: result.job.role ?? (data.role ?? "code"),
+        status: result.job.status,
+      };
+      if (data.wait) {
+        const waitResult = await runner.waitForCompletion(result.job.id, {
+          timeoutMs: data.timeoutMs,
+        });
+        return { ...response, status: waitResult.status, exitCode: waitResult.exitCode ?? null };
+      }
+      return response;
     }
     case "jobs": {
       const registry = context.registry ?? new AgentRegistry(projectRootCanonical);
@@ -459,8 +478,26 @@ export async function lookupBridgeRuntime(projectPath?: string, cwd = process.cw
   return readBridgeRuntime(exact);
 }
 
+export function bridgeUnsupportedReason(): string | undefined {
+  if (process.platform === "win32") {
+    return "Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented";
+  }
+  return undefined;
+}
+
 export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): Promise<BridgeCommandResult> {
   const projectRoot = resolveBridgeProject(projectPath, cwd);
+  const unsupported = bridgeUnsupportedReason();
+  if (unsupported) {
+    return {
+      ok: false,
+      projectRoot,
+      projectHash: stableProjectHash(projectRoot),
+      error: unsupported,
+      code: "unsupported",
+    };
+  }
+
   const runtime = await lookupBridgeRuntime(projectRoot);
   if (!runtime) {
     return {
@@ -599,6 +636,23 @@ export async function callBridgeOperation(
   cwd = process.cwd(),
 ): Promise<BridgeResponse> {
   const projectRoot = canonicalProjectRoot(projectPath, cwd);
+  const unsupported = bridgeUnsupportedReason();
+  if (unsupported) {
+    return buildBridgeErrorEnvelope(
+      {
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: randomUUID(),
+        operation,
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        params,
+        deadlineMs: 5000,
+      },
+      "unsupported",
+      unsupported,
+    );
+  }
+
   const runtime = await lookupBridgeRuntime(projectRoot, cwd);
   if (!runtime) {
     return buildBridgeErrorEnvelope(
@@ -720,7 +774,22 @@ export async function startBridgeServer(
   context: BridgeOperationContext = {},
 ): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
   if (process.platform === "win32") {
-    throw new Error("Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented");
+    const projectRoot = canonicalProjectRoot(projectPath, cwd);
+    const warning = "Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented";
+    console.warn(`[bridge] ${warning}`);
+    const noopServer = createServer();
+    return {
+      server: noopServer,
+      descriptor: {
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
+        pid: process.pid,
+        processStartIdentity: `${process.pid}:${process.ppid}:${Date.now()}`,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        generation: 1,
+      },
+    };
   }
 
   const projectRoot = canonicalProjectRoot(projectPath, cwd);

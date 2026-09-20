@@ -95,4 +95,19 @@ describe("bridge runtime registry", () => {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it("reports an explicit unsupported state when the platform has no secure IPC", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-unsupported-"));
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      const result = await bridgeStatus(projectRoot, projectRoot);
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("unsupported");
+      expect(result.error).toContain("Windows bridge writes are disabled");
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

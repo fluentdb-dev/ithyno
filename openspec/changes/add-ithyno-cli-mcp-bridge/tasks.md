@@ -4,6 +4,7 @@
 - [x] 1.2 Define the initial allow-listed operation catalog for status, project/change reads, phase/activity writes, dispatch, job read/cancel, and needs-human answers; explicitly exclude raw HTTP, shell, filesystem, Secrets, environment dump, and token operations.
 - [x] 1.3 Implement canonical realpath project identity and stable project hashing with symlink, missing-path, case-sensitivity, and multi-project unit tests.
 - [ ] 1.4 Resolve and document the supported Windows current-user named-pipe ACL mechanism, including remote-client rejection, before enabling Windows write operations.
+  - Reopened: Windows ACL support is intentionally deferred; bridge writes remain disabled until verified on a supported Windows runtime.
 - [x] 1.5 Implement platform runtime-directory and endpoint selection for macOS, Linux, and Windows without embedding project names or secrets in endpoint names.
 
 ## 2. Secure runtime registry and IPC
@@ -12,6 +13,7 @@
 - [x] 2.2 Implement descriptor lookup, exact canonical-project validation, liveness handshake, orderly unregister, and proven-stale pruning without fixed-port or recency fallback.
 - [x] 2.3 Implement the macOS/Linux Unix-domain socket server and client with `0700` runtime-directory and `0600` socket permissions, bounded messages, deadlines, and cleanup.
 - [ ] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
+  - Reopened: not supported on this branch until the Windows ACL mechanism is validated and the bridge write path is enabled with evidence.
 - [x] 2.5 Register and unregister the bridge with standalone, Electron-launched, and VS Code Extension-launched server lifecycles without changing browser HTTP startup behavior.
 - [x] 2.6 Add IPC protocol tests for malformed JSON, unsupported versions, unknown operations, oversized payloads, duplicate request IDs, timeout, disconnect, and sanitized failures.
 - [x] 2.7 Add multi-project, symlink, stale PID/start identity, generation replacement, crash residue, and unauthorized-user/ACL platform tests.
@@ -55,5 +57,7 @@
 - [x] 7.1 Include the bridge client/server, platform IPC support, CLI adapter, MCP adapter, and required dependency files in npm, Electron, and VSIX staging and release verification.
 - [x] 7.2 Add packaged smoke tests for macOS/Linux and Windows path/pipe behavior, including launching the CLI and MCP server from installed artifact layouts.
 - [x] 7.3 Document the security boundary, same-OS-user limitation, project routing, CLI commands, MCP setup/removal, sandbox remediation, and compatibility migration in the user/developer documentation.
-- [x] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
-- [x] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
+- [ ] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
+  - Reopened: verification is intentionally deferred until the executable contract and wait semantics are proven in the current branch.
+- [ ] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
+  - Reopened: no evidence of end-to-end project verification exists in this branch yet.

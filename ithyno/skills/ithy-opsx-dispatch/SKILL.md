@@ -798,10 +798,18 @@ teardown done outside the ladder.
 2. **Check current phase**
 
    ```bash
-   curl -sS $ITHYNO_BASE/api/changes/<change-id>/phase
+   PHASE_STATUS=$(ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
+     try {
+       const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
+       const item = (data?.result?.items ?? []).find((entry) => entry.id === process.argv[1]);
+       console.log(item?.phase ?? "");
+     } catch {
+       console.log("");
+     }
+   ' "<change-id>")
    ```
 
-   Parse the response's `phase` field:
+   Parse the `PHASE_STATUS` value:
    - `done` → exit: `Change already at phase: done — nothing to do.`
    - `needs-human` → exit: `Change is in needs-human — user must
      answer via /ithy-opsx:answer <id> "<answer>" before dispatcher can
@@ -958,10 +966,7 @@ teardown done outside the ladder.
    - Advance phase:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "coded"}'
+     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
 
@@ -983,10 +988,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "reviewed"}'
+     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
      Break out of the loop, proceed to step 8.
@@ -1017,10 +1019,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "done"}'
+     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
 
      # Release the .worktrees/.lock semaphore (parallelExecution=false only).
      if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then
