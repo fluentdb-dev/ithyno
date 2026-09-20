@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,6 +103,12 @@ async function rawBridgeNoNewlineRequest(address: string, payload: string): Prom
   });
 }
 
+async function unregisterOwnedBridgeRuntime(projectRoot: string, cwd = process.cwd()): Promise<void> {
+  const runtime = await lookupBridgeRuntime(projectRoot, cwd);
+  if (!runtime) return;
+  await unregisterBridgeRuntime(projectRoot, cwd, runtime.generation, runtime.processStartIdentity);
+}
+
 describe("bridge project identity", () => {
   it("canonicalizes symlinked roots and hashes them stably", () => {
     const base = mkdtempSync(join(tmpdir(), "ithyno-bridge-"));
@@ -148,6 +154,7 @@ describe("bridge runtime registry", () => {
       expect(json).not.toContain("password");
       expect((await lookupBridgeRuntime(projectRoot, projectRoot))?.projectHash).toBe(descriptor.projectHash);
     } finally {
+      await unregisterOwnedBridgeRuntime(projectRoot, projectRoot);
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -231,7 +238,7 @@ describe("bridge runtime registry", () => {
       }));
     } finally {
       await stopBridgeServer(server);
-      await unregisterBridgeRuntime(projectRoot, process.cwd());
+      await unregisterOwnedBridgeRuntime(projectRoot, process.cwd());
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -323,7 +330,7 @@ describe("bridge runtime registry", () => {
       expect(timedOut).toContain("timeout");
     } finally {
       await stopBridgeServer(server);
-      await unregisterBridgeRuntime(projectRoot, process.cwd());
+      await unregisterOwnedBridgeRuntime(projectRoot, process.cwd());
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -386,7 +393,7 @@ describe("bridge runtime registry", () => {
       await unregisterBridgeRuntime(projectRoot, projectRoot, replacement.generation, replacement.processStartIdentity);
       expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
     } finally {
-      await unregisterBridgeRuntime(projectRoot, projectRoot).catch(() => undefined);
+      await unregisterOwnedBridgeRuntime(projectRoot, projectRoot);
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -418,6 +425,51 @@ describe("bridge runtime registry", () => {
   it("parses Linux /proc/<pid>/stat starttime when the executable name contains spaces", () => {
     const raw = "1234 (my process name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4321";
     expect(parseLinuxProcessStartIdentity(raw, 1234)).toBe("1234:4321");
+  });
+
+  it("fails closed when a runtime socket is stale or missing", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-cli-stale-"));
+    const runtimeDir = join(tmpdir(), `ithyno-stale-runtime-${Date.now()}`);
+    mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+    const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+    try {
+      const descriptor = {
+        projectRoot,
+        projectHash: stableProjectHash(projectRoot),
+        ipcAddress: join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`),
+        pid: process.pid,
+        processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start",
+        protocolVersion: "1",
+        generation: 1,
+      };
+      writeFileSync(bridgeRuntimeFile(projectRoot, projectRoot), JSON.stringify(descriptor));
+      const env = {
+        ...process.env,
+        XDG_RUNTIME_DIR: runtimeDir,
+        ITHYNO_PORT: "4321",
+        ITHYNO_BASE: "http://localhost:4321",
+        ITHYNO_SESSION_TOKEN: "token-should-not-leak",
+      };
+      const child = spawnSync(process.execPath, ["bin/ithyno.js", "status", "--json", "--project", projectRoot], {
+        cwd: process.cwd(),
+        env,
+        encoding: "utf8",
+      });
+      const output = `${child.stdout ?? ""}
+${child.stderr ?? ""}`;
+      expect(child.status).toBe(14);
+      expect(output).not.toContain("ITHYNO_PORT");
+      expect(output).not.toContain("ITHYNO_BASE");
+      expect(output).not.toContain("ITHYNO_SESSION_TOKEN");
+      expect(output).not.toContain("localhost:4321");
+      expect(output).toContain("ownership could not be proven");
+    } finally {
+      if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(runtimeDir, { recursive: true, force: true });
+    }
   });
 
   it("strips ITHYNO_* env from subprocesses and avoids a fixed port fallback", () => {

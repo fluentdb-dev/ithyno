@@ -139,7 +139,12 @@ async function restartBridgeRuntimeForProject(projectRoot: string): Promise<void
     try {
       await stopBridgeServer(bridgeRuntime.server);
     } finally {
-      await unregisterBridgeRuntime(bridgeRuntime.descriptor.projectRoot).catch(() => undefined);
+      await unregisterBridgeRuntime(
+        bridgeRuntime.descriptor.projectRoot,
+        process.cwd(),
+        bridgeRuntime.descriptor.generation,
+        bridgeRuntime.descriptor.processStartIdentity,
+      ).catch(() => undefined);
       bridgeRuntime = null;
     }
   }
@@ -162,7 +167,12 @@ registerProductionShutdown(fastify, async () => {
     try {
       await stopBridgeServer(bridgeRuntime.server);
     } finally {
-      await unregisterBridgeRuntime(bridgeRuntime.descriptor.projectRoot).catch(() => undefined);
+      await unregisterBridgeRuntime(
+        bridgeRuntime.descriptor.projectRoot,
+        process.cwd(),
+        bridgeRuntime.descriptor.generation,
+        bridgeRuntime.descriptor.processStartIdentity,
+      ).catch(() => undefined);
       bridgeRuntime = null;
     }
   }

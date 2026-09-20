@@ -195,7 +195,7 @@ export function isBridgeRuntimeCurrent(descriptor: Partial<BridgeRuntimeDescript
   if (typeof descriptor.processStartIdentity !== "string" || !descriptor.processStartIdentity.trim()) return false;
   if (typeof descriptor.generation !== "number" || !Number.isInteger(descriptor.generation) || descriptor.generation < 1) return false;
   const liveIdentity = currentProcessStartIdentity(descriptor.pid);
-  if (!liveIdentity) return true;
+  if (!liveIdentity) return false;
   return descriptor.processStartIdentity === liveIdentity;
 }
 
@@ -569,10 +569,13 @@ export async function registerBridgeRuntime(projectPath?: string, cwd = process.
 export async function unregisterBridgeRuntime(
   projectPath?: string,
   cwd = process.cwd(),
-  generation?: number,
-  processStartIdentity?: string,
+  generation: number | undefined = undefined,
+  processStartIdentity: string | undefined = undefined,
 ): Promise<void> {
   const file = bridgeRuntimeFile(projectPath, cwd);
+  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 1 || typeof processStartIdentity !== "string" || !processStartIdentity.trim()) {
+    return;
+  }
   try {
     const raw = await readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<BridgeRuntimeDescriptor>;
@@ -580,18 +583,17 @@ export async function unregisterBridgeRuntime(
       await rm(file, { force: true });
       return;
     }
-    if (typeof parsed.generation === "number" && typeof generation === "number" && parsed.generation !== generation) {
+    if (typeof parsed.generation !== "number" || parsed.generation !== generation) {
       return;
     }
-    if (typeof parsed.processStartIdentity === "string" && typeof processStartIdentity === "string" && parsed.processStartIdentity !== processStartIdentity) {
+    if (typeof parsed.processStartIdentity !== "string" || parsed.processStartIdentity !== processStartIdentity) {
+      return;
+    }
+    if (typeof parsed.pid !== "number" || parsed.pid !== process.pid) {
       return;
     }
     const liveIdentity = currentProcessStartIdentity(process.pid);
-    const sameOwner =
-      typeof parsed.pid === "number" && parsed.pid === process.pid &&
-      typeof parsed.processStartIdentity === "string" &&
-      parsed.processStartIdentity === liveIdentity;
-    if (typeof generation !== "number" && !sameOwner) {
+    if (!liveIdentity || parsed.processStartIdentity !== liveIdentity) {
       return;
     }
     await rm(file, { force: true });
@@ -651,6 +653,51 @@ export function bridgeUnsupportedReason(): string | undefined {
   return undefined;
 }
 
+export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescriptor): Promise<boolean> {
+  const request: BridgeRequest = {
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    requestId: randomUUID(),
+    operation: "status",
+    projectRoot: runtime.projectRoot,
+    projectHash: runtime.projectHash,
+    generation: runtime.generation,
+    processStartIdentity: runtime.processStartIdentity,
+    params: {},
+    deadlineMs: BRIDGE_DEFAULT_DEADLINE_MS,
+  };
+  const payload = `${JSON.stringify(request)}\n`;
+  return await new Promise((resolve) => {
+    const socket = netConnect(runtime.ipcAddress);
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), 1500);
+    socket.on("error", () => finish(false));
+    socket.on("connect", () => {
+      socket.write(payload);
+    });
+    socket.on("data", (chunk) => {
+      const text = String(chunk).trim();
+      if (!text) return;
+      try {
+        const parsed = JSON.parse(text) as Partial<BridgeResponse>;
+        const validated = validateBridgeResponse(request, parsed);
+        finish(!validated.error && Boolean(parsed.ok));
+      } catch {
+        finish(false);
+      }
+    });
+    socket.on("close", () => {
+      if (!settled) finish(false);
+    });
+  });
+}
+
 export function windowsPipeSecurityDescription(): string {
   return "LOCAL login-session namespace; exclusive listener; readableAll=false; writableAll=false; duplex requests require creator-owner read/write access";
 }
@@ -676,6 +723,18 @@ export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): P
       projectHash: stableProjectHash(projectRoot),
       error: "no live bridge runtime was registered for this project; no fixed-port or localhost fallback is used",
       code: "unavailable",
+    };
+  }
+
+  const socketChecked = await probeBridgeRuntimeOwnership(runtime);
+  if (!socketChecked) {
+    await pruneBridgeRuntime(projectRoot, cwd);
+    return {
+      ok: false,
+      projectRoot,
+      projectHash: runtime.projectHash,
+      error: "live bridge runtime ownership could not be proven over the project socket; no fixed-port or localhost fallback is used",
+      code: "stale",
     };
   }
 

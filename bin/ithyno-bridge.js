@@ -49,8 +49,13 @@ program
   .action(async (opts) => {
     const api = await loadBridgeApi();
     const projectRoot = api.canonicalProjectRoot(opts.project || process.cwd());
-    await api.unregisterBridgeRuntime(projectRoot, process.cwd());
-    console.log(JSON.stringify({ ok: true, projectRoot }, null, 2));
+    const runtime = await api.lookupBridgeRuntime(projectRoot, process.cwd());
+    if (!runtime) {
+      console.log(JSON.stringify({ ok: true, projectRoot, removed: false }, null, 2));
+      process.exit(0);
+    }
+    await api.unregisterBridgeRuntime(projectRoot, process.cwd(), runtime.generation, runtime.processStartIdentity);
+    console.log(JSON.stringify({ ok: true, projectRoot, removed: true }, null, 2));
   });
 
 program.parseAsync(process.argv);

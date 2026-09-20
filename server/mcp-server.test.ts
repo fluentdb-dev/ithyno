@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bridgeRuntimeDirectory, startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
+import { bridgeRuntimeDirectory, lookupBridgeRuntime, startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
 import { TOOL_DEFS, handleBridgeTool } from "./mcp-server.js";
 
 async function sendMcpJsonRpcBatch(child: ReturnType<typeof spawn>, requests: Array<{ id: number; method: string; params?: Record<string, unknown> }>) {
@@ -116,7 +116,10 @@ describe("MCP bridge adapter", () => {
       expect(invalidRole.error).toContain("role must be one of");
     } finally {
       await stopBridgeServer(server);
-      await unregisterBridgeRuntime(projectRoot, process.cwd());
+      const runtime = await lookupBridgeRuntime(projectRoot, process.cwd());
+      if (runtime) {
+        await unregisterBridgeRuntime(projectRoot, process.cwd(), runtime.generation, runtime.processStartIdentity);
+      }
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -169,7 +172,10 @@ describe("MCP bridge adapter", () => {
     } finally {
       child.kill("SIGTERM");
       await stopBridgeServer(server);
-      await unregisterBridgeRuntime(projectRoot, process.cwd());
+      const runtime = await lookupBridgeRuntime(projectRoot, process.cwd());
+      if (runtime) {
+        await unregisterBridgeRuntime(projectRoot, process.cwd(), runtime.generation, runtime.processStartIdentity);
+      }
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });

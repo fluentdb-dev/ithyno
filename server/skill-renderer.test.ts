@@ -692,36 +692,38 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(content, `${cli}: AgentRunner fallback missing`).toContain("server AgentRunner");
       expect(content, `${cli}: synchronous wait contract missing`).toContain("wait: true");
       expect(content, `${cli}: transport timeout missing`).toContain("--connect-timeout 10");
-      expect(content, `${cli}: authoritative endpoint guard missing`).toContain(
+      expect(content, `${cli}: bridge workflow contract missing`).toContain(
+        "ITHYNO_BRIDGE",
+      );
+      expect(content, `${cli}: bridge phase hook missing`).toContain(
+        "ithyno bridge phase",
+      );
+      expect(content, `${cli}: legacy ITHYNO_BASE guard remains`).not.toContain(
         'if [ -z "${ITHYNO_BASE:-}" ]',
       );
-      expect(content, `${cli}: injected port derivation missing`).toContain(
+      expect(content, `${cli}: legacy ITHYNO_BASE fallback remains`).not.toContain(
         'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${cli}: direct curl endpoint fallback remains`).not.toContain(
+        'curl "$ITHYNO_BASE',
       );
       expect(content, `${cli}: stale endpoint fallback remains`).not.toContain(
         "ITHYNO_PORT:-4321",
       );
       expect(content, `${cli}: token secrecy rule missing`).toContain(
-        "Never print the token itself",
+        "token-bearing `curl` call",
       );
-      expect(content, `${cli}: per-request freshness checkpoint missing`).toContain(
-        "Mandatory freshness checkpoint",
+      expect(content, `${cli}: bridge freshness guard missing`).toContain(
+        "if it did not change, stop and request a fresh Manager session",
       );
       expect(content, `${cli}: session failure may enter worker fallback`).toContain(
-        "failure is not a worker failure",
+        "Controller/session failures never enter that ladder",
       );
       expect(content, `${cli}: wrong auth header remains`).not.toContain(
         "Authorization: Bearer $ITHYNO_SESSION_TOKEN",
       );
-      expect(content, `${cli}: session-token header missing`).toContain(
-        "X-Session-Token: $ITHYNO_SESSION_TOKEN",
-      );
-      expect(content, `${cli}: transport failure not separated`).toContain(
-        'if [ "$CURL_EXIT" -ne 0 ]',
-      );
-      expect(content, `${cli}: auth failure not separated`).toContain(
-        'JOB_STATUS" = "auth required"',
-      );
+      expect(content, `${cli}: direct token curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${cli}: auth failure separation missing`).toContain("401/403");
       expect(content, `${cli}: direct argv assembly returned`).not.toContain(
         "<entry.command> <entry.args...> -p <resolved-prompt>",
       );
