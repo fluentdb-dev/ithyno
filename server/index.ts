@@ -86,6 +86,7 @@ import {
 } from "./manager-activity.js";
 import { registerEnvironmentRoutes } from "./environment/routes.js";
 import { registerProductionShutdown } from "./production-shutdown.js";
+import { startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -125,8 +126,17 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
-registerProductionShutdown(fastify, () => {
+let bridgeRuntime: Awaited<ReturnType<typeof startBridgeServer>> | null = null;
+registerProductionShutdown(fastify, async () => {
   terminateAllLivePtys();
+  if (bridgeRuntime) {
+    try {
+      await stopBridgeServer(bridgeRuntime.server);
+    } finally {
+      await unregisterBridgeRuntime(bridgeRuntime.descriptor.projectRoot).catch(() => undefined);
+      bridgeRuntime = null;
+    }
+  }
 });
 await fastify.register(rateLimit, { global: false });
 await fastify.register(registerEnvironmentRoutes, {
@@ -346,6 +356,7 @@ try {
     `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
   );
 }
+bridgeRuntime = await startBridgeServer(getProjectRoot());
 const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
 await agentRunner.adoptDetached();
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's

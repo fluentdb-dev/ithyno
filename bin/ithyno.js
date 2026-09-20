@@ -46,35 +46,10 @@ import { runInit } from "./init.js";
 async function loadBridgeApi() {
   try {
     return await import("../server/bridge.ts");
-  } catch {
-    return {
-      canonicalProjectRoot(projectPath, cwd = process.cwd()) {
-        const raw = projectPath && projectPath.trim() ? projectPath : cwd;
-        const absolute = resolve(raw);
-        try {
-          return realpathSync(absolute, { encoding: "utf8" });
-        } catch {
-          return absolute;
-        }
-      },
-      stableProjectHash(projectPath, cwd = process.cwd()) {
-        const root = this.canonicalProjectRoot(projectPath, cwd);
-        return createHash("sha256").update(root).digest("hex");
-      },
-      async callBridgeOperation(projectPath, operation, params = {}, cwd = process.cwd()) {
-        const projectRoot = this.canonicalProjectRoot(projectPath, cwd);
-        const projectHash = this.stableProjectHash(projectRoot);
-        return {
-          protocolVersion: "1",
-          requestId: `${operation}:${Date.now()}`,
-          ok: false,
-          projectRoot,
-          projectHash,
-          code: "unavailable",
-          error: "no live bridge runtime was registered for this project; no fixed-port or localhost fallback is used",
-        };
-      },
-    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[ithyno] bridge runtime failed to load:", message);
+    process.exit(EXIT_CODES.unsupported);
   }
 }
 

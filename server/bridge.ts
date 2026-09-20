@@ -4,6 +4,12 @@ import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises
 import { createServer, connect as netConnect, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { resolveOpenspecDir, scanWorkspace } from "./parser/workspace.js";
+import { appendAnswer, parseNeedsHuman } from "./needs-human.js";
+import { extractSidecarFields, readSidecar, writeSidecar } from "./sidecar.js";
+import { parseManagerActivityBody, setManagerActivity } from "./manager-activity.js";
+import { AgentRegistry } from "./agents/registry.js";
+import { AgentRunner } from "./agents/runner.js";
 
 export type BridgeProtocolVersion = "1";
 
@@ -194,42 +200,122 @@ export function validateBridgeRequest(request: unknown): { request: BridgeReques
   };
 }
 
-export function handleBridgeOperation(operation: BridgeOperationName, params: Record<string, unknown>, projectRoot: string): unknown {
+export async function handleBridgeOperation(operation: BridgeOperationName, params: Record<string, unknown>, projectRoot: string): Promise<unknown> {
+  const projectRootCanonical = canonicalProjectRoot(projectRoot);
+  const projectHash = stableProjectHash(projectRootCanonical);
+  const currentOpenspecDir = resolveOpenspecDir(projectRootCanonical);
+
   switch (operation) {
     case "status":
       return {
         ok: true,
-        projectRoot,
-        projectHash: stableProjectHash(projectRoot),
-        runtime: { projectRoot, projectHash: stableProjectHash(projectRoot), pid: process.pid, ipcAddress: buildBridgeIpcAddress(projectRoot), processStartIdentity: `${process.pid}:${process.ppid}`, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: 1 },
+        projectRoot: projectRootCanonical,
+        projectHash,
+        runtime: {
+          projectRoot: projectRootCanonical,
+          projectHash,
+          pid: process.pid,
+          ipcAddress: buildBridgeIpcAddress(projectRootCanonical),
+          processStartIdentity: `${process.pid}:${process.ppid}`,
+          protocolVersion: BRIDGE_PROTOCOL_VERSION,
+          generation: 1,
+        },
       };
-    case "changes":
-      return { ok: true, items: [] };
+    case "changes": {
+      if (!currentOpenspecDir) return { ok: true, items: [] };
+      const workspace = await scanWorkspace(currentOpenspecDir, projectRootCanonical);
+      return {
+        ok: true,
+        items: workspace.changes.map((change) => ({
+          id: change.id,
+          phase: change.phase ?? null,
+          progress: change.progress,
+          proposal: change.proposal?.intent ?? change.proposal?.scope ?? null,
+        })),
+      };
+    }
     case "phase": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
+      const requested = typeof params.phase === "string" ? params.phase : "";
       if (!changeId) throw new Error("changeId is required for phase operations");
-      return { ok: true, changeId, phase: String(params.phase ?? "proposed") };
+      if (!requested) throw new Error("phase is required for phase operations");
+      const raw = await readSidecar(projectRootCanonical, changeId);
+      const current = extractSidecarFields(raw, changeId);
+      if (current.phase === requested) {
+        return { ok: true, changeId, phase: requested };
+      }
+      await writeSidecar(projectRootCanonical, changeId, { phase: requested }, undefined);
+      return { ok: true, changeId, phase: requested };
     }
     case "activity": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
+      const activity = typeof params.activity === "string" ? params.activity : "idle";
       if (!changeId) throw new Error("changeId is required for activity operations");
-      return { ok: true, changeId, activity: String(params.activity ?? "idle") };
+      const parsed = parseManagerActivityBody({
+        changeId,
+        activity,
+        ...(typeof params.role === "string" ? { role: params.role } : {}),
+        ...(typeof params.detail === "string" ? { detail: params.detail } : {}),
+      });
+      if (!parsed.ok) throw new Error(parsed.error);
+      const record = setManagerActivity(parsed.value);
+      return { ok: true, changeId, activity: record, phase: null };
     }
     case "dispatch": {
-      return { ok: true, jobId: `job-${randomUUID()}` };
+      const changeId = typeof params.changeId === "string" ? params.changeId : "";
+      const role = typeof params.role === "string" ? params.role : "code";
+      if (!changeId) throw new Error("changeId is required for dispatch operations");
+      const registry = new AgentRegistry(projectRootCanonical);
+      await registry.load();
+      const cfg = registry.publicConfig();
+      if (!cfg.ok || cfg.agents.length === 0) {
+        throw new Error("no agents are configured for this project");
+      }
+      const agentName =
+        typeof params.agentName === "string"
+          ? params.agentName
+          : cfg.agents.find((agent) => agent.roles.includes(role))?.name ?? cfg.agents[0].name;
+      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
+      const result = await runner.run(changeId, agentName, role, "worktree");
+      if (!result.ok) throw new Error(result.reason);
+      return { ok: true, jobId: result.job.id, changeId, role: result.job.role ?? role, status: result.job.status };
     }
-    case "jobs":
-      return { ok: true, jobs: [] };
+    case "jobs": {
+      const registry = new AgentRegistry(projectRootCanonical);
+      await registry.load();
+      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
+      return { ok: true, jobs: runner.listJobs() };
+    }
     case "job.cancel": {
-      return { ok: true, cancelled: true, jobId: String(params.jobId ?? "") };
+      const jobId = typeof params.jobId === "string" ? params.jobId : "";
+      if (!jobId) throw new Error("jobId is required for job cancellation");
+      const registry = new AgentRegistry(projectRootCanonical);
+      await registry.load();
+      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
+      const result = runner.cancel(jobId);
+      if (!result.ok) throw new Error(result.reason ?? "job cancellation failed");
+      return { ok: true, cancelled: true, jobId };
     }
     case "needs-human.read": {
-      return { ok: true, question: null, answer: null, answered: false };
+      const changeId = typeof params.changeId === "string" ? params.changeId : "";
+      if (!changeId) throw new Error("changeId is required for needs-human read operations");
+      const doc = await parseNeedsHuman(projectRootCanonical, changeId);
+      if (!doc) {
+        return { ok: true, changeId, question: null, answer: null, answered: false };
+      }
+      return { ok: true, changeId, question: doc.question, answer: doc.answer, answered: doc.answered };
     }
     case "needs-human.answer": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
+      const answer = typeof params.answer === "string" ? params.answer : "";
       if (!changeId) throw new Error("changeId is required for needs-human answer operations");
-      return { ok: true, changeId, answered: true, answer: String(params.answer ?? "") };
+      if (!answer) throw new Error("answer is required for needs-human answer operations");
+      const currentRaw = await readSidecar(projectRootCanonical, changeId);
+      const current = extractSidecarFields(currentRaw, changeId);
+      await appendAnswer(projectRootCanonical, changeId, answer);
+      const restored = current.priorPhase ?? "proposed";
+      await writeSidecar(projectRootCanonical, changeId, { phase: restored, priorPhase: undefined, escalatedAt: undefined }, undefined);
+      return { ok: true, changeId, answered: true, answer, phase: restored };
     }
     default:
       throw new Error(`unsupported operation: ${String(operation)}`);
@@ -274,6 +360,7 @@ export async function registerBridgeRuntime(projectPath?: string, cwd = process.
     await chmod(runtimeDir, 0o700).catch(() => undefined);
   }
 
+  const existing = await readBridgeRuntime(projectRoot, cwd);
   const descriptor: BridgeRuntimeDescriptor = {
     projectRoot,
     projectHash,
@@ -281,7 +368,7 @@ export async function registerBridgeRuntime(projectPath?: string, cwd = process.
     pid: overrides.pid ?? process.pid,
     processStartIdentity: overrides.processStartIdentity ?? `${process.pid}:${process.ppid}:${Date.now()}:${randomUUID()}`,
     protocolVersion: overrides.protocolVersion ?? "1",
-    generation: overrides.generation ?? 1,
+    generation: overrides.generation ?? (existing ? existing.generation + 1 : 1),
   };
 
   const file = bridgeRuntimeFile(projectRoot);
@@ -407,32 +494,71 @@ export function buildBridgeErrorEnvelope(request: BridgeRequest, code: BridgeCom
 async function readBridgeMessage(socket: Socket): Promise<BridgeRequest | null> {
   return new Promise((resolve) => {
     let buffer = "";
-    const onData = (chunk: Buffer | string) => {
-      buffer += chunk.toString("utf8");
-      if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
+    const flush = () => {
+      const candidate = buffer.trim();
+      if (!candidate) return;
+      if (candidate.length > BRIDGE_MAX_MESSAGE_BYTES) {
         socket.off("data", onData);
-        socket.destroy();
+        socket.off("error", onError);
         resolve(null);
         return;
       }
       try {
-        const parsed = JSON.parse(buffer) as unknown;
-        socket.off("data", onData);
+        const parsed = JSON.parse(candidate) as unknown;
         const valid = validateBridgeRequest(parsed);
         if (valid.error) {
+          socket.off("data", onData);
+          socket.off("error", onError);
           resolve(null);
           return;
         }
+        socket.off("data", onData);
+        socket.off("error", onError);
         resolve(valid.request);
       } catch {
-        if (buffer.includes("\n") || buffer.includes("{")) {
-          socket.off("data", onData);
-          resolve(null);
-        }
+        socket.off("data", onData);
+        socket.off("error", onError);
+        resolve(null);
       }
     };
+    const onData = (chunk: Buffer | string) => {
+      buffer += chunk.toString("utf8");
+      if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
+        socket.off("data", onData);
+        socket.off("error", onError);
+        resolve(null);
+        return;
+      }
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex >= 0) {
+        const frame = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (frame) {
+          const parsed = JSON.parse(frame) as unknown;
+          const valid = validateBridgeRequest(parsed);
+          if (valid.error) {
+            socket.off("data", onData);
+            socket.off("error", onError);
+            resolve(null);
+            return;
+          }
+          socket.off("data", onData);
+          socket.off("error", onError);
+          resolve(valid.request);
+          return;
+        }
+      }
+      if (buffer.trim().startsWith("{") && buffer.trim().endsWith("}")) {
+        flush();
+      }
+    };
+    const onError = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+      resolve(null);
+    };
     socket.on("data", onData);
-    socket.on("error", () => resolve(null));
+    socket.on("error", onError);
   });
 }
 
@@ -471,7 +597,7 @@ export async function callBridgeOperation(
   };
 
   try {
-    const payload = JSON.stringify(request);
+    const payload = `${JSON.stringify(request)}\n`;
     const response = await new Promise<BridgeResponse | null>((resolve) => {
       const socket = netConnect(runtime.ipcAddress, () => {
         socket.write(payload);
@@ -481,12 +607,14 @@ export async function callBridgeOperation(
         socket.destroy();
         resolve(buildBridgeErrorEnvelope(request, "timeout", "bridge operation timed out"));
       }, request.deadlineMs);
-      socket.on("error", onError);
-      socket.on("data", (chunk) => {
-        clearTimeout(timer);
-        socket.destroy();
+      let buffer = "";
+      const flush = () => {
+        const text = buffer.trim();
+        if (!text) return;
         try {
-          const parsed = JSON.parse(String(chunk)) as BridgeResponse;
+          const parsed = JSON.parse(text) as BridgeResponse;
+          clearTimeout(timer);
+          socket.destroy();
           resolve({
             protocolVersion: BRIDGE_PROTOCOL_VERSION,
             requestId: parsed.requestId ?? request.requestId,
@@ -498,7 +626,49 @@ export async function callBridgeOperation(
             result: sanitizeBridgeValue(parsed.result),
           });
         } catch {
+          clearTimeout(timer);
+          socket.destroy();
           resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
+        }
+      };
+      socket.on("error", onError);
+      socket.on("data", (chunk) => {
+        buffer += String(chunk);
+        if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
+          clearTimeout(timer);
+          socket.destroy();
+          resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response exceeded the maximum payload size"));
+          return;
+        }
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex >= 0) {
+          const frame = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (frame) {
+            try {
+              const parsed = JSON.parse(frame) as BridgeResponse;
+              clearTimeout(timer);
+              socket.destroy();
+              resolve({
+                protocolVersion: BRIDGE_PROTOCOL_VERSION,
+                requestId: parsed.requestId ?? request.requestId,
+                ok: Boolean(parsed.ok),
+                projectRoot: parsed.projectRoot ?? request.projectRoot,
+                projectHash: parsed.projectHash ?? request.projectHash,
+                code: parsed.code,
+                error: parsed.error,
+                result: sanitizeBridgeValue(parsed.result),
+              });
+            } catch {
+              clearTimeout(timer);
+              socket.destroy();
+              resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
+            }
+            return;
+          }
+        }
+        if (buffer.trim().startsWith("{") && buffer.trim().endsWith("}")) {
+          flush();
         }
       });
       socket.on("close", () => {
@@ -520,13 +690,13 @@ export async function startBridgeServer(projectPath: string, cwd = process.cwd()
     ipcAddress: buildBridgeIpcAddress(projectRoot),
     pid: process.pid,
     processStartIdentity: `${process.pid}:${process.ppid}:${Date.now()}`,
-    generation: 1,
   });
 
+  const seenRequestIds = new Set<string>();
   const server = createServer(async (socket) => {
     const request = await readBridgeMessage(socket);
     if (!request) {
-      socket.write(JSON.stringify(buildBridgeErrorEnvelope({
+      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope({
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         requestId: randomUUID(),
         operation: "status",
@@ -534,16 +704,28 @@ export async function startBridgeServer(projectPath: string, cwd = process.cwd()
         projectHash: descriptor.projectHash,
         params: {},
         deadlineMs: 5000,
-      }, "validation", "request was malformed or exceeded the bridge protocol limits")));
+      }, "validation", "request was malformed or exceeded the bridge protocol limits"))}\n`);
       socket.end();
       return;
     }
+    if (request.projectHash !== descriptor.projectHash || request.projectRoot !== descriptor.projectRoot) {
+      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope(request, "validation", "project identity did not match the server-owned runtime descriptor"))}\n`);
+      socket.end();
+      return;
+    }
+    if (seenRequestIds.has(request.requestId)) {
+      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope(request, "validation", "duplicate request ID rejected"))}\n`);
+      socket.end();
+      return;
+    }
+    seenRequestIds.add(request.requestId);
+    setTimeout(() => seenRequestIds.delete(request.requestId), 60_000).unref?.();
     try {
-      const result = handleBridgeOperation(request.operation, request.params, request.projectRoot);
-      socket.write(JSON.stringify(buildBridgeEnvelope(request, result)));
+      const result = await handleBridgeOperation(request.operation, request.params, request.projectRoot);
+      socket.write(`${JSON.stringify(buildBridgeEnvelope(request, result))}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "bridge operation failed";
-      socket.write(JSON.stringify(buildBridgeErrorEnvelope(request, "validation", message)));
+      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope(request, "validation", message))}\n`);
     }
     socket.end();
   });

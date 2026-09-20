@@ -7,25 +7,10 @@ import { resolve } from "node:path";
 async function loadBridgeApi() {
   try {
     return await import("../server/bridge.ts");
-  } catch {
-    return {
-      canonicalProjectRoot(projectPath, cwd = process.cwd()) {
-        const raw = projectPath && projectPath.trim() ? projectPath : cwd;
-        const absolute = resolve(raw);
-        try { return realpathSync(absolute, { encoding: "utf8" }); } catch { return absolute; }
-      },
-      async bridgeStatus(projectPath, cwd = process.cwd()) {
-        const projectRoot = this.canonicalProjectRoot(projectPath, cwd);
-        return { ok: false, projectRoot, projectHash: createHash("sha256").update(projectRoot).digest("hex"), error: "no live bridge runtime was registered for this project; no fixed-port or localhost fallback is used", code: "unavailable" };
-      },
-      async registerBridgeRuntime(projectPath, cwd = process.cwd(), overrides = {}) {
-        const projectRoot = this.canonicalProjectRoot(projectPath, cwd);
-        return { projectRoot, projectHash: createHash("sha256").update(projectRoot).digest("hex"), ipcAddress: overrides.ipcAddress ?? `bridge:${projectRoot}`, pid: process.pid, processStartIdentity: `cli:${process.pid}`, protocolVersion: "1", generation: overrides.generation ?? 1 };
-      },
-      async unregisterBridgeRuntime(projectPath, cwd = process.cwd()) {
-        return undefined;
-      },
-    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[ithyno-bridge] bridge runtime failed to load:", message);
+    process.exit(1);
   }
 }
 
