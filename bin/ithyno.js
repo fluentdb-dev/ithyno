@@ -92,6 +92,34 @@ program
     child.on("exit", (code) => process.exit(code ?? 1));
   });
 
+program
+  .command("bridge")
+  .description("Bridge runtime registry and project status helpers")
+  .addCommand(
+    new Command("status")
+      .description("Read the current project's shared bridge status")
+      .option("-p, --project <path>", "absolute or relative project root")
+      .action((opts) => {
+        const bridge = resolve(pkgRoot, "bin", "ithyno-bridge.js");
+        const child = spawn(process.execPath, [bridge, "status", ...(opts.project ? ["--project", opts.project] : [])], { stdio: "inherit" });
+        child.on("exit", (code) => process.exit(code ?? 0));
+      }),
+  );
+
+program
+  .command("mcp")
+  .description("MCP adapter commands")
+  .addCommand(
+    new Command("serve")
+      .description("Run the stdio MCP server over the shared bridge client")
+      .action(() => {
+        const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+        const serverEntry = resolve(pkgRoot, "server", "mcp-server.ts");
+        const child = spawn(process.execPath, [tsxCli, serverEntry], { stdio: "inherit" });
+        child.on("exit", (code) => process.exit(code ?? 0));
+      }),
+  );
+
 // Default action: start the dashboard.
 program
   .option("-p, --port <number>", "port to listen on", "4321")
