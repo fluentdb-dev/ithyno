@@ -8,8 +8,10 @@ import { resolveOpenspecDir, scanWorkspace } from "./parser/workspace.js";
 import { appendAnswer, parseNeedsHuman } from "./needs-human.js";
 import { extractSidecarFields, readSidecar, writeSidecar } from "./sidecar.js";
 import { parseManagerActivityBody, setManagerActivity } from "./manager-activity.js";
+import { PHASES, isPhase, isReservedPhase } from "./phases.js";
 import { AgentRegistry } from "./agents/registry.js";
-import { AgentRunner } from "./agents/runner.js";
+import { AgentRunner, type RunnerExecutionMode } from "./agents/runner.js";
+import { validateRunPayload } from "./agents/run-validation.js";
 
 export type BridgeProtocolVersion = "1";
 
@@ -200,7 +202,17 @@ export function validateBridgeRequest(request: unknown): { request: BridgeReques
   };
 }
 
-export async function handleBridgeOperation(operation: BridgeOperationName, params: Record<string, unknown>, projectRoot: string): Promise<unknown> {
+export type BridgeOperationContext = {
+  registry?: AgentRegistry;
+  runner?: AgentRunner;
+};
+
+export async function handleBridgeOperation(
+  operation: BridgeOperationName,
+  params: Record<string, unknown>,
+  projectRoot: string,
+  context: BridgeOperationContext = {},
+): Promise<unknown> {
   const projectRootCanonical = canonicalProjectRoot(projectRoot);
   const projectHash = stableProjectHash(projectRootCanonical);
   const currentOpenspecDir = resolveOpenspecDir(projectRootCanonical);
@@ -239,6 +251,12 @@ export async function handleBridgeOperation(operation: BridgeOperationName, para
       const requested = typeof params.phase === "string" ? params.phase : "";
       if (!changeId) throw new Error("changeId is required for phase operations");
       if (!requested) throw new Error("phase is required for phase operations");
+      if (isReservedPhase(requested)) {
+        throw new Error(`phase '${requested}' is reserved for Phase 4 and is not supported over the bridge`);
+      }
+      if (!isPhase(requested)) {
+        throw new Error(`unknown phase '${String(requested)}'; expected one of ${PHASES.join(", ")}`);
+      }
       const raw = await readSidecar(projectRootCanonical, changeId);
       const current = extractSidecarFields(raw, changeId);
       if (current.phase === requested) {
@@ -263,35 +281,47 @@ export async function handleBridgeOperation(operation: BridgeOperationName, para
     }
     case "dispatch": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
-      const role = typeof params.role === "string" ? params.role : "code";
-      if (!changeId) throw new Error("changeId is required for dispatch operations");
-      const registry = new AgentRegistry(projectRootCanonical);
+      const runBody = {
+        changeId,
+        agentName: typeof params.agentName === "string" ? params.agentName : undefined,
+        role: typeof params.role === "string" ? params.role : undefined,
+        executionMode: (typeof params.executionMode === "string" && (params.executionMode === "worktree" || params.executionMode === "main-tree")
+          ? params.executionMode
+          : undefined) as RunnerExecutionMode | undefined,
+        prompt: typeof params.prompt === "string" ? params.prompt : undefined,
+        wait: typeof params.wait === "boolean" ? params.wait : undefined,
+        timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
+      };
+      const validation = validateRunPayload(runBody);
+      if (!validation.ok) throw new Error(validation.error);
+      const { data } = validation;
+      const registry = context.registry ?? new AgentRegistry(projectRootCanonical);
       await registry.load();
       const cfg = registry.publicConfig();
       if (!cfg.ok || cfg.agents.length === 0) {
         throw new Error("no agents are configured for this project");
       }
       const agentName =
-        typeof params.agentName === "string"
-          ? params.agentName
-          : cfg.agents.find((agent) => agent.roles.includes(role))?.name ?? cfg.agents[0].name;
-      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
-      const result = await runner.run(changeId, agentName, role, "worktree");
+        data.agentName ??
+        cfg.agents.find((agent) => agent.roles.includes(data.role ?? "code"))?.name ??
+        cfg.agents[0].name;
+      const runner = context.runner ?? new AgentRunner(projectRootCanonical, registry, () => undefined);
+      const result = await runner.run(data.changeId, agentName, data.role ?? "code", data.executionMode ?? "worktree", data.prompt ?? undefined);
       if (!result.ok) throw new Error(result.reason);
-      return { ok: true, jobId: result.job.id, changeId, role: result.job.role ?? role, status: result.job.status };
+      return { ok: true, jobId: result.job.id, changeId: data.changeId, role: result.job.role ?? (data.role ?? "code"), status: result.job.status };
     }
     case "jobs": {
-      const registry = new AgentRegistry(projectRootCanonical);
+      const registry = context.registry ?? new AgentRegistry(projectRootCanonical);
       await registry.load();
-      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
+      const runner = context.runner ?? new AgentRunner(projectRootCanonical, registry, () => undefined);
       return { ok: true, jobs: runner.listJobs() };
     }
     case "job.cancel": {
       const jobId = typeof params.jobId === "string" ? params.jobId : "";
       if (!jobId) throw new Error("jobId is required for job cancellation");
-      const registry = new AgentRegistry(projectRootCanonical);
+      const registry = context.registry ?? new AgentRegistry(projectRootCanonical);
       await registry.load();
-      const runner = new AgentRunner(projectRootCanonical, registry, () => undefined);
+      const runner = context.runner ?? new AgentRunner(projectRootCanonical, registry, () => undefined);
       const result = runner.cancel(jobId);
       if (!result.ok) throw new Error(result.reason ?? "job cancellation failed");
       return { ok: true, cancelled: true, jobId };
@@ -307,7 +337,7 @@ export async function handleBridgeOperation(operation: BridgeOperationName, para
     }
     case "needs-human.answer": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
-      const answer = typeof params.answer === "string" ? params.answer : "";
+      const answer = typeof params.answer === "string" ? params.answer.trim() : "";
       if (!changeId) throw new Error("changeId is required for needs-human answer operations");
       if (!answer) throw new Error("answer is required for needs-human answer operations");
       const currentRaw = await readSidecar(projectRootCanonical, changeId);
@@ -684,7 +714,15 @@ export async function callBridgeOperation(
   }
 }
 
-export async function startBridgeServer(projectPath: string, cwd = process.cwd()): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
+export async function startBridgeServer(
+  projectPath: string,
+  cwd = process.cwd(),
+  context: BridgeOperationContext = {},
+): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
+  if (process.platform === "win32") {
+    throw new Error("Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented");
+  }
+
   const projectRoot = canonicalProjectRoot(projectPath, cwd);
   const descriptor = await registerBridgeRuntime(projectRoot, cwd, {
     ipcAddress: buildBridgeIpcAddress(projectRoot),
@@ -721,7 +759,7 @@ export async function startBridgeServer(projectPath: string, cwd = process.cwd()
     seenRequestIds.add(request.requestId);
     setTimeout(() => seenRequestIds.delete(request.requestId), 60_000).unref?.();
     try {
-      const result = await handleBridgeOperation(request.operation, request.params, request.projectRoot);
+      const result = await handleBridgeOperation(request.operation, request.params, request.projectRoot, context);
       socket.write(`${JSON.stringify(buildBridgeEnvelope(request, result))}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "bridge operation failed";
@@ -730,23 +768,16 @@ export async function startBridgeServer(projectPath: string, cwd = process.cwd()
     socket.end();
   });
 
-  if (process.platform !== "win32") {
-    const socketPath = descriptor.ipcAddress;
-    await rm(socketPath, { force: true });
-    await mkdir(join(socketPath, ".."), { recursive: true, mode: 0o700 });
-    await new Promise<void>((resolve, reject) => {
-      server.listen(socketPath, () => {
-        chmod(socketPath, 0o600).catch(() => undefined);
-        resolve();
-      });
-      server.on("error", reject);
+  const socketPath = descriptor.ipcAddress;
+  await rm(socketPath, { force: true });
+  await mkdir(join(socketPath, ".."), { recursive: true, mode: 0o700 });
+  await new Promise<void>((resolve, reject) => {
+    server.listen(socketPath, () => {
+      chmod(socketPath, 0o600).catch(() => undefined);
+      resolve();
     });
-  } else {
-    await new Promise<void>((resolve, reject) => {
-      server.listen(descriptor.ipcAddress, () => resolve());
-      server.on("error", reject);
-    });
-  }
+    server.on("error", reject);
+  });
 
   return { server, descriptor };
 }

@@ -50,17 +50,11 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  The Electron shell and VSCode extension export the resolved,
-  per-project endpoint into the Manager PTY. If only the injected
-  `ITHYNO_PORT` is available, derive the base URL from that exact
-  value. Never use a remembered or default port.
-
-- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
-  token. Required by every token-gated endpoint, including
-  `POST /api/manager/activity` (see **Manager activity publication**
-  below). The server exports it into the Manager PTY's environment at
-  spawn time. Validate the injected context at dispatch start:
+- `ITHYNO_BASE` — compatibility-only when the caller still relies on
+  the injected HTTP env. The authoritative transport is the shared
+  `ithyno bridge` client, which resolves the active project and never
+  guesses a default port. If only `ITHYNO_PORT` is present, derive the
+  base URL from that value and stop before any fallback guess:
 
   ```bash
   if [ -z "${ITHYNO_BASE:-}" ]; then
@@ -72,20 +66,26 @@ The dispatch advances the change through `proposed → coded → reviewed
       exit 1
     fi
   fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch] authoritative ithyno session context is missing."
-    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch] Restart this Manager from the active dashboard."
-    exit 1
-  fi
   ```
 
-  Never print the token itself. If a request fails, report the value
-  of `ITHYNO_BASE` and whether the token is set, then stop. Do not
-  retry a guessed endpoint or declare the server offline based on a
-  request to another port. Activity publication remains best-effort
-  only after this initial session-context validation succeeds.
+- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
+  token. Required only by any direct HTTP request that still uses the
+  legacy transport after the bridge check. Never print the token
+  itself. If a request fails, report the value of `ITHYNO_BASE` and
+  whether the token is set, then stop. Do not retry a guessed endpoint
+  or declare the server offline based on a request to another port.
+
+  **Mandatory freshness checkpoint:** immediately before every ithyno
+  HTTP request, pause and ask whether the dashboard or server may have
+  restarted since the preceding request. Expand the current shell's
+  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
+  moment; never reuse a literal endpoint/token copied from an earlier
+  command or explanation. On HTTP 401/403 or a transport failure,
+  re-read those variables once. Retry only when the current values are
+  demonstrably different from the values used by the failed request;
+  otherwise stop and request a fresh Manager session. An auth/transport
+  failure is not a worker failure and MUST NOT trigger Manager self-
+  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
 
   **Mandatory freshness checkpoint:** immediately before every ithyno
   HTTP request, pause and ask whether the dashboard or server may have

@@ -3,7 +3,7 @@
 - [x] 1.1 Define versioned bridge request, response, error, operation metadata, and redacted audit-event schemas in a transport-neutral server module.
 - [x] 1.2 Define the initial allow-listed operation catalog for status, project/change reads, phase/activity writes, dispatch, job read/cancel, and needs-human answers; explicitly exclude raw HTTP, shell, filesystem, Secrets, environment dump, and token operations.
 - [x] 1.3 Implement canonical realpath project identity and stable project hashing with symlink, missing-path, case-sensitivity, and multi-project unit tests.
-- [x] 1.4 Resolve and document the supported Windows current-user named-pipe ACL mechanism, including remote-client rejection, before enabling Windows write operations.
+- [ ] 1.4 Resolve and document the supported Windows current-user named-pipe ACL mechanism, including remote-client rejection, before enabling Windows write operations.
 - [x] 1.5 Implement platform runtime-directory and endpoint selection for macOS, Linux, and Windows without embedding project names or secrets in endpoint names.
 
 ## 2. Secure runtime registry and IPC
@@ -11,7 +11,7 @@
 - [x] 2.1 Implement atomic, user-scoped runtime descriptor registration containing only project identity, IPC address, PID, process-start identity, protocol version, and generation.
 - [x] 2.2 Implement descriptor lookup, exact canonical-project validation, liveness handshake, orderly unregister, and proven-stale pruning without fixed-port or recency fallback.
 - [x] 2.3 Implement the macOS/Linux Unix-domain socket server and client with `0700` runtime-directory and `0600` socket permissions, bounded messages, deadlines, and cleanup.
-- [x] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
+- [ ] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
 - [x] 2.5 Register and unregister the bridge with standalone, Electron-launched, and VS Code Extension-launched server lifecycles without changing browser HTTP startup behavior.
 - [x] 2.6 Add IPC protocol tests for malformed JSON, unsupported versions, unknown operations, oversized payloads, duplicate request IDs, timeout, disconnect, and sanitized failures.
 - [x] 2.7 Add multi-project, symlink, stale PID/start identity, generation replacement, crash residue, and unauthorized-user/ACL platform tests.

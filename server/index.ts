@@ -127,6 +127,35 @@ let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
 let bridgeRuntime: Awaited<ReturnType<typeof startBridgeServer>> | null = null;
+
+async function restartBridgeRuntimeForProject(projectRoot: string): Promise<void> {
+  const nextRegistry = new AgentRegistry(projectRoot);
+  await nextRegistry.load();
+  const nextRunner = new AgentRunner(projectRoot, nextRegistry, (ev) => broadcast(ev));
+  await nextRunner.adoptDetached();
+  await nextRunner.adoptOrphanWorktrees();
+
+  if (bridgeRuntime) {
+    try {
+      await stopBridgeServer(bridgeRuntime.server);
+    } finally {
+      await unregisterBridgeRuntime(bridgeRuntime.descriptor.projectRoot).catch(() => undefined);
+      bridgeRuntime = null;
+    }
+  }
+  agentRegistry = nextRegistry;
+  agentRunner = nextRunner;
+  try {
+    bridgeRuntime = await startBridgeServer(projectRoot, process.cwd(), {
+      registry: agentRegistry,
+      runner: agentRunner,
+    });
+  } catch (err) {
+    console.warn(`[bridge] runtime restart failed for ${projectRoot}: ${err instanceof Error ? err.message : String(err)}`);
+    bridgeRuntime = null;
+  }
+}
+
 registerProductionShutdown(fastify, async () => {
   terminateAllLivePtys();
   if (bridgeRuntime) {
@@ -344,7 +373,7 @@ if (existsSync(DOCS_DIR)) {
 }
 
 // ---- Agent runner ----------------------------------------------------------
-const agentRegistry = new AgentRegistry(getProjectRoot());
+let agentRegistry = new AgentRegistry(getProjectRoot());
 await agentRegistry.load();
 // auto-sync-agmsg-spawn-options: on boot, ensure ~/.agmsg/config/spawn_options.yaml
 // mirrors non-`--model` args of live-shell workers in agents.yaml. Silent on failure —
@@ -356,8 +385,11 @@ try {
     `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
   );
 }
-bridgeRuntime = await startBridgeServer(getProjectRoot());
-const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+let agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+bridgeRuntime = await startBridgeServer(getProjectRoot(), process.cwd(), {
+  registry: agentRegistry,
+  runner: agentRunner,
+});
 await agentRunner.adoptDetached();
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
@@ -1958,6 +1990,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       const oldRoot = getProjectRoot();
       terminateAllLivePtys(oldRoot);
       setProjectRoot(resolvedNext);
+      await restartBridgeRuntimeForProject(resolvedNext);
       broadcast({ type: "state-replaced" });
       return reply.code(200).send({ projectRoot: resolvedNext });
     } finally {

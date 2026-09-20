@@ -37,9 +37,11 @@ function loadShellEnv() {
 loadShellEnv();
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { readFile, writeFile, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { Command } from "commander";
 import { runInit } from "./init.js";
 
@@ -69,6 +71,29 @@ const EXIT_CODES = {
 async function projectFromArgs(project, defaultDir = process.cwd()) {
   const api = await loadBridgeApi();
   return api.canonicalProjectRoot(project || defaultDir, defaultDir);
+}
+
+function resolveMcpConfigPath(projectRoot, globalFlag = false) {
+  if (globalFlag) return join(homedir(), ".mcp.json");
+  return join(projectRoot || process.cwd(), ".mcp.json");
+}
+
+async function readMcpConfig(configPath) {
+  try {
+    const text = await readFile(configPath, "utf8");
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return { mcpServers: {} };
+    return { mcpServers: parsed.mcpServers && typeof parsed.mcpServers === "object" ? parsed.mcpServers : {} };
+  } catch {
+    return { mcpServers: {} };
+  }
+}
+
+async function writeMcpConfig(configPath, servers) {
+  const parent = dirname(configPath);
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(parent, { recursive: true }));
+  const payload = JSON.stringify({ mcpServers: servers }, null, 2);
+  await writeFile(configPath, `${payload}\n`, "utf8");
 }
 
 async function printBridgeEnvelope(result, requestKind, projectRoot, operation) {
@@ -178,19 +203,72 @@ bridgeCommand.description("Secure local project bridge commands");
 });
 program.addCommand(bridgeCommand);
 
-program
-  .command("mcp")
-  .description("MCP adapter commands")
-  .addCommand(
-    new Command("serve")
-      .description("Run the stdio MCP server over the shared bridge client")
-      .action(() => {
-        const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
-        const serverEntry = resolve(pkgRoot, "server", "mcp-server.ts");
-        const child = spawn(process.execPath, [tsxCli, serverEntry], { stdio: "inherit" });
-        child.on("exit", (code) => process.exit(code ?? 0));
-      }),
-  );
+const mcpCommand = new Command("mcp");
+mcpCommand.description("MCP adapter commands");
+
+mcpCommand
+  .command("serve")
+  .description("Run the stdio MCP server over the shared bridge client")
+  .action(() => {
+    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+    const serverEntry = resolve(pkgRoot, "server", "mcp-server.ts");
+    const child = spawn(process.execPath, [tsxCli, serverEntry], { stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code ?? 0));
+  });
+
+mcpCommand
+  .command("install")
+  .description("Install the ithyno MCP server into a project or user .mcp.json config without storing credentials")
+  .option("-p, --project <path>", "project root to update")
+  .option("--global", "write to ~/.mcp.json instead of the project")
+  .action(async (opts) => {
+    const projectRoot = opts.project ? await projectFromArgs(opts.project) : process.cwd();
+    const configPath = resolveMcpConfigPath(projectRoot, !!opts.global);
+    const config = await readMcpConfig(configPath);
+    const command = process.execPath;
+    const args = [resolve(pkgRoot, "bin", "ithyno.js"), "mcp", "serve"];
+    config.mcpServers.ithyno = {
+      command,
+      args,
+      env: { ITHYNO_PROJECT_ROOT: projectRoot, ITHYNO_OPEN: "0" },
+    };
+    await writeMcpConfig(configPath, config.mcpServers);
+    console.log(JSON.stringify({ ok: true, configPath, installed: true, name: "ithyno" }, null, 2));
+  });
+
+mcpCommand
+  .command("status")
+  .description("Check whether ithyno is installed in the active project or user MCP config")
+  .option("-p, --project <path>", "project root to inspect")
+  .option("--global", "check ~/.mcp.json instead of the project")
+  .action(async (opts) => {
+    const projectRoot = opts.project ? await projectFromArgs(opts.project) : process.cwd();
+    const configPath = resolveMcpConfigPath(projectRoot, !!opts.global);
+    const config = await readMcpConfig(configPath);
+    const installed = Boolean(config.mcpServers?.ithyno);
+    console.log(JSON.stringify({ ok: true, configPath, installed, config: config.mcpServers?.ithyno ?? null }, null, 2));
+    process.exit(installed ? EXIT_CODES.ok : EXIT_CODES.unavailable);
+  });
+
+mcpCommand
+  .command("remove")
+  .description("Remove the ithyno MCP server from a project or user .mcp.json config")
+  .option("-p, --project <path>", "project root to update")
+  .option("--global", "remove from ~/.mcp.json instead of the project")
+  .action(async (opts) => {
+    const projectRoot = opts.project ? await projectFromArgs(opts.project) : process.cwd();
+    const configPath = resolveMcpConfigPath(projectRoot, !!opts.global);
+    const config = await readMcpConfig(configPath);
+    if (!config.mcpServers?.ithyno) {
+      console.log(JSON.stringify({ ok: true, configPath, removed: false }, null, 2));
+      process.exit(EXIT_CODES.unavailable);
+    }
+    delete config.mcpServers.ithyno;
+    await writeMcpConfig(configPath, config.mcpServers);
+    console.log(JSON.stringify({ ok: true, configPath, removed: true }, null, 2));
+  });
+
+program.addCommand(mcpCommand);
 
 program
   .option("-p, --port <number>", "port to listen on", "4321")

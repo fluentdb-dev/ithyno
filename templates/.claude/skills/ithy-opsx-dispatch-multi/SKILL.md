@@ -51,13 +51,13 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
+- `ITHYNO_PROJECT_ROOT` — exact project root for the concurrent change set.
+  Resolve it before any worker routing; never guess a different project or
+  remembered local port.
 - `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  The Electron shell and VSCode extension export the resolved,
-  per-project endpoint into the Manager PTY. If only the injected
-  `ITHYNO_PORT` is available, derive the base URL from that exact
-  value. Never use a remembered or default port.
-- `ITHYNO_SESSION_TOKEN` — the current dashboard session token.
-  Validate the injected context before preflight or worker routing:
+  Compatibility-only if a legacy HTTP caller still needs the injected env;
+  if it is absent, derive from `ITHYNO_PORT` and stop rather than falling
+  back to `localhost:4321`.
 
   ```bash
   if [ -z "${ITHYNO_BASE:-}" ]; then
@@ -99,11 +99,11 @@ independent Kanban badges. Landed by
 ```bash
 postManagerActivity() {
   # $1 = JSON body carrying changeId + stage + activity (+ detail).
-  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
-  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
-    -H 'content-type: application/json' \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -d "$1" >/dev/null 2>&1 || true
+  ithyno bridge activity \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "${CHANGE_ID:-}" \
+    --activity "${2:-idle}" \
+    --message "$1" >/dev/null 2>&1 || true
 }
 ```
 

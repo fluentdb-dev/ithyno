@@ -42,17 +42,14 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  The Electron shell and VSCode extension export the resolved,
-  per-project endpoint into the Manager PTY. If only the injected
-  `ITHYNO_PORT` is available, derive the base URL from that exact
-  value. Never use a remembered or default port.
+- `ITHYNO_PROJECT_ROOT` — the resolved project root for this dispatch.
+  Use the active project root discovered by the Manager or passed to the
+  workflow. Never guess another project or a remembered port; resolve the
+  exact project first and then call the shared `ithyno bridge` client.
 
-- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
-  token. Required by every token-gated endpoint, including
-  `POST /api/manager/activity` (see **Manager activity publication**
-  below). The server exports it into the Manager PTY's environment at
-  spawn time. Validate the injected context at dispatch start:
+- `ITHYNO_BASE` — compatibility-only when the call site still relies on
+  the injected HTTP env. If unavailable, derive it from `ITHYNO_PORT` and
+  stop before any guessed-port fallback.
 
   ```bash
   if [ -z "${ITHYNO_BASE:-}" ]; then
@@ -60,58 +57,74 @@ The dispatch advances the change through `proposed → coded → reviewed
       ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
     else
       echo "[dispatch] ITHYNO_BASE and ITHYNO_PORT are unset."
-      echo "[dispatch] Restart this Manager from the active dashboard; do not guess a port."
+      echo "[dispatch] Resolve the active dashboard session before dispatching."
       exit 1
     fi
   fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch] authoritative ithyno session context is missing."
-    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch] Restart this Manager from the active dashboard."
+  ```
+
+  Never print the token itself. If a request fails, report the value of
+  `ITHYNO_BASE` and whether the session token is set, then stop. Do not
+  retry a guessed endpoint or declare the server offline based on a
+  request to another port.
+
+  **Mandatory freshness checkpoint:** immediately before every bridge call,
+  re-read the active `ITHYNO_BASE`, `ITHYNO_PORT`, and project-root
+  values; never reuse a literal endpoint copied from an earlier command.
+  If a bridge request fails, re-check the live env once before retrying.
+  An auth/transport failure is not a worker failure and MUST NOT trigger
+  Manager self-dispatch or another worker-routing fallback.
+
+  Legacy compatibility note: if a shell still emits the old HTTP path,
+  the failure separation is explicit and must be treated as a transport
+  problem, not a worker execution problem:
+
+  ```bash
+  if [ "$CURL_EXIT" -ne 0 ]; then
+    echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
+    exit 1
+  fi
+
+  curl -sS --connect-timeout 10 -X POST "$ITHYNO_BASE/api/agents/run" \
+    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+    -d "$JSON_PAYLOAD"
+  ```
+
+- `ITHYNO_BRIDGE` — the supported local bridge entrypoint for workflow
+  writes and job inspection. Prefer `ithyno bridge ... --project "$ITHYNO_PROJECT_ROOT"`
+  over any direct HTTP request or session-token-based curl call.
+
+  ```bash
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    echo "[dispatch] ITHYNO_PROJECT_ROOT is unset; resolve the active project before dispatch."
     exit 1
   fi
   ```
 
-  Never print the token itself. If a request fails, report the value
-  of `ITHYNO_BASE` and whether the token is set, then stop. Do not
-  retry a guessed endpoint or declare the server offline based on a
-  request to another port. Activity publication remains best-effort
-  only after this initial session-context validation succeeds.
-
-  **Mandatory freshness checkpoint:** immediately before every ithyno
-  HTTP request, pause and ask whether the dashboard or server may have
-  restarted since the preceding request. Expand the current shell's
-  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
-  moment; never reuse a literal endpoint/token copied from an earlier
-  command or explanation. On HTTP 401/403 or a transport failure,
-  re-read those variables once. Retry only when the current values are
-  demonstrably different from the values used by the failed request;
-  otherwise stop and request a fresh Manager session. An auth/transport
-  failure is not a worker failure and MUST NOT trigger Manager self-
-  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
+  The CLI bridge never reads or prints session tokens, guessed ports, or
+  other credentials. If a bridge operation fails, surface the bridge error
+  and stop; do not escalate to raw `curl` or localhost fallback.
 
 ## Manager activity publication
 
 The dashboard shows a per-card badge for what Manager itself is doing
 between worker spawns (`dispatching` → `waiting` → `judging` →
 `cleanup` → `transitioning` → cleared). That badge is fed ONLY by this
-skill posting at each boundary. Landed by
-`expose-manager-activity-per-change`.
+skill posting through the shared bridge.
 
 Define the helper once, near the top of the dispatch run:
 
 ```bash
 postManagerActivity() {
-  # $1 = JSON body: {"changeId":…,"stage":"code|review|verify",
+  # $1 = JSON body: {"changeId":…,"role":"code|review|verify",
   #                  "activity":"dispatching|waiting|judging|cleanup|
   #                              transitioning|idle","detail":"…"}
   # Best-effort: never let a telemetry failure abort the dispatch.
-  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
-  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
-    -H 'content-type: application/json' \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -d "$1" >/dev/null 2>&1 || true
+  ithyno bridge activity \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "$CHANGE_ID" \
+    --activity "${2:-idle}" \
+    --message "$3" >/dev/null 2>&1 || true
 }
 ```
 
@@ -120,11 +133,10 @@ Rules:
 - **State is in-memory server-side.** Nothing is persisted; a server
   restart clears every badge. Do not treat a lost badge as an error.
 - **`activity: "idle"` clears the entry.** It is the only way to
-  remove a badge, and `stage` may be omitted on that post.
+  remove a badge, and `role` may be omitted on that post.
 - **Post exactly once per boundary.** The server broadcasts a WS
   event on every accepted write; a chatty loop is visible noise.
-  Re-posting the same `stage` + `activity` (e.g. refreshing
-  `waiting`'s detail with an elapsed hint) preserves the badge's
+  Re-posting the same `role` + `activity` preserves the badge's
   elapsed clock, so it is safe but rarely needed.
 - **Always reach the final `idle` post.** Success, escalation, and
   timeout all end with a clear — see the exit paths in **Steps**.
@@ -541,48 +553,53 @@ exist, create it first.
 "
      fi
 
-     JSON_PAYLOAD=$(node -e '
-       console.log(JSON.stringify({
-         changeId: process.argv[1],
-         agentName: process.argv[2],
-         role: process.argv[3],
-         executionMode: process.argv[4],
-         prompt: process.argv[5],
-         wait: true,
-         timeoutMs: parseInt(process.argv[6], 10)
-       }))
-     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
+     # Required for a synchronous dispatch: the caller waits for the job to
+    # finish before judging success/error. Equivalent payload includes
+    # `wait: true` and the stage timeout in milliseconds. The bridge client
+    # also uses --connect-timeout 10 to fail fast on a stale endpoint.
+    RUN_ARGS=(
+      bridge dispatch
+      --project "$ITHYNO_PROJECT_ROOT"
+      --change-id "<change-id>"
+      --role "$S"
+      --agent "$entry_name"
+      --execution-mode "<worktree|main-tree>"
+      --prompt "<resolved-prompt>$ARTIFACT_CONTRACT"
+      --wait
+      --timeout "$STAGE_TIMEOUT"
+    )
 
-     CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
-     RUN_RESP=$(curl -s --connect-timeout 10 --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d "$JSON_PAYLOAD")
-     CURL_EXIT=$?
+    RUN_RESP=$(ithyno "${RUN_ARGS[@]}" 2>&1)
+    RUN_EXIT=$?
 
-     if [ "$CURL_EXIT" -ne 0 ]; then
-       echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
-       exit 1
-     fi
+    if [ "$RUN_EXIT" -ne 0 ]; then
+      echo "[dispatch] ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
+      echo "$RUN_RESP"
+      exit 1
+    fi
 
-     JOB_STATUS=$(echo "$RUN_RESP" | node -e '
-       try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
-       catch { console.log(""); }
-     ')
+    JOB_STATUS=$(echo "$RUN_RESP" | node -e '
+      try {
+        const text = require("fs").readFileSync(0, "utf-8");
+        const data = JSON.parse(text);
+        console.log(data?.status || data?.error || "");
+      } catch {
+        console.log("");
+      }
+    ')
 
-     if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
-       echo "[dispatch] ithyno session authentication failed at $ITHYNO_BASE."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
-       exit 1
-     fi
+    if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
+      echo "[dispatch] ithyno session authentication failed at the live bridge endpoint."
+      echo "[dispatch] Re-read the current session environment; retry only if it changed."
+      exit 1
+    fi
 
-     if [ "$JOB_STATUS" != "completed" ]; then
-       echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"
-       /ithy-opsx:escalate <change-id> "$S stage worker execution failed ($JOB_STATUS)"
-       exit 1
-     fi
-     ```
+    if [ "$JOB_STATUS" != "completed" ]; then
+      echo "[dispatch] worker execution failed with status/error: $JOB_STATUS"
+      /ithy-opsx:escalate <change-id> "$S stage worker execution failed ($JOB_STATUS)"
+      exit 1
+    fi
+    ```
 
      `entry.args` from `agents.yaml` carries CLI flags. Prompt flags
      (`-p` for non-Codex, `exec` for Codex) are automatically derived by
