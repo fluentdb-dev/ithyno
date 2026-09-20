@@ -2,14 +2,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execSync } from "node:child_process";
 
+function stripIthynoEnv(env = process.env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.startsWith("ITHYNO_")),
+  );
+}
+
 function loadShellEnv() {
   if (process.platform === "win32") return;
+  if (!process.stdin?.isTTY || !process.stdout?.isTTY) return;
   try {
     const shell = process.env.SHELL || "/bin/zsh";
     const output = execSync(`"${shell}" -l -c 'printenv'`, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 10000,
+      timeout: 2500,
     });
     for (const line of output.split("\n")) {
       const idx = line.indexOf("=");
@@ -29,8 +36,11 @@ function loadShellEnv() {
         }
       }
     }
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("ITHYNO_")) delete process.env[key];
+    }
   } catch (err) {
-    console.warn("[cli] failed to load shell env:", err);
+    // Non-interactive or constrained shells can fail here; do not block local CLI startup.
   }
 }
 
@@ -70,15 +80,17 @@ const EXIT_CODES = {
 if (!process.env.ITHYNO_TSX_LOADED && existsSync(resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs"))) {
   const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
     stdio: "inherit",
-    env: { ...process.env, ITHYNO_TSX_LOADED: "1" },
+    env: {
+      ...stripIthynoEnv(process.env),
+      ITHYNO_TSX_LOADED: "1",
+    },
   });
   child.on("exit", (code) => process.exit(code ?? 0));
   child.on("error", (err) => {
     console.error("[ithyno] failed to relaunch with tsx:", err);
     process.exit(EXIT_CODES.unsupported);
   });
-  process.exit(0);
-}
+} else {
 
 async function projectFromArgs(project, defaultDir = process.cwd()) {
   const api = await loadBridgeApi();
@@ -343,11 +355,15 @@ mcpCommand.description("MCP adapter commands");
 mcpCommand
   .command("serve")
   .description("Run the stdio MCP server over the shared bridge client")
-  .action(() => {
-    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
-    const serverEntry = resolve(pkgRoot, "server", "mcp-server.ts");
-    const child = spawn(process.execPath, [tsxCli, serverEntry], { stdio: "inherit" });
-    child.on("exit", (code) => process.exit(code ?? 0));
+  .action(async () => {
+    try {
+      const { serveMcpBridge } = await import("../server/mcp-server.ts");
+      await serveMcpBridge();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[ithyno] failed to start MCP stdio server:", message);
+      process.exit(EXIT_CODES.unsupported);
+    }
   });
 
 mcpCommand
@@ -407,14 +423,39 @@ mcpCommand
 program.addCommand(mcpCommand);
 
 program
-  .option("-p, --port <number>", "port to listen on", "4321")
-  .option("-d, --dir <path>", "path to the OpenSpec project root (containing openspec/)", process.cwd())
+  .command("status")
+  .description("Check the shared local bridge status for a project without fixed-port fallback")
+  .option("-p, --project <path>", "project root to inspect")
+  .option("--json", "emit a machine-readable JSON envelope")
+  .action(async (opts) => {
+    const api = await loadBridgeApi();
+    const projectRoot = await projectFromArgs(opts.project, process.cwd());
+    const status = await api.bridgeStatus(projectRoot, process.cwd());
+    const payload = {
+      ok: status.ok,
+      version: "1",
+      kind: "bridge",
+      command: "status",
+      projectRoot,
+      projectHash: api.stableProjectHash(projectRoot),
+      result: status.runtime ?? null,
+      error: status.error ?? null,
+      code: status.code ?? null,
+    };
+    console.log(JSON.stringify(payload, null, opts.json ? 2 : 0));
+    process.exit(status.ok ? EXIT_CODES.ok : EXIT_CODES[status.code ?? "unsupported"] ?? EXIT_CODES.unsupported);
+  });
+
+program
+  .option("-p, --port <number>", "port to listen on")
+  .option("-d, --dir <path>", "path to the OpenSpec project root (containing openspec/)")
   .option("--no-open", "do not open the browser automatically")
   .action((opts) => {
+    const port = Number(opts.port ?? 4321);
     const env = {
       ...process.env,
-      PORT: String(opts.port),
-      ITHYNO_PROJECT_ROOT: resolve(opts.dir),
+      PORT: String(port),
+      ITHYNO_PROJECT_ROOT: resolve(opts.dir ?? process.cwd()),
       ITHYNO_OPEN: opts.open ? "1" : "0",
     };
     const serverEntry = resolve(pkgRoot, "server", "index.ts");
@@ -424,3 +465,4 @@ program
   });
 
 program.parseAsync(process.argv);
+}

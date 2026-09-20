@@ -54,6 +54,21 @@ If you need to install OpenSpec / agent runner manually — for example
 because you want to customize the workflow skill or your project has a
 non-standard layout — read the sections below.
 
+## Bridge migration and security
+
+The newer CLI and MCP workflow no longer depends on guessed browser URLs or
+`ITHYNO_PORT` / `ITHYNO_BASE` / `ITHYNO_SESSION_TOKEN` values. A project is
+identified by its canonical filesystem root and a user-scoped runtime entry in
+`$XDG_RUNTIME_DIR` or `%LOCALAPPDATA%` rather than by a fixed port. Only the
+current OS user can reach the bridge over its local Unix socket or Windows pipe,
+and the client purposely fails closed if a runtime is missing instead of silently
+falling back to `http://localhost:4321`.
+
+This is the compatibility boundary for the legacy workflow: the older
+`ITHYNO_*` values remain recognized only as a fallback path for older scripts;
+new code should use the direct bridge client and the explicit `ithyno mcp
+install` / `ithyno mcp remove` flow.
+
 ## Prerequisites
 
 For Claude runs using `-p`, `detached: true` can keep the worker alive across
