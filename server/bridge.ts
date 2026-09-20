@@ -641,6 +641,17 @@ export function buildBridgeErrorEnvelope(request: BridgeRequest, code: BridgeCom
 async function readBridgeMessage(socket: Socket): Promise<BridgeRequest | null> {
   return new Promise((resolve) => {
     let buffer = "";
+    const parseFrame = (raw: string): BridgeRequest | null => {
+      const frame = raw.trim();
+      if (!frame) return null;
+      try {
+        const parsed = JSON.parse(frame) as unknown;
+        const valid = validateBridgeRequest(parsed);
+        return valid.error ? null : valid.request;
+      } catch {
+        return null;
+      }
+    };
     const flush = () => {
       const candidate = buffer.trim();
       if (!candidate) return;
@@ -650,23 +661,16 @@ async function readBridgeMessage(socket: Socket): Promise<BridgeRequest | null> 
         resolve(null);
         return;
       }
-      try {
-        const parsed = JSON.parse(candidate) as unknown;
-        const valid = validateBridgeRequest(parsed);
-        if (valid.error) {
-          socket.off("data", onData);
-          socket.off("error", onError);
-          resolve(null);
-          return;
-        }
-        socket.off("data", onData);
-        socket.off("error", onError);
-        resolve(valid.request);
-      } catch {
+      const parsed = parseFrame(candidate);
+      if (!parsed) {
         socket.off("data", onData);
         socket.off("error", onError);
         resolve(null);
+        return;
       }
+      socket.off("data", onData);
+      socket.off("error", onError);
+      resolve(parsed);
     };
     const onData = (chunk: Buffer | string) => {
       buffer += chunk.toString("utf8");
@@ -678,22 +682,19 @@ async function readBridgeMessage(socket: Socket): Promise<BridgeRequest | null> 
       }
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex >= 0) {
-        const frame = buffer.slice(0, newlineIndex).trim();
+        const frame = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
-        if (frame) {
-          const parsed = JSON.parse(frame) as unknown;
-          const valid = validateBridgeRequest(parsed);
-          if (valid.error) {
-            socket.off("data", onData);
-            socket.off("error", onError);
-            resolve(null);
-            return;
-          }
+        const parsed = parseFrame(frame);
+        if (!parsed) {
           socket.off("data", onData);
           socket.off("error", onError);
-          resolve(valid.request);
+          resolve(null);
           return;
         }
+        socket.off("data", onData);
+        socket.off("error", onError);
+        resolve(parsed);
+        return;
       }
       if (buffer.trim().startsWith("{") && buffer.trim().endsWith("}")) {
         flush();

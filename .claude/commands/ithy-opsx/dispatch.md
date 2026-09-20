@@ -50,29 +50,20 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_PROJECT_ROOT` — the exact project selected by the dashboard.
-  The authoritative transport is the shared `ithyno bridge` client.
-  Resolve this value before dispatch and never guess a port or another
-  project:
+- `ITHYNO_PROJECT_ROOT` — optional project root for the dispatch.
+  Prefer the exact project resolved from the active CLI working directory,
+  or from an explicit `--project <path>` passed to the CLI. If it is unset,
+  resolve the project from `pwd` before starting any worker; never guess a
+  different project or a remembered localhost port.
+
+- `ITHYNO_PROJECT_ROOT` is the resolved project root for this dispatch. The
+  authoritative transport is the shared `ithyno bridge` client — not a
+  guessed `localhost:4321` URL, not a token-bearing `curl`, and not a
+  compatibility fallback.
 
   ```bash
   if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
-    echo "[dispatch] ITHYNO_PROJECT_ROOT is unset."
-    echo "[dispatch] Resolve the active project before dispatching."
-    exit 1
-  fi
-  ```
-
-- `ITHYNO_PROJECT_ROOT` is the resolved project root for this dispatch and
-  must be present before any stage starts. The authoritative transport is
-  the shared `ithyno bridge` client — not a guessed `localhost:4321` URL,
-  not a token-bearing `curl`, and not a compatibility fallback.
-
-  ```bash
-  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
-    echo "[dispatch] ITHYNO_PROJECT_ROOT is unset."
-    echo "[dispatch] Resolve the active project before dispatching."
-    exit 1
+    ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
 
   ithyno bridge phase \
@@ -81,11 +72,10 @@ The dispatch advances the change through `proposed → coded → reviewed
     --phase coded
   ```
 
-  Keep the same phase-change semantics as the old control-plane call, but
-  route through the bridge so the exact project identity is checked and the
-  process fails closed if the runtime is unavailable. Manager activity is
-  reported via `ithyno bridge activity` with a mapped `role` and a
-  per-change `change-id`; do not reuse a stale token or guessed endpoint.
+  Keep the same phase-change semantics as the legacy flow, but route through
+  the bridge so the exact project identity is checked and the process fails
+  closed if the runtime is unavailable. Manager activity is reported via
+  `ithyno bridge activity` with a mapped `role` and a per-change `change-id`.
 
 ## Manager activity publication
 

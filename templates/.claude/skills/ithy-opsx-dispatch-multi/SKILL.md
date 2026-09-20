@@ -51,19 +51,15 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
-- `ITHYNO_PROJECT_ROOT` — exact project root for the concurrent change set.
-  Resolve it before any worker routing; never guess a different project or
-  remembered local port.
-- `ITHYNO_PROJECT_ROOT` — exact project root for the concurrent change set.
-  The authoritative transport is the shared `ithyno bridge` client; never
-  guess a different project or port. If the project root is missing, stop
-  before any worker fan-out and ask the user to reopen the active project.
+- `ITHYNO_PROJECT_ROOT` — optional project root for the concurrent change set.
+  Prefer the exact project resolved from the active CLI working directory,
+  or from an explicit `--project <path>` passed to the CLI. If it is unset,
+  resolve the project from `pwd` before starting any worker; never guess a
+  different project or a remembered localhost port.
 
   ```bash
   if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
-    echo "[dispatch-multi] ITHYNO_PROJECT_ROOT is unset."
-    echo "[dispatch-multi] Resolve the active project before dispatching."
-    exit 1
+    ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
 
   ithyno bridge phase \
