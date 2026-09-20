@@ -35,28 +35,106 @@ function loadShellEnv() {
 }
 
 loadShellEnv();
-// CLI entry. Two modes:
-//   - default (no subcommand): start the dashboard server via tsx
-//   - `init [dir]`           : scaffold a target project (pure JS handler)
-//   - `doctor`               : check prerequisites (add-doctor-and-installer)
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { Command } from "commander";
 import { runInit } from "./init.js";
 
+async function loadBridgeApi() {
+  try {
+    return await import("../server/bridge.ts");
+  } catch {
+    return {
+      canonicalProjectRoot(projectPath, cwd = process.cwd()) {
+        const raw = projectPath && projectPath.trim() ? projectPath : cwd;
+        const absolute = resolve(raw);
+        try {
+          return realpathSync(absolute, { encoding: "utf8" });
+        } catch {
+          return absolute;
+        }
+      },
+      stableProjectHash(projectPath, cwd = process.cwd()) {
+        const root = this.canonicalProjectRoot(projectPath, cwd);
+        return createHash("sha256").update(root).digest("hex");
+      },
+      async callBridgeOperation(projectPath, operation, params = {}, cwd = process.cwd()) {
+        const projectRoot = this.canonicalProjectRoot(projectPath, cwd);
+        const projectHash = this.stableProjectHash(projectRoot);
+        return {
+          protocolVersion: "1",
+          requestId: `${operation}:${Date.now()}`,
+          ok: false,
+          projectRoot,
+          projectHash,
+          code: "unavailable",
+          error: "no live bridge runtime was registered for this project; no fixed-port or localhost fallback is used",
+        };
+      },
+    };
+  }
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(__dirname, "..");
+const EXIT_CODES = {
+  ok: 0,
+  unavailable: 10,
+  permission: 11,
+  validation: 12,
+  timeout: 13,
+  stale: 14,
+  unsupported: 15,
+  usage: 2,
+};
+
+async function projectFromArgs(project, defaultDir = process.cwd()) {
+  const api = await loadBridgeApi();
+  return api.canonicalProjectRoot(project || defaultDir, defaultDir);
+}
+
+async function printBridgeEnvelope(result, requestKind, projectRoot, operation) {
+  const api = await loadBridgeApi();
+  const envelope = {
+    ok: Boolean(result?.ok ?? false),
+    version: "1",
+    kind: requestKind,
+    command: operation,
+    projectRoot,
+    projectHash: api.stableProjectHash(projectRoot),
+    result: result?.result ?? null,
+    error: result?.error ?? null,
+    code: result?.code ?? null,
+  };
+  console.log(JSON.stringify(envelope, null, 2));
+}
+
+async function runBridgeCommand(operation, params, opts) {
+  const bridgeApi = await loadBridgeApi();
+  const projectRoot = await projectFromArgs(opts.project, opts.cwd || process.cwd());
+  const response = await bridgeApi.callBridgeOperation(projectRoot, operation, params, opts.cwd || process.cwd());
+  const forceJson = !!opts.json;
+  if (!forceJson) {
+    if (!response.ok) {
+      console.error(response.error ?? "bridge request failed");
+      process.exit(EXIT_CODES[response.code ?? "unsupported"] ?? EXIT_CODES.unsupported);
+    }
+    console.log(JSON.stringify(response.result ?? {}, null, 2));
+    return;
+  }
+  await printBridgeEnvelope(response, "bridge", projectRoot, operation);
+  process.exit(response.ok ? EXIT_CODES.ok : EXIT_CODES[response.code ?? "unsupported"] ?? EXIT_CODES.unsupported);
+}
 
 const program = new Command();
 program.name("ithyno").description("ithyno — local dashboard for the OpenSpec workflow");
 
-// `init` subcommand: scaffold a target project.
 program
   .command("init [dir]")
-  .description(
-    "Scaffold the project-side files ithyno expects (CLAUDE.md, skill, agents.yaml.example, docs/, .gitignore)",
-  )
+  .description("Scaffold the project-side files ithyno expects (CLAUDE.md, skill, agents.yaml.example, docs/, .gitignore)")
   .option("-f, --force", "overwrite existing files instead of skipping them")
   .option("--no-gitignore", "do not modify the target .gitignore")
   .option("-q, --quiet", "minimal output (errors only)")
@@ -64,7 +142,6 @@ program
     const res = await runInit({
       targetDir: dir,
       force: !!opts.force,
-      // commander negates `--no-gitignore` to `opts.gitignore === false`
       skipGitignore: opts.gitignore === false,
       quiet: !!opts.quiet,
     });
@@ -75,16 +152,12 @@ program
     process.exit(0);
   });
 
-// `doctor` subcommand: check prerequisites (add-doctor-and-installer).
-// Runs runDoctor() via tsx (so the TS module is available without a build step)
-// and prints a human-readable table. Exit 0 when readyForManager, 1 otherwise.
 program
   .command("doctor")
   .description("Check prerequisite CLIs and tools (agent CLIs, tmux, agmsg)")
   .option("--json", "emit raw DoctorReport JSON instead of a human-readable table")
   .action((opts) => {
     const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
-    // _doctor-runner.ts lives next to ithyno.js in bin/
     const doctorRunner = resolve(pkgRoot, "bin", "_doctor-runner.ts");
     const args = [tsxCli, doctorRunner];
     if (opts.json) args.push("--json");
@@ -92,19 +165,43 @@ program
     child.on("exit", (code) => process.exit(code ?? 1));
   });
 
-program
-  .command("bridge")
-  .description("Bridge runtime registry and project status helpers")
-  .addCommand(
-    new Command("status")
-      .description("Read the current project's shared bridge status")
+const bridgeCommand = new Command("bridge");
+bridgeCommand.description("Secure local project bridge commands");
+["status", "changes", "phase", "activity", "dispatch", "jobs", "cancel", "needs-human"].forEach((name) => {
+  bridgeCommand.addCommand(
+    new Command(name)
+      .description(`${name} via the shared bridge client`)
       .option("-p, --project <path>", "absolute or relative project root")
-      .action((opts) => {
-        const bridge = resolve(pkgRoot, "bin", "ithyno-bridge.js");
-        const child = spawn(process.execPath, [bridge, "status", ...(opts.project ? ["--project", opts.project] : [])], { stdio: "inherit" });
-        child.on("exit", (code) => process.exit(code ?? 0));
+      .option("--json", "emit a versioned JSON envelope")
+      .option("--change-id <id>", "change ID")
+      .option("--phase <phase>", "phase to set")
+      .option("--activity <activity>", "activity to set")
+      .option("--role <role>", "role for a dispatch")
+      .option("--job <jobId>", "job ID to cancel")
+      .option("--message <message>", "message to attach")
+      .option("--answer <answer>", "needs-human answer")
+      .action(async (opts) => {
+        const projectRoot = await projectFromArgs(opts.project, process.cwd());
+        const opMap = {
+          status: { op: "status", params: {} },
+          changes: { op: "changes", params: {} },
+          phase: { op: "phase", params: { changeId: opts.changeId, phase: opts.phase, message: opts.message } },
+          activity: { op: "activity", params: { changeId: opts.changeId, activity: opts.activity, detail: opts.message } },
+          dispatch: { op: "dispatch", params: { changeId: opts.changeId, role: opts.role } },
+          jobs: { op: "jobs", params: {} },
+          cancel: { op: "job.cancel", params: { jobId: opts.job } },
+          "needs-human": { op: opts.answer ? "needs-human.answer" : "needs-human.read", params: { changeId: opts.changeId, answer: opts.answer ?? "" } },
+        };
+        const selected = opMap[name];
+        if (!selected) {
+          console.error(`unsupported bridge command: ${name}`);
+          process.exit(EXIT_CODES.usage);
+        }
+        await runBridgeCommand(selected.op, selected.params, { ...opts, project: projectRoot, cwd: process.cwd() });
       }),
   );
+});
+program.addCommand(bridgeCommand);
 
 program
   .command("mcp")
@@ -120,14 +217,9 @@ program
       }),
   );
 
-// Default action: start the dashboard.
 program
   .option("-p, --port <number>", "port to listen on", "4321")
-  .option(
-    "-d, --dir <path>",
-    "path to the OpenSpec project root (containing openspec/)",
-    process.cwd(),
-  )
+  .option("-d, --dir <path>", "path to the OpenSpec project root (containing openspec/)", process.cwd())
   .option("--no-open", "do not open the browser automatically")
   .action((opts) => {
     const env = {
@@ -137,11 +229,6 @@ program
       ITHYNO_OPEN: opts.open ? "1" : "0",
     };
     const serverEntry = resolve(pkgRoot, "server", "index.ts");
-    // Spawn tsx via its cli.mjs directly rather than `.bin/tsx`: vsce/pkg
-    // packaging tools replace `.bin` symlinks with copies, which breaks the
-    // relative sibling imports inside cli.mjs when it's copied outside its
-    // dist/. cli.mjs itself resolves its neighbors correctly, so pointing at
-    // it works both in dev and in packaged distributions.
     const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
     const child = spawn(process.execPath, [tsxCli, serverEntry], { env, stdio: "inherit" });
     child.on("exit", (code) => process.exit(code ?? 0));
