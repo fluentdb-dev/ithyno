@@ -390,6 +390,32 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
+  it("single and multi activity helpers omit --role for idle/no-role writes", async () => {
+    const pairs = [
+      [
+        join(REPO_ROOT, ".claude/commands/ithy-opsx/dispatch.md"),
+        join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/dispatch.md"),
+      ],
+      [
+        join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+        join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      ],
+    ] as const;
+    for (const [dev, tmpl] of pairs) {
+      const [devText, tmplText] = await Promise.all([
+        readFile(dev, "utf8"),
+        readFile(tmpl, "utf8"),
+      ]);
+      expect(new Set([devText, tmplText]).size).toBe(1);
+      for (const content of [devText, tmplText]) {
+        expect(content).toContain(
+          'if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then',
+        );
+        expect(content).toMatch(/if \[ -n "\$ACTIVITY_ROLE" \] && \[ "\$ACTIVITY_NAME" != "idle" \]; then[\s\S]*else[\s\S]*--activity "\$ACTIVITY_NAME"/);
+      }
+    }
+  });
+
   it("ithyno API commands never embed a default-port fallback or direct curl auth path", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {

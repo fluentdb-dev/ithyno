@@ -84,17 +84,25 @@ independent Kanban badges. Landed by
 
 ```bash
 postManagerActivity() {
-  # $1 = JSON body carrying changeId + role + activity (+ detail).
+  # $1 = JSON body carrying changeId + role/stage + activity (+ detail).
   ACTIVITY_CHANGE_ID=$(node -e 'try { console.log(JSON.parse(process.argv[1]).changeId || "") } catch {}' "$1")
   ACTIVITY_ROLE=$(node -e 'try { const v=JSON.parse(process.argv[1]); console.log(v.role || v.stage || "") } catch {}' "$1")
   ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
   ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
-  ithyno bridge activity \
-    --project "$ITHYNO_PROJECT_ROOT" \
-    --change-id "$ACTIVITY_CHANGE_ID" \
-    --role "$ACTIVITY_ROLE" \
-    --activity "$ACTIVITY_NAME" \
-    --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
+    ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --role "$ACTIVITY_ROLE" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  else
+    ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  fi
 }
 ```
 
