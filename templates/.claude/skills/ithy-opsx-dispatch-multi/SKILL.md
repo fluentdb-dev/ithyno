@@ -54,39 +54,29 @@ Landed by `add-multi-dispatch-orchestrator`.
 - `ITHYNO_PROJECT_ROOT` — exact project root for the concurrent change set.
   Resolve it before any worker routing; never guess a different project or
   remembered local port.
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  Compatibility-only if a legacy HTTP caller still needs the injected env;
-  if it is absent, derive from `ITHYNO_PORT` and stop rather than falling
-  back to `localhost:4321`.
+- `ITHYNO_PROJECT_ROOT` — exact project root for the concurrent change set.
+  The authoritative transport is the shared `ithyno bridge` client; never
+  guess a different project or port. If the project root is missing, stop
+  before any worker fan-out and ask the user to reopen the active project.
 
   ```bash
-  if [ -z "${ITHYNO_BASE:-}" ]; then
-    if [ -n "${ITHYNO_PORT:-}" ]; then
-      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-    else
-      echo "[dispatch-multi] ITHYNO_BASE and ITHYNO_PORT are unset."
-      echo "[dispatch-multi] Restart this Manager from the active dashboard; do not guess a port."
-      exit 1
-    fi
-  fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch-multi] authoritative ithyno session context is missing."
-    echo "[dispatch-multi] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch-multi] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch-multi] Restart this Manager from the active dashboard."
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    echo "[dispatch-multi] ITHYNO_PROJECT_ROOT is unset."
+    echo "[dispatch-multi] Resolve the active project before dispatching."
     exit 1
   fi
+
+  ithyno bridge phase \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "<change-id>" \
+    --phase coded
   ```
 
-  Never print the token itself. Immediately before every ithyno HTTP
-  request, reconsider whether the dashboard or server restarted and
-  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
-  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
-  re-read them once and retry only if the request values demonstrably
-  changed. Otherwise stop; a control-plane failure must not enter a
-  worker, Manager-execution, or guessed-endpoint fallback. Activity
-  publication remains best-effort only after this initial session-
-  context validation succeeds.
+  All control-plane writes, including phase updates and dashboard activity,
+  must use `ithyno bridge ...` rather than `curl` plus `ITHYNO_BASE` /
+  `ITHYNO_PORT` / `ITHYNO_SESSION_TOKEN`. The same-phase fan-out behavior
+  remains unchanged, but the runtime path is explicitly fail-closed when the
+  bridge is unavailable.
 
 ## Manager activity publication (per change)
 

@@ -166,7 +166,7 @@ export function sanitizeBridgeValue<T>(value: T): T {
         lowered.includes("authorization") ||
         lowered.includes("cookie") ||
         lowered.includes("dotenv") ||
-        lowered === "key"
+        lowered.includes("key")
       ) {
         out[key] = "[redacted]";
         continue;
@@ -766,87 +766,95 @@ export async function callBridgeOperation(
 
   try {
     const payload = `${JSON.stringify(request)}\n`;
-    const response = await new Promise<BridgeResponse | null>((resolve) => {
-      const socket = netConnect(runtime.ipcAddress, () => {
-        socket.write(payload);
-      });
-      const onError = () => resolve(buildBridgeErrorEnvelope(request, "unavailable", "bridge IPC endpoint is not reachable"));
-      const timer = setTimeout(() => {
-        socket.destroy();
-        resolve(buildBridgeErrorEnvelope(request, "timeout", "bridge operation timed out"));
-      }, request.deadlineMs);
-      let buffer = "";
-      const flush = () => {
-        const text = buffer.trim();
-        if (!text) return;
-        try {
-          const parsed = JSON.parse(text) as BridgeResponse;
-          clearTimeout(timer);
+    let lastResponse: BridgeResponse | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await new Promise<BridgeResponse | null>((resolve) => {
+        const socket = netConnect(runtime.ipcAddress, () => {
+          socket.write(payload);
+        });
+        const onError = () => resolve(buildBridgeErrorEnvelope(request, "unavailable", "bridge IPC endpoint is not reachable"));
+        const timer = setTimeout(() => {
           socket.destroy();
-          resolve({
-            protocolVersion: BRIDGE_PROTOCOL_VERSION,
-            requestId: parsed.requestId ?? request.requestId,
-            ok: Boolean(parsed.ok),
-            projectRoot: parsed.projectRoot ?? request.projectRoot,
-            projectHash: parsed.projectHash ?? request.projectHash,
-            code: parsed.code,
-            error: parsed.error,
-            result: sanitizeBridgeValue(parsed.result),
-          });
-        } catch {
-          clearTimeout(timer);
-          socket.destroy();
-          resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
-        }
-      };
-      socket.on("error", onError);
-      socket.on("data", (chunk) => {
-        buffer += String(chunk);
-        if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
-          clearTimeout(timer);
-          socket.destroy();
-          resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response exceeded the maximum payload size"));
-          return;
-        }
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex >= 0) {
-          const frame = buffer.slice(0, newlineIndex).trim();
-          buffer = buffer.slice(newlineIndex + 1);
-          if (frame) {
-            try {
-              const parsed = JSON.parse(frame) as BridgeResponse;
-              clearTimeout(timer);
-              socket.destroy();
-              resolve({
-                protocolVersion: BRIDGE_PROTOCOL_VERSION,
-                requestId: parsed.requestId ?? request.requestId,
-                ok: Boolean(parsed.ok),
-                projectRoot: parsed.projectRoot ?? request.projectRoot,
-                projectHash: parsed.projectHash ?? request.projectHash,
-                code: parsed.code,
-                error: parsed.error,
-                result: sanitizeBridgeValue(parsed.result),
-              });
-            } catch {
-              clearTimeout(timer);
-              socket.destroy();
-              resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
-            }
+          resolve(buildBridgeErrorEnvelope(request, "timeout", "bridge operation timed out"));
+        }, request.deadlineMs);
+        let buffer = "";
+        const flush = () => {
+          const text = buffer.trim();
+          if (!text) return;
+          try {
+            const parsed = JSON.parse(text) as BridgeResponse;
+            clearTimeout(timer);
+            socket.destroy();
+            resolve({
+              protocolVersion: BRIDGE_PROTOCOL_VERSION,
+              requestId: parsed.requestId ?? request.requestId,
+              ok: Boolean(parsed.ok),
+              projectRoot: parsed.projectRoot ?? request.projectRoot,
+              projectHash: parsed.projectHash ?? request.projectHash,
+              code: parsed.code,
+              error: parsed.error,
+              result: sanitizeBridgeValue(parsed.result),
+            });
+          } catch {
+            clearTimeout(timer);
+            socket.destroy();
+            resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
+          }
+        };
+        socket.on("error", onError);
+        socket.on("data", (chunk) => {
+          buffer += String(chunk);
+          if (buffer.length > BRIDGE_MAX_MESSAGE_BYTES) {
+            clearTimeout(timer);
+            socket.destroy();
+            resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response exceeded the maximum payload size"));
             return;
           }
-        }
-        if (buffer.trim().startsWith("{") && buffer.trim().endsWith("}")) {
-          flush();
-        }
+          const newlineIndex = buffer.indexOf("\n");
+          if (newlineIndex >= 0) {
+            const frame = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (frame) {
+              try {
+                const parsed = JSON.parse(frame) as BridgeResponse;
+                clearTimeout(timer);
+                socket.destroy();
+                resolve({
+                  protocolVersion: BRIDGE_PROTOCOL_VERSION,
+                  requestId: parsed.requestId ?? request.requestId,
+                  ok: Boolean(parsed.ok),
+                  projectRoot: parsed.projectRoot ?? request.projectRoot,
+                  projectHash: parsed.projectHash ?? request.projectHash,
+                  code: parsed.code,
+                  error: parsed.error,
+                  result: sanitizeBridgeValue(parsed.result),
+                });
+              } catch {
+                clearTimeout(timer);
+                socket.destroy();
+                resolve(buildBridgeErrorEnvelope(request, "validation", "bridge response was not valid JSON"));
+              }
+              return;
+            }
+          }
+          if (buffer.trim().startsWith("{") && buffer.trim().endsWith("}")) {
+            flush();
+          }
+        });
+        socket.on("close", () => {
+          clearTimeout(timer);
+        });
+        socket.on("end", () => {
+          clearTimeout(timer);
+        });
       });
-      socket.on("close", () => {
-        clearTimeout(timer);
-      });
-      socket.on("end", () => {
-        clearTimeout(timer);
-      });
-    });
-    return response ?? buildBridgeErrorEnvelope(request, "unsupported", "bridge IPC request failed");
+      lastResponse = response ?? null;
+      if (response && response.ok !== false) break;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    return lastResponse ?? buildBridgeErrorEnvelope(request, "unsupported", "bridge IPC request failed");
   } catch {
     return buildBridgeErrorEnvelope(request, "unsupported", "bridge IPC client failed");
   }

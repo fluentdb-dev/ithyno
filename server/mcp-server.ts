@@ -14,7 +14,8 @@ export const TOOL_DEFS = [
       properties: {
         project: { type: "string" },
         changeId: { type: "string" },
-        activity: { type: "string" },
+        role: { type: "string", enum: ["propose", "code", "review", "verify"] },
+        activity: { type: "string", enum: ["dispatching", "waiting", "judging", "cleanup", "transitioning", "idle"] },
         detail: { type: "string" },
       },
       required: ["project", "changeId", "activity"],
@@ -171,8 +172,16 @@ export async function handleBridgeTool(name: string, args: Record<string, unknow
       if (typeof args?.changeId !== "string" || typeof args?.activity !== "string") {
         return { ok: false, ...payload, runtime: status.runtime ?? null, error: "changeId and activity are required" };
       }
+      const role = typeof args?.role === "string" ? args.role : undefined;
+      if (args?.activity !== "idle" && !role) {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "role is required for non-idle activity" };
+      }
+      if (role && !["propose", "code", "review", "verify"].includes(role)) {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "role must be one of: propose, code, review, verify" };
+      }
       const response = await callBridgeOperation(payload.projectRoot, "activity", {
         changeId: args.changeId,
+        ...(role ? { role } : {}),
         activity: args.activity,
         detail: typeof args.detail === "string" ? args.detail : "",
       }, process.cwd());
@@ -258,12 +267,9 @@ export async function serveMcpBridge(): Promise<void> {
   await server.connect(transport);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  void serveMcpBridge();
-}
-
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
-if (invokedPath && invokedPath === resolve(fileURLToPath(import.meta.url))) {
+const thisFile = resolve(fileURLToPath(import.meta.url));
+if (invokedPath && invokedPath === thisFile) {
   serveMcpBridge().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ithyno-mcp] ${message}`);

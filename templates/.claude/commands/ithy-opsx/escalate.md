@@ -39,29 +39,23 @@ in the needs-human state and hand off to the user.
 
 3. **POST the escalation**
 
-   Use the Bash tool:
+   Use the shared bridge CLI so the exact project and prior runtime are
+   resolved without any token-bearing `curl` path:
 
    ```bash
-   if [ -z "${ITHYNO_BASE:-}" ]; then
-     [ -n "${ITHYNO_PORT:-}" ] || { echo "ITHYNO_BASE and ITHYNO_PORT are unset"; exit 1; }
-     ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-   fi
-   [ -n "${ITHYNO_SESSION_TOKEN:-}" ] || { echo "ITHYNO_SESSION_TOKEN is unset"; exit 1; }
-   curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/needs-human" \
-     -H 'content-type: application/json' \
-     -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-     -d '{"question":"<question>","context":"<context>"}'
+   ithyno bridge needs-human \
+     --project "$ITHYNO_PROJECT_ROOT" \
+     --change-id "<change-id>" \
+     --message "<question>"
    ```
 
-   Prefer the authoritative `ITHYNO_BASE` exported into the Manager
-   PTY. If only `ITHYNO_PORT` was injected, derive the URL from that
-   exact port. Never guess a default port or print the session token.
-   Immediately before the request, reconsider whether the dashboard or
-   server restarted and expand all three environment variables again;
-   never reuse values copied from an earlier request.
+   The bridge command resolves the canonical project and writes the
+   needs-human state through the same validated bridge policy, without
+   hard-coded `localhost:4321` fallback or session-token export.
 
    Escape the JSON body appropriately (use a heredoc or Node's
-   JSON.stringify equivalent to avoid quoting bugs).
+   JSON.stringify equivalent to avoid quoting bugs) before passing it
+   to the CLI call.
 
 4. **Interpret the response**
 

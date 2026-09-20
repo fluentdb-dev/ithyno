@@ -390,21 +390,15 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
-  it("ithyno API commands never embed a default-port fallback", async () => {
+  it("ithyno API commands never embed a default-port fallback or direct curl auth path", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {
       const content = await readFile(join(commandsDir, name), "utf8");
       expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
-      expect(content, `${name}: authoritative base missing`).toContain("ITHYNO_BASE");
-      expect(content, `${name}: injected port derivation missing`).toContain(
-        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
-      );
-      expect(content, `${name}: session token guard missing`).toContain(
-        "ITHYNO_SESSION_TOKEN",
-      );
-      expect(content, `${name}: per-request environment refresh missing`).toContain(
-        name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
-      );
+      expect(content, `${name}: token-bearing curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${name}: direct curl remains`).not.toContain("curl -sS -X POST");
+      expect(content, `${name}: bridge CLI missing`).toContain("ithyno bridge");
+      expect(content, `${name}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
 
     const multiCopies = [
@@ -413,21 +407,11 @@ describe("ithy-opsx template drift guard", () => {
     ];
     for (const path of multiCopies) {
       const content = await readFile(path, "utf8");
-      expect(content, `${path}: default-port fallback`).not.toContain(
-        "ITHYNO_PORT:-4321",
-      );
-      expect(content, `${path}: authoritative base missing`).toContain(
-        "authoritative base URL",
-      );
-      expect(content, `${path}: injected port derivation missing`).toContain(
-        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
-      );
-      expect(content, `${path}: token fail-closed guard missing`).toContain(
-        "authoritative ithyno session context is missing",
-      );
-      expect(content, `${path}: freshness checkpoint missing`).toContain(
-        "before every ithyno HTTP",
-      );
+      expect(content, `${path}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
+      expect(content, `${path}: token-bearing curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${path}: direct curl remains`).not.toContain("curl -sS -X POST");
+      expect(content, `${path}: bridge CLI missing`).toContain("ithyno bridge");
+      expect(content, `${path}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
     const multiContents = await Promise.all(
       multiCopies.map((path) => readFile(path, "utf8")),

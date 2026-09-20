@@ -27,28 +27,22 @@ returning the change to the phase it was in before being escalated.
 
 2. **POST the answer**
 
-   Use the Bash tool:
+   Use the shared bridge CLI so the exact project is resolved without
+   guesswork or session-token leakage:
 
    ```bash
-   if [ -z "${ITHYNO_BASE:-}" ]; then
-     [ -n "${ITHYNO_PORT:-}" ] || { echo "ITHYNO_BASE and ITHYNO_PORT are unset"; exit 1; }
-     ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-   fi
-   [ -n "${ITHYNO_SESSION_TOKEN:-}" ] || { echo "ITHYNO_SESSION_TOKEN is unset"; exit 1; }
-   curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/needs-human/answer" \
-     -H 'content-type: application/json' \
-     -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-     -d '{"answer":"<answer>"}'
+   ithyno bridge needs-human \
+     --project "$ITHYNO_PROJECT_ROOT" \
+     --change-id "<change-id>" \
+     --answer "<answer>"
    ```
 
-   Prefer the authoritative `ITHYNO_BASE` exported into the Manager
-   PTY. If only `ITHYNO_PORT` was injected, derive the URL from that
-   exact port. Never guess a default port or print the session token.
-   Immediately before the request, reconsider whether the dashboard or
-   server restarted and expand all three environment variables again;
-   never reuse values copied from an earlier request.
+   The bridge command resolves the canonical project root, enforces the
+   same local-user boundary as the dashboard, and never falls back to a
+   guessed `localhost:4321` endpoint or a token-bearing `curl` call.
 
-   JSON-escape the answer body (heredoc or JSON.stringify).
+   JSON-escape the answer body (heredoc or JSON.stringify) before the
+   final CLI argument is assembled.
 
 3. **Interpret the response**
 

@@ -63,62 +63,29 @@ The dispatch advances the change through `proposed → coded → reviewed
   fi
   ```
 
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  Compatibility-only if a legacy HTTP caller still needs the injected env;
-  if it is absent, derive from `ITHYNO_PORT` and stop rather than falling
-  back to `localhost:4321`.
+- `ITHYNO_PROJECT_ROOT` is the resolved project root for this dispatch and
+  must be present before any stage starts. The authoritative transport is
+  the shared `ithyno bridge` client — not a guessed `localhost:4321` URL,
+  not a token-bearing `curl`, and not a compatibility fallback.
 
   ```bash
-  if [ -z "${ITHYNO_BASE:-}" ]; then
-    if [ -n "${ITHYNO_PORT:-}" ]; then
-      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-    else
-      echo "[dispatch] ITHYNO_BASE and ITHYNO_PORT are unset."
-      echo "[dispatch] Restart this Manager from the active dashboard; do not guess a port."
-      exit 1
-    fi
-  fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch] authoritative ithyno session context is missing."
-    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch] Restart this Manager from the active dashboard."
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    echo "[dispatch] ITHYNO_PROJECT_ROOT is unset."
+    echo "[dispatch] Resolve the active project before dispatching."
     exit 1
   fi
+
+  ithyno bridge phase \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "<change-id>" \
+    --phase coded
   ```
 
-  Never print the token itself. Immediately before every ithyno HTTP
-  request, reconsider whether the dashboard or server restarted and
-  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
-  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
-  re-read them once and retry only if the request values demonstrably
-  changed. Otherwise stop; a control-plane failure must not enter a
-  worker, Manager-execution, or guessed-endpoint fallback. Activity
-  publication remains best-effort only after this initial session-context
-  validation succeeds.
-
-  **Mandatory freshness checkpoint** — a stale endpoint or missing token is
-  a session failure, not a worker failure. Re-expand the current env before
-  every dispatch and every phase mutation.
-
-  ```bash
-  curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -H "Content-Type: application/json" \
-    --data '{"phase":"coded"}'
-
-  CURL_EXIT=$?
-  if [ "$CURL_EXIT" -ne 0 ]; then
-    echo "[dispatch] ithyno HTTP transport failed; auth or session failure is not a worker failure."
-    exit 1
-  fi
-  ```
-
-- `ITHYNO_PORT`, `ITHYNO_SESSION_TOKEN`, and any legacy env values remain a
-  compatibility contract for older installed workflows only. Newly rendered
-  workflows MUST NOT read them for control-plane operations. A bridge failure
-  is explicit: report it and stop rather than falling back to authenticated
-  HTTP, a guessed port, or Manager self-execution.
+  Keep the same phase-change semantics as the old control-plane call, but
+  route through the bridge so the exact project identity is checked and the
+  process fails closed if the runtime is unavailable. Manager activity is
+  reported via `ithyno bridge activity` with a mapped `role` and a
+  per-change `change-id`; do not reuse a stale token or guessed endpoint.
 
 ## Manager activity publication
 

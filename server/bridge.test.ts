@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,11 @@ import {
   bridgeStatus,
   bridgeRuntimeDirectory,
   bridgeRuntimeFile,
+  startBridgeServer,
+  stopBridgeServer,
+  callBridgeOperation,
+  sanitizeBridgeValue,
+  unregisterBridgeRuntime,
 } from "./bridge.js";
 
 describe("bridge project identity", () => {
@@ -54,7 +59,7 @@ describe("bridge runtime registry", () => {
       });
       const file = bridgeRuntimeFile(projectRoot, projectRoot);
       expect(existsSync(file)).toBe(true);
-      const json = require("node:fs").readFileSync(file, "utf8");
+      const json = readFileSync(file, "utf8");
       expect(json).not.toContain("sessionToken");
       expect(json).not.toContain("password");
       expect((await lookupBridgeRuntime(projectRoot, projectRoot))?.projectHash).toBe(descriptor.projectHash);
@@ -110,4 +115,34 @@ describe("bridge runtime registry", () => {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it("runs a real bridge IPC round-trip and redacts secrets before they leave the process", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-ipc-"));
+    const { server } = await startBridgeServer(projectRoot, process.cwd());
+    try {
+      const status = await callBridgeOperation(projectRoot, "status", {}, process.cwd());
+      expect(status.ok).toBe(true);
+      expect(status.result).toEqual(expect.objectContaining({ projectRoot: canonicalProjectRoot(projectRoot, process.cwd()) }));
+
+      const redacted = sanitizeBridgeValue({ sessionToken: "abc", authorization: "Bearer hi", nested: { apiKey: "secret" } });
+      expect(redacted).toEqual({ sessionToken: "[redacted]", authorization: "[redacted]", nested: { apiKey: "[redacted]" } });
+
+      const activity = await callBridgeOperation(projectRoot, "activity", {
+        changeId: "bridge-ipc-test",
+        role: "code",
+        activity: "waiting",
+        detail: "secret=abc",
+      }, process.cwd());
+      expect(activity.ok).toBe(true);
+      expect(activity.result).toEqual(expect.objectContaining({
+        changeId: "bridge-ipc-test",
+        activity: expect.objectContaining({ role: "code", activity: "waiting" }),
+      }));
+    } finally {
+      await stopBridgeServer(server);
+      await unregisterBridgeRuntime(projectRoot, process.cwd());
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
 });
