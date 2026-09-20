@@ -2,8 +2,26 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, InitializeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { bridgeStatus, callBridgeOperation, canonicalProjectRoot, stableProjectHash } from "./bridge.js";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
+  {
+    name: "ithyno_activity",
+    description: "Publish or clear Manager activity for one change.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        changeId: { type: "string" },
+        activity: { type: "string" },
+        detail: { type: "string" },
+      },
+      required: ["project", "changeId", "activity"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
   {
     name: "ithyno_status",
     description: "Return the bridged status for the exact project without fixed-port guesses.",
@@ -68,8 +86,46 @@ const TOOL_DEFS = [
         project: { type: "string", description: "Absolute or relative path for the project root." },
         changeId: { type: "string" },
         role: { type: "string" },
+        agentName: { type: "string" },
+        executionMode: { type: "string", enum: ["worktree", "main-tree"] },
+        prompt: { type: "string" },
+        wait: { type: "boolean" },
+        timeoutMs: { type: "integer", minimum: 1 },
       },
       required: ["project", "changeId", "role"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "ithyno_cancel_job",
+    description: "Cancel a running AgentRunner job.",
+    inputSchema: {
+      type: "object",
+      properties: { project: { type: "string" }, jobId: { type: "string" } },
+      required: ["project", "jobId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "ithyno_needs_human",
+    description: "Read the current needs-human question and answer state.",
+    inputSchema: {
+      type: "object",
+      properties: { project: { type: "string" }, changeId: { type: "string" } },
+      required: ["project", "changeId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "ithyno_answer_needs_human",
+    description: "Submit an answer to a needs-human question.",
+    inputSchema: {
+      type: "object",
+      properties: { project: { type: "string" }, changeId: { type: "string" }, answer: { type: "string" } },
+      required: ["project", "changeId", "answer"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -84,7 +140,7 @@ function projectPayload(project: string | undefined) {
   };
 }
 
-async function handleBridgeTool(name: string, args: Record<string, unknown> | undefined) {
+export async function handleBridgeTool(name: string, args: Record<string, unknown> | undefined) {
   const payload = projectPayload(typeof args?.project === "string" ? args.project : undefined);
   const status = await bridgeStatus(payload.projectRoot);
   if (!status.ok) {
@@ -111,6 +167,17 @@ async function handleBridgeTool(name: string, args: Record<string, unknown> | un
       const response = await callBridgeOperation(payload.projectRoot, "phase", { changeId: args.changeId, phase: args.phase, message: args.message ?? "" }, process.cwd());
       return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
     }
+    case "ithyno_activity": {
+      if (typeof args?.changeId !== "string" || typeof args?.activity !== "string") {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "changeId and activity are required" };
+      }
+      const response = await callBridgeOperation(payload.projectRoot, "activity", {
+        changeId: args.changeId,
+        activity: args.activity,
+        detail: typeof args.detail === "string" ? args.detail : "",
+      }, process.cwd());
+      return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
+    }
     case "ithyno_jobs": {
       const response = await callBridgeOperation(payload.projectRoot, "jobs", {}, process.cwd());
       return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
@@ -119,7 +186,36 @@ async function handleBridgeTool(name: string, args: Record<string, unknown> | un
       if (typeof args?.changeId !== "string" || typeof args?.role !== "string") {
         return { ok: false, ...payload, runtime: status.runtime ?? null, error: "changeId and role are required" };
       }
-      const response = await callBridgeOperation(payload.projectRoot, "dispatch", { changeId: args.changeId, role: args.role }, process.cwd());
+      const response = await callBridgeOperation(payload.projectRoot, "dispatch", {
+        changeId: args.changeId,
+        role: args.role,
+        ...(typeof args.agentName === "string" ? { agentName: args.agentName } : {}),
+        ...(typeof args.executionMode === "string" ? { executionMode: args.executionMode } : {}),
+        ...(typeof args.prompt === "string" ? { prompt: args.prompt } : {}),
+        ...(typeof args.wait === "boolean" ? { wait: args.wait } : {}),
+        ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
+      }, process.cwd());
+      return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
+    }
+    case "ithyno_cancel_job": {
+      if (typeof args?.jobId !== "string") {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "jobId is required" };
+      }
+      const response = await callBridgeOperation(payload.projectRoot, "job.cancel", { jobId: args.jobId }, process.cwd());
+      return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
+    }
+    case "ithyno_needs_human": {
+      if (typeof args?.changeId !== "string") {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "changeId is required" };
+      }
+      const response = await callBridgeOperation(payload.projectRoot, "needs-human.read", { changeId: args.changeId }, process.cwd());
+      return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
+    }
+    case "ithyno_answer_needs_human": {
+      if (typeof args?.changeId !== "string" || typeof args?.answer !== "string") {
+        return { ok: false, ...payload, runtime: status.runtime ?? null, error: "changeId and answer are required" };
+      }
+      const response = await callBridgeOperation(payload.projectRoot, "needs-human.answer", { changeId: args.changeId, answer: args.answer }, process.cwd());
       return { ok: response.ok, ...payload, runtime: status.runtime ?? null, result: response.result ?? null, error: response.error ?? null };
     }
     default:
@@ -151,9 +247,26 @@ export async function serveMcpBridge(): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const response = await handleBridgeTool(String(name), (args ?? {}) as Record<string, unknown>);
-    return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      structuredContent: response,
+      isError: !response.ok,
+    };
   });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void serveMcpBridge();
+}
+
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (invokedPath && invokedPath === resolve(fileURLToPath(import.meta.url))) {
+  serveMcpBridge().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[ithyno-mcp] ${message}`);
+    process.exitCode = 1;
+  });
 }

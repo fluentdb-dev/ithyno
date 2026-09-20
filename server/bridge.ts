@@ -45,6 +45,31 @@ export type BridgeOperationName =
   | "needs-human.read"
   | "needs-human.answer";
 
+export type BridgeOperationPolicy = "read-only" | "workflow-write";
+
+export const BRIDGE_OPERATION_CATALOG: Readonly<Record<BridgeOperationName, BridgeOperationPolicy>> = Object.freeze({
+  status: "read-only",
+  changes: "read-only",
+  phase: "workflow-write",
+  activity: "workflow-write",
+  dispatch: "workflow-write",
+  jobs: "read-only",
+  "job.cancel": "workflow-write",
+  "needs-human.read": "read-only",
+  "needs-human.answer": "workflow-write",
+});
+
+export type BridgeAuditEvent = {
+  version: "1";
+  operation: BridgeOperationName;
+  policy: BridgeOperationPolicy;
+  projectHash: string;
+  changeId?: string;
+  jobId?: string;
+  outcome: "success";
+  at: string;
+};
+
 export type BridgeRequest = {
   protocolVersion: BridgeProtocolVersion;
   requestId: string;
@@ -68,6 +93,8 @@ export type BridgeResponse = {
 
 export const BRIDGE_PROTOCOL_VERSION: BridgeProtocolVersion = "1";
 export const BRIDGE_MAX_MESSAGE_BYTES = 256 * 1024;
+export const BRIDGE_DEFAULT_DEADLINE_MS = 5_000;
+export const BRIDGE_MAX_DEADLINE_MS = 30 * 60_000;
 
 export function canonicalProjectRoot(projectPath?: string, cwd = process.cwd()): string {
   const raw = projectPath && projectPath.trim() ? projectPath : cwd;
@@ -104,7 +131,10 @@ export function bridgeRuntimeFile(projectPath?: string, cwd = process.cwd()): st
 export function buildBridgeIpcAddress(projectPath?: string, cwd = process.cwd()): string {
   const hash = stableProjectHash(projectPath, cwd);
   if (process.platform === "win32") {
-    return `\\.\pipe\ithyno-${hash}`;
+    // LOCAL scopes packaged Windows clients to the caller's login session.
+    // Node's readableAll/writableAll defaults stay disabled when listening,
+    // so libuv uses the creator-owner DACL rather than widening the pipe.
+    return `\\.\pipe\LOCAL\ithyno-${hash}`;
   }
   const dir = bridgeRuntimeDirectory();
   return join(dir, `bridge-${hash}.sock`);
@@ -185,9 +215,9 @@ export function validateBridgeRequest(request: unknown): { request: BridgeReques
   if (candidate.params === undefined || candidate.params === null || typeof candidate.params !== "object") {
     return { request: null as never, error: "params must be an object" };
   }
-  const deadlineMs = Number(candidate.deadlineMs ?? 5000);
-  if (!Number.isFinite(deadlineMs) || deadlineMs <= 0 || deadlineMs > 30000) {
-    return { request: null as never, error: "deadlineMs must be within 1..30000" };
+  const deadlineMs = Number(candidate.deadlineMs ?? BRIDGE_DEFAULT_DEADLINE_MS);
+  if (!Number.isInteger(deadlineMs) || deadlineMs <= 0 || deadlineMs > BRIDGE_MAX_DEADLINE_MS) {
+    return { request: null as never, error: `deadlineMs must be within 1..${BRIDGE_MAX_DEADLINE_MS}` };
   }
   return {
     request: {
@@ -205,7 +235,38 @@ export function validateBridgeRequest(request: unknown): { request: BridgeReques
 export type BridgeOperationContext = {
   registry?: AgentRegistry;
   runner?: AgentRunner;
+  audit?: (event: BridgeAuditEvent) => void | Promise<void>;
 };
+
+async function emitBridgeAudit(
+  context: BridgeOperationContext,
+  operation: BridgeOperationName,
+  projectRoot: string,
+  params: Record<string, unknown>,
+  result: unknown,
+): Promise<void> {
+  if (BRIDGE_OPERATION_CATALOG[operation] !== "workflow-write") return;
+  const resultRecord = result && typeof result === "object" ? result as Record<string, unknown> : {};
+  const event: BridgeAuditEvent = {
+    version: "1",
+    operation,
+    policy: "workflow-write",
+    projectHash: stableProjectHash(projectRoot),
+    ...(typeof params.changeId === "string" ? { changeId: params.changeId } : {}),
+    ...(typeof resultRecord.jobId === "string"
+      ? { jobId: resultRecord.jobId }
+      : typeof params.jobId === "string"
+        ? { jobId: params.jobId }
+        : {}),
+    outcome: "success",
+    at: new Date().toISOString(),
+  };
+  if (context.audit) {
+    await context.audit(event);
+  } else {
+    console.info(`[bridge-audit] ${JSON.stringify(event)}`);
+  }
+}
 
 export async function handleBridgeOperation(
   operation: BridgeOperationName,
@@ -216,6 +277,8 @@ export async function handleBridgeOperation(
   const projectRootCanonical = canonicalProjectRoot(projectRoot);
   const projectHash = stableProjectHash(projectRootCanonical);
   const currentOpenspecDir = resolveOpenspecDir(projectRootCanonical);
+  const policy = BRIDGE_OPERATION_CATALOG[operation];
+  if (!policy) throw new Error(`operation '${String(operation)}' is not present in the bridge policy catalog`);
 
   switch (operation) {
     case "status":
@@ -260,10 +323,14 @@ export async function handleBridgeOperation(
       const raw = await readSidecar(projectRootCanonical, changeId);
       const current = extractSidecarFields(raw, changeId);
       if (current.phase === requested) {
-        return { ok: true, changeId, phase: requested };
+        const result = { ok: true, changeId, phase: requested };
+        await emitBridgeAudit(context, operation, projectRootCanonical, params, result);
+        return result;
       }
       await writeSidecar(projectRootCanonical, changeId, { phase: requested }, undefined);
-      return { ok: true, changeId, phase: requested };
+      const result = { ok: true, changeId, phase: requested };
+      await emitBridgeAudit(context, operation, projectRootCanonical, params, result);
+      return result;
     }
     case "activity": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
@@ -277,7 +344,9 @@ export async function handleBridgeOperation(
       });
       if (!parsed.ok) throw new Error(parsed.error);
       const record = setManagerActivity(parsed.value);
-      return { ok: true, changeId, activity: record, phase: null };
+      const result = { ok: true, changeId, activity: record, phase: null };
+      await emitBridgeAudit(context, operation, projectRootCanonical, params, result);
+      return result;
     }
     case "dispatch": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
@@ -325,8 +394,11 @@ export async function handleBridgeOperation(
         const waitResult = await runner.waitForCompletion(result.job.id, {
           timeoutMs: data.timeoutMs,
         });
-        return { ...response, status: waitResult.status, exitCode: waitResult.exitCode ?? null };
+        const completed = { ...response, status: waitResult.status, exitCode: waitResult.exitCode ?? null };
+        await emitBridgeAudit(context, operation, projectRootCanonical, params, completed);
+        return completed;
       }
+      await emitBridgeAudit(context, operation, projectRootCanonical, params, response);
       return response;
     }
     case "jobs": {
@@ -343,7 +415,9 @@ export async function handleBridgeOperation(
       const runner = context.runner ?? new AgentRunner(projectRootCanonical, registry, () => undefined);
       const result = runner.cancel(jobId);
       if (!result.ok) throw new Error(result.reason ?? "job cancellation failed");
-      return { ok: true, cancelled: true, jobId };
+      const response = { ok: true, cancelled: true, jobId };
+      await emitBridgeAudit(context, operation, projectRootCanonical, params, response);
+      return response;
     }
     case "needs-human.read": {
       const changeId = typeof params.changeId === "string" ? params.changeId : "";
@@ -364,7 +438,9 @@ export async function handleBridgeOperation(
       await appendAnswer(projectRootCanonical, changeId, answer);
       const restored = current.priorPhase ?? "proposed";
       await writeSidecar(projectRootCanonical, changeId, { phase: restored, priorPhase: undefined, escalatedAt: undefined }, undefined);
-      return { ok: true, changeId, answered: true, answer, phase: restored };
+      const response = { ok: true, changeId, answered: true, phase: restored };
+      await emitBridgeAudit(context, operation, projectRootCanonical, params, response);
+      return response;
     }
     default:
       throw new Error(`unsupported operation: ${String(operation)}`);
@@ -480,9 +556,13 @@ export async function lookupBridgeRuntime(projectPath?: string, cwd = process.cw
 
 export function bridgeUnsupportedReason(): string | undefined {
   if (process.platform === "win32") {
-    return "Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented";
+    return "Windows bridge writes are disabled until the current-user SID ACL and remote-client rejection behavior are implemented and verified on Windows";
   }
   return undefined;
+}
+
+export function windowsPipeSecurityDescription(): string {
+  return "LOCAL login-session namespace; exclusive listener; readableAll=false; writableAll=false; duplex requests require creator-owner read/write access";
 }
 
 export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): Promise<BridgeCommandResult> {
@@ -636,6 +716,10 @@ export async function callBridgeOperation(
   cwd = process.cwd(),
 ): Promise<BridgeResponse> {
   const projectRoot = canonicalProjectRoot(projectPath, cwd);
+  const requestedWaitMs = operation === "dispatch" && params.wait === true && typeof params.timeoutMs === "number"
+    ? params.timeoutMs + 30_000
+    : BRIDGE_DEFAULT_DEADLINE_MS;
+  const deadlineMs = Math.max(1, Math.min(BRIDGE_MAX_DEADLINE_MS, Math.trunc(requestedWaitMs)));
   const unsupported = bridgeUnsupportedReason();
   if (unsupported) {
     return buildBridgeErrorEnvelope(
@@ -646,7 +730,7 @@ export async function callBridgeOperation(
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
         params,
-        deadlineMs: 5000,
+        deadlineMs,
       },
       "unsupported",
       unsupported,
@@ -663,7 +747,7 @@ export async function callBridgeOperation(
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
         params,
-        deadlineMs: 5000,
+        deadlineMs,
       },
       "unavailable",
       "no live bridge runtime was registered for this project; no fixed-port or localhost fallback is used",
@@ -677,7 +761,7 @@ export async function callBridgeOperation(
     projectRoot,
     projectHash: runtime.projectHash,
     params: sanitizeBridgeValue(params),
-    deadlineMs: 5000,
+    deadlineMs,
   };
 
   try {
@@ -775,8 +859,6 @@ export async function startBridgeServer(
 ): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
   if (process.platform === "win32") {
     const projectRoot = canonicalProjectRoot(projectPath, cwd);
-    const warning = "Windows bridge writes are disabled until a current-user SID ACL and remote-rejection check are implemented";
-    console.warn(`[bridge] ${warning}`);
     const noopServer = createServer();
     return {
       server: noopServer,
@@ -791,7 +873,6 @@ export async function startBridgeServer(
       },
     };
   }
-
   const projectRoot = canonicalProjectRoot(projectPath, cwd);
   const descriptor = await registerBridgeRuntime(projectRoot, cwd, {
     ipcAddress: buildBridgeIpcAddress(projectRoot),
@@ -827,12 +908,27 @@ export async function startBridgeServer(
     }
     seenRequestIds.add(request.requestId);
     setTimeout(() => seenRequestIds.delete(request.requestId), 60_000).unref?.();
+    let deadlineTimer: NodeJS.Timeout | undefined;
     try {
-      const result = await handleBridgeOperation(request.operation, request.params, request.projectRoot, context);
+      const deadline = new Promise<never>((_resolve, reject) => {
+        deadlineTimer = setTimeout(() => reject(new Error("BRIDGE_REQUEST_DEADLINE_EXPIRED")), request.deadlineMs);
+        deadlineTimer.unref?.();
+      });
+      const result = await Promise.race([
+        handleBridgeOperation(request.operation, request.params, request.projectRoot, context),
+        deadline,
+      ]);
       socket.write(`${JSON.stringify(buildBridgeEnvelope(request, result))}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "bridge operation failed";
-      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope(request, "validation", message))}\n`);
+      const timedOut = message === "BRIDGE_REQUEST_DEADLINE_EXPIRED";
+      socket.write(`${JSON.stringify(buildBridgeErrorEnvelope(
+        request,
+        timedOut ? "timeout" : "validation",
+        timedOut ? "bridge operation exceeded its declared deadline" : message,
+      ))}\n`);
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
     }
     socket.end();
   });
@@ -841,7 +937,10 @@ export async function startBridgeServer(
   await rm(socketPath, { force: true });
   await mkdir(join(socketPath, ".."), { recursive: true, mode: 0o700 });
   await new Promise<void>((resolve, reject) => {
-    server.listen(socketPath, () => {
+    server.listen({
+      path: socketPath,
+      exclusive: true,
+    }, () => {
       chmod(socketPath, 0o600).catch(() => undefined);
       resolve();
     });

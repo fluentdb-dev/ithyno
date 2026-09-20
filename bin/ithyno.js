@@ -309,7 +309,7 @@ bridgeCommand.description("Secure local project bridge commands");
           status: { op: "status", params: {} },
           changes: { op: "changes", params: {} },
           phase: { op: "phase", params: { changeId: opts.changeId, phase: opts.phase, message: opts.message } },
-          activity: { op: "activity", params: { changeId: opts.changeId, activity: opts.activity, detail: opts.message } },
+          activity: { op: "activity", params: { changeId: opts.changeId, role: opts.role, activity: opts.activity, detail: opts.message } },
           dispatch: {
             op: "dispatch",
             params: {

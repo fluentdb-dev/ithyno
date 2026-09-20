@@ -57,7 +57,7 @@
 - [x] 7.1 Include the bridge client/server, platform IPC support, CLI adapter, MCP adapter, and required dependency files in npm, Electron, and VSIX staging and release verification.
 - [x] 7.2 Add packaged smoke tests for macOS/Linux and Windows path/pipe behavior, including launching the CLI and MCP server from installed artifact layouts.
 - [x] 7.3 Document the security boundary, same-OS-user limitation, project routing, CLI commands, MCP setup/removal, sandbox remediation, and compatibility migration in the user/developer documentation.
-- [ ] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
-  - Reopened: verification is intentionally deferred until the executable contract and wait semantics are proven in the current branch.
+- [x] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
+  - Verified: macOS/Linux bridge + MCP + skill-renderer checks and the required build/spec validation passed on this branch.
 - [ ] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
   - Reopened: no evidence of end-to-end project verification exists in this branch yet.

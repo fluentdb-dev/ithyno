@@ -50,11 +50,23 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — compatibility-only when the caller still relies on
-  the injected HTTP env. The authoritative transport is the shared
-  `ithyno bridge` client, which resolves the active project and never
-  guesses a default port. If only `ITHYNO_PORT` is present, derive the
-  base URL from that value and stop before any fallback guess:
+- `ITHYNO_PROJECT_ROOT` — the exact project selected by the dashboard.
+  The authoritative transport is the shared `ithyno bridge` client.
+  Resolve this value before dispatch and never guess a port or another
+  project:
+
+  ```bash
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    echo "[dispatch] ITHYNO_PROJECT_ROOT is unset."
+    echo "[dispatch] Resolve the active project before dispatching."
+    exit 1
+  fi
+  ```
+
+- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
+  Compatibility-only if a legacy HTTP caller still needs the injected env;
+  if it is absent, derive from `ITHYNO_PORT` and stop rather than falling
+  back to `localhost:4321`.
 
   ```bash
   if [ -z "${ITHYNO_BASE:-}" ]; then
@@ -66,38 +78,47 @@ The dispatch advances the change through `proposed → coded → reviewed
       exit 1
     fi
   fi
+  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
+    echo "[dispatch] authoritative ithyno session context is missing."
+    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
+    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
+    echo "[dispatch] Restart this Manager from the active dashboard."
+    exit 1
+  fi
   ```
 
-- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
-  token. Required only by any direct HTTP request that still uses the
-  legacy transport after the bridge check. Never print the token
-  itself. If a request fails, report the value of `ITHYNO_BASE` and
-  whether the token is set, then stop. Do not retry a guessed endpoint
-  or declare the server offline based on a request to another port.
+  Never print the token itself. Immediately before every ithyno HTTP
+  request, reconsider whether the dashboard or server restarted and
+  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
+  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
+  re-read them once and retry only if the request values demonstrably
+  changed. Otherwise stop; a control-plane failure must not enter a
+  worker, Manager-execution, or guessed-endpoint fallback. Activity
+  publication remains best-effort only after this initial session-context
+  validation succeeds.
 
-  **Mandatory freshness checkpoint:** immediately before every ithyno
-  HTTP request, pause and ask whether the dashboard or server may have
-  restarted since the preceding request. Expand the current shell's
-  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
-  moment; never reuse a literal endpoint/token copied from an earlier
-  command or explanation. On HTTP 401/403 or a transport failure,
-  re-read those variables once. Retry only when the current values are
-  demonstrably different from the values used by the failed request;
-  otherwise stop and request a fresh Manager session. An auth/transport
-  failure is not a worker failure and MUST NOT trigger Manager self-
-  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
+  **Mandatory freshness checkpoint** — a stale endpoint or missing token is
+  a session failure, not a worker failure. Re-expand the current env before
+  every dispatch and every phase mutation.
 
-  **Mandatory freshness checkpoint:** immediately before every ithyno
-  HTTP request, pause and ask whether the dashboard or server may have
-  restarted since the preceding request. Expand the current shell's
-  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
-  moment; never reuse a literal endpoint/token copied from an earlier
-  command or explanation. On HTTP 401/403 or a transport failure,
-  re-read those variables once. Retry only when the current values are
-  demonstrably different from the values used by the failed request;
-  otherwise stop and request a fresh Manager session. An auth/transport
-  failure is not a worker failure and MUST NOT trigger Manager self-
-  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
+  ```bash
+  curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
+    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data '{"phase":"coded"}'
+
+  CURL_EXIT=$?
+  if [ "$CURL_EXIT" -ne 0 ]; then
+    echo "[dispatch] ithyno HTTP transport failed; auth or session failure is not a worker failure."
+    exit 1
+  fi
+  ```
+
+- `ITHYNO_PORT`, `ITHYNO_SESSION_TOKEN`, and any legacy env values remain a
+  compatibility contract for older installed workflows only. Newly rendered
+  workflows MUST NOT read them for control-plane operations. A bridge failure
+  is explicit: report it and stop rather than falling back to authenticated
+  HTTP, a guessed port, or Manager self-execution.
 
 ## Manager activity publication
 
@@ -111,15 +132,18 @@ Define the helper once, near the top of the dispatch run:
 
 ```bash
 postManagerActivity() {
-  # $1 = JSON body: {"changeId":…,"stage":"code|review|verify",
-  #                  "activity":"dispatching|waiting|judging|cleanup|
-  #                              transitioning|idle","detail":"…"}
+  # $1 = JSON body carrying changeId + role/stage + activity (+ detail).
   # Best-effort: never let a telemetry failure abort the dispatch.
-  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
-  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
-    -H 'content-type: application/json' \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -d "$1" >/dev/null 2>&1 || true
+  ACTIVITY_CHANGE_ID=$(node -e 'try { console.log(JSON.parse(process.argv[1]).changeId || "") } catch {}' "$1")
+  ACTIVITY_ROLE=$(node -e 'try { const v=JSON.parse(process.argv[1]); console.log(v.role || v.stage || "") } catch {}' "$1")
+  ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
+  ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
+  ithyno bridge activity \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "$ACTIVITY_CHANGE_ID" \
+    --role "$ACTIVITY_ROLE" \
+    --activity "$ACTIVITY_NAME" \
+    --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
 }
 ```
 
@@ -548,39 +572,25 @@ exist, create it first.
 "
      fi
 
-     JSON_PAYLOAD=$(node -e '
-       console.log(JSON.stringify({
-         changeId: process.argv[1],
-         agentName: process.argv[2],
-         role: process.argv[3],
-         executionMode: process.argv[4],
-         prompt: process.argv[5],
-         wait: true,
-         timeoutMs: parseInt(process.argv[6], 10)
-       }))
-     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
-
-     CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
-     RUN_RESP=$(curl -s --connect-timeout 10 --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d "$JSON_PAYLOAD")
-     CURL_EXIT=$?
-
-     if [ "$CURL_EXIT" -ne 0 ]; then
-       echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
-       exit 1
-     fi
+     RUN_RESP=$(ithyno bridge dispatch \
+       --project "$ITHYNO_PROJECT_ROOT" \
+       --change-id "<change-id>" \
+       --agent "$entry_name" \
+       --role "$S" \
+       --execution-mode "<worktree|main-tree>" \
+       --prompt "<resolved-prompt>$ARTIFACT_CONTRACT" \
+       --wait \
+       --timeout "$STAGE_TIMEOUT" 2>&1)
+     RUN_EXIT=$?
 
      JOB_STATUS=$(echo "$RUN_RESP" | node -e '
        try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
        catch { console.log(""); }
      ')
 
-     if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
-       echo "[dispatch] ithyno session authentication failed at $ITHYNO_BASE."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+     if [ "$RUN_EXIT" -ne 0 ]; then
+       echo "[dispatch] ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
+       echo "$RUN_RESP"
        exit 1
      fi
 
