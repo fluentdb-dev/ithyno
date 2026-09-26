@@ -79,6 +79,17 @@ jobs:
 
       - name: Release build
         run: npm run release:build
+        env:
+          # Packaged release clients install the version-matched CLI asset
+          # attached to this GitHub Release. Local/debug packages instead
+          # embed a tarball from their checkout during prepack.
+          ITHYNO_RELEASE_BUILD: '1'
+
+      - name: Pack project-local CLI
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p release-npm
+          npm pack --pack-destination release-npm
 
       - name: Upload platform artifacts
         if: github.event_name != 'pull_request'
@@ -93,12 +104,14 @@ jobs:
 
       # release:build produces the same VSIX on every matrix runner. Upload it
       # once so the publish job never sends duplicate asset names concurrently.
-      - name: Upload VS Code extension
+      - name: Upload VS Code extension and project-local CLI
         if: github.event_name != 'pull_request' && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ithyno-vscode-${{ github.sha }}
-          path: vscode-extension/ithyno-*.vsix
+          name: ithyno-vscode-cli-${{ github.sha }}
+          path: |
+            vscode-extension/ithyno-*.vsix
+            release-npm/ithyno-*.tgz
           if-no-files-found: error
 
   # Tag-only: fan-in the three matrix outputs and attach them to a
@@ -140,6 +153,7 @@ jobs:
             dist-artifacts/**/ithyno-*.dmg
             dist-artifacts/**/ithyno-*.exe
             dist-artifacts/**/ithyno-*.AppImage
+            dist-artifacts/**/ithyno-*.tgz
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
@@ -152,5 +166,6 @@ jobs:
             - `ithyno-*-win-x64.exe` / `ithyno-*-win-arm64.exe` — Windows (Portable / Non-installer)
             - `ithyno-*-linux-x64.AppImage` / `ithyno-*-linux-arm64.AppImage` — Linux
             - `ithyno-*.vsix` — VS Code extension
+            - `ithyno-*.tgz` — project-local CLI package used by initialization
 
             Release notes: edit this Release description to add details.

@@ -57,7 +57,7 @@ The dispatch advances the change through `proposed → coded → reviewed
   different project or a remembered localhost port.
 
 - `ITHYNO_PROJECT_ROOT` is the resolved project root for this dispatch. The
-  authoritative transport is the shared `ithyno bridge` client — not a
+  authoritative transport is the shared `npx --no-install ithyno bridge` client — not a
   guessed `localhost:4321` URL, not a token-bearing `curl`, and not a
   compatibility fallback.
 
@@ -66,7 +66,7 @@ The dispatch advances the change through `proposed → coded → reviewed
     ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
 
-  ithyno bridge phase \
+  npx --no-install ithyno bridge phase \
     --project "$ITHYNO_PROJECT_ROOT" \
     --change-id "<change-id>" \
     --phase coded
@@ -75,7 +75,7 @@ The dispatch advances the change through `proposed → coded → reviewed
   Keep the same phase-change semantics as the legacy flow, but route through
   the bridge so the exact project identity is checked and the process fails
   closed if the runtime is unavailable. Manager activity is reported via
-  `ithyno bridge activity` with a mapped `role` and a per-change `change-id`.
+  `npx --no-install ithyno bridge activity` with a mapped `role` and a per-change `change-id`.
 
 ## Manager activity publication
 
@@ -96,14 +96,14 @@ postManagerActivity() {
   ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
   ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
   if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --role "$ACTIVITY_ROLE" \
       --activity "$ACTIVITY_NAME" \
       --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
   else
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --activity "$ACTIVITY_NAME" \
@@ -537,7 +537,7 @@ exist, create it first.
 "
      fi
 
-     RUN_RESP=$(ithyno bridge dispatch \
+     RUN_RESP=$(npx --no-install ithyno bridge dispatch \
        --project "$ITHYNO_PROJECT_ROOT" \
        --change-id "<change-id>" \
        --agent "$entry_name" \
@@ -554,7 +554,7 @@ exist, create it first.
      ')
 
      if [ "$RUN_EXIT" -ne 0 ]; then
-       echo "[dispatch] ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
+       echo "[dispatch] npx --no-install ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
        echo "$RUN_RESP"
        exit 1
      fi
@@ -763,7 +763,7 @@ teardown done outside the ladder.
 2. **Check current phase**
 
    ```bash
-   PHASE_STATUS=$(ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
+   PHASE_STATUS=$(npx --no-install ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
      try {
        const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
        const item = (data?.result?.items ?? []).find((entry) => entry.id === process.argv[1]);
@@ -931,7 +931,7 @@ teardown done outside the ladder.
    - Advance phase:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
 
@@ -953,7 +953,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
      Break out of the loop, proceed to step 8.
@@ -984,7 +984,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
 
      # Release the .worktrees/.lock semaphore (parallelExecution=false only).
      if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then

@@ -62,14 +62,14 @@ Landed by `add-multi-dispatch-orchestrator`.
     ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
 
-  ithyno bridge phase \
+  npx --no-install ithyno bridge phase \
     --project "$ITHYNO_PROJECT_ROOT" \
     --change-id "<change-id>" \
     --phase coded
   ```
 
   All control-plane writes, including phase updates and dashboard activity,
-  must use `ithyno bridge ...` rather than `curl` plus `ITHYNO_BASE` /
+  must use `npx --no-install ithyno bridge ...` rather than `curl` plus `ITHYNO_BASE` /
   `ITHYNO_PORT` / `ITHYNO_SESSION_TOKEN`. The same-phase fan-out behavior
   remains unchanged, but the runtime path is explicitly fail-closed when the
   bridge is unavailable.
@@ -90,14 +90,14 @@ postManagerActivity() {
   ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
   ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
   if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --role "$ACTIVITY_ROLE" \
       --activity "$ACTIVITY_NAME" \
       --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
   else
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --activity "$ACTIVITY_NAME" \

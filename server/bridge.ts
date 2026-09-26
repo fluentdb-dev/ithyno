@@ -142,7 +142,10 @@ export function buildBridgeIpcAddress(projectPath?: string, cwd = process.cwd())
     return `\\.\pipe\LOCAL\ithyno-${hash}`;
   }
   const dir = bridgeRuntimeDirectory();
-  return join(dir, `bridge-${hash}.sock`);
+  // Keep the Unix-domain socket path comfortably below macOS's sockaddr_un
+  // limit. The full hash remains in the descriptor filename and protocol;
+  // 96 bits is sufficient to disambiguate the local socket endpoint.
+  return join(dir, `bridge-${hash.slice(0, 24)}.sock`);
 }
 
 export function resolveBridgeProject(projectPath?: string, cwd = process.cwd()): string {
@@ -1355,6 +1358,9 @@ export async function stopBridgeServer(server: ReturnType<typeof createServer>):
   await new Promise<void>((resolve, reject) => {
     server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
   }).catch(() => undefined);
+  if (descriptor && process.platform !== "win32") {
+    await rm(descriptor.ipcAddress, { force: true }).catch(() => undefined);
+  }
 }
 
 export async function ensureBridgeRuntimeDirectory(): Promise<string> {

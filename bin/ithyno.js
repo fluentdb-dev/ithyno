@@ -4,9 +4,16 @@ import { execSync } from "node:child_process";
 
 function stripIthynoEnv(env = process.env) {
   return Object.fromEntries(
-    Object.entries(env).filter(([key]) => !key.startsWith("ITHYNO_")),
+    Object.entries(env).filter(
+      ([key]) => !key.startsWith("ITHYNO_") || key === "ITHYNO_INIT_PACKAGE_SPEC",
+    ),
   );
 }
+
+// Older launches leaked this internal marker into the server and Manager PTY.
+// It is not authoritative: only the active Node loader can prove that this
+// process is actually running under tsx.
+delete process.env.ITHYNO_TSX_LOADED;
 
 function loadShellEnv() {
   if (process.platform === "win32") return;
@@ -37,23 +44,31 @@ function loadShellEnv() {
       }
     }
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith("ITHYNO_")) delete process.env[key];
+      if (key.startsWith("ITHYNO_") && key !== "ITHYNO_INIT_PACKAGE_SPEC") {
+        delete process.env[key];
+      }
     }
   } catch (err) {
     // Non-interactive or constrained shells can fail here; do not block local CLI startup.
   }
 }
 
-loadShellEnv();
+// Bridge clients resolve the live project through the runtime registry and do
+// not need a login-shell PATH refresh. Running a login shell here can block in
+// interactive shell startup hooks before status/MCP produces any output.
+const bridgeOnlyCommand = new Set(["status", "bridge", "mcp"]).has(process.argv[2] ?? "");
+if (!bridgeOnlyCommand) loadShellEnv();
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { runInit } from "./init.js";
+import { runNewProjectChain } from "./new-project-chain.js";
 
 async function loadBridgeApi() {
   try {
@@ -77,13 +92,27 @@ const EXIT_CODES = {
   unsupported: 15,
   usage: 2,
 };
-if (!process.env.ITHYNO_TSX_LOADED && existsSync(resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs"))) {
-  const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+// Resolve through Node's package algorithm instead of assuming npm placed
+// tsx below ithyno/node_modules. A normal project-local install hoists tsx to
+// the owning project's node_modules, while Electron/VSIX staging keeps it
+// below pkgRoot; import.meta.resolve supports both layouts.
+let bundledTsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+try {
+  bundledTsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
+} catch {
+  // Keep the packaged-layout fallback. The missing-path guard below will
+  // still produce the existing sanitized unsupported error if neither exists.
+}
+const runningUnderTsx = process.execArgv.some((arg) =>
+  /(?:^|[\\/])tsx[\\/]dist[\\/](?:loader\.mjs|preflight\.cjs)$/u.test(arg) || arg === "tsx"
+);
+if (!runningUnderTsx && existsSync(bundledTsxCli)) {
+  // Use the tsx CLI rather than `node --import tsx`: the CLI's resolver
+  // consistently maps the repository's emitted-style `.js` imports back to
+  // their `.ts` sources across supported Node versions.
+  const child = spawn(process.execPath, [bundledTsxCli, fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
     stdio: "inherit",
-    env: {
-      ...stripIthynoEnv(process.env),
-      ITHYNO_TSX_LOADED: "1",
-    },
+    env: stripIthynoEnv(process.env),
   });
   child.on("exit", (code) => process.exit(code ?? 0));
   child.on("error", (err) => {
@@ -110,9 +139,9 @@ function tomlArray(values) {
   return `[${values.map((entry) => JSON.stringify(String(entry))).join(", ")}]`;
 }
 
-function codexServerConfigBlock(command, args, env) {
+function codexServerConfigBlock(name, command, args, env) {
   const lines = [
-    "[mcp_servers.ithyno]",
+    `[mcp_servers.${name}]`,
     `command = ${tomlString(command)}`,
     `args = ${tomlArray(args)}`,
   ];
@@ -206,16 +235,12 @@ async function writeCodexConfig(configPath, servers) {
     current = "";
   }
 
-  const existing = await readCodexConfig(configPath);
-  const normalized = {
-    ...(existing.mcpServers && typeof existing.mcpServers === "object" ? existing.mcpServers : {}),
-    ...servers,
-  };
+  const normalized = servers;
 
   const blocks = [];
   for (const [name, config] of Object.entries(normalized)) {
     if (!config || typeof config !== "object") continue;
-    const block = codexServerConfigBlock(config.command ?? "", config.args ?? [], config.env ?? {});
+    const block = codexServerConfigBlock(name, config.command ?? "", config.args ?? [], config.env ?? {});
     blocks.push(block);
   }
 
@@ -258,25 +283,138 @@ async function runBridgeCommand(operation, params, opts) {
   process.exit(response.ok ? EXIT_CODES.ok : EXIT_CODES[response.code ?? "unsupported"] ?? EXIT_CODES.unsupported);
 }
 
+function dashboardPort(rawPort) {
+  const port = Number(rawPort ?? 4321);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid dashboard port: ${String(rawPort ?? 4321)} (expected 1-65535)`);
+  }
+  return port;
+}
+
+function canListenOnDashboardPort(port) {
+  return new Promise((resolveCheck) => {
+    const probe = createServer();
+    probe.unref();
+    probe.once("error", (error) => resolveCheck({ ok: false, error }));
+    probe.listen(port, "127.0.0.1", () => {
+      probe.close(() => resolveCheck({ ok: true }));
+    });
+  });
+}
+
+async function startDashboard(opts, { deprecatedBare = false } = {}) {
+  if (deprecatedBare) {
+    console.warn("[ithyno] Bare `ithyno` startup is deprecated; use `ithyno start`.");
+  }
+
+  let port;
+  try {
+    port = dashboardPort(opts.port);
+  } catch (error) {
+    console.error(`[ithyno] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = EXIT_CODES.usage;
+    return;
+  }
+
+  const availability = await canListenOnDashboardPort(port);
+  if (!availability.ok) {
+    if (availability.error?.code === "EADDRINUSE") {
+      console.error(
+        `[ithyno] Port ${port} is already in use.\n\n` +
+          "If ithyno is already running for this project, inspect that session with:\n" +
+          "  npx --no-install ithyno bridge status --project .\n\n" +
+          "To start another dashboard, choose a different port:\n" +
+          `  npx --no-install ithyno start --port ${port === 65535 ? 4322 : port + 1}`,
+      );
+    } else {
+      console.error(
+        `[ithyno] Cannot listen on 127.0.0.1:${port}: ` +
+          `${availability.error?.message ?? "unknown socket error"}`,
+      );
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    ITHYNO_PROJECT_ROOT: resolve(opts.dir ?? process.cwd()),
+    ITHYNO_OPEN: opts.open ? "1" : "0",
+    ITHYNO_ONBOARDING: opts.onboarding ? "1" : "0",
+  };
+  const serverEntry = resolve(pkgRoot, "server", "index.ts");
+  const child = spawn(process.execPath, [bundledTsxCli, serverEntry], { env, stdio: "inherit" });
+  child.on("exit", (code) => process.exit(code ?? 0));
+  child.on("error", (error) => {
+    console.error(`[ithyno] Failed to start dashboard: ${error.message}`);
+    process.exit(EXIT_CODES.unsupported);
+  });
+}
+
+function addDashboardOptions(command) {
+  return command
+    .option("-p, --port <number>", "port to listen on")
+    .option("-d, --dir <path>", "path to the OpenSpec project root (containing openspec/)")
+    .option("--no-open", "do not open the browser automatically")
+    .addOption(new Option("--onboarding").hideHelp());
+}
+
 const program = new Command();
 program.name("ithyno").description("ithyno — local dashboard for the OpenSpec workflow");
+// Keep the legacy root startup options from consuming identically named
+// options that appear after the explicit `start` subcommand.
+program.enablePositionalOptions();
+
+addDashboardOptions(
+  program
+    .command("start")
+    .description("Start the ithyno dashboard"),
+).action(async (opts) => {
+  await startDashboard(opts);
+});
 
 program
   .command("init [dir]")
-  .description("Scaffold the project-side files ithyno expects (CLAUDE.md, skill, agents.yaml.example, docs/, .gitignore)")
+  .description("Initialize OpenSpec and install the matching project-local ithyno CLI and workflow files")
   .option("-f, --force", "overwrite existing files instead of skipping them")
   .option("--no-gitignore", "do not modify the target .gitignore")
   .option("-q, --quiet", "minimal output (errors only)")
+  .option("--scaffold-only", "copy project files without installing dependencies (internal/package verification)")
   .action(async (dir, opts) => {
-    const res = await runInit({
-      targetDir: dir,
+    const target = resolve(dir ?? process.cwd());
+    if (opts.scaffoldOnly) {
+      const scaffold = await runInit({
+        targetDir: target,
+        force: !!opts.force,
+        skipGitignore: opts.gitignore === false,
+        quiet: !!opts.quiet,
+      });
+      if (!scaffold.ok) {
+        console.error(`✗ ${scaffold.reason}`);
+        process.exit(scaffold.exitCode);
+      }
+      process.exit(0);
+    }
+    let lastError = "initialization failed";
+    const res = await runNewProjectChain(target, (event) => {
+      if (event.type === "log" && !opts.quiet) {
+        const output = event.stream === "stderr" ? console.error : console.log;
+        output(event.line);
+      } else if (event.type === "error") {
+        lastError = event.message;
+      }
+    }, {
+      ithynoPackageSpec: process.env.ITHYNO_INIT_PACKAGE_SPEC,
       force: !!opts.force,
       skipGitignore: opts.gitignore === false,
       quiet: !!opts.quiet,
+      autoCreateDir: false,
+      autoGitInit: false,
     });
     if (!res.ok) {
-      console.error(`✗ ${res.reason}`);
-      process.exit(res.exitCode);
+      console.error(`✗ ${lastError}`);
+      process.exit(2);
     }
     process.exit(0);
   });
@@ -286,9 +424,8 @@ program
   .description("Check prerequisite CLIs and tools (agent CLIs, tmux, agmsg)")
   .option("--json", "emit raw DoctorReport JSON instead of a human-readable table")
   .action((opts) => {
-    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
     const doctorRunner = resolve(pkgRoot, "bin", "_doctor-runner.ts");
-    const args = [tsxCli, doctorRunner];
+    const args = [bundledTsxCli, doctorRunner];
     if (opts.json) args.push("--json");
     const child = spawn(process.execPath, args, { stdio: "inherit" });
     child.on("exit", (code) => process.exit(code ?? 1));
@@ -355,10 +492,12 @@ mcpCommand.description("MCP adapter commands");
 mcpCommand
   .command("serve")
   .description("Run the stdio MCP server over the shared bridge client")
-  .action(async () => {
+  .option("-p, --project <path>", "default project root for tool calls that omit project")
+  .action(async (opts) => {
     try {
       const { serveMcpBridge } = await import("../server/mcp-server.ts");
-      await serveMcpBridge();
+      const projectRoot = opts.project ? await projectFromArgs(opts.project) : process.cwd();
+      await serveMcpBridge(projectRoot);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[ithyno] failed to start MCP stdio server:", message);
@@ -376,11 +515,11 @@ mcpCommand
     const configPath = resolveCodexConfigPath(projectRoot, !!opts.global);
     const config = await readCodexConfig(configPath);
     const command = process.execPath;
-    const args = [resolve(pkgRoot, "bin", "ithyno.js"), "mcp", "serve"];
+    const args = [resolve(pkgRoot, "bin", "ithyno.js"), "mcp", "serve", "--project", projectRoot];
     const server = {
       command,
       args,
-      env: { ITHYNO_PROJECT_ROOT: projectRoot, ITHYNO_OPEN: "0" },
+      env: {},
     };
     const nextConfig = { ...config.mcpServers, ithyno: server };
     await writeCodexConfig(configPath, nextConfig);
@@ -446,23 +585,9 @@ program
     process.exit(status.ok ? EXIT_CODES.ok : EXIT_CODES[status.code ?? "unsupported"] ?? EXIT_CODES.unsupported);
   });
 
-program
-  .option("-p, --port <number>", "port to listen on")
-  .option("-d, --dir <path>", "path to the OpenSpec project root (containing openspec/)")
-  .option("--no-open", "do not open the browser automatically")
-  .action((opts) => {
-    const port = Number(opts.port ?? 4321);
-    const env = {
-      ...process.env,
-      PORT: String(port),
-      ITHYNO_PROJECT_ROOT: resolve(opts.dir ?? process.cwd()),
-      ITHYNO_OPEN: opts.open ? "1" : "0",
-    };
-    const serverEntry = resolve(pkgRoot, "server", "index.ts");
-    const tsxCli = resolve(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
-    const child = spawn(process.execPath, [tsxCli, serverEntry], { env, stdio: "inherit" });
-    child.on("exit", (code) => process.exit(code ?? 0));
-  });
+addDashboardOptions(program).action(async (opts) => {
+  await startDashboard(opts, { deprecatedBare: true });
+});
 
 program.parseAsync(process.argv);
 }

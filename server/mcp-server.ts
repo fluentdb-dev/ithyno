@@ -133,16 +133,23 @@ export const TOOL_DEFS = [
   },
 ];
 
-function projectPayload(project: string | undefined) {
-  const root = canonicalProjectRoot(project ?? process.cwd());
+function projectPayload(project: string | undefined, defaultProjectRoot = process.cwd()) {
+  const root = canonicalProjectRoot(project ?? defaultProjectRoot);
   return {
     projectRoot: root,
     projectHash: stableProjectHash(root),
   };
 }
 
-export async function handleBridgeTool(name: string, args: Record<string, unknown> | undefined) {
-  const payload = projectPayload(typeof args?.project === "string" ? args.project : undefined);
+export async function handleBridgeTool(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  defaultProjectRoot = process.cwd(),
+) {
+  const payload = projectPayload(
+    typeof args?.project === "string" ? args.project : undefined,
+    defaultProjectRoot,
+  );
   const status = await bridgeStatus(payload.projectRoot);
   if (!status.ok) {
     return {
@@ -232,7 +239,7 @@ export async function handleBridgeTool(name: string, args: Record<string, unknow
   }
 }
 
-export async function serveMcpBridge(): Promise<void> {
+export async function serveMcpBridge(defaultProjectRoot = process.cwd()): Promise<void> {
   const server = new Server(
     {
       name: "ithyno-bridge",
@@ -255,7 +262,11 @@ export async function serveMcpBridge(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const response = await handleBridgeTool(String(name), (args ?? {}) as Record<string, unknown>);
+    const response = await handleBridgeTool(
+      String(name),
+      (args ?? {}) as Record<string, unknown>,
+      defaultProjectRoot,
+    );
     return {
       content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
       structuredContent: response,

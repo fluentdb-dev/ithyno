@@ -75,6 +75,8 @@ The existing `ithyno` executable gains namespaced commands rather than a second 
 
 The CLI connects directly to local IPC using a library API. It does not invoke `curl`, put credentials in argv or environment variables, or print secret-bearing diagnostics.
 
+Dashboard startup uses the explicit `ithyno start` subcommand so it is not confused with bridge or MCP operations. Bare `ithyno` remains a compatibility alias during the migration window and prints a deprecation notice. Startup validates the requested port before spawning the server and replaces raw `EADDRINUSE` stack output with actionable commands for inspecting an existing project session or selecting another port.
+
 ### D6: Implement MCP as a stdio adapter over the same client
 
 `ithyno mcp serve` starts a stdio MCP server. Tools use the bridge operation schemas and return sanitized structured content. The server advertises concise instructions that require exact project selection and forbid guessed ports or raw token discovery.
@@ -92,6 +94,10 @@ Template drift tests cover Claude commands, Codex prompts/skills, Agy workflows/
 ### D8: Package and test the bridge as a product surface
 
 Release bundles include the CLI adapter, MCP adapter, IPC modules, and any platform helper required for secure named-pipe ACLs. Verification includes bundle-content tests, CLI contract tests, MCP protocol tests, multi-project routing tests, stale descriptor recovery, secret-redaction tests, and packaged smoke tests without `ITHYNO_*` variables.
+
+Project initialization installs ithyno as a project-local development dependency alongside OpenSpec. The launcher/build selects the package source explicitly: source development runs use the current checkout, locally packaged debug Electron/VSIX builds embed an npm tarball made from that checkout, and release builds use the version-matched npm-format tarball attached to the GitHub Release. The initialization chain does not infer this channel from `.git`, `NODE_ENV`, or the target project. The npm registry is not an assumed distribution channel. Generated workflows resolve the project-local binary without downloading at invocation time. This makes the workflow version follow the initializing product build instead of an unrelated global install, while MCP installation remains an explicit, separate action.
+
+VS Code New Project starts its temporary server before the selected project has necessarily been created. Its lightweight Manager-selection preflight therefore honors `autoCreateDir` and `autoGitInit` before writing `agents.yaml`; the subsequent streamed chain remains the owner of template, dependency, and OpenSpec initialization. The server receives an internal onboarding launch flag so the expected pre-initialization absence of Git and `openspec/` is not logged as a dashboard startup failure.
 
 ## Risks / Trade-offs
 

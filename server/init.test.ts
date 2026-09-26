@@ -7,7 +7,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { copyFile, updateGitignore, runInit } from "../bin/init.js";
-import { resolveManagerFromDoctor, writeAgentsYaml } from "./init-handler.js";
+import {
+  prepareAgentsYamlTarget,
+  resolveManagerFromDoctor,
+  writeAgentsYaml,
+} from "./init-handler.js";
 import type { DoctorReport } from "./doctor.js";
 
 const execFile = promisify(execFileCb);
@@ -275,6 +279,36 @@ describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () 
   });
 });
 
+describe("prepareAgentsYamlTarget — New Project preflight", () => {
+  it("creates a missing target and initializes Git before agents.yaml is written", async () => {
+    const target = join(dir, "new-project", "nested");
+
+    const result = await prepareAgentsYamlTarget(target, {
+      autoCreateDir: true,
+      autoGitInit: true,
+    });
+
+    expect(result).toEqual({ created: true, gitInitialized: true });
+    expect(existsSync(join(target, ".git"))).toBe(true);
+  });
+
+  it("rejects a missing target when autoCreateDir is disabled", async () => {
+    const target = join(dir, "missing-target");
+    await expect(prepareAgentsYamlTarget(target)).rejects.toThrow(
+      `Target directory does not exist: ${target}`,
+    );
+  });
+
+  it("is idempotent for an existing Git repository", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const result = await prepareAgentsYamlTarget(dir, {
+      autoCreateDir: true,
+      autoGitInit: true,
+    });
+    expect(result).toEqual({ created: false, gitInitialized: false });
+  });
+});
+
 describe("template drift guard", () => {
   // The two skill files SHALL be byte-identical except for the
   // frontmatter `description:` line, which intentionally names
@@ -423,7 +457,9 @@ describe("ithy-opsx template drift guard", () => {
       expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
       expect(content, `${name}: token-bearing curl remains`).not.toContain("X-Session-Token");
       expect(content, `${name}: direct curl remains`).not.toContain("curl -sS -X POST");
-      expect(content, `${name}: bridge CLI missing`).toContain("ithyno bridge");
+      expect(content, `${name}: project-local bridge CLI missing`).toContain(
+        "npx --no-install ithyno bridge",
+      );
       expect(content, `${name}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
 
@@ -436,7 +472,9 @@ describe("ithy-opsx template drift guard", () => {
       expect(content, `${path}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
       expect(content, `${path}: token-bearing curl remains`).not.toContain("X-Session-Token");
       expect(content, `${path}: direct curl remains`).not.toContain("curl -sS -X POST");
-      expect(content, `${path}: bridge CLI missing`).toContain("ithyno bridge");
+      expect(content, `${path}: project-local bridge CLI missing`).toContain(
+        "npx --no-install ithyno bridge",
+      );
       expect(content, `${path}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
     const multiContents = await Promise.all(

@@ -4,6 +4,12 @@ Hand this to a Windows tester (or use it yourself on a Windows box)
 to verify the pieces that don't reproduce on macOS: PTY / ConPTY,
 the `titleBarOverlay` window chrome, and packaged-installer launch.
 
+CLI bridge, project-local CLI installation, MCP setup, two-project routing,
+and Windows named-pipe checks are documented separately in
+[`docs/testing/windows-cli-bridge-verification.md`](testing/windows-cli-bridge-verification.md).
+That handout also distinguishes the checks that can run now from the
+named-pipe security checks that remain intentionally fail-closed on Windows.
+
 ## 0. Prerequisites
 
 - **Windows 10 build 1809 or later** (required for ConPTY).
@@ -54,6 +60,12 @@ Expected in this order:
 3. The dashboard renders. If it shows JSON `{"error":"not found"}`,
    go back to §1 and confirm `web\dist\index.html` exists.
 4. The Kanban lists changes from `openspec\changes\`.
+
+For the CLI/MCP change, also use **New Project** once with a fresh disposable
+folder and complete the initialization screen. Confirm that the target becomes
+a Git repository and receives a project-local `ithyno` dependency. Use the
+separate CLI bridge handout for the exact commands and expected package-source
+behavior.
 
 ## 3. Launch — packaged installer
 
@@ -213,6 +225,9 @@ For any bug, include in the report:
    `curl.exe http://localhost:<port>/api/health -H "X-CSRF-Token: <token>"`
    → note the `terminal.available` field. (Port + token appear in
    the Electron main-process console at boot.)
+9. **CLI/MCP initialization evidence** from
+   [`docs/testing/windows-cli-bridge-verification.md`](testing/windows-cli-bridge-verification.md),
+   including `npm ls ithyno --depth=0` and MCP install/status/remove output.
 
 Section 4 (window chrome) and Section 5 (PTY) are the two
 highest-value verification passes we cannot reproduce off Windows;

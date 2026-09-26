@@ -43,7 +43,7 @@ in the needs-human state and hand off to the user.
    resolved without any token-bearing `curl` path:
 
    ```bash
-   ithyno bridge needs-human \
+   npx --no-install ithyno bridge needs-human \
      --project "$ITHYNO_PROJECT_ROOT" \
      --change-id "<change-id>" \
      --message "<question>"

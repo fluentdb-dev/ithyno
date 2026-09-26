@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { connect as netConnect, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   canonicalProjectRoot,
   stableProjectHash,
@@ -111,6 +111,13 @@ async function unregisterOwnedBridgeRuntime(projectRoot: string, cwd = process.c
 }
 
 describe("bridge project identity", () => {
+  it("uses a compact Unix socket name that fits the macOS path limit", () => {
+    if (process.platform === "win32") return;
+    const address = buildBridgeIpcAddress("/a/project/with/a/stable/identity");
+    expect(basename(address)).toMatch(/^bridge-[a-f0-9]{24}\.sock$/u);
+    expect(Buffer.byteLength(address)).toBeLessThan(104);
+  });
+
   it("canonicalizes symlinked roots and hashes them stably", () => {
     const base = mkdtempSync(join(tmpdir(), "ithyno-bridge-"));
     const target = join(base, "real-project");
@@ -262,7 +269,7 @@ describe("bridge runtime registry", () => {
     const runtime = {
       projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
       projectHash: stableProjectHash(projectRoot),
-      ipcAddress: join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`),
+      ipcAddress: buildBridgeIpcAddress(projectRoot),
       pid: process.pid,
       processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start-perm",
       protocolVersion: "1",
@@ -340,7 +347,7 @@ describe("bridge runtime registry", () => {
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-timeout-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
     process.env.XDG_RUNTIME_DIR = runtimeDir;
-    const socketPath = join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`);
+    const socketPath = buildBridgeIpcAddress(projectRoot);
     const openSockets = new Set<import("node:net").Socket>();
     const server = createServer((socket) => {
       openSockets.add(socket);
@@ -449,6 +456,25 @@ describe("bridge runtime registry", () => {
     } finally {
       await stopBridgeServer(server);
       await unregisterOwnedBridgeRuntime(projectRoot, process.cwd());
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("removes its Unix socket and descriptor on orderly shutdown", async () => {
+    if (process.platform === "win32") return;
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-shutdown-"));
+    const { server, descriptor } = await startBridgeServer(projectRoot, process.cwd());
+    const descriptorPath = bridgeRuntimeFile(projectRoot, process.cwd());
+    try {
+      expect(existsSync(descriptor.ipcAddress)).toBe(true);
+      expect(existsSync(descriptorPath)).toBe(true);
+
+      await stopBridgeServer(server);
+
+      expect(existsSync(descriptor.ipcAddress)).toBe(false);
+      expect(existsSync(descriptorPath)).toBe(false);
+    } finally {
+      await stopBridgeServer(server);
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -647,7 +673,7 @@ describe("bridge runtime registry", () => {
       const descriptor = {
         projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
-        ipcAddress: join(runtimeDir, `bridge-${stableProjectHash(projectRoot)}.sock`),
+        ipcAddress: buildBridgeIpcAddress(projectRoot),
         pid: process.pid,
         processStartIdentity: currentProcessStartIdentity(process.pid) ?? "manual-start",
         protocolVersion: "1",
@@ -660,6 +686,9 @@ describe("bridge runtime registry", () => {
         ITHYNO_PORT: "4321",
         ITHYNO_BASE: "http://localhost:4321",
         ITHYNO_SESSION_TOKEN: "token-should-not-leak",
+        // Regression: older Electron/VSIX server launches leaked this marker
+        // into Manager PTYs. It must not bypass the real tsx-loader check.
+        ITHYNO_TSX_LOADED: "1",
       };
       const child = spawnSync(process.execPath, ["bin/ithyno.js", "status", "--json", "--project", projectRoot], {
         cwd: process.cwd(),
@@ -672,6 +701,8 @@ ${child.stderr ?? ""}`;
       expect(output).not.toContain("ITHYNO_PORT");
       expect(output).not.toContain("ITHYNO_BASE");
       expect(output).not.toContain("ITHYNO_SESSION_TOKEN");
+      expect(output).not.toContain("Unknown file extension");
+      expect(output).not.toContain("Cannot find module");
       expect(output).not.toContain("localhost:4321");
       expect(output).toContain("ownership could not be proven");
     } finally {

@@ -36,9 +36,9 @@
   },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "OPENSPEC_DEV=1 tsx watch server/index.ts",
+    "dev:server": "ITHYNO_DEV=1 OPENSPEC_DEV=1 tsx watch server/index.ts",
     "dev:web": "vite",
-    "dev:test": "concurrently -n api,web -c blue,magenta \"OPENSPEC_DEV=1 tsx server/index.ts\" \"npm:dev:web\"",
+    "dev:test": "concurrently -n api,web -c blue,magenta \"ITHYNO_DEV=1 OPENSPEC_DEV=1 tsx server/index.ts\" \"npm:dev:web\"",
     "build": "vite build",
     "build:server": "tsc -p server-dist.tsconfig.json",
     "start": "node bin/ithyno.js",

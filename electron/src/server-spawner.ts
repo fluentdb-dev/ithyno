@@ -17,6 +17,7 @@ export interface SpawnResult {
 export interface SpawnOptions {
   binPath: string;
   projectRoot: string;
+  initPackageSpec?: string;
   nodePath?: string;
   onLog?: (line: string, stream: 'stdout' | 'stderr') => void;
   port?: number;
@@ -74,7 +75,7 @@ function fetchHealth(port: number): Promise<boolean> {
   });
 }
 
-export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'sessionToken'>, port: number): NodeJS.ProcessEnv {
+export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'sessionToken' | 'initPackageSpec'>, port: number): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   // The Electron shell always runs the server in production-static mode, even
   // if the developer's shell has ITHYNO_DEV set for the CLI workflow.
@@ -84,6 +85,11 @@ export function buildServerSpawnEnv(opts: Pick<SpawnOptions, 'projectRoot' | 'se
   env.ITHYNO_PROJECT_ROOT = opts.projectRoot;
   env.PORT = String(port);
   env.ITHYNO_OPEN = '0';
+  if (opts.initPackageSpec !== undefined) {
+    env.ITHYNO_INIT_PACKAGE_SPEC = opts.initPackageSpec;
+  } else {
+    delete env.ITHYNO_INIT_PACKAGE_SPEC;
+  }
   if (opts.sessionToken !== undefined) {
     env.ITHYNO_LAUNCHER_SESSION_TOKEN = opts.sessionToken;
   }

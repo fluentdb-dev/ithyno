@@ -14,6 +14,7 @@ import {
   readEnvironmentSelection,
   resolveDevelopmentEnvironmentValues,
   runDotenvxNativeAction,
+  sanitizeChildEnvironment,
   writeEnvironmentSelection,
 } from "./environment/index.js";
 
@@ -26,6 +27,13 @@ afterEach(() => {
 });
 
 describe("development environment resolver", () => {
+  it("does not expose the launcher-only init package source to agent children", () => {
+    expect(sanitizeChildEnvironment({
+      PATH: "/bin",
+      ITHYNO_INIT_PACKAGE_SPEC: "/private/debug-package.tgz",
+    })).toEqual({ PATH: "/bin" });
+  });
+
   it("loads the selected profile and masks values", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "BASE=from-base\nSECRET=hidden\n", "utf8");

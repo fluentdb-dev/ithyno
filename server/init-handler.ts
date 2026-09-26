@@ -7,9 +7,11 @@
  * Fastify handler makes it unit-testable without spinning up the full server.
  */
 import { join } from "node:path";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rm, stat } from "node:fs/promises";
 import type { DoctorReport, Cli } from "./doctor.js";
 import { CLI_PRIORITY } from "./doctor.js";
+import { gitInit } from "./git/init.js";
+import { getGitStatus } from "./git/status.js";
 
 export type InitHandlerInput = {
   dir: string;
@@ -25,6 +27,51 @@ export type InitHandlerGateResult =
   | { ok: false; status: 409; error: string; hint: string }
   | { ok: false; status: 400; error: string; installed: Cli[] }
   | { ok: true; chosenCli: Cli };
+
+/**
+ * Ensure the lightweight `agentsYamlOnly` preflight has somewhere valid to
+ * write. New Project calls this before the streamed initialization chain, so
+ * the selected subdirectory may not exist and cannot be assumed to be a Git
+ * repository yet.
+ */
+export async function prepareAgentsYamlTarget(
+  dir: string,
+  options: { autoCreateDir?: boolean; autoGitInit?: boolean } = {},
+): Promise<{ created: boolean; gitInitialized: boolean }> {
+  let created = false;
+  try {
+    const target = await stat(dir);
+    if (!target.isDirectory()) throw new Error(`Target is not a directory: ${dir}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Target is not a directory:")) {
+      throw err;
+    }
+    if (!(err instanceof Error) || (err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
+    if (!options.autoCreateDir) {
+      throw new Error(`Target directory does not exist: ${dir}`);
+    }
+    await mkdir(dir, { recursive: true });
+    created = true;
+  }
+
+  let gitInitialized = false;
+  if (options.autoGitInit) {
+    const before = await getGitStatus(dir);
+    const after = await gitInit(dir);
+    if (!after.isRepo) {
+      throw new Error(
+        after.reason === "git-missing"
+          ? "git binary not found in PATH"
+          : `git init did not create a repository at ${dir}`,
+      );
+    }
+    gitInitialized = !before.isRepo;
+  }
+
+  return { created, gitInitialized };
+}
 
 /**
  * Run the doctor gate and manager resolution. Returns the chosen CLI or an

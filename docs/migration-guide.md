@@ -15,12 +15,12 @@ one-shot bootstrap is:
 ```bash
 cd /path/to/your-project
 git init                    # if the project is not already a git repo
-npx ithyno init .           # scaffold ithyno-side files (see below)
-npx -y -p @fission-ai/openspec@latest openspec init . --tools claude
-npx ithyno                  # start the dashboard at http://localhost:4321
+ithyno init .               # install OpenSpec + the matching local ithyno CLI
+ithyno start                # start the dashboard at http://localhost:4321
 ```
 
-`ithyno init` drops these files at your project root:
+`ithyno init` initializes OpenSpec, pins the matching ithyno release as a
+project development dependency, and drops these files at your project root:
 
 - `CLAUDE.md` — generic project rules (uses your project's verification
   commands via a placeholder — edit the `# Replace with your project's
@@ -66,8 +66,9 @@ falling back to `http://localhost:4321`.
 
 This is the compatibility boundary for the legacy workflow: the older
 `ITHYNO_*` values remain recognized only as a fallback path for older scripts;
-new code should use the direct bridge client and the explicit `ithyno mcp
-install` / `ithyno mcp remove` flow.
+new generated workflows use the initialized project's
+`npx --no-install ithyno bridge ...` command. MCP remains opt-in through the
+explicit `ithyno mcp install` / `ithyno mcp remove` flow.
 
 ## Prerequisites
 
@@ -227,9 +228,3 @@ Edit the copied `CLAUDE.md` to remove the openspec-ui-specific command lines
 | Kanban doesn't react to terminal edits | The dashboard server and Claude Code must run in the **same environment** (both WSL or both native on Windows). See `add-embedded-terminal` outcome notes. |
 | Embedded terminal won't open | PTY backend failed to load. `/api/health` shows `terminal.available: false`. The dashboard still works — drag/buttons just won't be able to inject commands. |
 | `npx openspec` resolves a different version | The local `@fission-ai/openspec` devDep installs into your project's `node_modules`. Run `npm install` after migration. |
-
-## Future improvements (not yet shipped)
-
-- An `ithyno init` subcommand that performs all of Stage 3 in one shot
-  is proposed as `add-init-command` (see active changes).
-- Publishing to npm so `npx ithyno --dir .` works without manual install.

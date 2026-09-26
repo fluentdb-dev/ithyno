@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bridgeRuntimeDirectory, lookupBridgeRuntime, startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
@@ -127,7 +127,7 @@ describe("MCP bridge adapter", () => {
   it("supports stdio initialize, list tools, and tool calls without a fixed port fallback", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-mcp-stdio-"));
     const { server } = await startBridgeServer(projectRoot, process.cwd());
-    const child = spawn(process.execPath, ["--import", "tsx", "bin/ithyno.js", "mcp", "serve"], {
+    const child = spawn(process.execPath, ["bin/ithyno.js", "mcp", "serve", "--project", projectRoot], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -152,7 +152,7 @@ describe("MCP bridge adapter", () => {
           method: "tools/call",
           params: {
             name: "ithyno_status",
-            arguments: { project: projectRoot },
+            arguments: {},
           },
         },
       ]);
@@ -166,7 +166,7 @@ describe("MCP bridge adapter", () => {
         tools: expect.arrayContaining([expect.objectContaining({ name: "ithyno_status" })]),
       }));
       expect(call.result).toEqual(expect.objectContaining({
-        structuredContent: expect.objectContaining({ ok: true }),
+        structuredContent: expect.objectContaining({ ok: true, projectRoot: realpathSync(projectRoot) }),
       }));
       expect(JSON.stringify(call.result)).not.toContain("localhost:4321");
     } finally {

@@ -6,11 +6,17 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { stageInitPackageSource } from "../../scripts/init-package-source.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extRoot = resolve(here, "..");
 const repoRoot = resolve(extRoot, "..");
 const stageDir = resolve(extRoot, "host");
+
+// Keep Electron packaging self-contained for the same reason as the VSIX:
+// never copy web/dist while another process may still be rebuilding it.
+console.log("[electron prepack] building production web UI before staging…");
+execSync("npm run build", { cwd: repoRoot, stdio: "inherit" });
 
 console.log(`[electron prepack] staging ${repoRoot} → ${stageDir}`);
 
@@ -25,6 +31,12 @@ for (const rel of ["bin", "server", "web/dist", "templates", "vendor/agmsg", "it
   const dst = resolve(stageDir, rel);
   mkdirSync(dirname(dst), { recursive: true });
   cpSync(src, dst, { recursive: true });
+}
+
+for (const rel of ["web/dist/index.html", "web/dist/assets"]) {
+  if (!existsSync(resolve(stageDir, rel))) {
+    throw new Error(`staged Electron host is missing required web artifact: ${rel}`);
+  }
 }
 
 const claudeSkillsRoot = resolve(repoRoot, ".claude", "skills");
@@ -42,6 +54,9 @@ for (const file of ["package.json", "tsconfig.json", "LICENSE"]) {
     cpSync(src, resolve(stageDir, file));
   }
 }
+
+const initPackageSource = stageInitPackageSource({ repoRoot, stageDir });
+console.log(`[electron prepack] init package source: ${initPackageSource.kind}`);
 
 // Install production deps inside stageDir so require()/import resolution
 // works when the Electron shell launches the server.

@@ -5,13 +5,15 @@ import * as http from "node:http";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as vscode from "vscode";
+import { stopChildProcess } from "./process-lifecycle";
+import { resolveInitPackageSpec } from "./init-package-source";
 
 export type SpawnedServer = {
   /** Full URL including `?token=…` — hand this directly to the webview. */
   url: string;
   port: number;
   child: ChildProcess;
-  dispose(): void;
+  dispose(): Promise<void>;
 };
 
 /** Ask the OS for a free ephemeral port by binding, reading, and releasing. */
@@ -101,8 +103,13 @@ const TOKEN_RE = /token=([a-f0-9]+)/i;
  * well-known user-level directories when they exist and are not already present.
  * Non-Windows platforms receive process.env unchanged.
  */
-function buildServerEnv(): NodeJS.ProcessEnv {
+export function buildServerEnv(initPackageSpec?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+  if (initPackageSpec !== undefined) {
+    env.ITHYNO_INIT_PACKAGE_SPEC = initPackageSpec;
+  } else {
+    delete env.ITHYNO_INIT_PACKAGE_SPEC;
+  }
   if (process.platform !== "win32") return env;
 
   const candidates = [
@@ -129,6 +136,8 @@ function buildServerEnv(): NodeJS.ProcessEnv {
 export async function spawnServer(opts: {
   extensionPath: string;
   workspaceRoot: string;
+  development?: boolean;
+  onboarding?: boolean;
 }): Promise<SpawnedServer> {
   const port = await pickFreePort();
   const pkgRoot = resolvePackageRoot(opts.extensionPath);
@@ -137,12 +146,17 @@ export async function spawnServer(opts: {
   // Pass port + project root as CLI args, not env: bin/ithyno.js uses
   // commander whose --port default ("4321") overwrites env.PORT. Passing
   // --port explicitly is the only way to actually pin the picked port.
-  const env: NodeJS.ProcessEnv = buildServerEnv();
+  const initPackageSpec = resolveInitPackageSpec(pkgRoot, opts.development === true);
+  const env: NodeJS.ProcessEnv = buildServerEnv(initPackageSpec);
   delete env.ITHYNO_DEV;
+  delete env.ITHYNO_ONBOARDING;
+
+  const args = [entry, "--dir", opts.workspaceRoot, "--port", String(port), "--no-open"];
+  if (opts.onboarding) args.push("--onboarding");
 
   const child = spawn(
     process.execPath,
-    [entry, "--dir", opts.workspaceRoot, "--port", String(port), "--no-open"],
+    args,
     { env, cwd: pkgRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
 
@@ -176,17 +190,20 @@ export async function spawnServer(opts: {
 
   try {
     const [t] = await Promise.all([tokenPromise, waitForHealth(port)]);
+    let disposePromise: Promise<void> | null = null;
     return {
       url: `http://127.0.0.1:${port}/?token=${t}`,
       port,
       child,
       dispose() {
-        if (!child.killed) child.kill("SIGTERM");
-        log.dispose();
+        if (!disposePromise) {
+          disposePromise = stopChildProcess(child).finally(() => log.dispose());
+        }
+        return disposePromise;
       },
     };
   } catch (err) {
-    if (!child.killed) child.kill("SIGTERM");
+    await stopChildProcess(child);
     const msg = err instanceof Error ? err.message : String(err);
     log.appendLine(`[ithyno] spawn failed: ${msg}`);
     log.show(true);

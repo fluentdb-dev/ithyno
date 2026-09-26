@@ -4,7 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { normalizeCodexPromptNames, runNewProjectChain } from "../bin/new-project-chain.js";
+import {
+  ithynoPackageSpec,
+  normalizeCodexPromptNames,
+  runNewProjectChain,
+} from "../bin/new-project-chain.js";
 import type { ChainEvent } from "../bin/new-project-chain.js";
 
 let dir: string;
@@ -61,6 +65,55 @@ describe("runNewProjectChain — full run against a fresh dir", () => {
         expect(e.stream === "stdout" || e.stream === "stderr").toBe(true);
       }
     }
+  });
+
+  it("installs OpenSpec and the matching project-local ithyno CLI", async () => {
+    const target = join(dir, "local-cli");
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const spec = await ithynoPackageSpec();
+    expect(spec).toMatch(
+      /^https:\/\/github\.com\/fluentdb-dev\/ithyno\/releases\/download\/v[^/]+\/ithyno-[^/]+\.tgz$/,
+    );
+
+    const result = await runNewProjectChain(target, (e) => events.push(e), {
+      spawnImpl: async (cmd, args) => {
+        calls.push({ cmd, args });
+        return { ok: true, code: 0, message: "" };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls[0]).toEqual({
+      cmd: "npm",
+      args: [
+        "install",
+        "--save-dev",
+        "@fission-ai/openspec@latest",
+        spec,
+      ],
+    });
+    expect(calls[1]?.cmd).toBe("npx");
+    expect(calls[1]?.args.slice(0, 2)).toEqual(["openspec", "init"]);
+  });
+
+  it("uses an explicit development or bundled package source without resolving a release", async () => {
+    const target = join(dir, "explicit-cli-source");
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const localPackage = join(dir, "ithyno-debug.tgz");
+
+    const result = await runNewProjectChain(target, (e) => events.push(e), {
+      ithynoPackageSpec: localPackage,
+      spawnImpl: async (cmd, args) => {
+        calls.push({ cmd, args });
+        return { ok: true, code: 0, message: "" };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls[0]).toEqual({
+      cmd: "npm",
+      args: ["install", "--save-dev", "@fission-ai/openspec@latest", localPackage],
+    });
   });
 });
 

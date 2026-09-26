@@ -49,7 +49,7 @@ The dispatch advances the change through `proposed → coded → reviewed
   different project or a remembered localhost port.
 
 - `ITHYNO_BRIDGE` — the supported local bridge entrypoint for workflow
-  writes and job inspection. Prefer `ithyno bridge ... --project "$ITHYNO_PROJECT_ROOT"`
+  writes and job inspection. Prefer `npx --no-install ithyno bridge ... --project "$ITHYNO_PROJECT_ROOT"`
   over any direct HTTP request or token-bearing `curl` call. The bridge path
   is the source of truth for all control-plane writes and must work when
   all `ITHYNO_*` variables are unset.
@@ -59,7 +59,7 @@ The dispatch advances the change through `proposed → coded → reviewed
     ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
 
-  ithyno bridge phase \
+  npx --no-install ithyno bridge phase \
     --project "$ITHYNO_PROJECT_ROOT" \
     --change-id "<change-id>" \
     --phase coded
@@ -90,14 +90,14 @@ postManagerActivity() {
   ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
   ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
   if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --role "$ACTIVITY_ROLE" \
       --activity "$ACTIVITY_NAME" \
       --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
   else
-    ithyno bridge activity \
+    npx --no-install ithyno bridge activity \
       --project "$ITHYNO_PROJECT_ROOT" \
       --change-id "$ACTIVITY_CHANGE_ID" \
       --activity "$ACTIVITY_NAME" \
@@ -551,7 +551,7 @@ exist, create it first.
     RUN_EXIT=$?
 
     if [ "$RUN_EXIT" -ne 0 ]; then
-      echo "[dispatch] ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
+      echo "[dispatch] npx --no-install ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
       echo "$RUN_RESP"
       exit 1
     fi
@@ -776,7 +776,7 @@ teardown done outside the ladder.
 2. **Check current phase**
 
    ```bash
-   PHASE_STATUS=$(ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
+   PHASE_STATUS=$(npx --no-install ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
      try {
        const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
        const item = (data?.result?.items ?? []).find((entry) => entry.id === process.argv[1]);
@@ -944,7 +944,7 @@ teardown done outside the ladder.
    - Advance phase:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
 
@@ -966,7 +966,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
      Break out of the loop, proceed to step 8.
@@ -997,7 +997,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
-     ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
 
      # Release the .worktrees/.lock semaphore (parallelExecution=false only).
      if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then

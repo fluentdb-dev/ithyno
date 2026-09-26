@@ -21,13 +21,15 @@
 // `enable-codex-native-subagent-dispatch` for the current source-root
 // contract this script enforces.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -171,7 +173,72 @@ function assertTarballShape() {
 
     const paths = walkFiles(packageDir).map((p) => `package/${p}`);
     assertApprovedIthyOpsxSources(paths, "package/", "npm tarball");
+
+    // Install the tarball as a consumer would. npm normally hoists `tsx` to
+    // the fixture's node_modules rather than nesting it under ithyno; running
+    // a bridge command here guards the CLI loader against assuming the latter
+    // layout. An unavailable bridge is the expected semantic result because
+    // no dashboard owns this temporary project.
+    const installDir = join(stagingDir, "consumer");
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(
+      join(installDir, "package.json"),
+      JSON.stringify({ name: "ithyno-bundle-smoke", version: "1.0.0", private: true }) + "\n",
+    );
+    execFileSync(
+      npmCmd,
+      ["install", "--save-dev", "--ignore-scripts", "--no-audit", "--no-fund", tgzPath],
+      { cwd: installDir, stdio: ["ignore", "inherit", "inherit"], shell: process.platform === "win32" },
+    );
+    const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+    const cli = spawnSync(
+      npxCmd,
+      ["--no-install", "ithyno", "bridge", "status", "--project", installDir, "--json"],
+      { cwd: installDir, encoding: "utf8", shell: process.platform === "win32" },
+    );
+    if (cli.status !== 10) {
+      throw new Error(
+        `installed ithyno CLI returned ${cli.status}; expected unavailable-session exit 10\n` +
+          `  stdout: ${String(cli.stdout).slice(-1000)}\n` +
+          `  stderr: ${String(cli.stderr).slice(-1000)}`,
+      );
+    }
+    let envelope;
+    try {
+      envelope = JSON.parse(String(cli.stdout));
+    } catch {
+      throw new Error(`installed ithyno CLI did not emit JSON: ${String(cli.stdout).slice(-1000)}`);
+    }
+    if (envelope?.code !== "unavailable" || envelope?.ok !== false) {
+      throw new Error(`installed ithyno CLI emitted an unexpected status envelope`);
+    }
+
+    // Doctor is a second-stage TypeScript launch. It must reuse the loader
+    // path resolved through Node's package algorithm instead of assuming tsx
+    // is nested below node_modules/ithyno (npm normally hoists it here).
+    const doctor = spawnSync(
+      npxCmd,
+      ["--no-install", "ithyno", "doctor", "--json"],
+      { cwd: installDir, encoding: "utf8", shell: process.platform === "win32" },
+    );
+    if (doctor.status !== 0 && doctor.status !== 1) {
+      throw new Error(
+        `installed ithyno doctor returned ${doctor.status}; expected readiness exit 0 or 1\n` +
+          `  stdout: ${String(doctor.stdout).slice(-1000)}\n` +
+          `  stderr: ${String(doctor.stderr).slice(-1000)}`,
+      );
+    }
+    try {
+      JSON.parse(String(doctor.stdout));
+    } catch {
+      throw new Error(
+        `installed ithyno doctor did not emit JSON from the hoisted dependency layout\n` +
+          `  stdout: ${String(doctor.stdout).slice(-1000)}\n` +
+          `  stderr: ${String(doctor.stderr).slice(-1000)}`,
+      );
+    }
     log(`  ✓ ${paths.length} files scanned in ${tgzName}`);
+    log("  ✓ project-local tarball CLI and doctor loaded from a consumer node_modules layout");
   } finally {
     try {
       rmSync(stagingDir, { recursive: true, force: true });
@@ -262,6 +329,19 @@ function assertElectronBundleShape(bundles) {
       throw new Error(
         `electron bundle (${b.label}) has @dotenvx/dotenvx ${dotenvx.version}; expected ${DOTENVX_VERSION}`,
       );
+    }
+    const initSourcePath = join(b.appDir, "init-package-source.json");
+    if (!existsSync(initSourcePath)) {
+      throw new Error(`electron bundle (${b.label}) is missing init-package-source.json`);
+    }
+    const initSource = JSON.parse(readFileSync(initSourcePath, "utf8"));
+    if (initSource.kind === "bundled") {
+      const bundledPackage = resolve(b.appDir, String(initSource.relativePath ?? ""));
+      if (!existsSync(bundledPackage) || !bundledPackage.endsWith(".tgz")) {
+        throw new Error(`electron bundle (${b.label}) is missing its bundled init package`);
+      }
+    } else if (initSource.kind !== "release") {
+      throw new Error(`electron bundle (${b.label}) has an invalid init package source`);
     }
     log(`  ✓ ${paths.length} files scanned in ${b.label}`);
   }
@@ -354,7 +434,7 @@ function runInitFromBundle(bundles) {
     // Invoke the packaged bin. Both mac and win bundles ship a `.js` entry;
     // executing via the host `node` avoids needing the packaged Electron
     // runtime, which the smoke does not care about.
-    execFileSync(process.execPath, [bundle.binPath, "init", targetDir, "--quiet"], {
+    execFileSync(process.execPath, [bundle.binPath, "init", targetDir, "--quiet", "--scaffold-only"], {
       stdio: ["ignore", "inherit", "inherit"],
     });
 

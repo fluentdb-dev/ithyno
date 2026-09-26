@@ -109,6 +109,31 @@ function resolveBinPath(): string {
   return resolve(app.getAppPath(), '..', 'bin', 'ithyno.js');
 }
 
+type InitPackageSource =
+  | { kind: 'release' }
+  | { kind: 'bundled'; relativePath: string };
+
+/** Resolve an explicit init package source chosen by the launcher/build. */
+function resolveInitPackageSpec(): string | undefined {
+  if (!app.isPackaged) {
+    // electron:dev runs directly from the monorepo source tree.
+    return resolve(app.getAppPath(), '..');
+  }
+  const hostRoot = join(process.resourcesPath, 'app');
+  const manifestPath = join(hostRoot, 'init-package-source.json');
+  // Older packaged builds have no manifest and retain release resolution.
+  if (!existsSync(manifestPath)) return undefined;
+
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as InitPackageSource;
+  if (manifest.kind === 'release') return undefined;
+  if (manifest.kind === 'bundled' && typeof manifest.relativePath === 'string') {
+    const bundled = resolve(hostRoot, manifest.relativePath);
+    if (existsSync(bundled)) return bundled;
+    throw new Error(`bundled init package is missing: ${bundled}`);
+  }
+  throw new Error(`unsupported init package source manifest: ${manifestPath}`);
+}
+
 function isDirectory(p: string): boolean {
   try {
     return statSync(p).isDirectory();
@@ -370,6 +395,7 @@ async function _createWindowForProjectImpl(projectRoot: string | null): Promise<
     spawn = await spawnServer({
       binPath,
       projectRoot: resolvedProjectRoot ?? projectRoot,
+      initPackageSpec: resolveInitPackageSpec(),
       onLog: (line, stream) => {
         if (stream === 'stderr') process.stderr.write(line);
         else process.stdout.write(line);

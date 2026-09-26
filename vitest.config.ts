@@ -10,7 +10,7 @@ export default defineConfig({
       "web/src/**/*.test.ts",
       "web/src/**/*.test.tsx",
       "scripts/**/*.test.mjs",
-      "vscode-extension/src/webview-html.test.ts",
+      "vscode-extension/src/**/*.test.ts",
     ],
     environment: "node",
     // Several suites exercise real chokidar/fs.watch instances. Capping

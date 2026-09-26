@@ -17,6 +17,7 @@
 - [ ] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
   - Reopened: not supported on this branch until the Windows ACL mechanism is validated and the bridge write path is enabled with evidence.
 - [x] 2.5 Register and unregister the bridge with standalone, Electron-launched, and VS Code Extension-launched server lifecycles without changing browser HTTP startup behavior.
+  - Verified: SIGINT/SIGTERM now close Fastify before process exit, Unix socket names fit the macOS path limit, orderly shutdown removes both socket and descriptor, and VS Code Extension disposal waits for graceful exit before a bounded SIGKILL fallback.
 - [x] 2.6 Add IPC protocol tests for malformed JSON, unsupported versions, unknown operations, oversized payloads, duplicate request IDs, timeout, disconnect, and sanitized failures.
   - Verified: the Unix bridge tests cover malformed frames, unsupported versions, unknown operations, oversized payloads, duplicate ID reject, timeout, and redacted error output.
 - [x] 2.7 Add multi-project, symlink, stale PID/start identity, generation replacement, crash residue, and unauthorized-user/ACL platform tests.
@@ -68,4 +69,7 @@
 - [x] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
   - Verified: the full validation bundle passed on the patched branch after strict descriptor identity and prune-proofing updates.
 - [ ] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
-  - Reopened: no evidence of end-to-end project verification exists in this branch yet.
+  - Partial verification: VS Code Extension New Project was confirmed manually with the rebuilt VSIX, including the initialization screen and completed project initialization. Electron and two simultaneous projects remain to be verified.
+- [x] 7.6 Install the matching ithyno CLI release as a project-local development dependency during the shared initialization chain, route generated workflows to that local executable without runtime downloads, and cover the install/version contract with regression tests.
+  - Verified: the shared chain accepts a launcher-selected package source; source/F5 development uses the checkout, debug Electron/VSIX packages embed a checkout tarball, and release clients use the version-matched GitHub Release tarball. Generated workflows use `npx --no-install ithyno bridge`; release verification installs the packed artifact into a consumer layout and executes the hoisted-dependency CLI successfully. `ithyno start` is the canonical dashboard command, while bare `ithyno` remains a deprecated compatibility alias and occupied ports produce actionable CLI guidance.
+  - Fixed: VS Code New Project now creates the selected target and initializes Git during its preflight before writing `agents.yaml`; the temporary onboarding server suppresses expected no-Git/no-OpenSpec startup diagnostics.

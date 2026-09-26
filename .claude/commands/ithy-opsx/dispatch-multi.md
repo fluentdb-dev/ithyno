@@ -47,7 +47,7 @@ The skill covers:
    next queued id and spawn its code stage.
 8. **Termination** — end when every id is `done` or `escalated`.
    Report per-id summary.
-9. **Manager activity publication** — post via `ithyno bridge activity`
+9. **Manager activity publication** — post via `npx --no-install ithyno bridge activity`
    at every per-change boundary (`dispatching` → `waiting` → `judging` →
    `cleanup` → `transitioning` → `idle`) so each Kanban card shows what
    Manager is doing for THAT change. Every post carries its own

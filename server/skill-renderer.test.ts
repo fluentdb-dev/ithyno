@@ -696,7 +696,7 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
         "ITHYNO_BRIDGE",
       );
       expect(content, `${cli}: bridge phase hook missing`).toContain(
-        "ithyno bridge phase",
+        "npx --no-install ithyno bridge phase",
       );
       expect(content, `${cli}: legacy ITHYNO_BASE guard remains`).not.toContain(
         'if [ -z "${ITHYNO_BASE:-}" ]',

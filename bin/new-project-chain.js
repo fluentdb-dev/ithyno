@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Two-step "new project" chain: scaffold ithyno files (via runInit),
-// then run `openspec init` as a subprocess. Emits ChainEvents so
+// then install the project-local OpenSpec + ithyno CLIs and run
+// `openspec init` as a subprocess. Emits ChainEvents so
 // consumers (HTTP SSE endpoint, Electron main, VS Code extension host)
 // can render progress.
 //
@@ -167,9 +168,34 @@ export function openspecToolForCli(cli) {
 }
 
 /**
+ * Return the exact ithyno package release that owns this initialization
+ * chain. New projects keep their workflow CLI project-local so packaged
+ * Electron / VSIX builds do not depend on an unrelated global install.
+ *
+ * @returns {Promise<string>}
+ */
+export async function ithynoPackageSpec() {
+  const raw = await readFile(new URL("../package.json", import.meta.url), "utf8");
+  const metadata = JSON.parse(raw);
+  if (
+    typeof metadata.version !== "string" ||
+    !/^[0-9A-Za-z.+-]+$/.test(metadata.version)
+  ) {
+    throw new Error("ithyno package metadata does not contain a valid version");
+  }
+  // ithyno is distributed as an npm-format tarball attached to each GitHub
+  // Release rather than through the npm registry. npm accepts that URL as a
+  // dependency and creates node_modules/.bin/ithyno from its `bin` entry.
+  return `https://github.com/fluentdb-dev/ithyno/releases/download/v${metadata.version}/ithyno-${metadata.version}.tgz`;
+}
+
+/**
  * @param {string} target
  * @param {(e: ChainEvent) => void} onEvent
- * @param {{ managerCli?: string, spawnImpl?: typeof spawnStreamed }} [options]
+ * @param {{ managerCli?: string, ithynoPackageSpec?: string,
+ *           force?: boolean, skipGitignore?: boolean,
+ *           autoCreateDir?: boolean, autoGitInit?: boolean, quiet?: boolean,
+ *           spawnImpl?: typeof spawnStreamed }} [options]
  * @returns {Promise<{ ok: boolean, target: string }>}
  */
 export async function runNewProjectChain(target, onEvent, options = {}) {
@@ -183,9 +209,11 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   try {
     initResult = await runInit({
       targetDir: target,
-      autoCreateDir: true,
-      autoGitInit: true,
-      quiet: false,
+      autoCreateDir: options.autoCreateDir ?? true,
+      autoGitInit: options.autoGitInit ?? true,
+      force: options.force ?? false,
+      skipGitignore: options.skipGitignore ?? false,
+      quiet: options.quiet ?? false,
       log: (line) =>
         onEvent({ type: "log", step: "scaffold", line, stream: "stdout" }),
       // Forward the picked Manager CLI so runInit's renderer step
@@ -213,7 +241,8 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   }
   onEvent({ type: "step-done", step: "scaffold" });
 
-  // Step 2 — install `openspec` as a project-level devDependency BEFORE
+  // Step 2 — install `openspec` and the matching ithyno CLI as project-level
+  // devDependencies BEFORE
   // running `openspec init`, so init itself uses the same resolvable
   // local install that stays behind afterward. Without this, every
   // OpenSpec-authored slash command (`/opsx:propose` etc., installed by
@@ -227,9 +256,23 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
   // package.json if one doesn't exist yet.
   onEvent({ type: "step-start", step: "openspec-init" });
   const finalTarget = initResult.target ?? target;
+  let localIthynoSpec;
+  try {
+    localIthynoSpec = options.ithynoPackageSpec ?? await ithynoPackageSpec();
+    if (typeof localIthynoSpec !== "string" || localIthynoSpec.trim() === "") {
+      throw new Error("ithyno package spec must be a non-empty string");
+    }
+  } catch (err) {
+    onEvent({
+      type: "error",
+      step: "openspec-init",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, target: finalTarget };
+  }
   const npmResult = await runSpawn(
     "npm",
-    ["install", "--save-dev", "@fission-ai/openspec@latest"],
+    ["install", "--save-dev", "@fission-ai/openspec@latest", localIthynoSpec],
     finalTarget,
     "openspec-init",
     onEvent,
@@ -245,7 +288,9 @@ export async function runNewProjectChain(target, onEvent, options = {}) {
 
   // Step 3 — `openspec init`, now resolved from ./node_modules/.bin
   // (npx checks local node_modules/.bin before ever considering the
-  // registry) instead of an ephemeral, separately-pinned npx fetch.
+  // registry) instead of an ephemeral, separately-pinned npx fetch. The same
+  // install also leaves the matching ithyno CLI available to generated
+  // workflows through `npx --no-install ithyno`.
   // `--tools` is derived from the Manager CLI the caller picked (see
   // openspecToolForCli above). Prior to this the tool was hard-coded
   // "claude" — an agy / codex / etc pick still got a Claude scaffold

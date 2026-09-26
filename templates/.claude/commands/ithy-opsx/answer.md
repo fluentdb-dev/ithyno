@@ -31,7 +31,7 @@ returning the change to the phase it was in before being escalated.
    guesswork or session-token leakage:
 
    ```bash
-   ithyno bridge needs-human \
+   npx --no-install ithyno bridge needs-human \
      --project "$ITHYNO_PROJECT_ROOT" \
      --change-id "<change-id>" \
      --answer "<answer>"

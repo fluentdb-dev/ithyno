@@ -174,7 +174,11 @@ export function activate(context: vscode.ExtensionContext): void {
           title: "ithyno: starting server…",
           cancellable: false,
         },
-        () => spawnServer({ extensionPath: context.extensionPath, workspaceRoot }),
+        () => spawnServer({
+          extensionPath: context.extensionPath,
+          workspaceRoot,
+          development: context.extensionMode === vscode.ExtensionMode.Development,
+        }),
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -260,7 +264,7 @@ export function activate(context: vscode.ExtensionContext): void {
     });
 
     panel.onDidDispose(() => {
-      s.server.dispose();
+      void s.server.dispose();
       if (s.terminal && s.terminal.exitStatus === undefined) {
         // Leave the terminal for the user — they may want its scrollback.
       }
@@ -393,7 +397,12 @@ async function runNewProjectFlow(
         title: "ithyno: starting init server…",
         cancellable: false,
       },
-      () => spawnServer({ extensionPath: context.extensionPath, workspaceRoot: parentDir }),
+      () => spawnServer({
+        extensionPath: context.extensionPath,
+        workspaceRoot: parentDir,
+        development: context.extensionMode === vscode.ExtensionMode.Development,
+        onboarding: true,
+      }),
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -440,7 +449,7 @@ async function runNewProjectFlow(
 
   panel.onDidDispose(() => {
     if (!disposed) disposed = true;
-    server.dispose();
+    void server.dispose();
   });
 }
 
@@ -555,10 +564,11 @@ async function runImportProjectFlow(): Promise<void> {
   });
 }
 
-export function deactivate(): void {
-  if (session) {
-    session.server.dispose();
-    session.panel.dispose();
-    session = null;
-  }
+export async function deactivate(): Promise<void> {
+  const activeSession = session;
+  session = null;
+  if (!activeSession) return;
+  const shutdown = activeSession.server.dispose();
+  activeSession.panel.dispose();
+  await shutdown;
 }
