@@ -20,6 +20,8 @@ import {
   sanitizeBridgeValue,
   unregisterBridgeRuntime,
   probeBridgeRuntimeOwnership,
+  bridgeUnsupportedReason,
+  windowsPipeSecurityDescription,
 } from "./bridge.js";
 
 async function rawBridgeRequest(address: string, payload: string): Promise<string> {
@@ -116,6 +118,13 @@ describe("bridge project identity", () => {
     const address = buildBridgeIpcAddress("/a/project/with/a/stable/identity");
     expect(basename(address)).toMatch(/^bridge-[a-f0-9]{24}\.sock$/u);
     expect(Buffer.byteLength(address)).toBeLessThan(104);
+  });
+
+  it.skipIf(process.platform !== "win32")("uses the local-session Windows named-pipe namespace", () => {
+    const address = buildBridgeIpcAddress("C:\\projects\\ithyno-bridge-test");
+    const prefix = "\\\\.\\pipe\\LOCAL\\ithyno-";
+    expect(address.startsWith(prefix)).toBe(true);
+    expect(address.slice(prefix.length)).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it("canonicalizes symlinked roots and hashes them stably", () => {
@@ -261,7 +270,7 @@ describe("bridge runtime registry", () => {
     }
   });
 
-  it("maps permission-denied socket probes to permission without pruning the descriptor", async () => {
+  it.skipIf(process.platform === "win32")("maps permission-denied socket probes to permission without pruning the descriptor", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-permission-"));
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-perm-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
@@ -296,7 +305,7 @@ describe("bridge runtime registry", () => {
     }
   });
 
-  it("treats fragmented ownership responses as validation and leaves the descriptor intact", async () => {
+  it.skipIf(process.platform === "win32")("treats fragmented ownership responses as validation and leaves the descriptor intact", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-fragmented-"));
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-frag-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
@@ -342,7 +351,7 @@ describe("bridge runtime registry", () => {
     }
   });
 
-  it("times out without pruning a live runtime descriptor", async () => {
+  it.skipIf(process.platform === "win32")("times out without pruning a live runtime descriptor", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-timeout-"));
     const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-timeout-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
@@ -416,19 +425,10 @@ describe("bridge runtime registry", () => {
     }
   });
 
-  it("reports an explicit unsupported state when the platform has no secure IPC", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-unsupported-"));
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-    try {
-      const result = await bridgeStatus(projectRoot, projectRoot);
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe("unsupported");
-      expect(result.error).toContain("Windows bridge writes are disabled");
-    } finally {
-      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-      rmSync(projectRoot, { recursive: true, force: true });
-    }
+  it.skipIf(process.platform !== "win32")("documents the enforced Windows named-pipe security boundary", () => {
+    expect(windowsPipeSecurityDescription()).toContain("current Windows user SID");
+    expect(windowsPipeSecurityDescription()).toContain("PIPE_REJECT_REMOTE_CLIENTS");
+    expect(bridgeUnsupportedReason()).toBeUndefined();
   });
 
   it("runs a real bridge IPC round-trip and redacts secrets before they leave the process", async () => {
@@ -479,7 +479,7 @@ describe("bridge runtime registry", () => {
     }
   });
 
-  it("enumerates the Unix bridge IPC protocol edge cases", async () => {
+  it.skipIf(process.platform === "win32")("enumerates the Unix bridge IPC protocol edge cases", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-ipc-regress-"));
     const { server, descriptor } = await startBridgeServer(projectRoot, process.cwd());
     try {

@@ -6,7 +6,7 @@ The ithyno local bridge lets the CLI and MCP server operate on the current proje
 
 - resolves the project by its canonical filesystem path;
 - registers a same-user runtime descriptor under the OS runtime directory;
-- opens a Unix socket (or secure pipe on supported Windows paths later);
+- opens a Unix socket or a current-user-only Windows named pipe;
 - validates the live process identity before accepting requests;
 - rejects malformed, duplicated, or timed-out requests.
 
@@ -38,3 +38,5 @@ Both the CLI and the MCP server strip `ITHYNO_*` values before child-process lau
 - If no runtime is available, the CLI reports it as unavailable instead of trying the legacy fixed-port route.
 - If a stale process is detected, the runtime is replaced and the stale entry is pruned automatically.
 - If a request is malformed or duplicated, the bridge rejects it with a structured protocol error.
+- On Windows, Windows PowerShell 5.1 is used to host the secured named pipe;
+  it is included with supported Windows 10 and Windows 11 installations.

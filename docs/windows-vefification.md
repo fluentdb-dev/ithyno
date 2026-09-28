@@ -7,8 +7,8 @@ the `titleBarOverlay` window chrome, and packaged-installer launch.
 CLI bridge, project-local CLI installation, MCP setup, two-project routing,
 and Windows named-pipe checks are documented separately in
 [`docs/testing/windows-cli-bridge-verification.md`](testing/windows-cli-bridge-verification.md).
-That handout also distinguishes the checks that can run now from the
-named-pipe security checks that remain intentionally fail-closed on Windows.
+That handout includes the named-pipe ACL security smoke and the complete CLI,
+MCP, and multi-project routing checks now supported on Windows.
 
 ## 0. Prerequisites
 

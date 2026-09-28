@@ -173,6 +173,9 @@ function assertTarballShape() {
 
     const paths = walkFiles(packageDir).map((p) => `package/${p}`);
     assertApprovedIthyOpsxSources(paths, "package/", "npm tarball");
+    if (!existsSync(join(packageDir, "server", "windows-bridge-host.ps1"))) {
+      throw new Error("npm tarball is missing the secured Windows named-pipe host");
+    }
 
     // Install the tarball as a consumer would. npm normally hoists `tsx` to
     // the fixture's node_modules rather than nesting it under ithyno; running

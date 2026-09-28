@@ -122,4 +122,7 @@ Rollback disables bridge registration and MCP configuration while leaving the un
 
 ## Open Questions
 
-- Confirm the minimum supported Windows APIs/runtime needed to apply a current-user-only named-pipe ACL without adding a large native dependency. This must be resolved in the platform foundation task before write operations are enabled on Windows.
+- Resolved: supported Windows 10/11 installations use the inbox Windows
+  PowerShell 5.1 runtime for a small `CreateNamedPipeW` host. It applies a
+  protected current-user SID DACL and `PIPE_REJECT_REMOTE_CLIENTS` at pipe
+  creation time without adding a native npm dependency.

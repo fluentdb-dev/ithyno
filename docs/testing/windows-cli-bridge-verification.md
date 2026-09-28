@@ -6,21 +6,22 @@ not run the write-operation section against a real project.
 
 ## Current implementation status
 
-The current `add-ithyno-cli-mcp-bridge` change deliberately disables the
-Windows bridge transport until both of these protections are implemented and
-verified:
+The Windows bridge transport is enabled. A bundled Windows PowerShell host
+creates each named pipe with `CreateNamedPipeW`, a protected DACL containing
+one allow ACE for the current Windows user SID, and
+`PIPE_REJECT_REMOTE_CLIENTS`. The ACL and remote-rejection flag are applied at
+creation time, before a client can connect.
 
-- the named pipe is restricted to the owning Windows user SID;
-- remote named-pipe clients are rejected.
+Run the security smoke before sections 4-9 when validating a source checkout:
 
-Until that work is complete, `ithyno bridge ...` on Windows is expected to
-return an `unsupported` result and exit code `15`. That is the secure
-fail-closed result, not a successful bridge verification.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\windows-bridge-security-smoke.ps1
+```
 
-Run sections 1-3 and 9 now to verify package installation, diagnostics, and
-explicit MCP configuration. Run sections 4-8 after the Windows named-pipe
-transport is enabled. Do not mark the Windows bridge complete while the
-expected result is still `unsupported`.
+The command must report `ok: true`, one allow ACE matching the current user
+SID, and `remoteClients: rejected-at-creation`. An `unsupported` bridge result
+on Windows is no longer expected and must be treated as a regression.
 
 ## 1. Prerequisites
 
@@ -358,8 +359,8 @@ Pass criteria:
 - the entry starts the project-local CLI with `mcp serve` and identifies the
   selected project, but contains no dashboard URL, port, or session token;
 - remove deletes only the ithyno entry and preserves unrelated MCP servers;
-- while Windows bridge transport is disabled, an MCP tool call fails with the
-  same sanitized `unsupported` result instead of attempting HTTP or port 4321.
+- an MCP tool call uses the secure named pipe and never attempts HTTP or port
+  4321.
 
 Use `--global` only for a deliberate user-wide Codex configuration check. It
 is not part of ordinary project initialization and should not be used on a

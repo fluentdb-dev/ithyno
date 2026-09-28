@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { createServer, connect as netConnect } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -100,6 +102,12 @@ export const BRIDGE_PROTOCOL_VERSION: BridgeProtocolVersion = "1";
 export const BRIDGE_MAX_MESSAGE_BYTES = 256 * 1024;
 export const BRIDGE_DEFAULT_DEADLINE_MS = 5_000;
 export const BRIDGE_MAX_DEADLINE_MS = 30 * 60_000;
+const windowsProcessIdentityCache = new Map<number, string>();
+
+function windowsPowerShellPath(): string {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+  return join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
 
 export function canonicalProjectRoot(projectPath?: string, cwd = process.cwd()): string {
   const raw = projectPath && projectPath.trim() ? projectPath : cwd;
@@ -136,10 +144,9 @@ export function bridgeRuntimeFile(projectPath?: string, cwd = process.cwd()): st
 export function buildBridgeIpcAddress(projectPath?: string, cwd = process.cwd()): string {
   const hash = stableProjectHash(projectPath, cwd);
   if (process.platform === "win32") {
-    // LOCAL scopes packaged Windows clients to the caller's login session.
-    // Node's readableAll/writableAll defaults stay disabled when listening,
-    // so libuv uses the creator-owner DACL rather than widening the pipe.
-    return `\\.\pipe\LOCAL\ithyno-${hash}`;
+    // The companion Windows host creates this endpoint with a protected
+    // current-user SID DACL and PIPE_REJECT_REMOTE_CLIENTS before listening.
+    return "\\\\.\\pipe\\LOCAL\\ithyno-" + hash;
   }
   const dir = bridgeRuntimeDirectory();
   // Keep the Unix-domain socket path comfortably below macOS's sockaddr_un
@@ -176,6 +183,25 @@ export function currentProcessStartIdentity(pid = process.pid): string | null {
       const out = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).stdout ?? "";
       const value = out.trim().replace(/\s+/g, " ");
       return value ? `${pid}:${value}` : null;
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === "win32") {
+    const cached = windowsProcessIdentityCache.get(pid);
+    if (cached && isBridgeRuntimeAlive({ pid })) return cached;
+    try {
+      const command = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`;
+      const out = spawnSync(windowsPowerShellPath(), ["-NoProfile", "-NonInteractive", "-Command", command], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 5_000,
+      }).stdout ?? "";
+      const ticks = out.trim();
+      if (!/^\d+$/u.test(ticks)) return null;
+      const identity = `${pid}:${ticks}`;
+      windowsProcessIdentityCache.set(pid, identity);
+      return identity;
     } catch {
       return null;
     }
@@ -706,9 +732,6 @@ export async function lookupBridgeRuntime(projectPath?: string, cwd = process.cw
 }
 
 export function bridgeUnsupportedReason(): string | undefined {
-  if (process.platform === "win32") {
-    return "Windows bridge writes are disabled until the current-user SID ACL and remote-client rejection behavior are implemented and verified on Windows";
-  }
   return undefined;
 }
 
@@ -870,7 +893,7 @@ export async function probeBridgeRuntimeOwnership(runtime: BridgeRuntimeDescript
 }
 
 export function windowsPipeSecurityDescription(): string {
-  return "LOCAL login-session namespace; exclusive listener; readableAll=false; writableAll=false; duplex requests require creator-owner read/write access";
+  return "LOCAL login-session namespace; protected DACL grants only the current Windows user SID; PIPE_REJECT_REMOTE_CLIENTS is applied at CreateNamedPipeW time";
 }
 
 export async function bridgeStatus(projectPath?: string, cwd = process.cwd()): Promise<BridgeCommandResult> {
@@ -1184,19 +1207,145 @@ export async function startBridgeServer(
 ): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
   if (process.platform === "win32") {
     const projectRoot = canonicalProjectRoot(projectPath, cwd);
-    const noopServer = createServer();
-    return {
-      server: noopServer,
-      descriptor: {
-        projectRoot,
-        projectHash: stableProjectHash(projectRoot),
-        ipcAddress: buildBridgeIpcAddress(projectRoot),
-        pid: process.pid,
-        processStartIdentity: currentProcessStartIdentity(process.pid) ?? `${process.pid}:${process.ppid}:${Date.now()}`,
-        protocolVersion: BRIDGE_PROTOCOL_VERSION,
-        generation: 1,
-      },
+    const processStartIdentity = currentProcessStartIdentity(process.pid);
+    if (!processStartIdentity) {
+      throw new Error("Windows bridge could not prove the server process start identity");
+    }
+    const pipeName = `ithyno-${stableProjectHash(projectRoot)}`;
+    const expectedAddress = "\\\\.\\pipe\\LOCAL\\" + pipeName;
+    const helperPath = fileURLToPath(new URL("./windows-bridge-host.ps1", import.meta.url));
+    const helper = spawn(windowsPowerShellPath(), [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy", "Bypass",
+      "-File", helperPath,
+      "-PipeName", pipeName,
+    ], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const server = createServer();
+    const seenRequestIds = new Set<string>();
+    let descriptor: BridgeRuntimeDescriptor = {
+      projectRoot,
+      projectHash: stableProjectHash(projectRoot),
+      ipcAddress: expectedAddress,
+      pid: process.pid,
+      processStartIdentity,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation: 1,
     };
+    let helperError = "";
+    helper.stderr.setEncoding("utf8");
+    helper.stderr.on("data", (chunk) => {
+      helperError = `${helperError}${String(chunk)}`.slice(-8_192);
+    });
+
+    const sendHelperResponse = (connectionId: string, response: BridgeResponse) => {
+      if (!helper.stdin.destroyed && helper.stdin.writable) {
+        const payload = Buffer.from(JSON.stringify(response), "utf8").toString("base64");
+        helper.stdin.write(`RESPONSE\t${connectionId}\t${payload}\n`);
+      }
+    };
+    const handleHelperRequest = async (connectionId: string, encoded: string) => {
+      let request: BridgeRequest | null = null;
+      try {
+        const raw = Buffer.from(encoded, "base64").toString("utf8");
+        if (Buffer.byteLength(raw, "utf8") > BRIDGE_MAX_MESSAGE_BYTES) throw new Error("request exceeded the bridge protocol limits");
+        const valid = validateBridgeRequest(JSON.parse(raw));
+        if (valid.error || !valid.request) throw new Error("request was malformed or exceeded the bridge protocol limits");
+        request = valid.request;
+        if (request.projectHash !== descriptor.projectHash || request.projectRoot !== descriptor.projectRoot) {
+          throw new Error("project identity did not match the server-owned runtime descriptor");
+        }
+        if (request.generation !== descriptor.generation || request.processStartIdentity !== descriptor.processStartIdentity) {
+          throw new Error("request ownership did not match the live descriptor generation or process identity");
+        }
+        if (seenRequestIds.has(request.requestId)) throw new Error("duplicate request ID rejected");
+        seenRequestIds.add(request.requestId);
+        setTimeout(() => seenRequestIds.delete(request!.requestId), 60_000).unref?.();
+        let deadlineTimer: NodeJS.Timeout | undefined;
+        try {
+          const deadline = new Promise<never>((_resolve, reject) => {
+            deadlineTimer = setTimeout(() => reject(new Error("BRIDGE_REQUEST_DEADLINE_EXPIRED")), request!.deadlineMs);
+            deadlineTimer.unref?.();
+          });
+          const result = await Promise.race([
+            handleBridgeOperation(request.operation, request.params, request.projectRoot, context),
+            deadline,
+          ]);
+          sendHelperResponse(connectionId, buildBridgeEnvelope(request, result));
+        } finally {
+          if (deadlineTimer) clearTimeout(deadlineTimer);
+        }
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : "bridge operation failed";
+        const message = request ? rawMessage : "request was malformed or exceeded the bridge protocol limits";
+        const fallback: BridgeRequest = request ?? {
+          protocolVersion: BRIDGE_PROTOCOL_VERSION,
+          requestId: randomUUID(),
+          operation: "status",
+          projectRoot,
+          projectHash: stableProjectHash(projectRoot),
+          generation: descriptor.generation,
+          processStartIdentity,
+          params: {},
+          deadlineMs: BRIDGE_DEFAULT_DEADLINE_MS,
+        };
+        sendHelperResponse(connectionId, buildBridgeErrorEnvelope(
+          fallback,
+          message === "BRIDGE_REQUEST_DEADLINE_EXPIRED" ? "timeout" : "validation",
+          message === "BRIDGE_REQUEST_DEADLINE_EXPIRED" ? "bridge operation exceeded its declared deadline" : message,
+        ));
+      }
+    };
+
+    const lines = createInterface({ input: helper.stdout });
+    const publishedDescriptor = await new Promise<BridgeRuntimeDescriptor>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) reject(new Error(`Windows bridge helper did not become ready${helperError ? `: ${helperError.trim()}` : ""}`));
+      }, 15_000);
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      };
+      helper.once("error", fail);
+      helper.once("exit", (code) => fail(new Error(`Windows bridge helper exited before readiness (${code ?? "unknown"})${helperError ? `: ${helperError.trim()}` : ""}`)));
+      lines.on("line", async (line) => {
+        const fields = line.split("\t");
+        if (fields[0] === "READY" && !settled) {
+          if (!fields[1]?.startsWith("S-") || fields[2] !== "REMOTE_REJECTED") {
+            fail(new Error("Windows bridge helper did not confirm its SID ACL and remote-client rejection"));
+            return;
+          }
+          try {
+            descriptor = await registerBridgeRuntime(projectRoot, cwd, {
+              ipcAddress: expectedAddress,
+              pid: process.pid,
+              processStartIdentity,
+              protocolVersion: BRIDGE_PROTOCOL_VERSION,
+            });
+            settled = true;
+            clearTimeout(timer);
+            resolve(descriptor);
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          }
+          return;
+        }
+        if (fields[0] === "REQUEST" && fields.length === 3) {
+          await handleHelperRequest(fields[1]!, fields[2]!);
+        }
+      });
+    });
+    Object.defineProperty(server, "__bridgeRuntimeDescriptor", { value: publishedDescriptor, configurable: true });
+    Object.defineProperty(server, "__bridgeWindowsHelper", { value: helper, configurable: true });
+    Object.defineProperty(server, "__bridgeWindowsReadline", { value: lines, configurable: true });
+    return { server, descriptor: publishedDescriptor };
   }
   const projectRoot = canonicalProjectRoot(projectPath, cwd);
   const processStartIdentity = currentProcessStartIdentity(process.pid) ?? `${process.pid}:${process.ppid}:${Date.now()}`;
@@ -1347,13 +1496,24 @@ export async function startBridgeServer(
 }
 
 export async function stopBridgeServer(server: ReturnType<typeof createServer>): Promise<void> {
-  const descriptor = (server as ReturnType<typeof createServer> & { __bridgeRuntimeDescriptor?: BridgeRuntimeDescriptor }).__bridgeRuntimeDescriptor;
-  const sockets = (server as ReturnType<typeof createServer> & { __bridgeRuntimeSockets?: Set<import("node:net").Socket> }).__bridgeRuntimeSockets;
+  const bridgeServer = server as ReturnType<typeof createServer> & {
+    __bridgeRuntimeDescriptor?: BridgeRuntimeDescriptor;
+    __bridgeRuntimeSockets?: Set<import("node:net").Socket>;
+    __bridgeWindowsHelper?: ChildProcessWithoutNullStreams;
+    __bridgeWindowsReadline?: ReturnType<typeof createInterface>;
+  };
+  const descriptor = bridgeServer.__bridgeRuntimeDescriptor;
+  const sockets = bridgeServer.__bridgeRuntimeSockets;
   if (descriptor) {
     await unregisterBridgeRuntime(descriptor.projectRoot, process.cwd(), descriptor.generation, descriptor.processStartIdentity);
   }
   if (sockets) {
     for (const socket of sockets) socket.destroy();
+  }
+  if (bridgeServer.__bridgeWindowsReadline) bridgeServer.__bridgeWindowsReadline.close();
+  if (bridgeServer.__bridgeWindowsHelper) {
+    bridgeServer.__bridgeWindowsHelper.stdin.end();
+    bridgeServer.__bridgeWindowsHelper.kill();
   }
   await new Promise<void>((resolve, reject) => {
     server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));

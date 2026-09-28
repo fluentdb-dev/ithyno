@@ -3,8 +3,8 @@
 - [x] 1.1 Define versioned bridge request, response, error, operation metadata, and redacted audit-event schemas in a transport-neutral server module.
 - [x] 1.2 Define the initial allow-listed operation catalog for status, project/change reads, phase/activity writes, dispatch, job read/cancel, and needs-human answers; explicitly exclude raw HTTP, shell, filesystem, Secrets, environment dump, and token operations.
 - [x] 1.3 Implement canonical realpath project identity and stable project hashing with symlink, missing-path, case-sensitivity, and multi-project unit tests.
-- [ ] 1.4 Resolve and document the supported Windows current-user named-pipe ACL mechanism, including remote-client rejection, before enabling Windows write operations.
-  - Reopened: Windows ACL support is intentionally deferred; bridge writes remain disabled until verified on a supported Windows runtime.
+- [x] 1.4 Resolve and document the supported Windows current-user named-pipe ACL mechanism, including remote-client rejection, before enabling Windows write operations.
+  - Verified on Windows: the bundled PowerShell host calls `CreateNamedPipeW` with a protected current-user SID DACL and `PIPE_REJECT_REMOTE_CLIENTS`; the security smoke reads back exactly one allow ACE for the current user.
 - [x] 1.5 Implement platform runtime-directory and endpoint selection for macOS, Linux, and Windows without embedding project names or secrets in endpoint names.
 
 ## 2. Secure runtime registry and IPC
@@ -14,8 +14,8 @@
 - [x] 2.2 Implement descriptor lookup, exact canonical-project validation, liveness handshake, orderly unregister, and proven-stale pruning without fixed-port or recency fallback.
   - Verified: server descriptors are published only after listening, requests carry and validate generation/process identity, responses are checked end-to-end, stale entries are pruned safely, and generation-safe unregister behavior is covered by regression tests.
 - [x] 2.3 Implement the macOS/Linux Unix-domain socket server and client with `0700` runtime-directory and `0600` socket permissions, bounded messages, deadlines, and cleanup.
-- [ ] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
-  - Reopened: not supported on this branch until the Windows ACL mechanism is validated and the bridge write path is enabled with evidence.
+- [x] 2.4 Implement the Windows named-pipe server and client with current-user ACL and remote-client rejection based on the mechanism selected in task 1.4.
+  - Verified: real status and workflow-write round trips pass over `\\.\pipe\LOCAL\ithyno-<hash>`, oversized frames are rejected, and two simultaneous projects resolve to distinct roots, hashes, and pipes.
 - [x] 2.5 Register and unregister the bridge with standalone, Electron-launched, and VS Code Extension-launched server lifecycles without changing browser HTTP startup behavior.
   - Verified: SIGINT/SIGTERM now close Fastify before process exit, Unix socket names fit the macOS path limit, orderly shutdown removes both socket and descriptor, and VS Code Extension disposal waits for graceful exit before a bounded SIGKILL fallback.
 - [x] 2.6 Add IPC protocol tests for malformed JSON, unsupported versions, unknown operations, oversized payloads, duplicate request IDs, timeout, disconnect, and sanitized failures.
@@ -62,14 +62,14 @@
 ## 7. Packaging, verification, and documentation
 
 - [x] 7.1 Include the bridge client/server, platform IPC support, CLI adapter, MCP adapter, and required dependency files in npm, Electron, and VSIX staging and release verification.
-- [ ] 7.2 Add packaged smoke tests for macOS/Linux and Windows path/pipe behavior, including launching the CLI and MCP server from installed artifact layouts.
-  - Reopened: there is no packaged smoke-test evidence for installed artifact layouts in this branch.
+- [x] 7.2 Add packaged smoke tests for macOS/Linux and Windows path/pipe behavior, including launching the CLI and MCP server from installed artifact layouts.
+  - Verified on Windows: `npm pack` includes `server/windows-bridge-host.ps1`; an installed consumer layout starts the packaged bridge and completes a status round trip. Existing bundle verification covers CLI and MCP launches from consumer layouts.
 - [x] 7.3 Document the security boundary, same-OS-user limitation, project routing, CLI commands, MCP setup/removal, sandbox remediation, and compatibility migration in the user/developer documentation.
   - Verified: the migration guide and new bridge security docs describe the same-user runtime limit, canonical project routing, no-port fallback, MCP install/remove flow, and compatibility migration guidance.
 - [x] 7.4 Run focused bridge/CLI/MCP/security tests, `npm run typecheck`, `npm test`, `npm run build`, package verification, and `openspec validate add-ithyno-cli-mcp-bridge --strict`.
   - Verified: the full validation bundle passed on the patched branch after strict descriptor identity and prune-proofing updates.
 - [ ] 7.5 Manually verify one Electron project and one VS Code Extension project from a process without `ITHYNO_*` variables, plus two simultaneous projects, confirming correct routing and no credential output.
-  - Partial verification: VS Code Extension New Project was confirmed manually with the rebuilt VSIX, including the initialization screen and completed project initialization. Electron and two simultaneous projects remain to be verified.
+  - Partial verification: VS Code Extension New Project was confirmed manually with the rebuilt VSIX, including the initialization screen and completed project initialization. Native Windows source-server CLI verification now passes without `ITHYNO_*`, and two simultaneous projects route to distinct named pipes. Electron GUI launch remains blocked by an unrelated local Electron `Error` window and requires a follow-up run with a supported Node/PTY binary combination.
 - [x] 7.6 Install the matching ithyno CLI release as a project-local development dependency during the shared initialization chain, route generated workflows to that local executable without runtime downloads, and cover the install/version contract with regression tests.
   - Verified: the shared chain accepts a launcher-selected package source; source/F5 development uses the checkout, debug Electron/VSIX packages embed a checkout tarball, and release clients use the version-matched GitHub Release tarball. Generated workflows use `npx --no-install ithyno bridge`; release verification installs the packed artifact into a consumer layout and executes the hoisted-dependency CLI successfully. `ithyno start` is the canonical dashboard command, while bare `ithyno` remains a deprecated compatibility alias and occupied ports produce actionable CLI guidance.
   - Fixed: VS Code New Project now creates the selected target and initializes Git during its preflight before writing `agents.yaml`; the temporary onboarding server suppresses expected no-Git/no-OpenSpec startup diagnostics.
