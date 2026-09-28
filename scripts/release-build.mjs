@@ -10,11 +10,12 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
+const releaseEnv = { ...process.env, ITHYNO_RELEASE_BUILD: "1" };
 
 function run(label, cmd, opts = {}) {
   console.log(`\n[release:build] ${label}`);
   console.log(`  > ${cmd}`);
-  execSync(cmd, { cwd: repoRoot, stdio: "inherit", ...opts });
+  execSync(cmd, { cwd: repoRoot, stdio: "inherit", env: releaseEnv, ...opts });
 }
 
 // Detect platform to know which electron package target to run.

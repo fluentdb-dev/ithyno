@@ -294,7 +294,9 @@ function getSanitizedProcessEnv(inheritedEnv: NodeJS.ProcessEnv): Record<string,
 
 export function sanitizeChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    Object.entries(env ?? {}).filter(([key]) => !isDotenvCredentialName(key)),
+    Object.entries(env ?? {}).filter(
+      ([key]) => !isDotenvCredentialName(key) && key !== "ITHYNO_INIT_PACKAGE_SPEC",
+    ),
   ) as NodeJS.ProcessEnv;
 }
 

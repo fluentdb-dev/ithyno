@@ -50,3 +50,42 @@ The CLI SHALL provide status and doctor output that reports project resolution, 
 #### Scenario: Sandbox denies socket access
 - **WHEN** the descriptor is live but IPC access is denied
 - **THEN** diagnostics identify a permission or sandbox problem instead of reporting that ithyno is not installed or not running
+
+### Requirement: Explicit dashboard startup command
+The CLI SHALL expose `ithyno start` as the canonical dashboard startup command. During the compatibility window, bare `ithyno` MAY continue to start the dashboard only when it prints a deprecation notice identifying `ithyno start`. Startup SHALL validate the requested port before spawning the server and SHALL report an occupied port with actionable session-inspection and alternate-port commands instead of a raw runtime stack trace.
+
+#### Scenario: Start the dashboard explicitly
+- **WHEN** a user runs `ithyno start` with an available valid port
+- **THEN** the CLI starts the dashboard without a deprecation notice
+
+#### Scenario: Use the legacy bare command
+- **WHEN** a user runs bare `ithyno` during the compatibility window
+- **THEN** the dashboard starts and the CLI identifies `ithyno start` as the replacement command
+
+#### Scenario: Requested port is occupied
+- **WHEN** the requested dashboard port is already bound
+- **THEN** the CLI exits before spawning the server and prints commands for bridge status and an alternate port without exposing a Node.js stack trace
+
+### Requirement: Project-local CLI installation during initialization
+The project initialization chain SHALL install ithyno as a project-local development dependency alongside OpenSpec. The launcher or build SHALL select the package source explicitly: source development runs use the current checkout, locally packaged debug clients use a bundled tarball created from that checkout, and release clients use the running version's GitHub Release tarball. The chain SHALL NOT infer the package channel from `.git`, `NODE_ENV`, or the target project. Newly rendered ithyno workflows SHALL invoke that project-local CLI without downloading a different release at execution time, so Electron, VS Code Extension, and standalone initialization produce the same executable contract. Initialization SHALL NOT enable MCP implicitly.
+
+#### Scenario: Initialize a new project
+- **WHEN** ithyno initializes a project and installs the OpenSpec development dependency
+- **THEN** it also installs the matching ithyno release and the generated workflows can invoke its project-local executable
+
+#### Scenario: A global ithyno installation differs
+- **WHEN** a generated workflow runs in a project whose globally installed ithyno version is missing or different
+- **THEN** the workflow uses the initialized project's local ithyno executable rather than the global installation
+
+#### Scenario: Initialize from a development or debug client
+- **WHEN** initialization is launched from `npm run dev`, Electron development, VS Code Extension F5, or a locally packaged debug client
+- **THEN** the project-local dependency is installed from that explicit checkout or its bundled tarball rather than requiring a published release asset
+
+#### Scenario: Initialize from a release client
+- **WHEN** initialization is launched from a release Electron, VS Code Extension, or CLI build
+- **THEN** the project-local dependency is installed from the version-matched GitHub Release tarball
+
+#### Scenario: VS Code initializes a fresh project directory
+- **WHEN** VS Code New Project targets a directory that does not exist yet or is not yet a Git repository
+- **THEN** the initialization preflight creates the directory and initializes Git before writing `agents.yaml` and starting the streamed OpenSpec installation chain
+- **AND** the temporary onboarding server does not report the expected absence of Git or `openspec/` as a startup failure

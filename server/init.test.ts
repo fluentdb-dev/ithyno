@@ -7,7 +7,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { copyFile, updateGitignore, runInit } from "../bin/init.js";
-import { resolveManagerFromDoctor, writeAgentsYaml } from "./init-handler.js";
+import {
+  prepareAgentsYamlTarget,
+  resolveManagerFromDoctor,
+  writeAgentsYaml,
+} from "./init-handler.js";
 import type { DoctorReport } from "./doctor.js";
 
 const execFile = promisify(execFileCb);
@@ -275,6 +279,36 @@ describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () 
   });
 });
 
+describe("prepareAgentsYamlTarget — New Project preflight", () => {
+  it("creates a missing target and initializes Git before agents.yaml is written", async () => {
+    const target = join(dir, "new-project", "nested");
+
+    const result = await prepareAgentsYamlTarget(target, {
+      autoCreateDir: true,
+      autoGitInit: true,
+    });
+
+    expect(result).toEqual({ created: true, gitInitialized: true });
+    expect(existsSync(join(target, ".git"))).toBe(true);
+  });
+
+  it("rejects a missing target when autoCreateDir is disabled", async () => {
+    const target = join(dir, "missing-target");
+    await expect(prepareAgentsYamlTarget(target)).rejects.toThrow(
+      `Target directory does not exist: ${target}`,
+    );
+  });
+
+  it("is idempotent for an existing Git repository", async () => {
+    await execFile("git", ["init"], { cwd: dir });
+    const result = await prepareAgentsYamlTarget(dir, {
+      autoCreateDir: true,
+      autoGitInit: true,
+    });
+    expect(result).toEqual({ created: false, gitInitialized: false });
+  });
+});
+
 describe("template drift guard", () => {
   // The two skill files SHALL be byte-identical except for the
   // frontmatter `description:` line, which intentionally names
@@ -390,21 +424,43 @@ describe("ithy-opsx template drift guard", () => {
     }
   });
 
-  it("ithyno API commands never embed a default-port fallback", async () => {
+  it("single and multi activity helpers omit --role for idle/no-role writes", async () => {
+    const pairs = [
+      [
+        join(REPO_ROOT, ".claude/commands/ithy-opsx/dispatch.md"),
+        join(REPO_ROOT, "templates/.claude/commands/ithy-opsx/dispatch.md"),
+      ],
+      [
+        join(REPO_ROOT, ".claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+        join(REPO_ROOT, "templates/.claude/skills/ithy-opsx-dispatch-multi/SKILL.md"),
+      ],
+    ] as const;
+    for (const [dev, tmpl] of pairs) {
+      const [devText, tmplText] = await Promise.all([
+        readFile(dev, "utf8"),
+        readFile(tmpl, "utf8"),
+      ]);
+      expect(new Set([devText, tmplText]).size).toBe(1);
+      for (const content of [devText, tmplText]) {
+        expect(content).toContain(
+          'if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then',
+        );
+        expect(content).toMatch(/if \[ -n "\$ACTIVITY_ROLE" \] && \[ "\$ACTIVITY_NAME" != "idle" \]; then[\s\S]*else[\s\S]*--activity "\$ACTIVITY_NAME"/);
+      }
+    }
+  });
+
+  it("ithyno API commands never embed a default-port fallback or direct curl auth path", async () => {
     const commandsDir = join(REPO_ROOT, ".claude/commands/ithy-opsx");
     for (const name of ["answer.md", "dispatch.md", "escalate.md"]) {
       const content = await readFile(join(commandsDir, name), "utf8");
       expect(content, `${name}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
-      expect(content, `${name}: authoritative base missing`).toContain("ITHYNO_BASE");
-      expect(content, `${name}: injected port derivation missing`).toContain(
-        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      expect(content, `${name}: token-bearing curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${name}: direct curl remains`).not.toContain("curl -sS -X POST");
+      expect(content, `${name}: project-local bridge CLI missing`).toContain(
+        "npx --no-install ithyno bridge",
       );
-      expect(content, `${name}: session token guard missing`).toContain(
-        "ITHYNO_SESSION_TOKEN",
-      );
-      expect(content, `${name}: per-request environment refresh missing`).toContain(
-        name === "dispatch.md" ? "Mandatory freshness checkpoint" : "environment variables again",
-      );
+      expect(content, `${name}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
 
     const multiCopies = [
@@ -413,21 +469,13 @@ describe("ithy-opsx template drift guard", () => {
     ];
     for (const path of multiCopies) {
       const content = await readFile(path, "utf8");
-      expect(content, `${path}: default-port fallback`).not.toContain(
-        "ITHYNO_PORT:-4321",
+      expect(content, `${path}: default-port fallback`).not.toContain("ITHYNO_PORT:-4321");
+      expect(content, `${path}: token-bearing curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${path}: direct curl remains`).not.toContain("curl -sS -X POST");
+      expect(content, `${path}: project-local bridge CLI missing`).toContain(
+        "npx --no-install ithyno bridge",
       );
-      expect(content, `${path}: authoritative base missing`).toContain(
-        "authoritative base URL",
-      );
-      expect(content, `${path}: injected port derivation missing`).toContain(
-        'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
-      );
-      expect(content, `${path}: token fail-closed guard missing`).toContain(
-        "authoritative ithyno session context is missing",
-      );
-      expect(content, `${path}: freshness checkpoint missing`).toContain(
-        "before every ithyno HTTP",
-      );
+      expect(content, `${path}: project root guard missing`).toContain("ITHYNO_PROJECT_ROOT");
     }
     const multiContents = await Promise.all(
       multiCopies.map((path) => readFile(path, "utf8")),
