@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -40,7 +40,10 @@ describe("Codex MCP configuration", () => {
     expect(afterInstall).toContain('command = "example-mcp"');
     expect(afterInstall).toContain("[mcp_servers.ithyno]");
     expect(afterInstall).toContain('\"mcp\", \"serve\", \"--project\"');
-    expect(afterInstall).toContain(projectRoot);
+    // TOML strings use JSON-compatible escaping. On Windows the serialized
+    // path contains doubled backslashes, so compare the encoded scalar rather
+    // than the raw filesystem path.
+    expect(afterInstall).toContain(JSON.stringify(realpathSync(projectRoot)));
     expect(afterInstall).not.toContain("ITHYNO_PROJECT_ROOT");
 
     const removed = runCli(projectRoot, "mcp", "remove");

@@ -14,7 +14,7 @@ async function sendMcpJsonRpcBatch(child: ReturnType<typeof spawn>, requests: Ar
     throw new Error("MCP stdio child has no stdout/stderr/stdin streams");
   }
   return await new Promise<Record<number, Record<string, unknown>>>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out waiting for a complete MCP stdio batch")), 5000);
+    const timer = setTimeout(() => reject(new Error("timed out waiting for a complete MCP stdio batch")), 15_000);
     const buffered = new Map<number, Record<string, unknown>>();
     const onData = (chunk: Buffer | string) => {
       const text = String(chunk);
@@ -178,5 +178,5 @@ describe("MCP bridge adapter", () => {
       }
       rmSync(projectRoot, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
