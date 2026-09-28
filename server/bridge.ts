@@ -1189,7 +1189,13 @@ export async function callBridgeOperation(
         });
       });
       lastResponse = response ?? null;
-      if (response && response.ok !== false) break;
+      // A protocol response means the request reached the owning server.
+      // Never retry semantic failures: workflow writes may already have
+      // executed, and replaying the same request ID correctly triggers the
+      // server's duplicate guard, which would mask the original actionable
+      // error.  Retry only a connection-level unavailable result where the
+      // endpoint was not reached.
+      if (response && (response.ok !== false || response.code !== "unavailable")) break;
       if (attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
@@ -1207,6 +1213,20 @@ export async function startBridgeServer(
 ): Promise<{ server: ReturnType<typeof createServer>; descriptor: BridgeRuntimeDescriptor }> {
   if (process.platform === "win32") {
     const projectRoot = canonicalProjectRoot(projectPath, cwd);
+    // Fail before launching the PowerShell pipe host when this exact project
+    // is already owned by a live server.  CreateNamedPipeW deliberately uses
+    // FILE_FLAG_FIRST_PIPE_INSTANCE, but relying on that collision alone made
+    // a second Windows launch wait for the helper readiness timeout and then
+    // surface a localized (often mojibake) PowerShell exception.  Descriptor
+    // lookup validates both PID liveness and process-start identity and prunes
+    // only proven-stale entries, so a non-null result is safe to treat as the
+    // active owner.
+    const existingRuntime = await lookupBridgeRuntime(projectRoot, cwd);
+    if (existingRuntime) {
+      throw new Error(
+        `ithyno is already running for this project (PID ${existingRuntime.pid}, pipe ${existingRuntime.ipcAddress})`,
+      );
+    }
     const processStartIdentity = currentProcessStartIdentity(process.pid);
     if (!processStartIdentity) {
       throw new Error("Windows bridge could not prove the server process start identity");

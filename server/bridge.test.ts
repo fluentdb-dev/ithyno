@@ -453,6 +453,28 @@ describe("bridge runtime registry", () => {
         changeId: "bridge-ipc-test",
         activity: expect.objectContaining({ role: "code", activity: "waiting" }),
       }));
+
+      const invalidActivity = await callBridgeOperation(projectRoot, "activity", {}, process.cwd());
+      expect(invalidActivity.ok).toBe(false);
+      expect(invalidActivity.code).toBe("validation");
+      expect(invalidActivity.error).toContain("changeId is required");
+      expect(invalidActivity.error).not.toContain("duplicate request ID");
+    } finally {
+      await stopBridgeServer(server);
+      await unregisterOwnedBridgeRuntime(projectRoot, process.cwd());
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")("rejects a second live server for the same Windows project immediately", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-win-duplicate-"));
+    const { server } = await startBridgeServer(projectRoot, process.cwd());
+    try {
+      const startedAt = Date.now();
+      await expect(startBridgeServer(projectRoot, process.cwd())).rejects.toThrow(
+        /already running for this project.*PID.*\\\\\.\\pipe\\LOCAL\\ithyno-/,
+      );
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
     } finally {
       await stopBridgeServer(server);
       await unregisterOwnedBridgeRuntime(projectRoot, process.cwd());
