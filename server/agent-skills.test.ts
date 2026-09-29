@@ -153,6 +153,69 @@ describe("inspectAgentSkills (add-settings-agent-skill-installer)", () => {
     expect(claude?.openspec.paths).toEqual(claudePaths);
   });
 
+  it("reports Copilot installed when native skills exist", async () => {
+    const nativePaths = [
+      ".github/skills/openspec-propose/SKILL.md",
+      ".github/skills/openspec-apply-change/SKILL.md",
+    ];
+    for (const p of nativePaths) {
+      const abs = join(tmpDir, p);
+      await mkdir(join(abs, ".."), { recursive: true });
+      await writeFile(abs, "# placeholder");
+    }
+
+    const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
+    const copilot = results.find((r) => r.cli === "copilot");
+    expect(copilot?.openspec.status).toBe("installed");
+    expect(copilot?.openspec.paths).toEqual(nativePaths);
+  });
+
+  it("reports Copilot installed when only compatibility prompts exist", async () => {
+    const promptPaths = [
+      ".github/prompts/opsx-propose.prompt.md",
+      ".github/prompts/opsx-apply.prompt.md",
+    ];
+    for (const p of promptPaths) {
+      const abs = join(tmpDir, p);
+      await mkdir(join(abs, ".."), { recursive: true });
+      await writeFile(abs, "# placeholder");
+    }
+
+    const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
+    const copilot = results.find((r) => r.cli === "copilot");
+    expect(copilot?.openspec.status).toBe("installed");
+    expect(copilot?.openspec.paths).toEqual(promptPaths);
+  });
+
+  it("reports Copilot partial when only one of the native or prompt layouts exists", async () => {
+    const partialPaths = [
+      ".github/skills/openspec-propose/SKILL.md",
+      ".github/prompts/opsx-propose.prompt.md",
+    ];
+    for (const p of partialPaths) {
+      const abs = join(tmpDir, p);
+      await mkdir(join(abs, "..").replace(/\/$/, ""), { recursive: true }).catch(() => {});
+      await writeFile(abs, "# partial");
+    }
+
+    const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
+    const copilot = results.find((r) => r.cli === "copilot");
+    expect(copilot?.openspec.status).toBe("partial");
+    expect(copilot?.openspec.diagnostics[0]).toContain("Partial installation detected");
+  });
+
+  it("reports Copilot missing when neither supported layout exists", async () => {
+    const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
+    const copilot = results.find((r) => r.cli === "copilot");
+    expect(copilot?.openspec.status).toBe("missing");
+    expect(copilot?.openspec.paths).toEqual([
+      ".github/skills/openspec-propose/SKILL.md",
+      ".github/skills/openspec-apply-change/SKILL.md",
+      ".github/prompts/opsx-propose.prompt.md",
+      ".github/prompts/opsx-apply.prompt.md",
+    ]);
+  });
+
   it("inspectedAt is a valid ISO timestamp", async () => {
     const results = await inspectAgentSkills(tmpDir, fakeSourcesDir, mockInstalledClis);
     for (const r of results) {

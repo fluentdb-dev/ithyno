@@ -67,7 +67,7 @@ export function expectedProbeSkillPath(command: string | undefined): string {
   }
   if (command === "cursor") return ".cursor/commands/ithy-opsx-test-probe.md";
   if (command === "gemini") return ".gemini/commands/ithy-opsx/test-probe.toml";
-  if (command === "copilot") return ".github/prompts/ithy-opsx-test-probe.prompt.md";
+  if (command === "copilot") return ".github/skills/ithy-opsx-test-probe/SKILL.md";
   if (command === "opencode") return ".opencode/commands/ithy-opsx-test-probe.md";
   throw new Error(`Agent command '${command ?? "<missing>"}' has no live probe skill-path adapter`);
 }

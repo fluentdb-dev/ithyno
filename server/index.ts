@@ -1544,7 +1544,7 @@ fastify.post("/api/agents/config", async (req, reply) => {
 });
 
 // Independent per-agent notification-hook toggle. Skill installation does not
-// affect this state; the hook is currently supported only for Claude.
+// affect this state; supported CLIs expose their own native Hook format.
 fastify.get("/api/agent-hooks", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   const init = await import("../bin/init.js");
