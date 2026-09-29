@@ -16,3 +16,8 @@
 
 - [x] 4.1 Run focused agent-skill, renderer, and skill-smoke tests.
 - [x] 4.2 Run typecheck, build, and strict OpenSpec validation for this change.
+
+## 5. Copilot notification control
+
+- [x] 5.1 Expose the existing Copilot notification Hook toggle on the installed Copilot Prerequisites row without coupling it to Skill installation.
+- [x] 5.2 Add focused tests for Copilot notification-control availability and rerun typecheck, build, and strict OpenSpec validation.

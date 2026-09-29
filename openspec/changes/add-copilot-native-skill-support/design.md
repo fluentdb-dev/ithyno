@@ -12,6 +12,7 @@ The renderer currently owns deterministic generated files and overwrites changed
 - Expose portable ithyno workflows through Copilot's native skill catalog.
 - Preserve prompt files as a separate explicit command surface.
 - Keep installation, update inspection, and smoke testing deterministic.
+- Allow users to opt into the existing Copilot notification Hook from the same Prerequisites row as Skill management.
 
 **Non-Goals:**
 
@@ -45,10 +46,14 @@ The Copilot probe path will become `.github/skills/ithy-opsx-test-probe/SKILL.md
 
 Both outputs retain a generated-file banner and are inspected byte-for-byte through the existing renderer plan. Reinstallation refreshes stale generated output and leaves byte-identical output untouched. No unrelated paths are enumerated or removed.
 
+### Reuse the existing notification Hook backend
+
+The server already reports and toggles Copilot notification state and writes `.github/hooks/ithyno-notification.json`. The UI will include `copilot` in the same installed-CLI allowlist used for Claude, Codex, and Agy. Skill installation and Hook enablement remain separate actions; installing Skills never enables notifications automatically.
+
 ## Risks / Trade-offs
 
 - **More generated files for Copilot** → Tests assert both exact output classes and inspection includes every renderer-produced file.
 - **OpenSpec can be configured for commands-only delivery** → Prompt-only OpenSpec installations remain a complete supported layout.
 - **Copilot discovery behavior may evolve again** → Paths are isolated in the Copilot adapter/renderer and covered by path-level regression tests.
 - **Existing projects initially report ithyno updates because native skills are absent** → This is intentional; using Manage skills once adds the native skill files without removing prompts.
-
+- **A Copilot Worker may notify even though it is not the Manager** → Notification enablement remains explicit per CLI, and users can disable it independently without changing Skill state.
