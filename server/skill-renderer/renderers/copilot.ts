@@ -2,16 +2,15 @@
 /**
  * GitHub Copilot renderer for the cross-CLI skill installer.
  *
- * Emits `.github/prompts/<namespace>-<command>.prompt.md` — matches
- * openspec's github-copilot adapter. Extension is `.prompt.md`,
- * NOT plain `.md`, and Copilot discovers prompts by that exact
- * suffix. Frontmatter shape (description only) mirrors openspec's
- * adapter.
+ * Emits both Copilot surfaces used by OpenSpec's default `both`
+ * delivery mode:
  *
- * For fragment-merge into `.github/copilot-instructions.md`
- * (deferred): the renderer contract's fragment support would be a
- * cleaner fit, but for MVP one-file-per-skill under `.github/prompts/`
- * is discoverable and does not require merging into a shared file.
+ * - `.github/skills/<skill-id>/SKILL.md` for native skill discovery.
+ * - `.github/prompts/<namespace>-<command>.prompt.md` for explicit
+ *   command invocation and compatibility with existing projects.
+ *
+ * The native Skill uses name + description frontmatter. The Prompt
+ * keeps OpenSpec's description-only prompt frontmatter.
  */
 import { stringify as yamlStringify } from "yaml";
 import type { Renderer, RenderedFile, SkillSource } from "../types.js";
@@ -32,9 +31,17 @@ function fillPlaceholders(body: string, source: SkillSource): string {
   return body.replace(/\{\{namespace\}\}/g, () => ns).replace(/\{\{command\}\}/g, () => cmd);
 }
 
-function frontmatter(source: SkillSource): string {
-  // openspec's github-copilot adapter emits only `description:`.
+function promptFrontmatter(source: SkillSource): string {
   const doc: Record<string, unknown> = {
+    description: source.manifest.description.replace(/\s+/g, " ").trim(),
+  };
+  const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
+  return `---\n${yaml}\n---`;
+}
+
+function skillFrontmatter(source: SkillSource): string {
+  const doc: Record<string, unknown> = {
+    name: source.manifest.name,
     description: source.manifest.description.replace(/\s+/g, " ").trim(),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
@@ -51,12 +58,26 @@ function generatedBanner(source: SkillSource): string {
   ].join("\n");
 }
 
+function renderFile(path: string, frontmatter: string, source: SkillSource): RenderedFile {
+  const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
+  const content = [frontmatter, "", generatedBanner(source), "", body, ""].join("\n");
+  return { path, content, mode: "create" };
+}
+
 export const copilotRenderer: Renderer = {
   cli: "copilot",
   render(source: SkillSource): RenderedFile[] {
-    const path = `.github/prompts/${source.manifest.namespace}-${source.manifest.command}.prompt.md`;
-    const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
-    const content = [frontmatter(source), "", generatedBanner(source), "", body, ""].join("\n");
-    return [{ path, content, mode: "create" }];
+    return [
+      renderFile(
+        `.github/skills/${source.id}/SKILL.md`,
+        skillFrontmatter(source),
+        source,
+      ),
+      renderFile(
+        `.github/prompts/${source.manifest.namespace}-${source.manifest.command}.prompt.md`,
+        promptFrontmatter(source),
+        source,
+      ),
+    ];
   },
 };

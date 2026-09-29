@@ -109,7 +109,12 @@ export const CLI_ADAPTERS: Record<string, CliAdapter> = {
   copilot: {
     openspecTool: "github-copilot",
     rendererCli: "copilot",
-    openspecPaths: [".github/prompts/opsx-propose.prompt.md", ".github/prompts/opsx-apply.prompt.md"],
+    openspecPaths: [
+      ".github/skills/openspec-propose/SKILL.md",
+      ".github/skills/openspec-apply-change/SKILL.md",
+      ".github/prompts/opsx-propose.prompt.md",
+      ".github/prompts/opsx-apply.prompt.md",
+    ],
   },
   gemini: {
     openspecTool: "gemini",
@@ -196,12 +201,19 @@ export const CLI_LAYOUTS: Record<string, OpenspecLayout[]> = {
   ],
   copilot: [
     {
+      name: "native-skills",
+      required: [
+        ".github/skills/openspec-propose/SKILL.md",
+        ".github/skills/openspec-apply-change/SKILL.md",
+      ],
+    },
+    {
       name: "legacy-prompts",
       required: [
         ".github/prompts/opsx-propose.prompt.md",
         ".github/prompts/opsx-apply.prompt.md",
       ],
-    }
+    },
   ],
   gemini: [
     {

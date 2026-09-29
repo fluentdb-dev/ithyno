@@ -69,7 +69,7 @@ describe("Agent skill smoke configuration", () => {
     expect(expectedProbeSkillPath("agy")).toBe(".agent/workflows/ithy-opsx-test-probe.md");
     expect(expectedProbeSkillPath("cursor")).toBe(".cursor/commands/ithy-opsx-test-probe.md");
     expect(expectedProbeSkillPath("gemini")).toBe(".gemini/commands/ithy-opsx/test-probe.toml");
-    expect(expectedProbeSkillPath("copilot")).toBe(".github/prompts/ithy-opsx-test-probe.prompt.md");
+    expect(expectedProbeSkillPath("copilot")).toBe(".github/skills/ithy-opsx-test-probe/SKILL.md");
     expect(expectedProbeSkillPath("opencode")).toBe(".opencode/commands/ithy-opsx-test-probe.md");
     expect(() => expectedProbeSkillPath("unknown")).toThrow("no live probe skill-path adapter");
   });
