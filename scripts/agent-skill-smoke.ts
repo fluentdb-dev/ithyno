@@ -3,7 +3,7 @@ import { execFile as execFileCb, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
@@ -15,6 +15,9 @@ import { runAgentSkillSmoke, type ProbeRunResult } from "../server/agents/skill-
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const execFile = promisify(execFileCb);
+const localBinDir = join(repoRoot, "node_modules", ".bin");
+const withLocalBin = (path = process.env.PATH ?? ""): string =>
+  `${localBinDir}${delimiter}${path}`;
 const optionValue = (name: string): string | undefined => {
   const inline = process.argv.find((arg) => arg.startsWith(`${name}=`));
   if (inline) return inline.slice(name.length + 1);
@@ -51,7 +54,7 @@ if (process.env.RUN_AGENT_SKILL_E2E !== "1") {
         env: {
           ...process.env,
           ...agent.env,
-          PATH: `${join(repoRoot, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+          PATH: withLocalBin(),
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -76,15 +79,19 @@ if (process.env.RUN_AGENT_SKILL_E2E !== "1") {
     initialize: async (projectRoot, agent) => {
       const initialized = await runInit({ targetDir: projectRoot, autoGitInit: true, quiet: true });
       if (!initialized.ok) throw new Error(initialized.reason);
-      const binDir = join(repoRoot, "node_modules", ".bin");
-      await execFile(join(binDir, "openspec"), [
+      // Invoke the package entry point through the current Node executable.
+      // This avoids Windows' non-executable `.cmd` shim while retaining the
+      // same pinned, project-local OpenSpec installation on every platform.
+      const openspecEntry = join(repoRoot, "node_modules", "@fission-ai", "openspec", "bin", "openspec.js");
+      await execFile(process.execPath, [
+        openspecEntry,
         "init",
         projectRoot,
         "--tools",
         openspecToolForCli(agent.command),
       ], {
         cwd: projectRoot,
-        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
+        env: { ...process.env, PATH: withLocalBin() },
         timeout: 60_000,
       });
       const cli = mapDoctorCliToRendererCli(agent.command ?? "");
