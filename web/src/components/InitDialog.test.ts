@@ -112,40 +112,40 @@ describe("Prerequisites summary logic (expand-init-to-scaffold-agents)", () => {
 describe("Manager picker candidate filter", () => {
   // Mirror of MANAGER_VERIFIED / MANAGER_UNVERIFIED in InitDialog.tsx.
   const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy"];
-  const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "opencode"];
+  const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "opencode", "copilot"];
   const MANAGER_CANDIDATES: readonly Cli[] = [
     ...MANAGER_VERIFIED,
     ...MANAGER_UNVERIFIED,
   ];
 
-  it("candidate list includes Codex as an unverified Manager", () => {
-    expect(MANAGER_CANDIDATES).toEqual(["claude", "agy", "codex", "opencode"]);
+  it("candidate list includes Codex and Copilot as unverified Managers", () => {
+    expect(MANAGER_CANDIDATES).toEqual(["claude", "agy", "codex", "opencode", "copilot"]);
   });
 
-  it("copilot/gemini/cursor/antigravity are NOT Manager candidates", () => {
-    for (const cli of ["copilot", "gemini", "cursor", "antigravity"] as Cli[]) {
+  it("gemini/cursor/antigravity are NOT Manager candidates", () => {
+    for (const cli of ["gemini", "cursor", "antigravity"] as Cli[]) {
       expect(MANAGER_CANDIDATES).not.toContain(cli);
     }
   });
 
-  it("codex and opencode are unverified; claude and agy are verified", () => {
-    expect(MANAGER_UNVERIFIED).toEqual(["codex", "opencode"]);
+  it("codex, opencode, and copilot are unverified; claude and agy are verified", () => {
+    expect(MANAGER_UNVERIFIED).toEqual(["codex", "opencode", "copilot"]);
     expect(MANAGER_VERIFIED).toContain("claude" as Cli);
     expect(MANAGER_VERIFIED).toContain("agy" as Cli);
     expect(MANAGER_UNVERIFIED).not.toContain("claude" as Cli);
     expect(MANAGER_UNVERIFIED).not.toContain("agy" as Cli);
   });
 
-  it("picker filter: installed ∩ candidates — claude+copilot+gemini installed → picker shows only claude", () => {
+  it("picker filter: installed ∩ candidates — claude+copilot+gemini installed → picker shows claude and copilot", () => {
     const installed: Cli[] = ["claude", "copilot", "gemini"];
     const choices = installed.filter((c) => MANAGER_CANDIDATES.includes(c));
-    expect(choices).toEqual(["claude"]);
+    expect(choices).toEqual(["claude", "copilot"]);
   });
 
-  it("picker filter: only copilot installed → picker empty (readyForManager false)", () => {
+  it("picker filter: only copilot installed → picker shows copilot (readyForManager true)", () => {
     const installed: Cli[] = ["copilot"];
     const choices = installed.filter((c) => MANAGER_CANDIDATES.includes(c));
-    expect(choices).toEqual([]);
+    expect(choices).toEqual(["copilot"]);
   });
 
   it("picker filter: claude+codex+opencode+agy installed → all four offered", () => {
