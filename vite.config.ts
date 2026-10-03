@@ -10,6 +10,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // Vite's production esbuild pass otherwise re-mangles xterm's already
+    // minified ESM and leaves requestMode with a dangling identifier.
+    minify: false,
   },
   server: {
     port: 5173,
