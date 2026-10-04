@@ -12,6 +12,11 @@ describe("dispatchCommandForManager", () => {
       .toBe("ithy-opsx-dispatch add-hello");
   });
 
+  it("uses Copilot's slash-prefixed flat command surface", () => {
+    expect(dispatchCommandForManager([agent("copilot", ["manager"])], "add-hello"))
+      .toBe("/ithy-opsx-dispatch add-hello");
+  });
+
   it("preserves the slash command for non-Codex Managers", () => {
     expect(dispatchCommandForManager([agent("claude", ["manager"])], "add-hello"))
       .toBe("/ithy-opsx:dispatch add-hello");
@@ -20,6 +25,7 @@ describe("dispatchCommandForManager", () => {
 
 describe("commandForManager", () => {
   const codex = [agent("codex", ["manager"])];
+  const copilot = [agent("copilot", ["manager"])];
   const claude = [agent("claude", ["manager"])];
 
   it.each([
@@ -30,6 +36,13 @@ describe("commandForManager", () => {
     ["ithy-opsx", "import", "/tmp/project", "ithy-opsx-import /tmp/project"],
   ] as const)("uses Codex command for %s:%s", (namespace, operation, args, expected) => {
     expect(commandForManager(codex, namespace, operation, args)).toBe(expected);
+  });
+
+  it("uses Copilot's slash-prefixed hyphen commands", () => {
+    expect(commandForManager(copilot, "opsx", "propose", "'hello'"))
+      .toBe("/opsx-propose 'hello'");
+    expect(commandForManager(copilot, "ithy-opsx", "archive", "add-hello"))
+      .toBe("/ithy-opsx-archive add-hello");
   });
 
   it("preserves slash commands for non-Codex and no Manager", () => {
@@ -55,6 +68,9 @@ describe("commandForAgentRole", () => {
     ["codex", "review", "ithy-opsx-review ${change_id}"],
     ["codex", "verify", "ithy-opsx-verify ${change_id}"],
     ["codex", "manager", "ithy-opsx-dispatch"],
+    ["copilot", "code", "/opsx-apply ${change_id}"],
+    ["copilot", "review", "/ithy-opsx-review ${change_id}"],
+    ["copilot", "manager", "/ithy-opsx-dispatch"],
     ["claude", "code", "/opsx:apply ${change_id}"],
     ["claude", "review", "/ithy-opsx:review ${change_id}"],
   ])("maps %s %s", (command, role, expected) => {

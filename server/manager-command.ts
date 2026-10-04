@@ -33,6 +33,9 @@ export function commandForManagerCommand(
       : `ithy-opsx-${operation}`;
     return `${command}${args ? ` ${args}` : ""}`;
   }
+  if (managerCommand === "copilot") {
+    return `/${namespace}-${operation}${args ? ` ${args}` : ""}`;
+  }
   return `/${namespace}:${operation}${args ? ` ${args}` : ""}`;
 }
 
