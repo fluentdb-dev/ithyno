@@ -68,6 +68,17 @@ export function parseTerminalSessionStatusMessage(
 
 export type TerminalReplayProtocolMessage = "replay-start" | "replay-end";
 
+export function copilotWheelInput(
+  terminalTitle: string,
+  mouseTrackingMode: string,
+  deltaY: number,
+): string | null {
+  if (terminalTitle !== "GitHub Copilot" || mouseTrackingMode !== "none" || deltaY === 0) {
+    return null;
+  }
+  return deltaY < 0 ? "\x1b[5~" : "\x1b[6~";
+}
+
 export function parseTerminalReplayProtocolMessage(raw: unknown): TerminalReplayProtocolMessage | null {
   if (typeof raw !== "string") return null;
   try {
@@ -448,6 +459,18 @@ export function Terminal() {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
+    let terminalTitle = "";
+    const titleDisposable = term.onTitleChange((title) => {
+      terminalTitle = title;
+    });
+    const wheelHandler = (event: WheelEvent) => {
+      const input = copilotWheelInput(terminalTitle, term.modes.mouseTrackingMode, event.deltaY);
+      if (!input || !gate.shouldForward(input) || !ws || ws.readyState !== WebSocket.OPEN) return;
+      event.preventDefault();
+      ws.send(JSON.stringify({ type: "input", data: input }));
+    };
+    host.addEventListener("wheel", wheelHandler, { passive: false });
+
     // Ctrl+Shift+C/V copy-paste. Plain Ctrl+C/Ctrl+V are left completely
     // untouched — they're legitimate terminal control characters (ETX /
     // interrupt, and "literal next" in readline) and xterm.js already
@@ -643,6 +666,8 @@ export function Terminal() {
       window.removeEventListener("resize", fitNow);
       ro.disconnect();
       inputDisposable.dispose();
+      titleDisposable.dispose();
+      host.removeEventListener("wheel", wheelHandler);
       term.dispose();
       termRef.current = null;
     };

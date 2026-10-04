@@ -311,10 +311,6 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
     expect(line).toBe("codex");
   });
 
-  it("enables mouse scrolling for Copilot's alternate-screen timeline", () => {
-    expect(resolveManagerStartup("copilot", "/nowhere")).toBe("copilot --mouse on");
-  });
-
   it("resolveManagerStartup(agy, undefined) → plain 'agy' (no strategy, no projectRoot)", () => {
     expect(resolveManagerStartup("agy", undefined)).toBe("agy");
   });

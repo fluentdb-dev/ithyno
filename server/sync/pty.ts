@@ -211,10 +211,7 @@ type ManagerStartupStrategy = (projectRoot: string | undefined) => string;
 
 const MANAGER_STARTUP_STRATEGIES: Readonly<Record<string, ManagerStartupStrategy>> = {
   claude: resolveClaudeSessionStartup,
-  // Copilot renders its interactive timeline in the alternate screen. Enable
-  // its supported mouse mode so xterm wheel events scroll that timeline.
-  copilot: () => "copilot --mouse on",
-  // codex/gemini/agy/opencode/cursor: no strategy yet — plain
+  // codex/copilot/gemini/agy/opencode/cursor: no strategy yet — plain
   // command via resolveManagerStartup fallback. Each CLI's session
   // resume mechanism is a separate follow-up (research per CLI).
 };
