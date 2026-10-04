@@ -66,7 +66,12 @@ describe("notification init helpers", () => {
     expect(installed.version).toBe(1);
     expect(installed.hooks.notification).toHaveLength(1);
     expect(installed.hooks.notification[0].bash).toContain("notify-waiting.sh");
+    expect(installed.hooks.preToolUse).toHaveLength(1);
+    expect(installed.hooks.preToolUse[0].bash).toContain("copilot-pretooluse");
+    expect(installed.hooks.preToolUse[0].powershell).toContain("-HookType copilot-pretooluse");
     await removeCopilotNotifyHook(root, join(root, ".ithyno/scripts/notify-waiting.sh"));
     expect((await copilotNotifyHookStatus(root, join(root, ".ithyno/scripts/notify-waiting.sh"))).enabled).toBe(false);
+    const removed = JSON.parse(await readFile(join(root, ".github/hooks/ithyno-notification.json"), "utf8"));
+    expect(removed.hooks.preToolUse).toEqual([]);
   });
 });

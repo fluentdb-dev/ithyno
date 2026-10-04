@@ -31,9 +31,24 @@ function fillPlaceholders(body: string, source: SkillSource): string {
   return body.replace(/\{\{namespace\}\}/g, () => ns).replace(/\{\{command\}\}/g, () => cmd);
 }
 
+/** Prefer Copilot's native Agent Skills over the legacy compatibility
+ * prompts emitted under `.github/prompts/opsx-*.prompt.md`. */
+function translateCommandReferences(body: string): string {
+  const opsxNames: Readonly<Record<string, string>> = {
+    apply: "apply-change",
+    archive: "archive-change",
+    sync: "sync-specs",
+    update: "update-change",
+  };
+  return body
+    .replace(/\/opsx:([a-z0-9-]+)/g, (_match, command: string) =>
+      `/openspec-${opsxNames[command] ?? command}`)
+    .replace(/\/ithy-opsx:([a-z0-9-]+)/g, "/ithy-opsx-$1");
+}
+
 function promptFrontmatter(source: SkillSource): string {
   const doc: Record<string, unknown> = {
-    description: source.manifest.description.replace(/\s+/g, " ").trim(),
+    description: translateCommandReferences(source.manifest.description.replace(/\s+/g, " ").trim()),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
   return `---\n${yaml}\n---`;
@@ -42,7 +57,7 @@ function promptFrontmatter(source: SkillSource): string {
 function skillFrontmatter(source: SkillSource): string {
   const doc: Record<string, unknown> = {
     name: source.manifest.name,
-    description: source.manifest.description.replace(/\s+/g, " ").trim(),
+    description: translateCommandReferences(source.manifest.description.replace(/\s+/g, " ").trim()),
   };
   const yaml = yamlStringify(doc, { lineWidth: 0 }).trimEnd();
   return `---\n${yaml}\n---`;
@@ -59,7 +74,7 @@ function generatedBanner(source: SkillSource): string {
 }
 
 function renderFile(path: string, frontmatter: string, source: SkillSource): RenderedFile {
-  const body = expandTokens(fillPlaceholders(source.body.trimEnd(), source));
+  const body = translateCommandReferences(expandTokens(fillPlaceholders(source.body.trimEnd(), source)));
   const content = [frontmatter, "", generatedBanner(source), "", body, ""].join("\n");
   return { path, content, mode: "create" };
 }

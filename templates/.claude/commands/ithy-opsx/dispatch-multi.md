@@ -30,9 +30,10 @@ The skill covers:
    before spawning anything.
 2. **Capacity resolution** — read `maxParallel`, compute
    `ACTIVE = min(len(ids), maxParallel)`.
-3. **Per-change worktree setup** — same idempotent
-   `git worktree add -b agent/<id> .worktrees/<id>` as single
-   dispatch.
+3. **Per-change worktree setup** — create the worktree, then copy the
+   complete current `openspec/changes/<id>/` directory into it before any
+   worker starts. This includes uncommitted/untracked `proposal.md`,
+   `tasks.md`, `specs/**`, `.openspec.yaml`, and other change artifacts.
 4. **Fan-out code stage** — spawn `ACTIVE` code workers concurrently
    via the standard Dispatch helper protocol.
 5. **Combined completion loop** — inspect the Manager inbox and any

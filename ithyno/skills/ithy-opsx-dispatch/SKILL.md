@@ -853,13 +853,28 @@ teardown done outside the ladder.
    fi
    ```
 
-   **Then create the worktree** (idempotent):
+   **Then create the worktree and seed the change artifacts** (idempotent).
+   A worktree created from `HEAD` omits uncommitted or untracked proposal
+   work. Before starting a worker, copy the complete current
+   `openspec/changes/<change-id>/` directory into the worktree. This MUST
+   include `proposal.md`, `tasks.md`, `specs/**`, `.openspec.yaml`, and all
+   other change-local artifacts:
 
    ```bash
-   if [ ! -d ".worktrees/<change-id>" ]; then
-     git worktree add -b agent/<change-id> .worktrees/<change-id> HEAD
+   CHANGE_SRC="$(pwd)/openspec/changes/<change-id>"
+   WORKTREE_PATH="$(pwd)/.worktrees/<change-id>"
+   if [ ! -d "$WORKTREE_PATH" ]; then
+     git worktree add -b agent/<change-id> "$WORKTREE_PATH" HEAD
    fi
+   CHANGE_DST="$WORKTREE_PATH/openspec/changes/<change-id>"
+   mkdir -p "$CHANGE_DST"
+   cp -R "$CHANGE_SRC"/. "$CHANGE_DST"/
+   test -f "$CHANGE_DST/proposal.md" || exit 1
+   test -f "$CHANGE_DST/tasks.md" || exit 1
    ```
+
+   Never dispatch a worker when either required file is missing from the
+   worktree.
 
    `git worktree add` fails when the branch or dir already exists —
    the `if` guard makes the step **idempotent** across re-runs.

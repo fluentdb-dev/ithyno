@@ -40,9 +40,13 @@ describe("commandForManager", () => {
 
   it("uses Copilot's slash-prefixed hyphen commands", () => {
     expect(commandForManager(copilot, "opsx", "propose", "'hello'"))
-      .toBe("/opsx-propose 'hello'");
+      .toBe("/openspec-propose 'hello'");
     expect(commandForManager(copilot, "ithy-opsx", "archive", "add-hello"))
       .toBe("/ithy-opsx-archive add-hello");
+    expect(commandForManager(copilot, "opsx", "apply", "add-hello"))
+      .toBe("/openspec-apply-change add-hello");
+    expect(commandForManager(copilot, "opsx", "archive", "add-hello"))
+      .toBe("/openspec-archive-change add-hello");
   });
 
   it("preserves slash commands for non-Codex and no Manager", () => {
@@ -68,9 +72,10 @@ describe("commandForAgentRole", () => {
     ["codex", "review", "ithy-opsx-review ${change_id}"],
     ["codex", "verify", "ithy-opsx-verify ${change_id}"],
     ["codex", "manager", "ithy-opsx-dispatch"],
-    ["copilot", "code", "/opsx-apply ${change_id}"],
+    ["copilot", "code", "/openspec-apply-change ${change_id}"],
     ["copilot", "review", "/ithy-opsx-review ${change_id}"],
     ["copilot", "manager", "/ithy-opsx-dispatch"],
+    ["copilot", "propose", "/openspec-propose ${change_id}"],
     ["claude", "code", "/opsx:apply ${change_id}"],
     ["claude", "review", "/ithy-opsx:review ${change_id}"],
   ])("maps %s %s", (command, role, expected) => {
