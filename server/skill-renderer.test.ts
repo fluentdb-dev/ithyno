@@ -560,6 +560,8 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     ]);
     expect(files[0].content).toContain("name: ithy-opsx-apply");
     expect(files[1].content).not.toContain("name: ithy-opsx-apply");
+    expect(files[0].content).toContain("/openspec-apply-change");
+    expect(files[0].content).not.toContain("/opsx:apply");
     for (const file of files) {
       expect(file.content).toContain("GENERATED FILE");
       expect(file.content).not.toContain("{{namespace}}");

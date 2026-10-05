@@ -200,15 +200,28 @@ barrier that waits for every code worker before starting any review.
 
 ### 3. Per-change worktree setup
 
-For each id in `RUNNING`, run the standard setup:
+For each id in `RUNNING`, create its worktree and seed it with the complete
+current change definition. `git worktree add` only materializes `HEAD`, so it
+does not carry uncommitted or untracked proposal work. Before enqueueing a
+worker, copy `openspec/changes/<id>/` from the Manager's source tree, including
+`proposal.md`, `tasks.md`, `specs/**`, `.openspec.yaml`, and every other
+change-local artifact:
 
 ```bash
-if [ ! -d ".worktrees/<id>" ]; then
-  git worktree add -b agent/<id> .worktrees/<id> HEAD
+CHANGE_SRC="$(pwd)/openspec/changes/<id>"
+WORKTREE_PATH="$(pwd)/.worktrees/<id>"
+if [ ! -d "$WORKTREE_PATH" ]; then
+  git worktree add -b agent/<id> "$WORKTREE_PATH" HEAD
 fi
+CHANGE_DST="$WORKTREE_PATH/openspec/changes/<id>"
+mkdir -p "$CHANGE_DST"
+cp -R "$CHANGE_SRC"/. "$CHANGE_DST"/
+test -f "$CHANGE_DST/proposal.md" || exit 1
+test -f "$CHANGE_DST/tasks.md" || exit 1
 ```
 
 Each change gets its own worktree; they never share disk state.
+Never enqueue a change whose worktree is missing either required file.
 Compute per-change `TARGET_PATH` + `REVIEW_MD_PATH` as
 `/ithy-opsx:dispatch` does.
 

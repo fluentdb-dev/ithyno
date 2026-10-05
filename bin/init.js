@@ -312,12 +312,23 @@ export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
   const bashPath = ".ithyno/scripts/notify-waiting.sh";
   const powershellPath = ".ithyno/scripts/notify-waiting.ps1";
-  const entry = { type: "command", bash: bashPath, powershell: powershellPath, timeoutSec: 10 };
+  const notificationEntry = { type: "command", bash: bashPath, powershell: powershellPath, timeoutSec: 10 };
+  const preToolUseEntry = {
+    type: "command",
+    bash: `${bashPath} Copilot ${context ?? "cli"} '' copilot-pretooluse`,
+    powershell: `${powershellPath} -CliName Copilot -Context ${context ?? "cli"} -HookType copilot-pretooluse`,
+    timeoutSec: 10,
+  };
   const existing = Array.isArray(settings.hooks.notification) ? settings.hooks.notification : [];
   const isOwned = (item) => item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath);
   const indexes = existing.reduce((all, item, index) => (isOwned(item) ? [...all, index] : all), []);
-  if (indexes.length === 0) settings.hooks.notification = [...existing, entry];
-  else if (force) settings.hooks.notification = existing.map((item, index) => index === indexes[0] ? entry : item);
+  if (indexes.length === 0) settings.hooks.notification = [...existing, notificationEntry];
+  else if (force) settings.hooks.notification = existing.map((item, index) => index === indexes[0] ? notificationEntry : item);
+  const existingPreToolUse = Array.isArray(settings.hooks.preToolUse) ? settings.hooks.preToolUse : [];
+  const preToolUseIndexes = existingPreToolUse.reduce((all, item, index) =>
+    (item?.type === "command" && (item.bash?.includes(bashPath) || item.powershell?.includes(powershellPath)) ? [...all, index] : all), []);
+  if (preToolUseIndexes.length === 0) settings.hooks.preToolUse = [...existingPreToolUse, preToolUseEntry];
+  else if (force) settings.hooks.preToolUse = existingPreToolUse.map((item, index) => index === preToolUseIndexes[0] ? preToolUseEntry : item);
   await mkdir(dirname(settingsPath), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   return { supported: true, settingsPath, changed: true };
@@ -335,9 +346,15 @@ export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
   const changed = Array.isArray(items) && filtered.length !== items.length;
   if (changed) {
     settings.hooks.notification = filtered;
-    await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   }
-  return { supported: true, settingsPath, changed };
+  const preToolUseItems = settings?.hooks?.preToolUse;
+  const filteredPreToolUse = Array.isArray(preToolUseItems)
+    ? preToolUseItems.filter((item) => !(item?.type === "command" && (item.bash?.includes(bashPath) || item.powershell?.includes(powershellPath))))
+    : preToolUseItems;
+  const preToolUseChanged = Array.isArray(preToolUseItems) && filteredPreToolUse.length !== preToolUseItems.length;
+  if (preToolUseChanged) settings.hooks.preToolUse = filteredPreToolUse;
+  if (changed || preToolUseChanged) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  return { supported: true, settingsPath, changed: changed || preToolUseChanged };
 }
 
 export async function copilotNotifyHookStatus(projectRoot, scriptAbsPath) {
@@ -346,9 +363,13 @@ export async function copilotNotifyHookStatus(projectRoot, scriptAbsPath) {
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const bashPath = ".ithyno/scripts/notify-waiting.sh";
   const powershellPath = ".ithyno/scripts/notify-waiting.ps1";
-  const enabled = Array.isArray(settings?.hooks?.notification) && settings.hooks.notification.some((item) =>
+  const notificationEnabled = Array.isArray(settings?.hooks?.notification) && settings.hooks.notification.some((item) =>
     item?.type === "command" && (item.command === scriptAbsPath || item.bash === bashPath || item.powershell === powershellPath),
   );
+  const preToolUseEnabled = Array.isArray(settings?.hooks?.preToolUse) && settings.hooks.preToolUse.some((item) =>
+    item?.type === "command" && (item.bash?.includes(bashPath) || item.powershell?.includes(powershellPath)),
+  );
+  const enabled = notificationEnabled && preToolUseEnabled;
   return { supported: true, enabled, settingsPath };
 }
 

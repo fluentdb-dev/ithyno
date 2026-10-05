@@ -649,17 +649,24 @@ describe("ithy-opsx package shape smoke", () => {
         `npm pack --json output was not valid JSON — output shape changed? First 200 chars: ${stdout.slice(0, 200)}`,
       );
     }
-    if (
-      !Array.isArray(parsed) ||
-      typeof parsed[0] !== "object" ||
-      parsed[0] === null ||
-      !Array.isArray((parsed[0] as { files?: unknown }).files)
-    ) {
+    // npm <=11 returns an array, while npm 12 returns an object keyed by
+    // package name for workspaces. Normalize both documented CLI shapes.
+    const reports = Array.isArray(parsed)
+      ? parsed
+      : typeof parsed === "object" && parsed !== null
+        ? Object.values(parsed)
+        : [];
+    const report = reports.find((value) =>
+      typeof value === "object" &&
+      value !== null &&
+      Array.isArray((value as { files?: unknown }).files)
+    ) as { files: { path: string }[] } | undefined;
+    if (!report) {
       throw new Error(
-        "npm pack --json output shape changed — expected `[{files: [...], ...}]`. If this fails after an npm upgrade, update the parser.",
+        "npm pack --json output shape changed — expected an array or package-name map containing `{files: [...]}`.",
       );
     }
-    const entries = (parsed[0] as { files: { path: string }[] }).files;
+    const entries = report.files;
     const ithyOpsxEntries = entries.filter((f) => /ithy-opsx/.test(f.path));
     expect(ithyOpsxEntries.length).toBeGreaterThan(0);
 

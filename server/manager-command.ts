@@ -20,6 +20,17 @@ export const CODEX_CODE_SCOPE_CONTRACT = [
   "- Do not create a git commit; the Manager owns the stage commit.",
 ].join("\n");
 
+const OPENSPEC_NATIVE_COMMANDS: Readonly<Record<string, string>> = {
+  apply: "apply-change",
+  archive: "archive-change",
+  sync: "sync-specs",
+  update: "update-change",
+};
+
+function openspecNativeCommand(operation: string): string {
+  return `openspec-${OPENSPEC_NATIVE_COMMANDS[operation] ?? operation}`;
+}
+
 /** Resolve one operation for the CLI that receives it. */
 export function commandForManagerCommand(
   managerCommand: string | undefined,
@@ -31,6 +42,12 @@ export function commandForManagerCommand(
     const command = namespace === "opsx"
       ? `openspec-${operation === "apply" ? "apply-change" : operation}`
       : `ithy-opsx-${operation}`;
+    return `${command}${args ? ` ${args}` : ""}`;
+  }
+  if (managerCommand === "copilot") {
+    const command = namespace === "opsx"
+      ? `/${openspecNativeCommand(operation)}`
+      : `/${namespace}-${operation}`;
     return `${command}${args ? ` ${args}` : ""}`;
   }
   return `/${namespace}:${operation}${args ? ` ${args}` : ""}`;
