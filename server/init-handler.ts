@@ -45,8 +45,7 @@ export async function prepareAgentsYamlTarget(
   let created = false;
   try {
     // The authenticated local user explicitly selects this project root.
-    // codeql[js/path-injection] -- Arbitrary absolute project selection is the feature; authentication and validation above define the boundary.
-    const target = await stat(targetDir);
+    const target = await stat(targetDir); // codeql[js/path-injection] -- Authenticated, validated absolute project selection is the feature.
     if (!target.isDirectory()) throw new Error(`Target is not a directory: ${targetDir}`);
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("Target is not a directory:")) {
@@ -58,8 +57,7 @@ export async function prepareAgentsYamlTarget(
     if (!options.autoCreateDir) {
       throw new Error(`Target directory does not exist: ${targetDir}`);
     }
-    // codeql[js/path-injection] -- Creates only the authenticated user's explicitly selected absolute project target.
-    await mkdir(targetDir, { recursive: true });
+    await mkdir(targetDir, { recursive: true }); // codeql[js/path-injection] -- Creates the authenticated user's validated project target.
     created = true;
   }
 
