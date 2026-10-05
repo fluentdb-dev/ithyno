@@ -340,12 +340,14 @@ describe("bridge runtime registry", () => {
       expect(probe.code).toBe("validation");
       expect(existsSync(file)).toBe(true);
     } finally {
-      for (const socket of openSockets) socket.destroy();
-      await new Promise<void>((resolve, reject) => {
-        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
-      });
       if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
       else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      for (const socket of openSockets) socket.destroy();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+        });
+      }
       rmSync(runtimeDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -353,7 +355,10 @@ describe("bridge runtime registry", () => {
 
   it.skipIf(process.platform === "win32")("times out without pruning a live runtime descriptor", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-timeout-"));
-    const runtimeDir = mkdtempSync(join(tmpdir(), "ithyno-runtime-timeout-"));
+    // macOS limits Unix-domain socket paths to roughly 104 bytes. The default
+    // per-user tmpdir is already long enough that appending the bridge socket
+    // name can exceed that limit, so keep this socket fixture under /tmp.
+    const runtimeDir = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "ithyno-runtime-timeout-"));
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
     process.env.XDG_RUNTIME_DIR = runtimeDir;
     const socketPath = buildBridgeIpcAddress(projectRoot);
@@ -388,12 +393,14 @@ describe("bridge runtime registry", () => {
       expect(status.code).toBe("timeout");
       expect(existsSync(file)).toBe(true);
     } finally {
-      for (const socket of openSockets) socket.destroy();
-      await new Promise<void>((resolve, reject) => {
-        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
-      });
       if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
       else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+      for (const socket of openSockets) socket.destroy();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+        });
+      }
       rmSync(runtimeDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -687,7 +694,7 @@ describe("bridge runtime registry", () => {
 
   it("fails closed when a runtime socket is stale or missing", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-cli-stale-"));
-    const runtimeDir = join(tmpdir(), `ithyno-stale-runtime-${Date.now()}`);
+    const runtimeDir = join(process.platform === "darwin" ? "/tmp" : tmpdir(), `ithyno-stale-runtime-${Date.now()}`);
     mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
     const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
     process.env.XDG_RUNTIME_DIR = runtimeDir;
