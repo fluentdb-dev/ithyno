@@ -52,7 +52,7 @@ type ChainEvent =
 const STEP_LABELS: Record<Step, string> = {
   prereq: "Check prerequisites",
   scaffold: "Scaffold ithyno files",
-  "openspec-init": "Install OpenSpec",
+  "openspec-init": "Install OpenSpec and ithyno CLI",
   "agents-yaml": "Write agents.yaml",
 };
 

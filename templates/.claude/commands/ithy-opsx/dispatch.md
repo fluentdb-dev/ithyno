@@ -50,54 +50,32 @@ The dispatch advances the change through `proposed → coded → reviewed
   reads `agents.yaml` directly; the server-resolved value is the
   canonical one.
 
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  The Electron shell and VSCode extension export the resolved,
-  per-project endpoint into the Manager PTY. If only the injected
-  `ITHYNO_PORT` is available, derive the base URL from that exact
-  value. Never use a remembered or default port.
+- `ITHYNO_PROJECT_ROOT` — optional project root for the dispatch.
+  Prefer the exact project resolved from the active CLI working directory,
+  or from an explicit `--project <path>` passed to the CLI. If it is unset,
+  resolve the project from `pwd` before starting any worker; never guess a
+  different project or a remembered localhost port.
 
-- `ITHYNO_SESSION_TOKEN` — the ithyno server's per-process session
-  token. Required by every token-gated endpoint, including
-  `POST /api/manager/activity` (see **Manager activity publication**
-  below). The server exports it into the Manager PTY's environment at
-  spawn time. Validate the injected context at dispatch start:
+- `ITHYNO_PROJECT_ROOT` is the resolved project root for this dispatch. The
+  authoritative transport is the shared `npx --no-install ithyno bridge` client — not a
+  guessed `localhost:4321` URL, not a token-bearing `curl`, and not a
+  compatibility fallback.
 
   ```bash
-  if [ -z "${ITHYNO_BASE:-}" ]; then
-    if [ -n "${ITHYNO_PORT:-}" ]; then
-      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-    else
-      echo "[dispatch] ITHYNO_BASE and ITHYNO_PORT are unset."
-      echo "[dispatch] Restart this Manager from the active dashboard; do not guess a port."
-      exit 1
-    fi
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch] authoritative ithyno session context is missing."
-    echo "[dispatch] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch] Restart this Manager from the active dashboard."
-    exit 1
-  fi
+
+  npx --no-install ithyno bridge phase \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "<change-id>" \
+    --phase coded
   ```
 
-  Never print the token itself. If a request fails, report the value
-  of `ITHYNO_BASE` and whether the token is set, then stop. Do not
-  retry a guessed endpoint or declare the server offline based on a
-  request to another port. Activity publication remains best-effort
-  only after this initial session-context validation succeeds.
-
-  **Mandatory freshness checkpoint:** immediately before every ithyno
-  HTTP request, pause and ask whether the dashboard or server may have
-  restarted since the preceding request. Expand the current shell's
-  `ITHYNO_BASE`, `ITHYNO_PORT`, and `ITHYNO_SESSION_TOKEN` again at that
-  moment; never reuse a literal endpoint/token copied from an earlier
-  command or explanation. On HTTP 401/403 or a transport failure,
-  re-read those variables once. Retry only when the current values are
-  demonstrably different from the values used by the failed request;
-  otherwise stop and request a fresh Manager session. An auth/transport
-  failure is not a worker failure and MUST NOT trigger Manager self-
-  execution, `invoke_subagent`, `spawn_agent`, or another worker-routing fallback.
+  Keep the same phase-change semantics as the legacy flow, but route through
+  the bridge so the exact project identity is checked and the process fails
+  closed if the runtime is unavailable. Manager activity is reported via
+  `npx --no-install ithyno bridge activity` with a mapped `role` and a per-change `change-id`.
 
 ## Manager activity publication
 
@@ -111,15 +89,26 @@ Define the helper once, near the top of the dispatch run:
 
 ```bash
 postManagerActivity() {
-  # $1 = JSON body: {"changeId":…,"stage":"code|review|verify",
-  #                  "activity":"dispatching|waiting|judging|cleanup|
-  #                              transitioning|idle","detail":"…"}
+  # $1 = JSON body carrying changeId + role/stage + activity (+ detail).
   # Best-effort: never let a telemetry failure abort the dispatch.
-  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
-  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
-    -H 'content-type: application/json' \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -d "$1" >/dev/null 2>&1 || true
+  ACTIVITY_CHANGE_ID=$(node -e 'try { console.log(JSON.parse(process.argv[1]).changeId || "") } catch {}' "$1")
+  ACTIVITY_ROLE=$(node -e 'try { const v=JSON.parse(process.argv[1]); console.log(v.role || v.stage || "") } catch {}' "$1")
+  ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
+  ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
+  if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
+    npx --no-install ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --role "$ACTIVITY_ROLE" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  else
+    npx --no-install ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  fi
 }
 ```
 
@@ -548,39 +537,25 @@ exist, create it first.
 "
      fi
 
-     JSON_PAYLOAD=$(node -e '
-       console.log(JSON.stringify({
-         changeId: process.argv[1],
-         agentName: process.argv[2],
-         role: process.argv[3],
-         executionMode: process.argv[4],
-         prompt: process.argv[5],
-         wait: true,
-         timeoutMs: parseInt(process.argv[6], 10)
-       }))
-     ' "<change-id>" "$entry_name" "$S" "<worktree|main-tree>" "<resolved-prompt>$ARTIFACT_CONTRACT" "$STAGE_TIMEOUT")
-
-     CURL_TIMEOUT=$(( (STAGE_TIMEOUT / 1000) + 30 ))
-     RUN_RESP=$(curl -s --connect-timeout 10 --max-time "$CURL_TIMEOUT" -X POST "$ITHYNO_BASE/api/agents/run" \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d "$JSON_PAYLOAD")
-     CURL_EXIT=$?
-
-     if [ "$CURL_EXIT" -ne 0 ]; then
-       echo "[dispatch] ithyno transport failed at $ITHYNO_BASE (curl=$CURL_EXIT)."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
-       exit 1
-     fi
+     RUN_RESP=$(npx --no-install ithyno bridge dispatch \
+       --project "$ITHYNO_PROJECT_ROOT" \
+       --change-id "<change-id>" \
+       --agent "$entry_name" \
+       --role "$S" \
+       --execution-mode "<worktree|main-tree>" \
+       --prompt "<resolved-prompt>$ARTIFACT_CONTRACT" \
+       --wait \
+       --timeout "$STAGE_TIMEOUT" 2>&1)
+     RUN_EXIT=$?
 
      JOB_STATUS=$(echo "$RUN_RESP" | node -e '
        try { const d = JSON.parse(require("fs").readFileSync(0, "utf-8")); console.log(d.status || d.error || ""); }
        catch { console.log(""); }
      ')
 
-     if [ "$JOB_STATUS" = "auth required" ] || [ "$JOB_STATUS" = "auth invalid" ]; then
-       echo "[dispatch] ithyno session authentication failed at $ITHYNO_BASE."
-       echo "[dispatch] Re-read the current session environment; retry only if it changed."
+     if [ "$RUN_EXIT" -ne 0 ]; then
+       echo "[dispatch] npx --no-install ithyno bridge dispatch failed for $S (exit=$RUN_EXIT)."
+       echo "$RUN_RESP"
        exit 1
      fi
 
@@ -788,10 +763,18 @@ teardown done outside the ladder.
 2. **Check current phase**
 
    ```bash
-   curl -sS $ITHYNO_BASE/api/changes/<change-id>/phase
+   PHASE_STATUS=$(npx --no-install ithyno bridge changes --project "$ITHYNO_PROJECT_ROOT" --json 2>/dev/null | node -e '
+     try {
+       const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
+       const item = (data?.result?.items ?? []).find((entry) => entry.id === process.argv[1]);
+       console.log(item?.phase ?? "");
+     } catch {
+       console.log("");
+     }
+   ' "<change-id>")
    ```
 
-   Parse the response's `phase` field:
+   Parse the `PHASE_STATUS` value:
    - `done` → exit: `Change already at phase: done — nothing to do.`
    - `needs-human` → exit: `Change is in needs-human — user must
      answer via /ithy-opsx:answer <id> "<answer>" before dispatcher can
@@ -857,13 +840,28 @@ teardown done outside the ladder.
    fi
    ```
 
-   **Then create the worktree** (idempotent):
+   **Then create the worktree and seed the change artifacts** (idempotent).
+   A worktree created from `HEAD` omits uncommitted or untracked proposal
+   work. Before starting a worker, copy the complete current
+   `openspec/changes/<change-id>/` directory into the worktree. This MUST
+   include `proposal.md`, `tasks.md`, `specs/**`, `.openspec.yaml`, and all
+   other change-local artifacts:
 
    ```bash
-   if [ ! -d ".worktrees/<change-id>" ]; then
-     git worktree add -b agent/<change-id> .worktrees/<change-id> HEAD
+   CHANGE_SRC="$(pwd)/openspec/changes/<change-id>"
+   WORKTREE_PATH="$(pwd)/.worktrees/<change-id>"
+   if [ ! -d "$WORKTREE_PATH" ]; then
+     git worktree add -b agent/<change-id> "$WORKTREE_PATH" HEAD
    fi
+   CHANGE_DST="$WORKTREE_PATH/openspec/changes/<change-id>"
+   mkdir -p "$CHANGE_DST"
+   cp -R "$CHANGE_SRC"/. "$CHANGE_DST"/
+   test -f "$CHANGE_DST/proposal.md" || exit 1
+   test -f "$CHANGE_DST/tasks.md" || exit 1
    ```
+
+   Never dispatch a worker when either required file is missing from the
+   worktree.
 
    `git worktree add` fails when the branch or dir already exists —
    the `if` guard makes the step **idempotent** across re-runs.
@@ -948,10 +946,7 @@ teardown done outside the ladder.
    - Advance phase:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"code\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "coded"}'
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase coded
      ```
      Log: `[dispatch] iteration <n>: code done, phase=coded`.
 
@@ -973,10 +968,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"review\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "reviewed"}'
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase reviewed
      ```
      Log: `[dispatch] iteration <n>: review pass, phase=reviewed`.
      Break out of the loop, proceed to step 8.
@@ -1007,10 +999,7 @@ teardown done outside the ladder.
    - `verdict: pass`:
      ```bash
      postManagerActivity "{\"changeId\":\"<change-id>\",\"stage\":\"verify\",\"activity\":\"transitioning\"}"
-     curl -sS -X POST "$ITHYNO_BASE/api/changes/<change-id>/phase" \
-       -H 'content-type: application/json' \
-       -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-       -d '{"phase": "done"}'
+     npx --no-install ithyno bridge phase --project "$ITHYNO_PROJECT_ROOT" --change-id "<change-id>" --phase done
 
      # Release the .worktrees/.lock semaphore (parallelExecution=false only).
      if [ "$PARALLEL" = "false" ] && [ -f .worktrees/.lock ]; then

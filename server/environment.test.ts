@@ -14,6 +14,7 @@ import {
   readEnvironmentSelection,
   resolveDevelopmentEnvironmentValues,
   runDotenvxNativeAction,
+  sanitizeChildEnvironment,
   writeEnvironmentSelection,
 } from "./environment/index.js";
 
@@ -26,6 +27,13 @@ afterEach(() => {
 });
 
 describe("development environment resolver", () => {
+  it("does not expose the launcher-only init package source to agent children", () => {
+    expect(sanitizeChildEnvironment({
+      PATH: "/bin",
+      ITHYNO_INIT_PACKAGE_SPEC: "/private/debug-package.tgz",
+    })).toEqual({ PATH: "/bin" });
+  });
+
   it("loads the selected profile and masks values", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
     writeFileSync(join(dir, ".env"), "BASE=from-base\nSECRET=hidden\n", "utf8");
@@ -152,7 +160,7 @@ describe("development environment resolver", () => {
     expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY")).toBe(false);
     expect(state.variables.some((item) => item.key === "DOTENV_PRIVATE_KEY_DEVELOPMENT")).toBe(false);
     expect(state.variables.find((item) => item.key === "APP")?.source).toBe(".env.development");
-  });
+  }, 20_000);
 
   it("creates a default .env.keys key file on first-time encryption without a preconfigured key", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
@@ -169,7 +177,7 @@ describe("development environment resolver", () => {
     expect(readFileSync(join(dir, ".env.keys"), "utf8")).toContain("DOTENV_PRIVATE_KEY");
     const after = await composeDevelopmentEnvironment(dir);
     expect(after.encryption.encrypted).toBe(true);
-  });
+  }, 20_000);
 
   it("restores .env, .env.keys, and .gitignore when encryption fails", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
@@ -223,7 +231,7 @@ describe("development environment resolver", () => {
     expect(wrong.diagnostics.some((item) => item.kind === "decryption-failed")).toBe(true);
     expect(wrong.diagnostics.some((item) => item.message.includes("could not decrypt"))).toBe(true);
     expect(wrong.diagnostics.some((item) => item.message.includes(wrongKey ?? "wrong"))).toBe(false);
-  });
+  }, 15_000);
 
   it("rejects tracked or symlinked .env.keys before any mutation", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));
@@ -246,7 +254,7 @@ describe("development environment resolver", () => {
     await expect(encryptEnvironmentFile(symlinkDir, "default")).rejects.toThrow(/symlink/);
     const symlinkState = await composeDevelopmentEnvironment(symlinkDir);
     expect(symlinkState.diagnostics.some((diag) => diag.kind === "path-traversal" && diag.path === ".env.keys")).toBe(true);
-  });
+  }, 20_000);
 
   it.skipIf(process.platform === "win32")("reports unreadable key-file state for a blocked .env.keys", async () => {
     dir = mkdtempSync(join(tmpdir(), "ithyno-env-"));

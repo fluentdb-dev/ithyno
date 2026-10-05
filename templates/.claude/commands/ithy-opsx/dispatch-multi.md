@@ -30,9 +30,10 @@ The skill covers:
    before spawning anything.
 2. **Capacity resolution** — read `maxParallel`, compute
    `ACTIVE = min(len(ids), maxParallel)`.
-3. **Per-change worktree setup** — same idempotent
-   `git worktree add -b agent/<id> .worktrees/<id>` as single
-   dispatch.
+3. **Per-change worktree setup** — create the worktree, then copy the
+   complete current `openspec/changes/<id>/` directory into it before any
+   worker starts. This includes uncommitted/untracked `proposal.md`,
+   `tasks.md`, `specs/**`, `.openspec.yaml`, and other change artifacts.
 4. **Fan-out code stage** — spawn `ACTIVE` code workers concurrently
    via the standard Dispatch helper protocol.
 5. **Combined completion loop** — inspect the Manager inbox and any
@@ -47,17 +48,14 @@ The skill covers:
    next queued id and spawn its code stage.
 8. **Termination** — end when every id is `done` or `escalated`.
    Report per-id summary.
-9. **Manager activity publication** — post to
-   `POST /api/manager/activity` at every per-change boundary
-   (`dispatching` → `waiting` → `judging` → `cleanup` →
-   `transitioning` → `idle`) so each Kanban card shows what Manager
-   is doing for THAT change. Every post carries its own `changeId`;
-   parallel dispatches never share a badge. Requires
-   the authoritative `ITHYNO_BASE` / `ITHYNO_PORT` and
-   `ITHYNO_SESSION_TOKEN` exported into the Manager PTY. Missing
-   session context stops dispatch before worker routing; individual
-   activity publication failures remain best-effort after that guard.
-   Landed by expose-manager-activity-per-change.
+9. **Manager activity publication** — post via `npx --no-install ithyno bridge activity`
+   at every per-change boundary (`dispatching` → `waiting` → `judging` →
+   `cleanup` → `transitioning` → `idle`) so each Kanban card shows what
+   Manager is doing for THAT change. Every post carries its own
+   `changeId`; parallel dispatches never share a badge. The bridge reads
+   the exact project root from `ITHYNO_PROJECT_ROOT` and does not guess
+   `localhost:4321` or require a token-bearing `curl` path. Landed by
+   expose-manager-activity-per-change.
 
 Do not skip steps. Respect `MAX_ITERATIONS = 5` per change.
 Escalation of one change does NOT stop the others.

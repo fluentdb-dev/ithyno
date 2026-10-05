@@ -3,7 +3,7 @@ param(
   [string]$CliName = "CLI",
   [ValidateSet("electron", "vscode", "cli")][string]$Context = "cli",
   [string]$HostAppName = "",
-  [ValidateSet("stop", "pretooluse")][string]$HookType = "stop"
+  [ValidateSet("stop", "pretooluse", "copilot-pretooluse")][string]$HookType = "stop"
 )
 
 # --- CWD / project name (mirrors notify-waiting.sh) ---
@@ -78,5 +78,7 @@ try {
 if ($HookType -eq "pretooluse") {
   Write-Output '{"decision":"allow"}'
 } else {
+  # Copilot preToolUse receives an empty decision object so its normal
+  # permission flow remains intact.
   Write-Output '{}'
 }

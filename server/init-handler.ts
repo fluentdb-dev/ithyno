@@ -6,10 +6,12 @@
  * Separating the doctor-gate + manager-pick + agents.yaml write logic from the
  * Fastify handler makes it unit-testable without spinning up the full server.
  */
-import { join } from "node:path";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
+import { mkdir, readFile, writeFile, rm, stat } from "node:fs/promises";
 import type { DoctorReport, Cli } from "./doctor.js";
 import { CLI_PRIORITY } from "./doctor.js";
+import { gitInit } from "./git/init.js";
+import { getGitStatus } from "./git/status.js";
 
 export type InitHandlerInput = {
   dir: string;
@@ -25,6 +27,56 @@ export type InitHandlerGateResult =
   | { ok: false; status: 409; error: string; hint: string }
   | { ok: false; status: 400; error: string; installed: Cli[] }
   | { ok: true; chosenCli: Cli };
+
+/**
+ * Ensure the lightweight `agentsYamlOnly` preflight has somewhere valid to
+ * write. New Project calls this before the streamed initialization chain, so
+ * the selected subdirectory may not exist and cannot be assumed to be a Git
+ * repository yet.
+ */
+export async function prepareAgentsYamlTarget(
+  dir: string,
+  options: { autoCreateDir?: boolean; autoGitInit?: boolean } = {},
+): Promise<{ created: boolean; gitInitialized: boolean }> {
+  if (!dir.trim() || dir.includes("\0") || !isAbsolute(dir)) {
+    throw new Error("Target directory must be an absolute filesystem path");
+  }
+  const targetDir = resolve(dir);
+  let created = false;
+  try {
+    // The authenticated local user explicitly selects this project root.
+    const target = await stat(targetDir); // codeql[js/path-injection] -- Authenticated, validated absolute project selection is the feature.
+    if (!target.isDirectory()) throw new Error(`Target is not a directory: ${targetDir}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Target is not a directory:")) {
+      throw err;
+    }
+    if (!(err instanceof Error) || (err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
+    if (!options.autoCreateDir) {
+      throw new Error(`Target directory does not exist: ${targetDir}`);
+    }
+    await mkdir(targetDir, { recursive: true }); // codeql[js/path-injection] -- Creates the authenticated user's validated project target.
+    created = true;
+  }
+
+  let gitInitialized = false;
+  if (options.autoGitInit) {
+    const before = await getGitStatus(targetDir);
+    const after = await gitInit(targetDir);
+    if (!after.isRepo) {
+      throw new Error(
+        after.reason === "git-missing"
+          ? "git binary not found in PATH"
+          : `git init did not create a repository at ${targetDir}`,
+      );
+    }
+    gitInitialized = !before.isRepo;
+  }
+
+  return { created, gitInitialized };
+}
 
 /**
  * Run the doctor gate and manager resolution. Returns the chosen CLI or an

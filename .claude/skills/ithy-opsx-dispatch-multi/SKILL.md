@@ -51,42 +51,28 @@ Landed by `add-multi-dispatch-orchestrator`.
   `GET /api/agents/config`.
 
 - `POLL_INTERVAL = 5` — inbox poll cadence (seconds).
-- `ITHYNO_BASE` — authoritative base URL of the local ithyno server.
-  The Electron shell and VSCode extension export the resolved,
-  per-project endpoint into the Manager PTY. If only the injected
-  `ITHYNO_PORT` is available, derive the base URL from that exact
-  value. Never use a remembered or default port.
-- `ITHYNO_SESSION_TOKEN` — the current dashboard session token.
-  Validate the injected context before preflight or worker routing:
+- `ITHYNO_PROJECT_ROOT` — optional project root for the concurrent change set.
+  Prefer the exact project resolved from the active CLI working directory,
+  or from an explicit `--project <path>` passed to the CLI. If it is unset,
+  resolve the project from `pwd` before starting any worker; never guess a
+  different project or a remembered localhost port.
 
   ```bash
-  if [ -z "${ITHYNO_BASE:-}" ]; then
-    if [ -n "${ITHYNO_PORT:-}" ]; then
-      ITHYNO_BASE="http://localhost:$ITHYNO_PORT"
-    else
-      echo "[dispatch-multi] ITHYNO_BASE and ITHYNO_PORT are unset."
-      echo "[dispatch-multi] Restart this Manager from the active dashboard; do not guess a port."
-      exit 1
-    fi
+  if [ -z "${ITHYNO_PROJECT_ROOT:-}" ]; then
+    ITHYNO_PROJECT_ROOT="$(pwd)"
   fi
-  if [ -z "${ITHYNO_SESSION_TOKEN:-}" ]; then
-    echo "[dispatch-multi] authoritative ithyno session context is missing."
-    echo "[dispatch-multi] ITHYNO_BASE=$ITHYNO_BASE"
-    echo "[dispatch-multi] ITHYNO_SESSION_TOKEN is unset."
-    echo "[dispatch-multi] Restart this Manager from the active dashboard."
-    exit 1
-  fi
+
+  npx --no-install ithyno bridge phase \
+    --project "$ITHYNO_PROJECT_ROOT" \
+    --change-id "<change-id>" \
+    --phase coded
   ```
 
-  Never print the token itself. Immediately before every ithyno HTTP
-  request, reconsider whether the dashboard or server restarted and
-  expand the current `ITHYNO_BASE`, `ITHYNO_PORT`, and
-  `ITHYNO_SESSION_TOKEN` again. On HTTP 401/403 or a transport failure,
-  re-read them once and retry only if the request values demonstrably
-  changed. Otherwise stop; a control-plane failure must not enter a
-  worker, Manager-execution, or guessed-endpoint fallback. Activity
-  publication remains best-effort only after this initial session-
-  context validation succeeds.
+  All control-plane writes, including phase updates and dashboard activity,
+  must use `npx --no-install ithyno bridge ...` rather than `curl` plus `ITHYNO_BASE` /
+  `ITHYNO_PORT` / `ITHYNO_SESSION_TOKEN`. The same-phase fan-out behavior
+  remains unchanged, but the runtime path is explicitly fail-closed when the
+  bridge is unavailable.
 
 ## Manager activity publication (per change)
 
@@ -98,12 +84,25 @@ independent Kanban badges. Landed by
 
 ```bash
 postManagerActivity() {
-  # $1 = JSON body carrying changeId + stage + activity (+ detail).
-  [ -n "$ITHYNO_SESSION_TOKEN" ] || return 0
-  curl -sS -X POST "$ITHYNO_BASE/api/manager/activity" \
-    -H 'content-type: application/json' \
-    -H "X-Session-Token: $ITHYNO_SESSION_TOKEN" \
-    -d "$1" >/dev/null 2>&1 || true
+  # $1 = JSON body carrying changeId + role/stage + activity (+ detail).
+  ACTIVITY_CHANGE_ID=$(node -e 'try { console.log(JSON.parse(process.argv[1]).changeId || "") } catch {}' "$1")
+  ACTIVITY_ROLE=$(node -e 'try { const v=JSON.parse(process.argv[1]); console.log(v.role || v.stage || "") } catch {}' "$1")
+  ACTIVITY_NAME=$(node -e 'try { console.log(JSON.parse(process.argv[1]).activity || "idle") } catch {}' "$1")
+  ACTIVITY_DETAIL=$(node -e 'try { console.log(JSON.parse(process.argv[1]).detail || "") } catch {}' "$1")
+  if [ -n "$ACTIVITY_ROLE" ] && [ "$ACTIVITY_NAME" != "idle" ]; then
+    npx --no-install ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --role "$ACTIVITY_ROLE" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  else
+    npx --no-install ithyno bridge activity \
+      --project "$ITHYNO_PROJECT_ROOT" \
+      --change-id "$ACTIVITY_CHANGE_ID" \
+      --activity "$ACTIVITY_NAME" \
+      --message "$ACTIVITY_DETAIL" >/dev/null 2>&1 || true
+  fi
 }
 ```
 
@@ -201,15 +200,28 @@ barrier that waits for every code worker before starting any review.
 
 ### 3. Per-change worktree setup
 
-For each id in `RUNNING`, run the standard setup:
+For each id in `RUNNING`, create its worktree and seed it with the complete
+current change definition. `git worktree add` only materializes `HEAD`, so it
+does not carry uncommitted or untracked proposal work. Before enqueueing a
+worker, copy `openspec/changes/<id>/` from the Manager's source tree, including
+`proposal.md`, `tasks.md`, `specs/**`, `.openspec.yaml`, and every other
+change-local artifact:
 
 ```bash
-if [ ! -d ".worktrees/<id>" ]; then
-  git worktree add -b agent/<id> .worktrees/<id> HEAD
+CHANGE_SRC="$(pwd)/openspec/changes/<id>"
+WORKTREE_PATH="$(pwd)/.worktrees/<id>"
+if [ ! -d "$WORKTREE_PATH" ]; then
+  git worktree add -b agent/<id> "$WORKTREE_PATH" HEAD
 fi
+CHANGE_DST="$WORKTREE_PATH/openspec/changes/<id>"
+mkdir -p "$CHANGE_DST"
+cp -R "$CHANGE_SRC"/. "$CHANGE_DST"/
+test -f "$CHANGE_DST/proposal.md" || exit 1
+test -f "$CHANGE_DST/tasks.md" || exit 1
 ```
 
 Each change gets its own worktree; they never share disk state.
+Never enqueue a change whose worktree is missing either required file.
 Compute per-change `TARGET_PATH` + `REVIEW_MD_PATH` as
 `/ithy-opsx:dispatch` does.
 

@@ -517,7 +517,7 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
     { cli: "antigravity", pathContains: [".ithyno/antigravity/skills/ithy-opsx-apply/SKILL.md"] },
     { cli: "cursor", pathContains: [".cursor/commands/", "ithy-opsx-apply", ".md"] },
     { cli: "gemini", pathContains: [".gemini/commands/", "ithy-opsx/apply", ".toml"] },
-    { cli: "copilot", pathContains: [".github/prompts/", "ithy-opsx-apply", ".prompt.md"] },
+    { cli: "copilot", pathContains: [".github/skills/", "ithy-opsx-apply", "SKILL.md"] },
     { cli: "opencode", pathContains: [".opencode/commands/", "ithy-opsx-apply", ".md"] },
   ];
 
@@ -547,6 +547,28 @@ describe("non-Claude renderers (scaffold-ithy-opsx-skills-per-cli)", () => {
       expect(files[0].content).toContain("ithyno/skills/ithy-opsx-apply");
     });
   }
+
+  it("renders both native skill and compatibility prompt for Copilot", async () => {
+    const sources = await discoverSkillSources(SKILLS_DIR);
+    const apply = sources.find((source) => source.id === "ithy-opsx-apply")!;
+    const renderer = getRenderer("copilot")!;
+    const files = renderer.render(apply, { projectRoot: "/proj", cli: "copilot" });
+
+    expect(files.map((file) => file.path)).toEqual([
+      ".github/skills/ithy-opsx-apply/SKILL.md",
+      ".github/prompts/ithy-opsx-apply.prompt.md",
+    ]);
+    expect(files[0].content).toContain("name: ithy-opsx-apply");
+    expect(files[1].content).not.toContain("name: ithy-opsx-apply");
+    expect(files[0].content).toContain("/openspec-apply-change");
+    expect(files[0].content).not.toContain("/opsx:apply");
+    for (const file of files) {
+      expect(file.content).toContain("GENERATED FILE");
+      expect(file.content).not.toContain("{{namespace}}");
+      expect(file.content).not.toContain("{{command}}");
+      expect(file.content).not.toContain("<capability:");
+    }
+  });
 
   it("mapDoctorCliToRendererCli maps agy → antigravity", async () => {
     const mod = await import("./skill-renderer/renderers/index.js");
@@ -605,8 +627,8 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
     },
     {
       cli: "copilot",
-      expectedPathContains: [".github/prompts/", ".prompt.md"],
-      probeCommandPath: ".github/prompts/ithy-opsx-test-probe.prompt.md",
+      expectedPathContains: [".github/skills/", "SKILL.md"],
+      probeCommandPath: ".github/skills/ithy-opsx-test-probe/SKILL.md",
     },
     {
       cli: "opencode",
@@ -658,6 +680,22 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(readFileSync(join(projectRoot, probeCommandPath), "utf-8")).toContain(
         "ithyno/skills/ithy-opsx-test-probe",
       );
+      if (cli === "copilot") {
+        const promptPath = ".github/prompts/ithy-opsx-apply.prompt.md";
+        expect(paths).toContain(promptPath);
+        expect(existsSync(join(projectRoot, promptPath))).toBe(true);
+
+        const firstSkill = readFileSync(join(projectRoot, applyPath!), "utf-8");
+        const firstPrompt = readFileSync(join(projectRoot, promptPath), "utf-8");
+        const replay = await installSkills({
+          projectRoot,
+          selectedClis: ["copilot"],
+          sourcesDir: SKILLS_DIR,
+        });
+        expect(replay.errors).toEqual([]);
+        expect(readFileSync(join(projectRoot, applyPath!), "utf-8")).toBe(firstSkill);
+        expect(readFileSync(join(projectRoot, promptPath), "utf-8")).toBe(firstPrompt);
+      }
     });
   }
 
@@ -692,36 +730,38 @@ describe("installSkills — per-CLI end-to-end (scaffold-ithy-opsx-skills-per-cl
       expect(content, `${cli}: AgentRunner fallback missing`).toContain("server AgentRunner");
       expect(content, `${cli}: synchronous wait contract missing`).toContain("wait: true");
       expect(content, `${cli}: transport timeout missing`).toContain("--connect-timeout 10");
-      expect(content, `${cli}: authoritative endpoint guard missing`).toContain(
+      expect(content, `${cli}: bridge workflow contract missing`).toContain(
+        "ITHYNO_BRIDGE",
+      );
+      expect(content, `${cli}: bridge phase hook missing`).toContain(
+        "npx --no-install ithyno bridge phase",
+      );
+      expect(content, `${cli}: legacy ITHYNO_BASE guard remains`).not.toContain(
         'if [ -z "${ITHYNO_BASE:-}" ]',
       );
-      expect(content, `${cli}: injected port derivation missing`).toContain(
+      expect(content, `${cli}: legacy ITHYNO_BASE fallback remains`).not.toContain(
         'ITHYNO_BASE="http://localhost:$ITHYNO_PORT"',
+      );
+      expect(content, `${cli}: direct curl endpoint fallback remains`).not.toContain(
+        'curl "$ITHYNO_BASE',
       );
       expect(content, `${cli}: stale endpoint fallback remains`).not.toContain(
         "ITHYNO_PORT:-4321",
       );
       expect(content, `${cli}: token secrecy rule missing`).toContain(
-        "Never print the token itself",
+        "token-bearing `curl` call",
       );
-      expect(content, `${cli}: per-request freshness checkpoint missing`).toContain(
-        "Mandatory freshness checkpoint",
+      expect(content, `${cli}: bridge freshness guard missing`).toContain(
+        "if it did not change, stop and request a fresh Manager session",
       );
       expect(content, `${cli}: session failure may enter worker fallback`).toContain(
-        "failure is not a worker failure",
+        "Controller/session failures never enter that ladder",
       );
       expect(content, `${cli}: wrong auth header remains`).not.toContain(
         "Authorization: Bearer $ITHYNO_SESSION_TOKEN",
       );
-      expect(content, `${cli}: session-token header missing`).toContain(
-        "X-Session-Token: $ITHYNO_SESSION_TOKEN",
-      );
-      expect(content, `${cli}: transport failure not separated`).toContain(
-        'if [ "$CURL_EXIT" -ne 0 ]',
-      );
-      expect(content, `${cli}: auth failure not separated`).toContain(
-        'JOB_STATUS" = "auth required"',
-      );
+      expect(content, `${cli}: direct token curl remains`).not.toContain("X-Session-Token");
+      expect(content, `${cli}: auth failure separation missing`).toContain("401/403");
       expect(content, `${cli}: direct argv assembly returned`).not.toContain(
         "<entry.command> <entry.args...> -p <resolved-prompt>",
       );

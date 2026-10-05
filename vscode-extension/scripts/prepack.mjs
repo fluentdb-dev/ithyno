@@ -18,11 +18,19 @@ import {
   normalizeEsbuildBinaryPermissions,
   resolveAuthoritativeEsbuildVersion,
 } from "./esbuild-permissions.mjs";
+import { stageInitPackageSource } from "../../scripts/init-package-source.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extRoot = resolve(here, "..");
 const repoRoot = resolve(extRoot, "..");
 const stageDir = resolve(extRoot, "host");
+
+// Packaging must be self-contained. Do not assume a caller built the web UI
+// first: Vite removes and recreates web/dist, so running a root build beside
+// prepack can otherwise capture a half-written directory (images only, no
+// index.html/assets) and every VS Code webview deep link returns 404.
+console.log("[prepack] building production web UI before staging…");
+execSync("npm run build", { cwd: repoRoot, stdio: "inherit" });
 
 console.log(`[prepack] staging ${repoRoot} → ${stageDir}`);
 
@@ -37,6 +45,12 @@ for (const rel of ["bin", "server", "web/dist", "templates", "ithyno", ".claude/
   const dst = resolve(stageDir, rel);
   mkdirSync(dirname(dst), { recursive: true });
   cpSync(src, dst, { recursive: true });
+}
+
+for (const rel of ["web/dist/index.html", "web/dist/assets"]) {
+  if (!existsSync(resolve(stageDir, rel))) {
+    throw new Error(`staged VS Code host is missing required web artifact: ${rel}`);
+  }
 }
 
 const claudeSkillsRoot = resolve(repoRoot, ".claude", "skills");
@@ -79,6 +93,9 @@ const stagedPkg = {
   },
 };
 writeFileSync(resolve(stageDir, "package.json"), JSON.stringify(stagedPkg, null, 2));
+
+const initPackageSource = stageInitPackageSource({ repoRoot, stageDir });
+console.log(`[prepack] init package source: ${initPackageSource.kind}`);
 
 // Install production deps inside stageDir so require()/import resolution
 // works when the extension host launches the bin.

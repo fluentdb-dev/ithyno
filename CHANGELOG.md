@@ -3,6 +3,31 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0-alpha.1] - 2026-10-05
+
+### Added
+
+- Added native GitHub Copilot OpenSpec and ithyno Skills under
+  `.github/skills`, while retaining `.github/prompts` compatibility files.
+- Added Copilot as a selectable Manager and exposed its notification Hook in
+  Settings → Prerequisites.
+
+### Changed
+
+- Dispatch now copies the complete OpenSpec change definition into a newly
+  created worktree before starting a worker.
+- Copilot Manager commands now use the native slash-Skill syntax expected by
+  current Copilot CLI releases.
+
+### Fixed
+
+- Fixed Copilot full-screen terminal rendering and timeline scrolling in the
+  Windows Electron application.
+- Fixed Windows Copilot Skill validation and portable notification Hook
+  installation without bypassing normal permission handling.
+- Isolated Unix bridge socket fixtures so macOS release verification does not
+  fail because of socket-path length or cleanup leakage between tests.
+
 ## [0.9.0-alpha.0] - 2026-09-19
 
 ### Added

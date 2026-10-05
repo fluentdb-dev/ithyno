@@ -176,7 +176,7 @@ describe("AgentRegistry role / specialties / concurrency", () => {
       expect(r.args).toEqual([
         "--dangerously-skip-permissions",
         "-p",
-        "/opsx:apply add-foo",
+        command === "copilot" ? "/openspec-apply-change add-foo" : "/opsx:apply add-foo",
       ]);
     },
   );

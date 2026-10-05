@@ -9,6 +9,7 @@ import { AgmsgConfigModal } from "../components/AgmsgConfigModal";
 import { AgentSkillInstallDialog } from "../components/AgentSkillInstallDialog";
 import { CommandModal } from "../components/CommandModal";
 import { isAbsolutePath } from "../lib/paths";
+import { notificationHookAvailable } from "../lib/notificationHooks";
 import { isVsCodeShell, vscodeHostAppName } from "../runtime/shell";
 import { isElectronShell } from "../runtime/electron";
 import type { AgmsgConfig, Cli, DoctorReport } from "../types";
@@ -394,8 +395,8 @@ function PrerequisitesSection(props: {
   /** Render an Agent CLI row with skill state badges + Manage skills button. */
   const renderAgentRow = (key: Cli, status: CliStatus | undefined) => {
     const info = skillInfoFor(key);
-    const hook = key !== "copilot" ? hookStatus.find((item) => item.command === key && item.supported) : undefined;
-    const hookAvailable = key !== "copilot" && ["claude", "codex", "agy"].includes(key) && status?.installed === true;
+    const hook = hookStatus.find((item) => item.command === key);
+    const hookAvailable = notificationHookAvailable(key, status?.installed, hook?.supported);
     const alerterMissing = /Mac/i.test(navigator.platform) && report?.alerter?.installed !== true;
     const unknownSkills = agentSkillsError !== null && agentSkills === null;
 

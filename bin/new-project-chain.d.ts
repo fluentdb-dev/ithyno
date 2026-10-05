@@ -16,12 +16,19 @@ export type ChainEvent =
   | { type: "error"; step: Step; message: string };
 
 export function openspecToolForCli(cli: string | undefined): string;
+export function ithynoPackageSpec(): Promise<string>;
 
 export function runNewProjectChain(
   target: string,
   onEvent: (e: ChainEvent) => void,
   options?: {
     managerCli?: string;
+    ithynoPackageSpec?: string;
+    force?: boolean;
+    skipGitignore?: boolean;
+    autoCreateDir?: boolean;
+    autoGitInit?: boolean;
+    quiet?: boolean;
     spawnImpl?: (
       cmd: string,
       args: string[],

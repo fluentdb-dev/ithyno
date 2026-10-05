@@ -10,11 +10,12 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
+const releaseEnv = { ...process.env, ITHYNO_RELEASE_BUILD: "1" };
 
 function run(label, cmd, opts = {}) {
   console.log(`\n[release:build] ${label}`);
   console.log(`  > ${cmd}`);
-  execSync(cmd, { cwd: repoRoot, stdio: "inherit", ...opts });
+  execSync(cmd, { cwd: repoRoot, stdio: "inherit", env: releaseEnv, ...opts });
 }
 
 // Detect platform to know which electron package target to run.
@@ -30,6 +31,12 @@ if (platform === "darwin") {
 
 run("typecheck", "npm run typecheck");
 run("test", "npm test");
+if (platform === "win32") {
+  run(
+    "Windows bridge security smoke",
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/windows-bridge-security-smoke.ps1",
+  );
+}
 run("build (web)", "npm run build");
 run("electron compile (TypeScript)", "npm run --workspace ithyno-electron build");
 run("vscode-extension package", "npm run --workspace ithyno-vscode package");

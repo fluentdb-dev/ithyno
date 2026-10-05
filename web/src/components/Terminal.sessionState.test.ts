@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  copilotWheelInput,
   beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
   parseTerminalReplayProtocolMessage,
@@ -13,6 +14,19 @@ import {
   resolveTerminalOverlayPresentation,
   TERMINAL_SESSION_LOST_TIMEOUT_MS,
 } from "./Terminal";
+
+describe("Copilot wheel compatibility", () => {
+  it("maps wheel movement to Copilot's documented timeline page keys", () => {
+    expect(copilotWheelInput("GitHub Copilot", "none", -120)).toBe("\x1b[5~");
+    expect(copilotWheelInput("GitHub Copilot", "none", 120)).toBe("\x1b[6~");
+  });
+
+  it("does not intercept other terminals or active mouse tracking", () => {
+    expect(copilotWheelInput("PowerShell", "none", 120)).toBeNull();
+    expect(copilotWheelInput("GitHub Copilot", "vt200", 120)).toBeNull();
+    expect(copilotWheelInput("GitHub Copilot", "none", 0)).toBeNull();
+  });
+});
 
 describe("terminal project identity", () => {
   it("converts the OpenSpec workspace root to the containing POSIX project root", () => {

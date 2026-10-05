@@ -86,6 +86,7 @@ import {
 } from "./manager-activity.js";
 import { registerEnvironmentRoutes } from "./environment/routes.js";
 import { registerProductionShutdown } from "./production-shutdown.js";
+import { startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -109,6 +110,13 @@ function setProjectRoot(next: string): void {
   openspecDir = resolveOpenspecDir(currentProjectRoot);
 }
 const DEV = process.env.ITHYNO_DEV === "1";
+const ONBOARDING = process.env.ITHYNO_ONBOARDING === "1";
+// Launchers resolve the development/package channel explicitly. The init
+// chain consumes this opaque npm package spec and never guesses from .git,
+// NODE_ENV, or the target project's contents. Standalone `npm run dev` is an
+// explicit development launch, so its source root is the package spec.
+const INIT_PACKAGE_SPEC = process.env.ITHYNO_INIT_PACKAGE_SPEC
+  ?? (DEV ? PKG_ROOT : undefined);
 const SHOULD_OPEN = process.env.ITHYNO_OPEN === "1";
 
 // Mutable — updated at runtime when the ProjectRootWatcher detects that
@@ -125,8 +133,56 @@ let openspecDir = resolveOpenspecDir(currentProjectRoot);
 let projectSwitchInProgress = false;
 
 const fastify = Fastify({ logger: false });
-registerProductionShutdown(fastify, () => {
+let bridgeRuntime: Awaited<ReturnType<typeof startBridgeServer>> | null = null;
+
+async function restartBridgeRuntimeForProject(projectRoot: string): Promise<void> {
+  const nextRegistry = new AgentRegistry(projectRoot);
+  await nextRegistry.load();
+  const nextRunner = new AgentRunner(projectRoot, nextRegistry, (ev) => broadcast(ev));
+  await nextRunner.adoptDetached();
+  await nextRunner.adoptOrphanWorktrees();
+
+  if (bridgeRuntime) {
+    try {
+      await stopBridgeServer(bridgeRuntime.server);
+    } finally {
+      await unregisterBridgeRuntime(
+        bridgeRuntime.descriptor.projectRoot,
+        process.cwd(),
+        bridgeRuntime.descriptor.generation,
+        bridgeRuntime.descriptor.processStartIdentity,
+      ).catch(() => undefined);
+      bridgeRuntime = null;
+    }
+  }
+  agentRegistry = nextRegistry;
+  agentRunner = nextRunner;
+  try {
+    bridgeRuntime = await startBridgeServer(projectRoot, process.cwd(), {
+      registry: agentRegistry,
+      runner: agentRunner,
+    });
+  } catch (err) {
+    console.warn(`[bridge] runtime restart failed for ${projectRoot}: ${err instanceof Error ? err.message : String(err)}`);
+    bridgeRuntime = null;
+  }
+}
+
+registerProductionShutdown(fastify, async () => {
   terminateAllLivePtys();
+  if (bridgeRuntime) {
+    try {
+      await stopBridgeServer(bridgeRuntime.server);
+    } finally {
+      await unregisterBridgeRuntime(
+        bridgeRuntime.descriptor.projectRoot,
+        process.cwd(),
+        bridgeRuntime.descriptor.generation,
+        bridgeRuntime.descriptor.processStartIdentity,
+      ).catch(() => undefined);
+      bridgeRuntime = null;
+    }
+  }
 });
 await fastify.register(rateLimit, { global: false });
 await fastify.register(registerEnvironmentRoutes, {
@@ -334,7 +390,7 @@ if (existsSync(DOCS_DIR)) {
 }
 
 // ---- Agent runner ----------------------------------------------------------
-const agentRegistry = new AgentRegistry(getProjectRoot());
+let agentRegistry = new AgentRegistry(getProjectRoot());
 await agentRegistry.load();
 // auto-sync-agmsg-spawn-options: on boot, ensure ~/.agmsg/config/spawn_options.yaml
 // mirrors non-`--model` args of live-shell workers in agents.yaml. Silent on failure —
@@ -346,7 +402,11 @@ try {
     `[boot] spawn_options.yaml sync failed: ${err instanceof Error ? err.message : String(err)}`,
   );
 }
-const agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+let agentRunner = new AgentRunner(getProjectRoot(), agentRegistry, (ev) => broadcast(ev));
+bridgeRuntime = await startBridgeServer(getProjectRoot(), process.cwd(), {
+  registry: agentRegistry,
+  runner: agentRunner,
+});
 await agentRunner.adoptDetached();
 // Adopt any `.worktrees/<change-id>/` sitting on disk into the runner's
 // job map so the Kanban card can offer Merge/Discard without the user
@@ -355,7 +415,7 @@ await agentRunner.adoptDetached();
 // already include the adopted orphans — otherwise the client races with
 // this init and misses the one-shot `agent-job-started` events.
 // See add-orphan-worktree-adoption.
-await agentRunner.adoptOrphanWorktrees();
+if (!ONBOARDING) await agentRunner.adoptOrphanWorktrees();
 // Debounced broadcast of the fresh registry state on `agents.yaml`
 // file-system changes. Debouncing collapses atomic-write patterns
 // (`.tmp → rename` fires multiple fs.watch events on macOS) into a
@@ -382,13 +442,27 @@ void agentRegistry.startWatching(() => {
   }, 100);
 });
 
-process.on("SIGINT", () => {
+let signalShutdownInProgress = false;
+async function shutdownFromSignal(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  if (signalShutdownInProgress) return;
+  signalShutdownInProgress = true;
   agentRunner.shutdown();
-  process.exit(0);
+  try {
+    // Closing Fastify runs the registered onClose hook, which terminates PTYs
+    // and unregisters/closes the project bridge before the process exits.
+    await fastify.close();
+    process.exit(0);
+  } catch (error) {
+    console.error(`[shutdown] ${signal} cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
+process.once("SIGINT", () => {
+  void shutdownFromSignal("SIGINT");
 });
-process.on("SIGTERM", () => {
-  agentRunner.shutdown();
-  process.exit(0);
+process.once("SIGTERM", () => {
+  void shutdownFromSignal("SIGTERM");
 });
 
 // ---- Helpers ---------------------------------------------------------------
@@ -1011,7 +1085,11 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
 
   // ---- Doctor gate + Manager resolution (expand-init-to-scaffold-agents) --
   const { runDoctor } = await import("./doctor.js");
-  const { resolveManagerFromDoctor, writeAgentsYaml } = await import("./init-handler.js");
+  const {
+    prepareAgentsYamlTarget,
+    resolveManagerFromDoctor,
+    writeAgentsYaml,
+  } = await import("./init-handler.js");
   const report = await runDoctor();
 
   const requestedCommand =
@@ -1038,6 +1116,20 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
 
   const { chosenCli } = gateResult;
 
+  if (body.agentsYamlOnly === true) {
+    try {
+      await prepareAgentsYamlTarget(v.dir, {
+        autoCreateDir: body.autoCreateDir === true,
+        autoGitInit: body.autoGitInit === true,
+      });
+    } catch (err) {
+      return reply.code(500).send({
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // ---- Run scaffold + openspec init (skipped when agentsYamlOnly is true) --
   // agentsYamlOnly: true — caller (OnboardingProject follow-up POST) has
   // already scaffolded openspec/ via the SSE chain; only write agents.yaml.
@@ -1059,7 +1151,7 @@ fastify.post<{ Body: InitBody }>("/api/init", async (req, reply) => {
     // "claude" scaffold (e.g. agy picker → --tools antigravity).
     const chainResult = await runNewProjectChain(v.dir, (ev) => {
       events.push(ev as { step: string; line?: string; message?: string; type: string });
-    }, { managerCli: chosenCli });
+    }, { managerCli: chosenCli, ithynoPackageSpec: INIT_PACKAGE_SPEC });
     if (!chainResult.ok) {
       const errorEvent = events.find((e) => e.type === "error");
       return reply.code(500).send({
@@ -1167,7 +1259,10 @@ fastify.post<{ Body: InitBody }>("/api/init/stream", async (req, reply) => {
     typeof (body.manager as { command: unknown }).command === "string"
       ? (body.manager as { command: string }).command
       : undefined;
-  await runNewProjectChain(v.dir, write, { managerCli });
+  await runNewProjectChain(v.dir, write, {
+    managerCli,
+    ithynoPackageSpec: INIT_PACKAGE_SPEC,
+  });
 
   // scaffold-ithy-opsx-skills-per-cli task 3 — same renderer step
   // as /api/init above, applied on the SSE path so both entry points
@@ -1449,7 +1544,7 @@ fastify.post("/api/agents/config", async (req, reply) => {
 });
 
 // Independent per-agent notification-hook toggle. Skill installation does not
-// affect this state; the hook is currently supported only for Claude.
+// affect this state; supported CLIs expose their own native Hook format.
 fastify.get("/api/agent-hooks", async (req, reply) => {
   if (!isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
   const init = await import("../bin/init.js");
@@ -1947,6 +2042,7 @@ fastify.post<{ Body: InjectBody }>("/api/pty/inject", async (req, reply) => {
       const oldRoot = getProjectRoot();
       terminateAllLivePtys(oldRoot);
       setProjectRoot(resolvedNext);
+      await restartBridgeRuntimeForProject(resolvedNext);
       broadcast({ type: "state-replaced" });
       return reply.code(200).send({ projectRoot: resolvedNext });
     } finally {
@@ -2142,10 +2238,10 @@ try {
   // requested PORT in some edge case).
   ORIGIN_ALLOW = buildOriginAllowList(PORT, DEV_EXTRA_ORIGINS);
   const launchUrl = `http://localhost:${PORT}/?token=${SESSION_TOKEN}`;
-  if (!openspecDir) {
+  if (!openspecDir && !ONBOARDING) {
     console.log(`⚠  No openspec/ directory found under ${getProjectRoot()}`);
     console.log(`   Run this from an OpenSpec project root, or use --dir <path>.`);
-  } else {
+  } else if (openspecDir) {
     console.log(`✔  ithyno watching ${openspecDir}`);
   }
   if (DEV) {
@@ -2158,6 +2254,17 @@ try {
     }
   }
 } catch (err) {
-  console.error(err);
+  const code = err && typeof err === "object" && "code" in err
+    ? String((err as { code?: unknown }).code ?? "")
+    : "";
+  if (code === "EADDRINUSE") {
+    console.error(
+      `[ithyno] Port ${PORT} is already in use. ` +
+        `Use \`ithyno bridge status --project .\` to inspect an existing session, ` +
+        `or \`ithyno start --port ${PORT === 65535 ? 4322 : PORT + 1}\` to choose another port.`,
+    );
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 }
