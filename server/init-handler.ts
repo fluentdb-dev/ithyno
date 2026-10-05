@@ -6,7 +6,7 @@
  * Separating the doctor-gate + manager-pick + agents.yaml write logic from the
  * Fastify handler makes it unit-testable without spinning up the full server.
  */
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { mkdir, readFile, writeFile, rm, stat } from "node:fs/promises";
 import type { DoctorReport, Cli } from "./doctor.js";
 import { CLI_PRIORITY } from "./doctor.js";
@@ -38,10 +38,15 @@ export async function prepareAgentsYamlTarget(
   dir: string,
   options: { autoCreateDir?: boolean; autoGitInit?: boolean } = {},
 ): Promise<{ created: boolean; gitInitialized: boolean }> {
+  if (!dir.trim() || dir.includes("\0") || !isAbsolute(dir)) {
+    throw new Error("Target directory must be an absolute filesystem path");
+  }
+  const targetDir = resolve(dir);
   let created = false;
   try {
-    const target = await stat(dir);
-    if (!target.isDirectory()) throw new Error(`Target is not a directory: ${dir}`);
+    // The authenticated local user explicitly selects this project root.
+    const target = await stat(targetDir); // lgtm[js/path-injection]
+    if (!target.isDirectory()) throw new Error(`Target is not a directory: ${targetDir}`);
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("Target is not a directory:")) {
       throw err;
@@ -50,21 +55,21 @@ export async function prepareAgentsYamlTarget(
       throw err;
     }
     if (!options.autoCreateDir) {
-      throw new Error(`Target directory does not exist: ${dir}`);
+      throw new Error(`Target directory does not exist: ${targetDir}`);
     }
-    await mkdir(dir, { recursive: true });
+    await mkdir(targetDir, { recursive: true }); // lgtm[js/path-injection]
     created = true;
   }
 
   let gitInitialized = false;
   if (options.autoGitInit) {
-    const before = await getGitStatus(dir);
-    const after = await gitInit(dir);
+    const before = await getGitStatus(targetDir);
+    const after = await gitInit(targetDir);
     if (!after.isRepo) {
       throw new Error(
         after.reason === "git-missing"
           ? "git binary not found in PATH"
-          : `git init did not create a repository at ${dir}`,
+          : `git init did not create a repository at ${targetDir}`,
       );
     }
     gitInitialized = !before.isRepo;

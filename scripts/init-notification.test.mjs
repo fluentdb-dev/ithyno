@@ -74,4 +74,9 @@ describe("notification init helpers", () => {
     const removed = JSON.parse(await readFile(join(root, ".github/hooks/ithyno-notification.json"), "utf8"));
     expect(removed.hooks.preToolUse).toEqual([]);
   });
+  it("rejects an invalid Copilot project root before touching the filesystem", async () => {
+    await expect(installCopilotNotifyHook("\0invalid", "/tmp/notify.sh")).rejects.toThrow(
+      "Project root must be a non-empty filesystem path",
+    );
+  });
 });

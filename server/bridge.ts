@@ -120,8 +120,10 @@ export function canonicalProjectRoot(projectPath?: string, cwd = process.cwd()):
 }
 
 export function canonicalProjectIdentity(projectPath?: string, cwd = process.cwd()): string {
-  const root = canonicalProjectRoot(projectPath, cwd);
-  return process.platform === "win32" ? root.replace(/[/\\]+$/u, "").toLowerCase() : root;
+  let root = canonicalProjectRoot(projectPath, cwd);
+  if (process.platform !== "win32") return root;
+  while (root.endsWith("/") || root.endsWith("\\")) root = root.slice(0, -1);
+  return root.toLowerCase();
 }
 
 export function stableProjectHash(projectPath?: string, cwd = process.cwd()): string {

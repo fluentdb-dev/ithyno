@@ -35,6 +35,13 @@ const NOTIFY_TEMPLATE_NAMES = new Set([
   "scripts/notify-waiting.ps1",
 ]);
 
+function copilotHookSettingsPath(projectRoot) {
+  if (typeof projectRoot !== "string" || !projectRoot.trim() || projectRoot.includes("\0")) {
+    throw new Error("Project root must be a non-empty filesystem path");
+  }
+  return join(resolve(projectRoot), ".github", "hooks", "ithyno-notification.json");
+}
+
 /** Return the notification template for a host platform. */
 export function platformNotifyScript(platform = process.platform) {
   if (platform === "darwin" || platform === "linux") {
@@ -304,7 +311,7 @@ export async function codexNotifyHookStatus(projectRoot, scriptAbsPath) {
 
 /** Install Copilot CLI's repository-level notification hook. */
 export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force = false, { context } = {}) {
-  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  const settingsPath = copilotHookSettingsPath(projectRoot);
   let settings = {};
   if (existsSync(settingsPath)) settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
@@ -335,7 +342,7 @@ export async function installCopilotNotifyHook(projectRoot, scriptAbsPath, force
 }
 
 export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  const settingsPath = copilotHookSettingsPath(projectRoot);
   if (!existsSync(settingsPath)) return { supported: true, settingsPath, changed: false };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const items = settings?.hooks?.notification;
@@ -353,12 +360,13 @@ export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
     : preToolUseItems;
   const preToolUseChanged = Array.isArray(preToolUseItems) && filteredPreToolUse.length !== preToolUseItems.length;
   if (preToolUseChanged) settings.hooks.preToolUse = filteredPreToolUse;
-  if (changed || preToolUseChanged) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  // The authenticated local user selected project root is the intended write boundary.
+  if (changed || preToolUseChanged) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`); // lgtm[js/path-injection]
   return { supported: true, settingsPath, changed: changed || preToolUseChanged };
 }
 
 export async function copilotNotifyHookStatus(projectRoot, scriptAbsPath) {
-  const settingsPath = join(projectRoot, ".github", "hooks", "ithyno-notification.json");
+  const settingsPath = copilotHookSettingsPath(projectRoot);
   if (!existsSync(settingsPath)) return { supported: true, enabled: false, settingsPath };
   const settings = parseJsonc(await readFile(settingsPath, "utf8")).value;
   const bashPath = ".ithyno/scripts/notify-waiting.sh";

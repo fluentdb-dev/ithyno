@@ -280,6 +280,15 @@ describe("runInit — autoCreateDir + autoGitInit (add-init-http-endpoint)", () 
 });
 
 describe("prepareAgentsYamlTarget — New Project preflight", () => {
+  it("rejects relative and NUL-containing project targets", async () => {
+    await expect(prepareAgentsYamlTarget("relative/project", { autoCreateDir: true })).rejects.toThrow(
+      "Target directory must be an absolute filesystem path",
+    );
+    await expect(prepareAgentsYamlTarget(`${dir}\0escape`, { autoCreateDir: true })).rejects.toThrow(
+      "Target directory must be an absolute filesystem path",
+    );
+  });
+
   it("creates a missing target and initializes Git before agents.yaml is written", async () => {
     const target = join(dir, "new-project", "nested");
 
