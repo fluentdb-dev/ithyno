@@ -103,6 +103,13 @@ export const BRIDGE_MAX_MESSAGE_BYTES = 256 * 1024;
 export const BRIDGE_DEFAULT_DEADLINE_MS = 5_000;
 export const BRIDGE_MAX_DEADLINE_MS = 30 * 60_000;
 const windowsProcessIdentityCache = new Map<number, string>();
+const currentWindowsProcessFallbackIdentity = `${process.pid}:${process.ppid}:${Math.floor(Date.now() - process.uptime() * 1_000)}`;
+
+function fallbackWindowsProcessIdentity(pid: number): string | null {
+  if (pid !== process.pid) return null;
+  windowsProcessIdentityCache.set(pid, currentWindowsProcessFallbackIdentity);
+  return currentWindowsProcessFallbackIdentity;
+}
 
 function windowsPowerShellPath(): string {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
@@ -200,12 +207,12 @@ export function currentProcessStartIdentity(pid = process.pid): string | null {
         timeout: 5_000,
       }).stdout ?? "";
       const ticks = out.trim();
-      if (!/^\d+$/u.test(ticks)) return null;
+      if (!/^\d+$/u.test(ticks)) return fallbackWindowsProcessIdentity(pid);
       const identity = `${pid}:${ticks}`;
       windowsProcessIdentityCache.set(pid, identity);
       return identity;
     } catch {
-      return null;
+      return fallbackWindowsProcessIdentity(pid);
     }
   }
   return `${pid}:${process.ppid}:${Date.now()}`;

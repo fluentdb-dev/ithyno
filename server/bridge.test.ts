@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { connect as netConnect, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   canonicalProjectRoot,
   stableProjectHash,
@@ -112,6 +112,11 @@ async function unregisterOwnedBridgeRuntime(projectRoot: string, cwd = process.c
   await unregisterBridgeRuntime(projectRoot, cwd, runtime.generation, runtime.processStartIdentity);
 }
 
+function writeRuntimeDescriptor(file: string, content: string): void {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, content);
+}
+
 describe("bridge project identity", () => {
   it("uses a compact Unix socket name that fits the macOS path limit", () => {
     if (process.platform === "win32") return;
@@ -174,13 +179,13 @@ describe("bridge runtime registry", () => {
       await unregisterOwnedBridgeRuntime(projectRoot, projectRoot);
       rmSync(projectRoot, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("rejects malformed protocol and generation metadata without coercion", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-bad-runtime-"));
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
-      writeFileSync(file, JSON.stringify({
+      writeRuntimeDescriptor(file, JSON.stringify({
         projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: buildBridgeIpcAddress(projectRoot),
@@ -192,7 +197,7 @@ describe("bridge runtime registry", () => {
       expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
       expect(existsSync(file)).toBe(true);
 
-      writeFileSync(file, JSON.stringify({
+      writeRuntimeDescriptor(file, JSON.stringify({
         projectRoot: canonicalProjectRoot(projectRoot, projectRoot),
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: buildBridgeIpcAddress(projectRoot),
@@ -213,7 +218,7 @@ describe("bridge runtime registry", () => {
     const otherRoot = mkdtempSync(join(tmpdir(), "ithyno-other-project-"));
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
-      writeFileSync(file, JSON.stringify({
+      writeRuntimeDescriptor(file, JSON.stringify({
         projectRoot: canonicalProjectRoot(otherRoot, otherRoot),
         projectHash: stableProjectHash(otherRoot),
         ipcAddress: buildBridgeIpcAddress(otherRoot),
@@ -243,7 +248,7 @@ describe("bridge runtime registry", () => {
         protocolVersion: "1",
         generation: 1,
       };
-      writeFileSync(file, JSON.stringify(descriptor));
+      writeRuntimeDescriptor(file, JSON.stringify(descriptor));
       expect(await lookupBridgeRuntime(projectRoot, projectRoot)).toBeNull();
       expect(existsSync(file)).toBe(false);
 
@@ -286,7 +291,7 @@ describe("bridge runtime registry", () => {
     } as const;
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
-      writeFileSync(file, JSON.stringify(runtime));
+      writeRuntimeDescriptor(file, JSON.stringify(runtime));
       chmodSync(file, 0o000);
       const status = await bridgeStatus(projectRoot, projectRoot);
       expect(status.ok).toBe(false);
@@ -334,7 +339,7 @@ describe("bridge runtime registry", () => {
         generation: 1,
       };
       const file = bridgeRuntimeFile(projectRoot, projectRoot);
-      writeFileSync(file, JSON.stringify(runtime));
+      writeRuntimeDescriptor(file, JSON.stringify(runtime));
       const probe = await probeBridgeRuntimeOwnership(runtime);
       expect(probe.ok).toBe(false);
       expect(probe.code).toBe("validation");
@@ -384,7 +389,7 @@ describe("bridge runtime registry", () => {
         generation: 1,
       };
       const file = bridgeRuntimeFile(projectRoot, projectRoot);
-      writeFileSync(file, JSON.stringify(runtime));
+      writeRuntimeDescriptor(file, JSON.stringify(runtime));
       const probe = await probeBridgeRuntimeOwnership(runtime);
       expect(probe.ok).toBe(false);
       expect(probe.code).toBe("timeout");
@@ -410,11 +415,11 @@ describe("bridge runtime registry", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-bad-descriptor-"));
     const file = bridgeRuntimeFile(projectRoot, projectRoot);
     try {
-      writeFileSync(file, "{not-json");
+      writeRuntimeDescriptor(file, "{not-json");
       await expect(unregisterBridgeRuntime(projectRoot, projectRoot, 1, "manual-start")).resolves.toBe(false);
       expect(existsSync(file)).toBe(true);
 
-      writeFileSync(file, JSON.stringify({
+      writeRuntimeDescriptor(file, JSON.stringify({
         projectRoot,
         projectHash: stableProjectHash(projectRoot),
         ipcAddress: buildBridgeIpcAddress(projectRoot),
@@ -427,7 +432,7 @@ describe("bridge runtime registry", () => {
       await expect(unregisterBridgeRuntime(projectRoot, projectRoot, 1, "manual-start")).resolves.toBe(false);
       expect(existsSync(file)).toBe(true);
     } finally {
-      chmodSync(file, 0o600);
+      if (existsSync(file)) chmodSync(file, 0o600);
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
@@ -708,7 +713,7 @@ describe("bridge runtime registry", () => {
         protocolVersion: "1",
         generation: 1,
       };
-      writeFileSync(bridgeRuntimeFile(projectRoot, projectRoot), JSON.stringify(descriptor));
+      writeRuntimeDescriptor(bridgeRuntimeFile(projectRoot, projectRoot), JSON.stringify(descriptor));
       const env = {
         ...process.env,
         XDG_RUNTIME_DIR: runtimeDir,

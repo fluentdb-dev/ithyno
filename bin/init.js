@@ -361,7 +361,8 @@ export async function removeCopilotNotifyHook(projectRoot, scriptAbsPath) {
   const preToolUseChanged = Array.isArray(preToolUseItems) && filteredPreToolUse.length !== preToolUseItems.length;
   if (preToolUseChanged) settings.hooks.preToolUse = filteredPreToolUse;
   // The authenticated local user selected project root is the intended write boundary.
-  if (changed || preToolUseChanged) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`); // lgtm[js/path-injection]
+  // codeql[js/path-injection] -- settingsPath is a fixed suffix beneath the validated project root.
+  if (changed || preToolUseChanged) await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   return { supported: true, settingsPath, changed: changed || preToolUseChanged };
 }
 

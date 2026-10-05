@@ -31,6 +31,12 @@ if (platform === "darwin") {
 
 run("typecheck", "npm run typecheck");
 run("test", "npm test");
+if (platform === "win32") {
+  run(
+    "Windows bridge security smoke",
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/windows-bridge-security-smoke.ps1",
+  );
+}
 run("build (web)", "npm run build");
 run("electron compile (TypeScript)", "npm run --workspace ithyno-electron build");
 run("vscode-extension package", "npm run --workspace ithyno-vscode package");
