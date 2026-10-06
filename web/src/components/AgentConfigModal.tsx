@@ -7,6 +7,7 @@ import type {
   AgentPublic,
 } from "../types";
 import { commandForAgentRole } from "../lib/managerCommand";
+import { sanitizePersistedArgs, splitArgv } from "../lib/commandBuilder";
 
 /**
  * Modal for editing (or adding) an entry in `agents.yaml`. Save posts to
@@ -175,10 +176,7 @@ export function AgentConfigModal({
     };
     if (form.command.trim()) {
       payload.command = form.command.trim();
-      payload.args = form.args
-        .split(/\s+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      payload.args = sanitizePersistedArgs(splitArgv(form.args));
     }
     setSubmitting(true);
     setError(null);
@@ -265,12 +263,12 @@ export function AgentConfigModal({
             )}
           </label>
           <label className="agent-config-field">
-            <span>Args (whitespace-separated)</span>
+            <span>Args (argv, preserves quoted values)</span>
             <input
               type="text"
               value={form.args}
               onChange={(e) => setForm({ ...form, args: e.target.value })}
-              placeholder="e.g. --dangerously-skip-permissions"
+              placeholder={'e.g. --dangerously-skip-permissions --profile "fast"'}
             />
           </label>
 
