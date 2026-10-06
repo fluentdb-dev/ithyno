@@ -76,7 +76,7 @@ describe("cli capability routes", () => {
     await app.close();
   });
 
-  it("returns a failed probe result when the selected CLI cannot complete the handshake", async () => {
+  it("keeps a failed native model probe non-fatal while preserving manual fallback state", async () => {
     const fakeCodex = makeFakeCodexExecutable("probe-failure");
     const app = Fastify({ logger: false });
     app.register(registerCliCapabilityRoutes);
@@ -88,7 +88,7 @@ describe("cli capability routes", () => {
         headers: { "X-Session-Token": SESSION_TOKEN },
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ ok: false, supported: false, availableModels: [] });
+      expect(response.json()).toMatchObject({ ok: true, supported: true, availableModels: [], modelDiscovery: "native", reason: "model probe failed" });
     } finally {
       await app.close();
       rmSync(fakeCodex, { recursive: true, force: true });

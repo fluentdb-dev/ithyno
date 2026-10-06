@@ -484,6 +484,45 @@ function parseJsonPayloads(text: string): unknown[] {
   return packets;
 }
 
+function normalizeReasoningEffortNames(value: unknown): string[] {
+  const names = new Set<string>();
+  const push = (candidate: unknown) => {
+    if (typeof candidate !== "string") return;
+    const normalized = candidate.trim();
+    if (!normalized) return;
+    names.add(normalized);
+  };
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string") {
+        push(item);
+        continue;
+      }
+      if (item && typeof item === "object") {
+        const entry = item as Record<string, unknown>;
+        push(entry.name);
+        push(entry.id);
+        push(entry.value);
+        push(entry.slug);
+        push(entry.label);
+      }
+    }
+    return [...names];
+  }
+
+  if (value && typeof value === "object") {
+    const entry = value as Record<string, unknown>;
+    push(entry.name);
+    push(entry.id);
+    push(entry.value);
+    push(entry.slug);
+    push(entry.label);
+  }
+
+  return [...names];
+}
+
 export function parseCodexModelMetadata(output: string): CodexModelMetadata[] {
   const entries: CodexModelMetadata[] = [];
   for (const packet of parseJsonPayloads(output)) {
@@ -503,16 +542,22 @@ export function parseCodexModelMetadata(output: string): CodexModelMetadata[] {
       const entry = item as Record<string, unknown>;
       const id = typeof entry.id === "string" ? entry.id : typeof entry.model === "string" ? entry.model : undefined;
       const displayName = typeof entry.displayName === "string" ? entry.displayName : typeof entry.label === "string" ? entry.label : undefined;
-      const supportedReasoningEfforts = Array.isArray(entry.supportedReasoningEfforts)
-        ? entry.supportedReasoningEfforts.filter((value): value is string => typeof value === "string")
-        : undefined;
-      const defaultReasoningEffort = typeof entry.defaultReasoningEffort === "string" ? entry.defaultReasoningEffort : undefined;
-      if (!id && !displayName && !supportedReasoningEfforts && !defaultReasoningEffort) continue;
+      const supportedReasoningEfforts = normalizeReasoningEffortNames(entry.supportedReasoningEfforts);
+      const defaultReasoningEffortValue = entry.defaultReasoningEffort;
+      const defaultReasoningEffort: string | undefined = typeof defaultReasoningEffortValue === "string"
+        ? defaultReasoningEffortValue
+        : defaultReasoningEffortValue && typeof defaultReasoningEffortValue === "object"
+          ? (defaultReasoningEffortValue as Record<string, unknown>).name as string
+            ?? (defaultReasoningEffortValue as Record<string, unknown>).id as string
+            ?? (defaultReasoningEffortValue as Record<string, unknown>).value as string
+            ?? undefined
+          : undefined;
+      if (!id && !displayName && supportedReasoningEfforts.length === 0 && !defaultReasoningEffort) continue;
       entries.push({
         id,
         model: typeof entry.model === "string" ? entry.model : undefined,
         displayName,
-        supportedReasoningEfforts,
+        supportedReasoningEfforts: supportedReasoningEfforts.length > 0 ? supportedReasoningEfforts : undefined,
         defaultReasoningEffort,
       });
     }
@@ -775,12 +820,13 @@ export async function probeCliAdapter(adapter: CliAdapter, selectedExecutablePat
   }
 
   const nativeModelProbeRequired = Boolean(adapter.modelProbe && adapter.modelDiscovery === "native");
-  const ok = versionProbe.ok && helpProbe.ok && (!nativeModelProbeRequired || availableModels.length > 0);
+  const nativeModelProbeFailed = nativeModelProbeRequired && availableModels.length === 0;
+  const ok = versionProbe.ok && helpProbe.ok;
   const supported = ok && supportedFields.length > 0;
   let reason: string | undefined;
   if (!versionProbe.ok) reason = versionProbe.error ?? "version probe failed";
   else if (!helpProbe.ok) reason = helpProbe.error ?? "help probe failed";
-  else if (nativeModelProbeRequired && availableModels.length === 0) reason = "model probe failed";
+  else if (nativeModelProbeFailed) reason = "model probe failed";
   else if (!supported) reason = "no compatible builder flags were discovered";
 
   return {

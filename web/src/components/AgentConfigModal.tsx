@@ -207,6 +207,7 @@ export function AgentConfigModal({
     reason?: string;
   } | null>(null);
   const [capabilityState, setCapabilityState] = useState<"idle" | "loading" | "ready" | "error" | "timeout" | "missing">("idle");
+  const [showAdvancedArgs, setShowAdvancedArgs] = useState(false);
 
   useEffect(() => {
     const command = form.command.trim();
@@ -239,7 +240,9 @@ export function AgentConfigModal({
           setCapabilityState("error");
           return;
         }
-        setCapabilityState(json.supported ? "ready" : "error");
+        const normalizedReason = json.reason;
+        const modelFallback = json.modelDiscovery === "manual" || normalizedReason === "model probe failed";
+        setCapabilityState(modelFallback ? "ready" : (json.supported ? "ready" : "error"));
       } catch (err) {
         if (cancelled) return;
         setCapabilityState(err instanceof DOMException && err.name === "AbortError" ? "idle" : "timeout");
@@ -398,6 +401,7 @@ export function AgentConfigModal({
                 {visibleFields.map((field) => {
                   const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
                   const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
+                  const isManualModelFallback = field.key === "model" && capability?.reason === "model probe failed";
                   if (field.kind === "boolean") {
                     return (
                       <label key={field.key} className="agent-config-field agent-config-checkbox-field">
@@ -430,11 +434,13 @@ export function AgentConfigModal({
                     );
                   }
                   const modelListId = `${selectedAdapter?.id ?? "cli"}-models`;
-                  const isModelField = field.key === "model" && modelOptions.length > 0;
+                  const hasDiscoveredModelOptions = modelOptions.length > 0;
+                  const shouldUseDatalist = field.key === "model" && hasDiscoveredModelOptions;
+                  const manualModelHint = isManualModelFallback ? " (manual entry)" : "";
                   return (
                     <label key={field.key} className="agent-config-field">
-                      <span>{field.label}</span>
-                      {isModelField ? (
+                      <span>{field.label}{manualModelHint}</span>
+                      {shouldUseDatalist ? (
                         <>
                           <input
                             type="text"
@@ -467,20 +473,37 @@ export function AgentConfigModal({
               {(capability?.modelGuidance ?? selectedAdapter?.modelGuidance) && (
                 <p className="muted">{capability?.modelGuidance ?? selectedAdapter?.modelGuidance}</p>
               )}
+              {capability?.reason === "model probe failed" && (
+                <p className="muted">Native model discovery is unavailable for this CLI version; keep the model field editable and enter a value manually.</p>
+              )}
               {argConflicts.length > 0 && (
                 <div className="form-field-error" role="alert">
                   Conflicting recognized args detected: {argConflicts.join(", ")}
                 </div>
               )}
-              <label className="agent-config-field">
-                <span>Advanced args (optional; exact argv preview)</span>
-                <textarea
-                  value={form.args}
-                  onChange={(e) => setForm({ ...form, args: e.target.value })}
-                  rows={3}
-                  placeholder={'--flag "value" --unknown "preserve me"'}
-                />
-              </label>
+              <div className="agent-config-advanced">
+                <button
+                  type="button"
+                  className="agent-config-advanced-toggle"
+                  aria-expanded={showAdvancedArgs}
+                  onClick={() => setShowAdvancedArgs((v) => !v)}
+                >
+                  {showAdvancedArgs ? "▾" : "▸"} Advanced args
+                </button>
+                {showAdvancedArgs && (
+                  <div className="agent-config-advanced-body">
+                    <label className="agent-config-field">
+                      <span>Advanced args (optional; exact argv preview)</span>
+                      <textarea
+                        value={form.args}
+                        onChange={(e) => setForm({ ...form, args: e.target.value })}
+                        rows={3}
+                        placeholder={'--flag "value" --unknown "preserve me"'}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
               <div className="muted">
                 Preview: {form.command ? `${form.command} ${joinArgv(splitArgv(form.args))}` : "(set command first)"}
               </div>

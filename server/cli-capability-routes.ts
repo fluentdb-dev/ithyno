@@ -44,7 +44,7 @@ export async function inspectCliCapability(command: string) {
     command,
     ok: result.ok,
     supported: result.supported,
-    reason: result.ok ? undefined : "probe-failed",
+    reason: result.reason ?? (result.ok ? undefined : "probe-failed"),
     executablePath,
     probeFingerprint: fingerprint,
   };
