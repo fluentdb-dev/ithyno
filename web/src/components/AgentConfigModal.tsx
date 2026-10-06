@@ -6,6 +6,7 @@ import type {
   AgentMode,
   AgentPublic,
 } from "../types";
+import { getSessionToken } from "../runtime";
 import { commandForAgentRole } from "../lib/managerCommand";
 import {
   detectCliArgConflicts,
@@ -13,7 +14,6 @@ import {
   mergeCliArgs,
   parseCliArgs,
   resolveCliAdapter,
-  sanitizePersistedArgs,
   splitArgv,
 } from "../lib/commandBuilder";
 
@@ -115,6 +115,67 @@ export function AgentConfigModal({
   const selectedAdapter = useMemo(() => resolveCliAdapter(form.command), [form.command]);
   const parsedArgs = useMemo(() => parseCliArgs(splitArgv(form.args)), [form.args]);
   const argConflicts = useMemo(() => detectCliArgConflicts(splitArgv(form.args)), [form.args]);
+  const [capability, setCapability] = useState<{
+    ok: boolean;
+    supported: boolean;
+    fields: Array<{ key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }>;
+    modelGuidance?: string;
+    availableModels: string[];
+    currentVersion?: string;
+    danger?: readonly string[];
+    reason?: string;
+  } | null>(null);
+  const [capabilityState, setCapabilityState] = useState<"idle" | "loading" | "ready" | "error" | "timeout" | "missing">("idle");
+
+  useEffect(() => {
+    const command = form.command.trim();
+    if (!command) {
+      setCapability(null);
+      setCapabilityState("idle");
+      return;
+    }
+    if (!selectedAdapter) {
+      setCapability(null);
+      setCapabilityState("missing");
+      return;
+    }
+
+    let cancelled = false;
+    let controller: AbortController | null = null;
+    const timer = window.setTimeout(async () => {
+      setCapabilityState("loading");
+      controller = new AbortController();
+      try {
+        const token = getSessionToken();
+        const res = await fetch(`/api/cli/capabilities?command=${encodeURIComponent(command)}`, {
+          headers: token ? { "X-Session-Token": token } : undefined,
+          signal: controller.signal,
+        });
+        const json = await res.json();
+        if (cancelled) return;
+        setCapability(json);
+        if (!res.ok) {
+          setCapabilityState("error");
+          return;
+        }
+        setCapabilityState(json.supported ? "ready" : "error");
+      } catch (err) {
+        if (cancelled) return;
+        setCapabilityState(err instanceof DOMException && err.name === "AbortError" ? "idle" : "timeout");
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      window.clearTimeout(timer);
+    };
+  }, [form.command, selectedAdapter]);
+
+  const modelOptions = capability?.availableModels ?? [];
+  const visibleFields = capability?.fields && capability.fields.length > 0
+    ? capability.fields
+    : (selectedAdapter?.fields ?? []);
 
   const updateBuilderField = (field: string, value: string | boolean | undefined) => {
     const nextArgs = mergeCliArgs(splitArgv(form.args), { [field]: value });
@@ -192,7 +253,7 @@ export function AgentConfigModal({
     };
     if (form.command.trim()) {
       payload.command = form.command.trim();
-      payload.args = sanitizePersistedArgs(splitArgv(form.args));
+      payload.args = splitArgv(form.args);
     }
     setSubmitting(true);
     setError(null);
@@ -284,9 +345,9 @@ export function AgentConfigModal({
                 CLI builder — {selectedAdapter.displayName}
               </legend>
               <div className="agent-config-builder-grid">
-                {selectedAdapter.fields.map((field) => {
+                {visibleFields.map((field) => {
                   const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
-                  const currentValue = parsedArgs[canonicalKey]?.[0] ?? "";
+                  const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
                   if (field.kind === "boolean") {
                     return (
                       <label key={field.key} className="agent-config-field agent-config-checkbox-field">
@@ -318,21 +379,43 @@ export function AgentConfigModal({
                       </label>
                     );
                   }
+                  const modelListId = `${selectedAdapter?.id ?? "cli"}-models`;
+                  const isModelField = field.key === "model" && modelOptions.length > 0;
                   return (
                     <label key={field.key} className="agent-config-field">
                       <span>{field.label}</span>
-                      <input
-                        type="text"
-                        value={currentValue}
-                        onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                        placeholder={field.guidance ?? field.flag}
-                      />
+                      {isModelField ? (
+                        <>
+                          <input
+                            type="text"
+                            list={modelListId}
+                            value={currentValue}
+                            onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                            placeholder={field.guidance ?? field.flag}
+                          />
+                          <datalist id={modelListId}>
+                            {modelOptions.map((option) => (
+                              <option key={option} value={option} />
+                            ))}
+                          </datalist>
+                        </>
+                      ) : (
+                        <input
+                          type="text"
+                          value={currentValue}
+                          onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                          placeholder={field.guidance ?? field.flag}
+                        />
+                      )}
                     </label>
                   );
                 })}
               </div>
-              {selectedAdapter.modelGuidance && (
-                <p className="muted">{selectedAdapter.modelGuidance}</p>
+              {capabilityState === "loading" && <p className="muted">Checking installed CLI capabilities…</p>}
+              {capabilityState === "timeout" && <p className="form-field-error">Timed out inspecting the selected CLI.</p>}
+              {capabilityState === "error" && capability?.reason && <p className="form-field-error">{capability.reason}</p>}
+              {(capability?.modelGuidance ?? selectedAdapter?.modelGuidance) && (
+                <p className="muted">{capability?.modelGuidance ?? selectedAdapter?.modelGuidance}</p>
               )}
               {argConflicts.length > 0 && (
                 <div className="form-field-error" role="alert">

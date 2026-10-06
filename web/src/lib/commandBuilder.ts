@@ -79,7 +79,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     ],
     versionProbe: ["codex", "--version"],
     helpProbe: ["codex", "--help"],
-    modelProbe: ["codex", "app-server", "initialize", "--", "model/list"],
+    modelProbe: ["codex", "app-server"],
     modelDiscovery: "native",
     modelGuidance: "Codex app-server model/list is preferred when available; if it fails, keep the model field editable and enter a value manually.",
     dangerousFlags: ["--dangerously-bypass-approvals-and-sandbox", "--approve-for-me"],
@@ -119,7 +119,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     helpProbe: ["copilot", "help", "commands"],
     modelProbe: undefined,
     modelDiscovery: "manual",
-    modelGuidance: "Copilot: use /model interactively or type a model name manually; no verified non-interactive list was found.",
+    modelGuidance: "Copilot does not expose a verified non-interactive model list in this environment; use /model interactively or specify a model manually.",
     dangerousFlags: ["--allow-all", "--yolo", "--no-ask-user"],
   },
 };
@@ -130,11 +130,11 @@ for (const adapter of Object.values(CLI_ADAPTERS)) {
   for (const field of adapter.fields) {
     KNOWN_CLI_ARG_KEYS.add(field.flag);
     KNOWN_CLI_ARG_KEYS.add(field.key);
-    KNOWN_CLI_ARG_KEYS.add(field.flag.replace(/^--?/, "").replace(/-+/g, "-"));
+    KNOWN_CLI_ARG_KEYS.add(canonicalCliFlagName(field.flag));
     if (field.kind === "boolean") {
       BOOLEAN_CLI_ARG_KEYS.add(field.flag);
       BOOLEAN_CLI_ARG_KEYS.add(field.key);
-      BOOLEAN_CLI_ARG_KEYS.add(field.flag.replace(/^--?/, "").replace(/-+/g, "-"));
+      BOOLEAN_CLI_ARG_KEYS.add(canonicalCliFlagName(field.flag));
     }
   }
 }
@@ -152,6 +152,140 @@ export function resolveCliAdapter(command?: string | null): CliAdapter | null {
     if (id === normalized || normalized === "antigravity" || normalized === "github-copilot") return adapter;
   }
   return null;
+}
+
+export type ParsedCliArgs = {
+  values: Record<string, string[]>;
+  unknown: string[];
+  conflicts: string[];
+};
+
+export function parseCliArgs(args: readonly string[]): ParsedCliArgs {
+  const values: Record<string, string[]> = {};
+  const unknown: string[] = [];
+  const conflicts: string[] = [];
+  const seen = new Map<string, string>();
+
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i];
+    if (!token) continue;
+    const isFlag = token.startsWith("-") && token !== "-";
+    if (!isFlag) {
+      unknown.push(token);
+      continue;
+    }
+    const bareFlag = token.split("=", 1)[0];
+    const canonical = canonicalCliFlagName(bareFlag);
+    const nextValue = token.includes("=") ? token.slice(token.indexOf("=") + 1) : undefined;
+    if (DISPATCHER_OWNED_PROMPT_FLAGS.has(bareFlag) || DISPATCHER_OWNED_PROMPT_FLAGS.has(canonical)) {
+      unknown.push(token);
+      if (nextValue !== undefined) continue;
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        unknown.push(next);
+        i += 1;
+      }
+      continue;
+    }
+    const isKnown = KNOWN_CLI_ARG_KEYS.has(bareFlag) || KNOWN_CLI_ARG_KEYS.has(canonical) || KNOWN_CLI_ARG_KEYS.has(bareFlag.replace(/^--?/, ""));
+    const isBooleanFlag = BOOLEAN_CLI_ARG_KEYS.has(bareFlag) || BOOLEAN_CLI_ARG_KEYS.has(canonical) || BOOLEAN_CLI_ARG_KEYS.has(bareFlag.replace(/^--?/, ""));
+    if (token.includes("=")) {
+      if (isKnown) {
+        if (seen.has(canonical) && seen.get(canonical) !== nextValue) conflicts.push(canonical);
+        seen.set(canonical, String(nextValue ?? ""));
+        values[canonical] = values[canonical] ? [...values[canonical], String(nextValue ?? "")] : [String(nextValue ?? "")];
+      } else {
+        unknown.push(token);
+      }
+      continue;
+    }
+    if (isKnown) {
+      const next = args[i + 1];
+      if (isBooleanFlag) {
+        if (seen.has(canonical) && seen.get(canonical) !== "true") conflicts.push(canonical);
+        seen.set(canonical, "true");
+        values[canonical] = values[canonical] ? [...values[canonical], "true"] : ["true"];
+        continue;
+      }
+      if (next !== undefined && !next.startsWith("-")) {
+        if (seen.has(canonical) && seen.get(canonical) !== next) conflicts.push(canonical);
+        seen.set(canonical, next);
+        values[canonical] = values[canonical] ? [...values[canonical], next] : [next];
+        i += 1;
+      } else {
+        if (seen.has(canonical) && seen.get(canonical) !== "true") conflicts.push(canonical);
+        seen.set(canonical, "true");
+        values[canonical] = values[canonical] ? [...values[canonical], "true"] : ["true"];
+      }
+      continue;
+    }
+    unknown.push(token);
+  }
+
+  return { values, unknown, conflicts: [...new Set(conflicts)] };
+}
+
+export function detectCliArgConflicts(args: readonly string[]): string[] {
+  return parseCliArgs(args).conflicts;
+}
+
+export function mergeCliArgs(
+  args: readonly string[],
+  selected: Record<string, string | boolean | undefined>,
+): string[] {
+  const selectedKeys = new Set(
+    Object.entries(selected)
+      .map(([key]) => canonicalCliFlagName(key.startsWith("-") ? key : `--${key}`)),
+  );
+  const removeKeys = new Set(
+    Object.entries(selected)
+      .filter(([, value]) => value === undefined || value === null || value === false)
+      .map(([key]) => canonicalCliFlagName(key.startsWith("-") ? key : `--${key}`)),
+  );
+
+  const preserved: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i];
+    if (token === undefined) continue;
+    const bareFlag = token.split("=", 1)[0];
+    const canonical = canonicalCliFlagName(bareFlag);
+    const matchesSelected = selectedKeys.has(canonical);
+    if (matchesSelected) {
+      const shouldRemove = removeKeys.has(canonical);
+      if (shouldRemove) {
+        const next = token.includes("=") ? undefined : args[i + 1];
+        if (!token.includes("=") && next !== undefined && !next.startsWith("-")) i += 1;
+        continue;
+      }
+      const next = token.includes("=") ? undefined : args[i + 1];
+      if (!token.includes("=") && next !== undefined && !next.startsWith("-")) i += 1;
+      continue;
+    }
+    if (token.startsWith("-") && !token.includes("=") && args[i + 1] !== undefined && !args[i + 1].startsWith("-")) {
+      preserved.push(token, args[i + 1]);
+      i += 1;
+      continue;
+    }
+    preserved.push(token);
+  }
+
+  const appended: string[] = [];
+  for (const [key, value] of Object.entries(selected)) {
+    if (value === undefined || value === null || value === false) continue;
+    const flag = key.startsWith("-") ? key : `--${canonicalCliFlagName(key)}`;
+    if (typeof value === "boolean") {
+      appended.push(flag);
+      continue;
+    }
+    appended.push(flag, String(value));
+  }
+
+  return [...preserved, ...appended];
+}
+
+export function formatArgvPreview(command: string, args: readonly string[]): string {
+  const all = [...args].filter((arg) => arg !== undefined && arg !== null);
+  return `${command}${all.length > 0 ? ` ${joinArgv(all)}` : ""}`;
 }
 
 export function splitArgv(input: string): string[] {
@@ -203,117 +337,54 @@ export function joinArgv(args: readonly string[]): string {
     .join(" ");
 }
 
-export function detectCliArgConflicts(args: readonly string[]): string[] {
-  const values: Record<string, string[]> = {};
-  const seen = new Map<string, string>();
-  const conflicts: string[] = [];
-
-  for (let i = 0; i < args.length; i += 1) {
-    const token = args[i];
-    if (token === undefined) continue;
-    if (token.includes("=")) {
-      const [key, raw] = token.split("=", 2);
-      const canonical = canonicalCliFlagName(key);
-      const nextValue = raw ?? "";
-      if (seen.has(canonical) && seen.get(canonical) !== nextValue) conflicts.push(canonical);
-      seen.set(canonical, nextValue);
-      values[canonical] = values[canonical] ? [...values[canonical], nextValue] : [nextValue];
-      continue;
-    }
-
-    if (token.startsWith("--") || token.startsWith("-")) {
-      const bareFlag = token.split("=", 1)[0];
-      const next = args[i + 1];
-      const canonical = canonicalCliFlagName(bareFlag);
-      const isKnown = KNOWN_CLI_ARG_KEYS.has(bareFlag) || KNOWN_CLI_ARG_KEYS.has(canonical);
-      const isBooleanFlag = BOOLEAN_CLI_ARG_KEYS.has(bareFlag) || BOOLEAN_CLI_ARG_KEYS.has(canonical);
-      if (isKnown && !isBooleanFlag && next !== undefined && !next.startsWith("-")) {
-        if (seen.has(canonical) && seen.get(canonical) !== next) conflicts.push(canonical);
-        seen.set(canonical, next);
-        values[canonical] = values[canonical] ? [...values[canonical], next] : [next];
-        i += 1;
-      } else if (isKnown) {
-        if (seen.has(canonical) && seen.get(canonical) !== "true") conflicts.push(canonical);
-        seen.set(canonical, "true");
-        values[canonical] = values[canonical] ? [...values[canonical], "true"] : ["true"];
-      }
-    }
-  }
-
-  return [...new Set(conflicts)];
-}
-
-export function parseCliArgs(args: readonly string[]): Record<string, string[]> {
-  const values: Record<string, string[]> = {};
-
-  for (let i = 0; i < args.length; i += 1) {
-    const token = args[i];
-    if (token === undefined) continue;
-    if (token.startsWith("--") || token.startsWith("-")) {
-      const key = token.split("=", 1)[0];
-      const canonical = canonicalCliFlagName(key);
-      const next = token.includes("=") ? token.slice(token.indexOf("=") + 1) : args[i + 1];
-      const isKnown = KNOWN_CLI_ARG_KEYS.has(key) || KNOWN_CLI_ARG_KEYS.has(canonical);
-      const isBooleanFlag = BOOLEAN_CLI_ARG_KEYS.has(key) || BOOLEAN_CLI_ARG_KEYS.has(canonical);
-      if (token.includes("=")) {
-        if (isKnown) values[canonical] = values[canonical] ? [...values[canonical], next] : [next];
-        continue;
-      }
-      if (isKnown && !isBooleanFlag && next !== undefined && !next.startsWith("-")) {
-        values[canonical] = values[canonical] ? [...values[canonical], next] : [next];
-        i += 1;
-      } else if (isKnown) {
-        values[canonical] = values[canonical] ? [...values[canonical], "true"] : ["true"];
-      }
-    }
-  }
-
-  return values;
-}
-
-export function mergeCliArgs(args: readonly string[], values: Record<string, string | boolean | undefined>): string[] {
-  const preserved: string[] = [];
-  const selectedKeys = new Set(
-    Object.entries(values)
-      .filter(([, value]) => value !== undefined && value !== null && value !== false)
-      .map(([key]) => canonicalCliFlagName(key.startsWith("-") ? key : `--${key}`)),
-  );
-
-  for (let i = 0; i < args.length; i += 1) {
-    const token = args[i];
-    if (token === undefined) continue;
-    const canonical = canonicalCliFlagName(token.split("=", 1)[0]);
-    const matchesSelected = selectedKeys.has(canonical);
-    if (matchesSelected) {
-      if (!token.includes("=") && args[i + 1] !== undefined && !args[i + 1].startsWith("-")) {
-        i += 1;
-      }
-      continue;
-    }
-
-    if (token.startsWith("-") && !token.includes("=") && args[i + 1] !== undefined && !args[i + 1].startsWith("-")) {
-      preserved.push(token, args[i + 1]);
-      i += 1;
-      continue;
-    }
-
-    preserved.push(token);
-  }
-
-  const appended: string[] = [];
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || value === null || value === false) continue;
-    const flag = key.startsWith("-") ? key : `--${canonicalCliFlagName(key)}`;
-    if (typeof value === "boolean") {
-      appended.push(flag);
-    } else {
-      appended.push(flag, String(value));
-    }
-  }
-
-  return [...preserved, ...appended];
-}
-
 export function sanitizePersistedArgs(args: readonly string[]): string[] {
   return [...args].filter((arg) => arg !== undefined && arg !== null);
+}
+
+export function parseCodexModelListOutput(output: string): string[] {
+  const text = output.trim();
+  if (!text) return [];
+  const values = new Set<string>();
+  const sentences = text.split(/\r?\n/);
+  for (const line of sentences) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) {
+      const match = trimmed.split(/\s+|\t+/).find(Boolean);
+      if (match) values.add(match);
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const result = parsed && typeof parsed.result === "object" ? parsed.result as Record<string, unknown> : null;
+      const data = result && typeof result.data !== "undefined" ? result.data : parsed && typeof parsed.models !== "undefined" ? parsed.models : [];
+      const models = Array.isArray(data) ? data : [];
+      for (const item of models) {
+        if (typeof item === "string") values.add(item.trim());
+        if (item && typeof item === "object") {
+          const entry = item as Record<string, unknown>;
+          const id = typeof entry.id === "string" ? entry.id : typeof entry.model === "string" ? entry.model : undefined;
+          if (id) values.add(id.trim());
+        }
+      }
+    } catch {
+      const match = trimmed.split(/\s+|\t+/).find(Boolean);
+      if (match) values.add(match);
+    }
+  }
+  return [...values];
+}
+
+export function parseModelListOutput(adapterId: CliAdapterId, output: string): string[] {
+  const text = output.trim();
+  if (!text) return [];
+  if (adapterId === "codex") {
+    const parsed = parseCodexModelListOutput(output);
+    if (parsed.length > 0) return parsed;
+  }
+  const ids = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.trim().split(/\s+|\t+/).find(Boolean);
+    if (match) ids.add(match);
+  }
+  return [...ids];
 }

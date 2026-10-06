@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { AgentRegistry, validateAgents } from "./registry.js";
 import type { AgentMode } from "./registry.js";
-import { sanitizePersistedArgs } from "./cli-command-builder.js";
 import { syncSpawnOptions } from "./spawn-options-writer.js";
 
 /**
@@ -128,7 +127,7 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   payload.command = o.command as string;
   const args = coerceStringArray(o.args ?? []);
   if (args === null) return { error: "args must be an array of strings" };
-  payload.args = sanitizePersistedArgs(args);
+  payload.args = args;
   return payload;
 }
 

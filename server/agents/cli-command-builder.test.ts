@@ -6,9 +6,12 @@ import {
   joinArgv,
   mergeCliArgs,
   parseCliArgs,
+  parseCodexModelListOutput,
   parseModelListOutput,
   resolveCliAdapter,
+  runCliProbe,
   sanitizePersistedArgs,
+  sanitizeProbeEnv,
   splitArgv,
 } from "./cli-command-builder.js";
 
@@ -87,5 +90,49 @@ describe("cli command builder args safety", () => {
       "gpt-6.1-sol",
       "gpt-5.6-luna",
     ]);
+  });
+
+  it("strips credential-bearing env vars before probes", () => {
+    const env = sanitizeProbeEnv({
+      PATH: "/usr/local/bin",
+      ITHYNO_SESSION_TOKEN: "secret",
+      ITHYNO_BASE: "/tmp/project",
+      DOTENV_PRIVATE_KEY: "abc",
+      GITHUB_TOKEN: "token",
+      OTHER: "keep",
+    });
+    expect(env.ITHYNO_SESSION_TOKEN).toBeUndefined();
+    expect(env.ITHYNO_BASE).toBeUndefined();
+    expect(env.DOTENV_PRIVATE_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.OTHER).toBe("keep");
+  });
+
+  it("applies output caps and timeouts to probe processes", async () => {
+    const timeoutResult = await runCliProbe([process.execPath, "-e", "setTimeout(() => {}, 2000)"], {
+      timeoutMs: 50,
+      outputLimit: 4096,
+    });
+    expect(timeoutResult.timedOut).toBe(true);
+    expect(timeoutResult.error).toMatch(/timed out/i);
+
+    const capResult = await runCliProbe([process.execPath, "-e", `console.log(${JSON.stringify("x".repeat(32_000))})`], {
+      timeoutMs: 2000,
+      outputLimit: 128,
+    });
+    expect(capResult.timedOut).toBe(true);
+    expect(capResult.error).toMatch(/output exceeded/i);
+  });
+
+  it("parses richer Codex model payloads from result.data metadata", () => {
+    const payload = JSON.stringify({
+      result: {
+        data: [
+          { id: "gpt-5.1", label: "GPT-5.1", supportedReasoningEfforts: ["low", "medium"], defaultReasoningEffort: "medium" },
+          { model: "claude-3.7-sonnet", label: "Claude 3.7" },
+        ],
+      },
+    });
+    expect(parseCodexModelListOutput(payload)).toEqual(["gpt-5.1", "claude-3.7-sonnet"]);
   });
 });

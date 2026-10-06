@@ -9,7 +9,9 @@
  * generic config-writer only round-trips the command + args array untouched.
  */
 
-import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { realpathSync } from "node:fs";
 
 export const DISPATCHER_OWNED_PROMPT_FLAGS = new Set([
   "-p",
@@ -67,6 +69,53 @@ export type CliProbeResult = {
   error?: string;
 };
 
+export const CLI_CAPABILITY_CACHE = new Map<string, { result: unknown; expiresAt: number }>();
+
+export function stableHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 32);
+}
+
+export function resolveCliExecutablePath(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return "";
+  if (/[\\/]/.test(trimmed) || (process.platform === "win32" && /\.exe$/i.test(trimmed))) {
+    try {
+      return realpathSync(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+
+  const probeCommand = process.platform === "win32" ? "where" : "which";
+  const { stdout, stderr } = spawnSync(probeCommand, [trimmed], {
+    shell: false,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: sanitizeProbeEnv(process.env),
+  });
+  const resolved = ((stdout || stderr || "").split(/\r?\n/)[0] ?? "").trim();
+  if (!resolved) return trimmed;
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+export function probeFingerprintFromResult(result: {
+  currentVersion?: string;
+  availableModels?: readonly string[];
+  fields?: readonly CliFieldDescriptor[];
+  reason?: string;
+  modelDiscovery?: string;
+}): string {
+  const fieldSignature = (result.fields ?? []).map((field) => `${field.flag}:${field.kind}`).join("|");
+  const modelSignature = (result.availableModels ?? []).join(",");
+  const version = result.currentVersion ?? "unknown";
+  const reason = result.reason ?? "none";
+  return stableHash([version, result.modelDiscovery ?? "none", fieldSignature, modelSignature, reason].join("::"));
+}
+
 export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
   claude: {
     id: "claude",
@@ -99,7 +148,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     ],
     versionProbe: ["codex", "--version"],
     helpProbe: ["codex", "--help"],
-    modelProbe: ["codex", "app-server", "initialize", "--", "model/list"],
+    modelProbe: ["codex", "app-server"],
     modelDiscovery: "native",
     modelGuidance: "Codex app-server model/list is preferred when available; if it fails, keep the model field editable and enter a value manually.",
     dangerousFlags: ["--dangerously-bypass-approvals-and-sandbox", "--approve-for-me"],
@@ -264,13 +313,17 @@ export function mergeCliArgs(
   args: readonly string[],
   selected: Record<string, string | boolean | undefined>,
 ): string[] {
-  const preserved: string[] = [];
   const selectedKeys = new Set(
     Object.entries(selected)
-      .filter(([, value]) => value !== undefined && value !== null && value !== false)
+      .map(([key]) => canonicalCliFlagName(key.startsWith("-") ? key : `--${key}`)),
+  );
+  const removeKeys = new Set(
+    Object.entries(selected)
+      .filter(([, value]) => value === undefined || value === null || value === false)
       .map(([key]) => canonicalCliFlagName(key.startsWith("-") ? key : `--${key}`)),
   );
 
+  const preserved: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
     if (token === undefined) continue;
@@ -278,6 +331,14 @@ export function mergeCliArgs(
     const canonical = canonicalCliFlagName(bareFlag);
     const matchesSelected = selectedKeys.has(canonical);
     if (matchesSelected) {
+      const shouldRemove = removeKeys.has(canonical);
+      if (shouldRemove) {
+        const next = token.includes("=") ? undefined : args[i + 1];
+        if (!token.includes("=") && next !== undefined && !next.startsWith("-")) {
+          i += 1;
+        }
+        continue;
+      }
       const next = token.includes("=") ? undefined : args[i + 1];
       if (!token.includes("=") && next !== undefined && !next.startsWith("-")) {
         i += 1;
@@ -371,41 +432,175 @@ export function sanitizePersistedArgs(args: readonly string[]): string[] {
   return [...args].filter((arg) => arg !== undefined && arg !== null);
 }
 
-const PROBE_TIMEOUT_MS = 12000;
-const PROBE_OUTPUT_LIMIT = 16384;
+const PROBE_TIMEOUT_MS = 12_000;
+const PROBE_OUTPUT_LIMIT = 16_384;
+const PROBE_ENV_EXCLUDE_RE = /^(ITHYNO_[A-Z0-9_]+|DOTENV[A-Z0-9_]*|DOTENVX_[A-Z0-9_]+|SESSION_TOKEN|AUTH_TOKEN|GITHUB_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|COPILOT_TOKEN|CODEX_API_KEY|AZURE_OPENAI_API_KEY)$/i;
 
-export async function runCliProbe(argv: readonly string[]): Promise<CliProbeResult> {
+export function sanitizeProbeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (PROBE_ENV_EXCLUDE_RE.test(key)) continue;
+    next[key] = value;
+  }
+  return next;
+}
+
+function terminateChild(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
+  if (!child || child.exitCode !== null || child.killed) return;
+  if (process.platform === "win32") {
+    try {
+      const { spawn } = require("node:child_process") as typeof import("node:child_process");
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" }).unref();
+    } catch {
+      child.kill("SIGKILL");
+    }
+    return;
+  }
+  child.kill(signal);
+  setTimeout(() => {
+    if (child.exitCode === null && child.killed === false) child.kill("SIGKILL");
+  }, 1000).unref?.();
+}
+
+function parseJsonPayloads(text: string): unknown[] {
+  const packets: unknown[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith("{")) continue;
+    try {
+      packets.push(JSON.parse(trimmed));
+    } catch {
+      // ignore malformed fragments; the caller decides how to handle them.
+    }
+  }
+  return packets;
+}
+
+export function parseCodexModelListOutput(output: string): string[] {
+  const values = new Set<string>();
+  for (const packet of parseJsonPayloads(output)) {
+    const candidate = packet && typeof packet === "object" ? packet as Record<string, unknown> : null;
+    const result = candidate && typeof candidate.result === "object" ? candidate.result as Record<string, unknown> : null;
+    const data = result?.data;
+    const models = Array.isArray(data)
+      ? data
+      : Array.isArray(candidate?.models)
+        ? candidate.models
+        : Array.isArray(candidate?.result)
+          ? candidate.result
+          : [];
+
+    for (const item of models) {
+      if (typeof item === "string") {
+        if (item.trim()) values.add(item.trim());
+        continue;
+      }
+      if (item && typeof item === "object") {
+        const entry = item as Record<string, unknown>;
+        const id = typeof entry.id === "string"
+          ? entry.id
+          : typeof entry.model === "string"
+            ? entry.model
+            : undefined;
+        const label = typeof entry.label === "string" ? entry.label : undefined;
+        const supportedReasoningEfforts = Array.isArray(entry.supportedReasoningEfforts)
+          ? entry.supportedReasoningEfforts
+          : undefined;
+        const defaultReasoningEffort = typeof entry.defaultReasoningEffort === "string"
+          ? entry.defaultReasoningEffort
+          : undefined;
+        if (id) values.add(id.trim());
+        if (label || supportedReasoningEfforts || defaultReasoningEffort) {
+          // intentionally accept richer model metadata without changing the ID-only return contract.
+        }
+      }
+    }
+  }
+  return [...values];
+}
+
+export async function runCodexAppServerModelProbe(): Promise<string[]> {
+  const argv = ["codex", "app-server"];
+  return await new Promise<string[]>((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let initAckSent = false;
+    const outputCap = 65_536;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      resolve([]);
+    }, PROBE_TIMEOUT_MS);
+    const child = spawn(argv[0], argv.slice(1), {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: sanitizeProbeEnv(process.env),
+    });
+    const finalize = (models: string[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdin?.end();
+      setTimeout(() => terminateChild(child, "SIGTERM"), 150).unref?.();
+      resolve(models);
+    };
+    const onChunk = (chunk: Buffer | string) => {
+      const text = String(chunk);
+      stdout += text;
+      if (stdout.length > outputCap) {
+        finalize([]);
+        return;
+      }
+
+      const packets = parseJsonPayloads(stdout);
+      const initializePacket = packets.find((packet) => {
+        const candidate = packet && typeof packet === "object" ? packet as Record<string, unknown> : null;
+        return candidate && (candidate.method === "initialize" || candidate.id === "initialize");
+      });
+      if (initializePacket && !initAckSent) {
+        initAckSent = true;
+        child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`);
+        child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "model-list", method: "model/list" })}\n`);
+      }
+
+      const models = parseCodexModelListOutput(stdout);
+      if (models.length > 0) finalize(models);
+    };
+
+    child.stdout?.on("data", onChunk);
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+      if (stderr.length > outputCap) finalize([]);
+    });
+    child.on("error", () => finalize([]));
+    child.on("close", () => {
+      if (!settled) finalize(parseCodexModelListOutput(stdout));
+    });
+    child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "initialize", method: "initialize" })}\n`);
+  });
+}
+
+export async function runCliProbe(argv: readonly string[], options: { timeoutMs?: number; outputLimit?: number } = {}): Promise<CliProbeResult> {
   if (argv.length === 0) {
     return { ok: false, command: argv, stdout: "", stderr: "", timedOut: false, error: "empty probe argv" };
   }
 
+  const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
+  const outputLimit = options.outputLimit ?? PROBE_OUTPUT_LIMIT;
   const [command, ...rest] = argv;
   return await new Promise<CliProbeResult>((resolve) => {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let settled = false;
-
     const child = spawn(command, rest, {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: sanitizeProbeEnv(process.env),
     });
-
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      timedOut = true;
-      child.kill("SIGKILL");
-      resolve({
-        ok: false,
-        command: argv,
-        stdout: stdout.slice(0, PROBE_OUTPUT_LIMIT),
-        stderr: stderr.slice(0, PROBE_OUTPUT_LIMIT),
-        timedOut: true,
-        error: `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
-      });
-    }, PROBE_TIMEOUT_MS);
 
     const finalize = (next: CliProbeResult) => {
       if (settled) return;
@@ -414,20 +609,57 @@ export async function runCliProbe(argv: readonly string[]): Promise<CliProbeResu
       resolve(next);
     };
 
+    const timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      terminateChild(child, "SIGTERM");
+      finalize({
+        ok: false,
+        command: argv,
+        stdout: stdout.slice(0, outputLimit),
+        stderr: stderr.slice(0, outputLimit),
+        timedOut: true,
+        error: `probe timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
+
     child.stdout?.on("data", (chunk) => {
       stdout += String(chunk);
-      if (stdout.length > PROBE_OUTPUT_LIMIT) stdout = stdout.slice(0, PROBE_OUTPUT_LIMIT);
+      if (stdout.length > outputLimit) {
+        timedOut = true;
+        terminateChild(child, "SIGTERM");
+        finalize({
+          ok: false,
+          command: argv,
+          stdout: stdout.slice(0, outputLimit),
+          stderr: stderr.slice(0, outputLimit),
+          timedOut: true,
+          error: `probe output exceeded ${outputLimit} bytes`,
+        });
+        return;
+      }
     });
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
-      if (stderr.length > PROBE_OUTPUT_LIMIT) stderr = stderr.slice(0, PROBE_OUTPUT_LIMIT);
+      if (stderr.length > outputLimit) {
+        timedOut = true;
+        terminateChild(child, "SIGTERM");
+        finalize({
+          ok: false,
+          command: argv,
+          stdout: stdout.slice(0, outputLimit),
+          stderr: stderr.slice(0, outputLimit),
+          timedOut: true,
+          error: `probe output exceeded ${outputLimit} bytes`,
+        });
+      }
     });
 
     child.on("error", (error) => finalize({
       ok: false,
       command: argv,
-      stdout: stdout.slice(0, PROBE_OUTPUT_LIMIT),
-      stderr: stderr.slice(0, PROBE_OUTPUT_LIMIT),
+      stdout: stdout.slice(0, outputLimit),
+      stderr: stderr.slice(0, outputLimit),
       timedOut,
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -437,8 +669,8 @@ export async function runCliProbe(argv: readonly string[]): Promise<CliProbeResu
       finalize({
         ok: exitCode === 0,
         command: argv,
-        stdout: stdout.slice(0, PROBE_OUTPUT_LIMIT),
-        stderr: stderr.slice(0, PROBE_OUTPUT_LIMIT),
+        stdout: stdout.slice(0, outputLimit),
+        stderr: stderr.slice(0, outputLimit),
         timedOut,
         error: exitCode === 0 ? undefined : `exit ${exitCode}`,
       });
@@ -451,39 +683,17 @@ export function parseModelListOutput(adapterId: CliAdapterId, output: string): s
   if (!text) return [];
 
   if (adapterId === "codex") {
-    try {
-      const parsed = JSON.parse(text);
-      const models = Array.isArray(parsed?.models)
-        ? parsed.models
-        : Array.isArray(parsed)
-          ? parsed
-          : [];
-      const ids = models
-        .map((entry: unknown) => {
-          if (typeof entry === "string") return entry;
-          if (entry && typeof entry === "object") {
-            const id = (entry as { id?: string }).id ?? (entry as { model?: string }).model;
-            return typeof id === "string" ? id : undefined;
-          }
-          return undefined;
-        })
-        .filter((value: string | undefined): value is string => !!value);
-      if (ids.length > 0) return ids;
-    } catch {
-      // Fall through to plain-text parsing.
-    }
+    const modelValues = parseCodexModelListOutput(output);
+    if (modelValues.length > 0) return modelValues;
   }
 
-  return [...new Set(
-    text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .flatMap((line) => {
-        const match = line.split(/\s+|\t+/).find(Boolean);
-        return match ? [match] : [];
-      }),
-  )];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const ids = new Set<string>();
+  for (const line of lines) {
+    const match = line.split(/\s+|\t+/).find(Boolean);
+    if (match) ids.add(match);
+  }
+  return [...ids];
 }
 
 export async function probeCliAdapter(adapter: CliAdapter): Promise<{
@@ -497,35 +707,48 @@ export async function probeCliAdapter(adapter: CliAdapter): Promise<{
   availableModels: string[];
   currentVersion?: string;
   danger: readonly string[];
+  reason?: string;
 }> {
   const versionProbe = await runCliProbe(adapter.versionProbe);
   const helpProbe = await runCliProbe(adapter.helpProbe);
+  const helpText = `${helpProbe.stdout}\n${helpProbe.stderr}`.trim().toLowerCase();
+  const versionText = versionProbe.ok ? versionProbe.stdout.trim() || versionProbe.stderr.trim() : "";
+  const supportedFields = helpProbe.ok
+    ? adapter.fields.filter((field) => {
+        const flag = field.flag.toLowerCase();
+        if (field.kind === "boolean") return helpText.includes(flag);
+        return helpText.includes(flag) || (field.flag.includes("--model") && helpText.includes("model"));
+      })
+    : [];
 
   let availableModels: string[] = [];
-  if (adapter.modelProbe) {
+  if (adapter.modelProbe && adapter.id === "codex") {
+    availableModels = await runCodexAppServerModelProbe();
+  } else if (adapter.modelProbe) {
     const modelProbe = await runCliProbe(adapter.modelProbe);
     if (modelProbe.ok) {
       availableModels = parseModelListOutput(adapter.id, `${modelProbe.stdout}\n${modelProbe.stderr}`);
     }
   }
 
-  const versionText = versionProbe.ok ? versionProbe.stdout.trim() || versionProbe.stderr.trim() : "";
-  const helpText = `${helpProbe.stdout}\n${helpProbe.stderr}`.toLowerCase();
-  const supportedFields = adapter.fields.filter((field) => {
-    if (field.kind === "boolean" && field.flag) return helpText.includes(field.flag.toLowerCase());
-    return helpText.includes(field.flag.toLowerCase()) || (field.flag.includes("--model") && helpText.includes("model"));
-  });
+  const ok = versionProbe.ok && helpProbe.ok;
+  const supported = ok && supportedFields.length > 0;
+  let reason: string | undefined;
+  if (!versionProbe.ok) reason = versionProbe.error ?? "version probe failed";
+  else if (!helpProbe.ok) reason = helpProbe.error ?? "help probe failed";
+  else if (!supported) reason = "no compatible builder flags were discovered";
 
   return {
-    ok: true,
-    supported: true,
-    command: adapter.aliases[0] ?? adapter.id,
+    ok,
+    supported,
+    command: adapter.versionProbe[0] ?? "",
     adapter: adapter.id,
-    fields: supportedFields.length > 0 ? supportedFields : adapter.fields,
+    fields: supportedFields,
     modelDiscovery: adapter.modelDiscovery,
     modelGuidance: adapter.modelGuidance,
     availableModels,
     currentVersion: versionText || undefined,
     danger: adapter.dangerousFlags ?? [],
+    reason,
   };
 }
