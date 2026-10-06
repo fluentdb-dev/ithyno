@@ -13,6 +13,14 @@ import { createHash } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
 
+export type CodexModelMetadata = {
+  id?: string;
+  model?: string;
+  displayName?: string;
+  supportedReasoningEfforts?: readonly string[];
+  defaultReasoningEffort?: string;
+};
+
 export const DISPATCHER_OWNED_PROMPT_FLAGS = new Set([
   "-p",
   "--print",
@@ -447,10 +455,9 @@ export function sanitizeProbeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.P
 }
 
 function terminateChild(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
-  if (!child || child.exitCode !== null || child.killed) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {
     try {
-      const { spawn } = require("node:child_process") as typeof import("node:child_process");
       spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" }).unref();
     } catch {
       child.kill("SIGKILL");
@@ -459,7 +466,7 @@ function terminateChild(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM")
   }
   child.kill(signal);
   setTimeout(() => {
-    if (child.exitCode === null && child.killed === false) child.kill("SIGKILL");
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }, 1000).unref?.();
 }
 
@@ -477,113 +484,144 @@ function parseJsonPayloads(text: string): unknown[] {
   return packets;
 }
 
-export function parseCodexModelListOutput(output: string): string[] {
-  const values = new Set<string>();
+export function parseCodexModelMetadata(output: string): CodexModelMetadata[] {
+  const entries: CodexModelMetadata[] = [];
   for (const packet of parseJsonPayloads(output)) {
     const candidate = packet && typeof packet === "object" ? packet as Record<string, unknown> : null;
     const result = candidate && typeof candidate.result === "object" ? candidate.result as Record<string, unknown> : null;
-    const data = result?.data;
-    const models = Array.isArray(data)
-      ? data
+    const data = Array.isArray(result?.data)
+      ? result.data
       : Array.isArray(candidate?.models)
         ? candidate.models
         : Array.isArray(candidate?.result)
           ? candidate.result
           : [];
 
-    for (const item of models) {
-      if (typeof item === "string") {
-        if (item.trim()) values.add(item.trim());
-        continue;
-      }
-      if (item && typeof item === "object") {
-        const entry = item as Record<string, unknown>;
-        const id = typeof entry.id === "string"
-          ? entry.id
-          : typeof entry.model === "string"
-            ? entry.model
-            : undefined;
-        const label = typeof entry.label === "string" ? entry.label : undefined;
-        const supportedReasoningEfforts = Array.isArray(entry.supportedReasoningEfforts)
-          ? entry.supportedReasoningEfforts
-          : undefined;
-        const defaultReasoningEffort = typeof entry.defaultReasoningEffort === "string"
-          ? entry.defaultReasoningEffort
-          : undefined;
-        if (id) values.add(id.trim());
-        if (label || supportedReasoningEfforts || defaultReasoningEffort) {
-          // intentionally accept richer model metadata without changing the ID-only return contract.
-        }
-      }
+    for (const item of data) {
+      if (typeof item === "string") continue;
+      if (!item || typeof item !== "object") continue;
+      const entry = item as Record<string, unknown>;
+      const id = typeof entry.id === "string" ? entry.id : typeof entry.model === "string" ? entry.model : undefined;
+      const displayName = typeof entry.displayName === "string" ? entry.displayName : typeof entry.label === "string" ? entry.label : undefined;
+      const supportedReasoningEfforts = Array.isArray(entry.supportedReasoningEfforts)
+        ? entry.supportedReasoningEfforts.filter((value): value is string => typeof value === "string")
+        : undefined;
+      const defaultReasoningEffort = typeof entry.defaultReasoningEffort === "string" ? entry.defaultReasoningEffort : undefined;
+      if (!id && !displayName && !supportedReasoningEfforts && !defaultReasoningEffort) continue;
+      entries.push({
+        id,
+        model: typeof entry.model === "string" ? entry.model : undefined,
+        displayName,
+        supportedReasoningEfforts,
+        defaultReasoningEffort,
+      });
     }
+  }
+  return entries;
+}
+
+export function parseCodexModelListOutput(output: string): string[] {
+  const values = new Set<string>();
+  for (const entry of parseCodexModelMetadata(output)) {
+    const id = entry.id ?? entry.model;
+    if (id && id.trim()) values.add(id.trim());
   }
   return [...values];
 }
 
-export async function runCodexAppServerModelProbe(): Promise<string[]> {
-  const argv = ["codex", "app-server"];
-  return await new Promise<string[]>((resolve) => {
+export async function runCodexAppServerModelProbe(executablePath = "codex"): Promise<string[]> {
+  const payload = await runCodexAppServerModelProbeDetailed(executablePath);
+  return payload.models;
+}
+
+export async function runCodexAppServerModelProbeDetailed(executablePath = "codex"): Promise<{ models: string[]; metadata: CodexModelMetadata[] }> {
+  return await new Promise<{ models: string[]; metadata: CodexModelMetadata[] }>((resolve) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    let initAckSent = false;
+    let initializeResultSeen = false;
+    let modelListResultSeen = false;
     const outputCap = 65_536;
+    let child: ChildProcess;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGTERM");
-      resolve([]);
+      if (child) child.kill("SIGTERM");
+      resolve({ models: [], metadata: [] });
     }, PROBE_TIMEOUT_MS);
-    const child = spawn(argv[0], argv.slice(1), {
+    child = spawn(executablePath, ["app-server"], {
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
       env: sanitizeProbeEnv(process.env),
     });
-    const finalize = (models: string[]) => {
+    const finalize = (models: string[], metadata: CodexModelMetadata[] = []) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       child.stdin?.end();
       setTimeout(() => terminateChild(child, "SIGTERM"), 150).unref?.();
-      resolve(models);
+      resolve({ models, metadata });
+    };
+    const handlePacket = (packet: unknown) => {
+      const candidate = packet && typeof packet === "object" ? packet as Record<string, unknown> : null;
+      if (!candidate) return;
+      const packetId = candidate.id;
+      if (packetId === 1) {
+        if (initializeResultSeen) return;
+        if (candidate.result && !candidate.error) {
+          initializeResultSeen = true;
+          child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} })}\n`);
+          child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "model/list", params: { includeHidden: false, limit: 100 } })}\n`);
+          return;
+        }
+        if (candidate.error) {
+          finalize([], []);
+        }
+        return;
+      }
+      if (packetId === 2) {
+        if (modelListResultSeen) return;
+        if (candidate.result && !candidate.error) {
+          modelListResultSeen = true;
+          const metadata = parseCodexModelMetadata(stdout);
+          const models = parseCodexModelListOutput(stdout);
+          if (models.length > 0) finalize(models, metadata);
+        }
+      }
     };
     const onChunk = (chunk: Buffer | string) => {
       const text = String(chunk);
       stdout += text;
       if (stdout.length > outputCap) {
-        finalize([]);
+        finalize([], []);
         return;
       }
-
-      const packets = parseJsonPayloads(stdout);
-      const initializePacket = packets.find((packet) => {
-        const candidate = packet && typeof packet === "object" ? packet as Record<string, unknown> : null;
-        return candidate && (candidate.method === "initialize" || candidate.id === "initialize");
-      });
-      if (initializePacket && !initAckSent) {
-        initAckSent = true;
-        child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`);
-        child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "model-list", method: "model/list" })}\n`);
+      for (const packet of parseJsonPayloads(stdout)) {
+        handlePacket(packet);
       }
-
-      const models = parseCodexModelListOutput(stdout);
-      if (models.length > 0) finalize(models);
+      if (modelListResultSeen) {
+        finalize(parseCodexModelListOutput(stdout), parseCodexModelMetadata(stdout));
+      }
     };
 
     child.stdout?.on("data", onChunk);
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
-      if (stderr.length > outputCap) finalize([]);
+      if (stderr.length > outputCap) finalize([], []);
     });
-    child.on("error", () => finalize([]));
+    child.on("error", () => finalize([], []));
     child.on("close", () => {
-      if (!settled) finalize(parseCodexModelListOutput(stdout));
+      if (!settled) {
+        const models = parseCodexModelListOutput(stdout);
+        const metadata = parseCodexModelMetadata(stdout);
+        finalize(models, metadata);
+      }
     });
-    child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "initialize", method: "initialize" })}\n`);
+    child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: "ithyno", version: "0.9.0" } } })}\n`);
   });
 }
 
-export async function runCliProbe(argv: readonly string[], options: { timeoutMs?: number; outputLimit?: number } = {}): Promise<CliProbeResult> {
+export async function runCliProbe(argv: readonly string[], options: { timeoutMs?: number; outputLimit?: number; executablePath?: string } = {}): Promise<CliProbeResult> {
   if (argv.length === 0) {
     return { ok: false, command: argv, stdout: "", stderr: "", timedOut: false, error: "empty probe argv" };
   }
@@ -591,12 +629,13 @@ export async function runCliProbe(argv: readonly string[], options: { timeoutMs?
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const outputLimit = options.outputLimit ?? PROBE_OUTPUT_LIMIT;
   const [command, ...rest] = argv;
+  const spawnCommand = options.executablePath || command;
   return await new Promise<CliProbeResult>((resolve) => {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let settled = false;
-    const child = spawn(command, rest, {
+    const child = spawn(spawnCommand, rest, {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       env: sanitizeProbeEnv(process.env),
@@ -696,7 +735,7 @@ export function parseModelListOutput(adapterId: CliAdapterId, output: string): s
   return [...ids];
 }
 
-export async function probeCliAdapter(adapter: CliAdapter): Promise<{
+export async function probeCliAdapter(adapter: CliAdapter, selectedExecutablePath?: string): Promise<{
   ok: boolean;
   supported: boolean;
   command: string;
@@ -705,12 +744,13 @@ export async function probeCliAdapter(adapter: CliAdapter): Promise<{
   modelDiscovery: "native" | "manual" | "none";
   modelGuidance: string;
   availableModels: string[];
+  modelMetadata: CodexModelMetadata[];
   currentVersion?: string;
   danger: readonly string[];
   reason?: string;
 }> {
-  const versionProbe = await runCliProbe(adapter.versionProbe);
-  const helpProbe = await runCliProbe(adapter.helpProbe);
+  const versionProbe = await runCliProbe(adapter.versionProbe, { executablePath: selectedExecutablePath });
+  const helpProbe = await runCliProbe(adapter.helpProbe, { executablePath: selectedExecutablePath });
   const helpText = `${helpProbe.stdout}\n${helpProbe.stderr}`.trim().toLowerCase();
   const versionText = versionProbe.ok ? versionProbe.stdout.trim() || versionProbe.stderr.trim() : "";
   const supportedFields = helpProbe.ok
@@ -722,20 +762,25 @@ export async function probeCliAdapter(adapter: CliAdapter): Promise<{
     : [];
 
   let availableModels: string[] = [];
+  let modelMetadata: CodexModelMetadata[] = [];
   if (adapter.modelProbe && adapter.id === "codex") {
-    availableModels = await runCodexAppServerModelProbe();
+    const payload = await runCodexAppServerModelProbeDetailed(selectedExecutablePath ?? adapter.modelProbe[0] ?? "codex");
+    availableModels = payload.models;
+    modelMetadata = payload.metadata;
   } else if (adapter.modelProbe) {
-    const modelProbe = await runCliProbe(adapter.modelProbe);
+    const modelProbe = await runCliProbe(adapter.modelProbe, { executablePath: selectedExecutablePath });
     if (modelProbe.ok) {
       availableModels = parseModelListOutput(adapter.id, `${modelProbe.stdout}\n${modelProbe.stderr}`);
     }
   }
 
-  const ok = versionProbe.ok && helpProbe.ok;
+  const nativeModelProbeRequired = Boolean(adapter.modelProbe && adapter.modelDiscovery === "native");
+  const ok = versionProbe.ok && helpProbe.ok && (!nativeModelProbeRequired || availableModels.length > 0);
   const supported = ok && supportedFields.length > 0;
   let reason: string | undefined;
   if (!versionProbe.ok) reason = versionProbe.error ?? "version probe failed";
   else if (!helpProbe.ok) reason = helpProbe.error ?? "help probe failed";
+  else if (nativeModelProbeRequired && availableModels.length === 0) reason = "model probe failed";
   else if (!supported) reason = "no compatible builder flags were discovered";
 
   return {
@@ -747,6 +792,7 @@ export async function probeCliAdapter(adapter: CliAdapter): Promise<{
     modelDiscovery: adapter.modelDiscovery,
     modelGuidance: adapter.modelGuidance,
     availableModels,
+    modelMetadata,
     currentVersion: versionText || undefined,
     danger: adapter.dangerousFlags ?? [],
     reason,

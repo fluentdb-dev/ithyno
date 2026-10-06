@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
+import {
+  buildAgentConfigSavePayload,
+  resolvedModelOptions,
+  resolvedVisibleFields,
+} from "./AgentConfigModal";
 
 // Client-side kebab-case validation regex mirrored from
 // web/src/components/AgentConfigModal.tsx. Extracted so the same
@@ -40,5 +45,44 @@ describe("AgentConfigModal — kebab-case name validation", () => {
 
   it("rejects empty string", () => {
     expect(KEBAB_RE.test("")).toBe(false);
+  });
+
+  it("prefers fetched model IDs and hides static fields after failed probes", () => {
+    expect(resolvedModelOptions({ availableModels: ["gpt-5.1", "claude-3.7-sonnet"] }, null)).toEqual([
+      "gpt-5.1",
+      "claude-3.7-sonnet",
+    ]);
+    expect(resolvedVisibleFields(null, { fields: [{ key: "model", label: "Model", flag: "--model", kind: "text" }] }, "error")).toEqual([]);
+    expect(resolvedVisibleFields(null, { fields: [{ key: "model", label: "Model", flag: "--model", kind: "text" }] }, "idle")).toMatchObject([
+      { key: "model", flag: "--model" },
+    ]);
+  });
+
+  it("serializes the agent save payload with fetched models and manual args intact", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "",
+        roles: ["code"],
+        prompts: { code: "" },
+        command: "codex",
+        args: '--model "gpt-5.1" --profile "fast"',
+        description: "worker",
+        detached: false,
+      },
+      includesManager: false,
+      agmsg: null,
+      isAdd: true,
+      existingNames: ["code-worker"],
+    });
+
+    expect(payload).toMatchObject({
+      action: "upsert",
+      name: "codex-code",
+      roles: ["code"],
+      mode: "single-prompt",
+      command: "codex",
+      args: ["--model", "gpt-5.1", "--profile", "fast"],
+      description: "worker",
+    });
   });
 });

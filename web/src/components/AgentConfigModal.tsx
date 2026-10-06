@@ -33,6 +33,86 @@ import {
 
 const ROLE_OPTIONS = ["propose", "code", "review", "verify", "manager", "other"] as const;
 
+export function resolvedModelOptions(
+  capability: {
+    availableModels?: readonly string[];
+  } | null,
+  _selectedAdapter: { fields?: readonly { key: string }[] } | null,
+): string[] {
+  if (capability && Array.isArray(capability.availableModels) && capability.availableModels.length > 0) {
+    return [...capability.availableModels];
+  }
+  return [];
+}
+
+export function resolvedVisibleFields(
+  capability: {
+    fields?: readonly { key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }[];
+  } | null,
+  selectedAdapter: { fields?: readonly { key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }[] } | null,
+  state: "idle" | "loading" | "ready" | "error" | "timeout" | "missing",
+) {
+  if (capability && capability.fields && capability.fields.length > 0) {
+    return capability.fields;
+  }
+  if (state === "idle" || state === "loading") {
+    return selectedAdapter?.fields ?? [];
+  }
+  return [];
+}
+
+export function buildAgentConfigSavePayload({
+  form,
+  includesManager,
+  agmsg,
+  isAdd,
+  existingNames,
+}: {
+  form: {
+    name: string;
+    roles: readonly string[];
+    prompts: Record<string, string>;
+    command: string;
+    args: string;
+    description: string;
+    detached: boolean;
+  };
+  includesManager: boolean;
+  agmsg: unknown;
+  isAdd: boolean;
+  existingNames: readonly string[];
+}): AgentConfigPayload {
+  const prompts: Record<string, string> = {};
+  for (const [role, value] of Object.entries(form.prompts)) {
+    const trimmed = value.trim();
+    if (trimmed && form.roles.includes(role)) prompts[role] = trimmed;
+  }
+
+  const managerLocked = includesManager;
+  const effectiveRoles = managerLocked ? ["manager"] : [...form.roles];
+  const effectiveMode: AgentMode = (managerLocked || agmsg !== null) ? "live-shell" : "single-prompt";
+  const effectiveName = !isAdd
+    ? form.name.trim()
+    : managerLocked
+      ? "manager"
+      : autoNameForWorker({ ...form, roles: [...form.roles], mode: "single-prompt" }, [...existingNames]);
+
+  const payload: AgentConfigPayload = {
+    action: "upsert",
+    name: effectiveName,
+    roles: effectiveRoles,
+    mode: effectiveMode,
+    prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
+    description: form.description.trim() || undefined,
+    detached: includesManager ? undefined : form.detached,
+  };
+  if (form.command.trim()) {
+    payload.command = form.command.trim();
+    payload.args = splitArgv(form.args);
+  }
+  return payload;
+}
+
 type Props = {
   /** `AgentPublic` = edit mode with the row's data;
    *  `"new"` = add mode (fields default; name auto-generated on submit). */
@@ -121,6 +201,7 @@ export function AgentConfigModal({
     fields: Array<{ key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }>;
     modelGuidance?: string;
     availableModels: string[];
+    modelMetadata?: Array<{ id?: string; model?: string; displayName?: string; supportedReasoningEfforts?: readonly string[]; defaultReasoningEffort?: string }>;
     currentVersion?: string;
     danger?: readonly string[];
     reason?: string;
@@ -172,10 +253,8 @@ export function AgentConfigModal({
     };
   }, [form.command, selectedAdapter]);
 
-  const modelOptions = capability?.availableModels ?? [];
-  const visibleFields = capability?.fields && capability.fields.length > 0
-    ? capability.fields
-    : (selectedAdapter?.fields ?? []);
+  const modelOptions = resolvedModelOptions(capability, selectedAdapter);
+  const visibleFields = resolvedVisibleFields(capability, selectedAdapter, capabilityState);
 
   const updateBuilderField = (field: string, value: string | boolean | undefined) => {
     const nextArgs = mergeCliArgs(splitArgv(form.args), { [field]: value });
@@ -219,42 +298,13 @@ export function AgentConfigModal({
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    const prompts: Record<string, string> = {};
-    for (const [role, value] of Object.entries(form.prompts)) {
-      const trimmed = value.trim();
-      if (trimmed && form.roles.includes(role)) prompts[role] = trimmed;
-    }
-
-    // Manager entries and agmsg-enabled projects run live-shell mode.
-    // Mode is automatically derived from agmsg state so users don't have
-    // to manually toggle single-prompt vs live-shell.
-    const managerLocked = includesManager;
-    const effectiveRoles = managerLocked ? ["manager"] : form.roles;
-    const effectiveMode: AgentMode = (managerLocked || agmsg !== null) ? "live-shell" : "single-prompt";
-    // Name resolution:
-    //   - Edit mode: keep the seed's name (form.name is preloaded from it)
-    //   - Add mode + Manager: force "manager" (singleton, no collision)
-    //   - Add mode + Worker: auto-derived from runtime/command + role,
-    //     de-duplicated against existingNames
-    const effectiveName = !isAdd
-      ? form.name.trim()
-      : managerLocked
-        ? "manager"
-        : autoNameForWorker(form, existingNames);
-
-    const payload: AgentConfigPayload = {
-      action: "upsert",
-      name: effectiveName,
-      roles: effectiveRoles,
-      mode: effectiveMode,
-      prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
-      description: form.description.trim() || undefined,
-      detached: includesManager ? undefined : form.detached,
-    };
-    if (form.command.trim()) {
-      payload.command = form.command.trim();
-      payload.args = splitArgv(form.args);
-    }
+    const payload = buildAgentConfigSavePayload({
+      form,
+      includesManager,
+      agmsg,
+      isAdd,
+      existingNames,
+    });
     setSubmitting(true);
     setError(null);
     try {
