@@ -203,9 +203,9 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
  * session resume).
  *
  * Adding session persistence for a new CLI = add its strategy here.
- * The picker's "(unverified)" label in InitDialog SHALL be dropped for a
- * CLI once its strategy is landed AND the dispatch skill resolves in
- * that CLI's command surface.
+ * Session-resume support is independent from Manager verification in the
+ * InitDialog. A CLI may be verified for dispatch while still using the plain
+ * first-launch fallback here.
  */
 type ManagerStartupStrategy = (projectRoot: string | undefined) => string;
 

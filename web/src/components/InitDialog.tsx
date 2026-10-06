@@ -52,11 +52,11 @@ const CLI_LABELS: Record<Cli, string> = {
 /** Manager-eligible CLIs — the picker offers only these. The rest
  *  (gemini/cursor/antigravity) are still valid as
  *  agmsg-spawned WORKERS but have not been validated as Manager.
- *  See `server/sync/pty.ts` MANAGER_STARTUP_STRATEGIES: each CLI here
- *  needs a startup strategy AND its own dispatch skill surface to run
- *  the workflow. */
-const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy"];
-const MANAGER_UNVERIFIED: readonly Cli[] = ["codex", "opencode", "copilot"];
+ *  A verified CLI must launch as a Manager and resolve the dispatch skill in
+ *  its own command surface. Session-resume strategies in `server/sync/pty.ts`
+ *  are optional and tracked independently. */
+const MANAGER_VERIFIED: readonly Cli[] = ["claude", "agy", "codex", "copilot"];
+const MANAGER_UNVERIFIED: readonly Cli[] = ["opencode"];
 const MANAGER_CANDIDATES: readonly Cli[] = [
   ...MANAGER_VERIFIED,
   ...MANAGER_UNVERIFIED,
