@@ -501,6 +501,7 @@ function normalizeReasoningEffortNames(value: unknown): string[] {
       }
       if (item && typeof item === "object") {
         const entry = item as Record<string, unknown>;
+        push(entry.reasoningEffort);
         push(entry.name);
         push(entry.id);
         push(entry.value);
@@ -513,6 +514,7 @@ function normalizeReasoningEffortNames(value: unknown): string[] {
 
   if (value && typeof value === "object") {
     const entry = value as Record<string, unknown>;
+    push(entry.reasoningEffort);
     push(entry.name);
     push(entry.id);
     push(entry.value);

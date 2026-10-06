@@ -204,6 +204,33 @@ describe("cli command builder args safety", () => {
     ]);
   });
 
+  it("parses the real Codex ModelListResponse reasoning effort shape", () => {
+    const payload = JSON.stringify({
+      result: {
+        data: [
+          {
+            id: "gpt-5.1",
+            displayName: "GPT-5.1",
+            supportedReasoningEfforts: [
+              { reasoningEffort: "minimal", description: "Cheapest fast reasoning" },
+              { reasoningEffort: "medium", description: "Balanced reasoning" },
+            ],
+            defaultReasoningEffort: "medium",
+          },
+        ],
+      },
+    });
+
+    expect(parseCodexModelMetadata(payload)).toMatchObject([
+      {
+        id: "gpt-5.1",
+        displayName: "GPT-5.1",
+        supportedReasoningEfforts: ["minimal", "medium"],
+        defaultReasoningEffort: "medium",
+      },
+    ]);
+  });
+
   it("rejects incomplete Codex app-server handshakes and proves the full handshake returns model metadata", async () => {
     const missingInit = makeFakeCodexExecutable("missing-init");
     const missingInitResult = await runCodexAppServerModelProbe(missingInit);
