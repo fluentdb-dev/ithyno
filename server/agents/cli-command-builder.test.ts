@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { sanitizePersistedArgs, splitArgv, joinArgv } from "./cli-command-builder.js";
+import {
+  CLI_ADAPTERS,
+  detectCliArgConflicts,
+  joinArgv,
+  mergeCliArgs,
+  parseCliArgs,
+  parseModelListOutput,
+  resolveCliAdapter,
+  sanitizePersistedArgs,
+  splitArgv,
+} from "./cli-command-builder.js";
 
 describe("cli command builder args safety", () => {
-  it("preserves unknown arguments while stripping dispatcher-owned prompt transport", () => {
+  it("preserves user-owned manager and codex options without broad sanitization", () => {
     const args = [
       "--profile",
       "fast",
@@ -18,17 +28,20 @@ describe("cli command builder args safety", () => {
       "/opsx:review add-123",
       "--session-id",
       "abc123",
+      "--resume",
+      "last",
     ];
 
-    expect(sanitizePersistedArgs(args)).toEqual([
-      "--profile",
-      "fast",
-      "--model",
-      "sonnet",
-      "--foo",
-      "bar",
-      "--dangerously-skip-permissions",
-    ]);
+    expect(sanitizePersistedArgs(args)).toEqual(args);
+    expect(parseCliArgs(args).values).toMatchObject({
+      profile: ["fast"],
+      model: ["sonnet"],
+      "dangerously-skip-permissions": ["true"],
+    });
+    expect(parseCliArgs(args).unknown).toContain("--foo");
+    expect(parseCliArgs(args).unknown).toContain("bar");
+    expect(parseCliArgs(args).unknown).toContain("--resume");
+    expect(parseCliArgs(args).unknown).toContain("abc123");
   });
 
   it("round-trips quoted values without collapsing spaces", () => {
@@ -41,6 +54,38 @@ describe("cli command builder args safety", () => {
       "two words",
       "--path=/tmp/example file",
     ]);
-    expect(joinArgv(parsed)).toContain('hello world');
+    expect(joinArgv(parsed)).toContain("hello world");
+  });
+
+  it("keeps unknown args in order while updating a selected recognized value", () => {
+    const args = ["--profile", "fast", "--model", "old-model", "--foo", "keep-me", "--bar", "still-here"];
+    const merged = mergeCliArgs(args, { model: "new-model" });
+    expect(merged).toEqual(["--profile", "fast", "--foo", "keep-me", "--bar", "still-here", "--model", "new-model"]);
+  });
+
+  it("detects duplicate option conflicts from parsed argv", () => {
+    const args = ["--model", "first", "--model", "second", "--mode", "plan", "--mode=accept-edits"];
+    expect(detectCliArgConflicts(args)).toContain("model");
+    expect(detectCliArgConflicts(args)).toContain("mode");
+  });
+
+  it("resolves allow-listed adapters and exposes dangerous controls", () => {
+    expect(resolveCliAdapter("claude")).toBe(CLI_ADAPTERS.claude);
+    expect(resolveCliAdapter("/usr/local/bin/codex")).toBe(CLI_ADAPTERS.codex);
+    expect(resolveCliAdapter("agy")).toBe(CLI_ADAPTERS.agy);
+    expect(resolveCliAdapter("copilot")).toBe(CLI_ADAPTERS.copilot);
+    expect(CLI_ADAPTERS.codex.dangerousFlags).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(CLI_ADAPTERS.claude.modelDiscovery).toBe("manual");
+  });
+
+  it("parses native model discovery output from agy and codex", () => {
+    expect(parseModelListOutput("agy", "gemini-3.8-flash-high\nclaude-opus-5-5-medium\n")).toEqual([
+      "gemini-3.8-flash-high",
+      "claude-opus-5-5-medium",
+    ]);
+    expect(parseModelListOutput("codex", '{"models":[{"id":"gpt-6.1-sol"},{"model":"gpt-5.6-luna"}]}')).toEqual([
+      "gpt-6.1-sol",
+      "gpt-5.6-luna",
+    ]);
   });
 });

@@ -54,6 +54,7 @@ import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { validateRunPayload, type RunBody } from "./agents/run-validation.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
+import { probeCliAdapter, resolveCliAdapter } from "./agents/cli-command-builder.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
@@ -504,6 +505,69 @@ fastify.get("/api/health", async () => {
       ? { available: true as const }
       : { available: false as const, reason: pty.reason },
   };
+});
+
+async function inspectCliCapability(command: string) {
+  const adapter = resolveCliAdapter(command);
+  if (!adapter) {
+    return {
+      ok: false,
+      supported: false,
+      reason: "unsupported-command",
+      command,
+      adapter: null,
+      fields: [],
+      modelDiscovery: "none",
+      modelGuidance: "This command has no allow-listed CLI adapter; use the manual Advanced args editor.",
+      availableModels: [],
+      danger: [],
+    };
+  }
+
+  const result = await probeCliAdapter(adapter);
+  return {
+    ...result,
+    command,
+    ok: result.ok,
+    supported: result.supported,
+    reason: result.ok ? undefined : "probe-failed",
+  };
+}
+
+fastify.get("/api/agent-capabilities", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+
+  const rawQuery = req.query as Record<string, unknown> | undefined;
+  const command = typeof rawQuery?.command === "string" ? rawQuery.command : undefined;
+  if (!command) {
+    return reply.code(400).send({ error: "query param 'command' is required" });
+  }
+
+  return inspectCliCapability(command);
+});
+
+fastify.get("/api/cli/capabilities", async (req, reply) => {
+  const token = extractToken({
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    url: req.url,
+  });
+  if (!token || !verifyToken(token)) {
+    return reply.code(401).send({ error: "auth required" });
+  }
+
+  const rawQuery = req.query as Record<string, unknown> | undefined;
+  const command = typeof rawQuery?.command === "string" ? rawQuery.command : undefined;
+  if (!command) {
+    return reply.code(400).send({ error: "query param 'command' is required" });
+  }
+
+  return inspectCliCapability(command);
 });
 
 fastify.get("/api/about", async () => getAboutInfo());

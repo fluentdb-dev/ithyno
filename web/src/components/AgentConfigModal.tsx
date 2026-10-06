@@ -7,7 +7,15 @@ import type {
   AgentPublic,
 } from "../types";
 import { commandForAgentRole } from "../lib/managerCommand";
-import { sanitizePersistedArgs, splitArgv } from "../lib/commandBuilder";
+import {
+  detectCliArgConflicts,
+  joinArgv,
+  mergeCliArgs,
+  parseCliArgs,
+  resolveCliAdapter,
+  sanitizePersistedArgs,
+  splitArgv,
+} from "../lib/commandBuilder";
 
 /**
  * Modal for editing (or adding) an entry in `agents.yaml`. Save posts to
@@ -104,6 +112,14 @@ export function AgentConfigModal({
   );
 
   const includesManager = form.roles.includes("manager");
+  const selectedAdapter = useMemo(() => resolveCliAdapter(form.command), [form.command]);
+  const parsedArgs = useMemo(() => parseCliArgs(splitArgv(form.args)), [form.args]);
+  const argConflicts = useMemo(() => detectCliArgConflicts(splitArgv(form.args)), [form.args]);
+
+  const updateBuilderField = (field: string, value: string | boolean | undefined) => {
+    const nextArgs = mergeCliArgs(splitArgv(form.args), { [field]: value });
+    setForm((f) => ({ ...f, args: joinArgv(nextArgs) }));
+  };
 
   const toggleRole = (role: string) => {
     setForm((f) => {
@@ -262,15 +278,91 @@ export function AgentConfigModal({
               <span className="form-field-error">{fieldErrors.command}</span>
             )}
           </label>
-          <label className="agent-config-field">
-            <span>Args (argv, preserves quoted values)</span>
-            <input
-              type="text"
-              value={form.args}
-              onChange={(e) => setForm({ ...form, args: e.target.value })}
-              placeholder={'e.g. --dangerously-skip-permissions --profile "fast"'}
-            />
-          </label>
+          {selectedAdapter ? (
+            <fieldset className="agent-config-field">
+              <legend>
+                CLI builder — {selectedAdapter.displayName}
+              </legend>
+              <div className="agent-config-builder-grid">
+                {selectedAdapter.fields.map((field) => {
+                  const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
+                  const currentValue = parsedArgs[canonicalKey]?.[0] ?? "";
+                  if (field.kind === "boolean") {
+                    return (
+                      <label key={field.key} className="agent-config-field agent-config-checkbox-field">
+                        <span>
+                          <input
+                            type="checkbox"
+                            checked={currentValue === "true"}
+                            onChange={(e) => updateBuilderField(canonicalKey, e.target.checked)}
+                          />{" "}
+                          {field.label}
+                          {field.dangerous && " — dangerous"}
+                        </span>
+                      </label>
+                    );
+                  }
+                  if (field.kind === "select") {
+                    return (
+                      <label key={field.key} className="agent-config-field">
+                        <span>{field.label}</span>
+                        <select
+                          value={currentValue}
+                          onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                        >
+                          <option value="">(unset)</option>
+                          {(field.choices ?? []).map((choice) => (
+                            <option key={choice} value={choice}>{choice}</option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+                  return (
+                    <label key={field.key} className="agent-config-field">
+                      <span>{field.label}</span>
+                      <input
+                        type="text"
+                        value={currentValue}
+                        onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                        placeholder={field.guidance ?? field.flag}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedAdapter.modelGuidance && (
+                <p className="muted">{selectedAdapter.modelGuidance}</p>
+              )}
+              {argConflicts.length > 0 && (
+                <div className="form-field-error" role="alert">
+                  Conflicting recognized args detected: {argConflicts.join(", ")}
+                </div>
+              )}
+              <label className="agent-config-field">
+                <span>Advanced args (optional; exact argv preview)</span>
+                <textarea
+                  value={form.args}
+                  onChange={(e) => setForm({ ...form, args: e.target.value })}
+                  rows={3}
+                  placeholder={'--flag "value" --unknown "preserve me"'}
+                />
+              </label>
+              <div className="muted">
+                Preview: {form.command ? `${form.command} ${joinArgv(splitArgv(form.args))}` : "(set command first)"}
+              </div>
+            </fieldset>
+          ) : (
+            <label className="agent-config-field">
+              <span>Args (argv, preserves quoted values)</span>
+              <input
+                type="text"
+                value={form.args}
+                onChange={(e) => setForm({ ...form, args: e.target.value })}
+                placeholder={'e.g. --dangerously-skip-permissions --profile "fast"'}
+              />
+            </label>
+          )}
 
           <fieldset className="agent-config-field agent-config-prompts">
             <legend>
