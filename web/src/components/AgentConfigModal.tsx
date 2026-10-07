@@ -55,7 +55,7 @@ export function resolvedVisibleFields(
     fields?: readonly { key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }[];
   } | null,
   selectedAdapter: { fields?: readonly { key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }[] } | null,
-  state: "idle" | "loading" | "ready" | "error" | "timeout" | "missing",
+  state: "idle" | "loading" | "ready" | "error" | "missing",
 ) {
   if (capability && capability.fields && capability.fields.length > 0) {
     return capability.fields;
@@ -211,7 +211,7 @@ export function AgentConfigModal({
     danger?: readonly string[];
     reason?: string;
   } | null>(null);
-  const [capabilityState, setCapabilityState] = useState<"idle" | "loading" | "ready" | "error" | "timeout" | "missing">("idle");
+  const [capabilityState, setCapabilityState] = useState<"idle" | "loading" | "ready" | "error" | "missing">("idle");
 
   useEffect(() => {
     const command = form.command.trim();
@@ -244,12 +244,10 @@ export function AgentConfigModal({
           setCapabilityState("error");
           return;
         }
-        const normalizedReason = json.reason;
-        const modelFallback = json.modelDiscovery === "manual" || normalizedReason === "model probe failed";
-        setCapabilityState(modelFallback ? "ready" : (json.supported ? "ready" : "error"));
+        setCapabilityState(json.supported ? "ready" : "error");
       } catch (err) {
         if (cancelled) return;
-        setCapabilityState(err instanceof DOMException && err.name === "AbortError" ? "idle" : "timeout");
+        setCapabilityState(err instanceof DOMException && err.name === "AbortError" ? "idle" : "error");
       }
     }, 250);
 
@@ -505,7 +503,6 @@ export function AgentConfigModal({
                           {section.fields.map((field) => {
                             const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
                             const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
-                            const isManualModelFallback = field.key === "model" && capability?.reason === "model probe failed";
                             if (field.kind === "boolean") {
                               return (
                                 <label key={field.key} className="agent-config-field agent-config-checkbox-field">
@@ -540,10 +537,9 @@ export function AgentConfigModal({
                             const modelListId = `${selectedAdapter?.id ?? "cli"}-models`;
                             const hasDiscoveredModelOptions = modelOptions.length > 0;
                             const shouldUseDatalist = field.key === "model" && hasDiscoveredModelOptions;
-                            const manualModelHint = isManualModelFallback ? " (manual entry)" : "";
                             return (
                               <label key={field.key} className="agent-config-field">
-                                <span>{field.label}{manualModelHint}</span>
+                                <span>{field.label}</span>
                                 {shouldUseDatalist ? (
                                   <>
                                     <input
@@ -576,14 +572,10 @@ export function AgentConfigModal({
                   );
                 })}
               </div>
-              {capabilityState === "loading" && <p className="muted">Checking installed CLI capabilities…</p>}
-              {capabilityState === "timeout" && <p className="form-field-error">Timed out inspecting the selected CLI.</p>}
-              {capabilityState === "error" && capability?.reason && <p className="form-field-error">{capability.reason}</p>}
+              {capabilityState === "loading" && <p className="muted">Loading bundled CLI catalog…</p>}
+              {capabilityState === "error" && <p className="form-field-error">Failed to load the bundled CLI catalog.</p>}
               {(capability?.modelGuidance ?? selectedAdapter?.modelGuidance) && (
                 <p className="muted">{capability?.modelGuidance ?? selectedAdapter?.modelGuidance}</p>
-              )}
-              {capability?.reason === "model probe failed" && (
-                <p className="muted">Native model discovery is unavailable for this CLI version; keep the model field editable and enter a value manually.</p>
               )}
               {argConflicts.length > 0 && (
                 <div className="form-field-error" role="alert">

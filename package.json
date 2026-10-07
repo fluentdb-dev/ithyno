@@ -54,7 +54,7 @@
     "electron:package:linux": "npm run --workspace ithyno-electron package:linux",
     "electron:package:all": "npm run --workspace ithyno-electron package:all",
     "build:icons": "node scripts/build-icons.mjs",
-    "generate:cli-catalog": "ITHYNO_GENERATE_CLI_CATALOG=1 node --import tsx scripts/generate-agent-cli-capabilities.ts",
+    "generate:cli-catalog": "node --import tsx scripts/generate-agent-cli-capabilities.ts --write",
     "release:build": "node scripts/release-build.mjs",
     "release:verify-bundle": "node scripts/verify-bundle.mjs",
     "release:version": "node scripts/release-version.mjs",

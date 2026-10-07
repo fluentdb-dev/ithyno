@@ -13,9 +13,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const outputPath = join(repoRoot, "server", "agent-cli-capabilities.json");
 
-if (process.env.ITHYNO_GENERATE_CLI_CATALOG !== "1") {
+if (!process.argv.includes("--write")) {
   console.error(
-    "Refusing to probe installed agent CLIs. Re-run with ITHYNO_GENERATE_CLI_CATALOG=1 npm run generate:cli-catalog.",
+    "Refusing to probe installed agent CLIs. Re-run with: node --import tsx scripts/generate-agent-cli-capabilities.ts --write",
   );
   process.exit(1);
 }

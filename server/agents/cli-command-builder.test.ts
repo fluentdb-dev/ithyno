@@ -26,6 +26,11 @@ import {
   sanitizeProbeEnv,
   splitArgv,
 } from "./cli-command-builder.js";
+import {
+  CLI_ADAPTERS as WEB_CLI_ADAPTERS,
+  CLI_FIELD_CATEGORY_CONFIG,
+  getCliFieldCategory as getWebCliFieldCategory,
+} from "../../web/src/lib/commandBuilder";
 
 function makeFakeExecutable(name: string, script: string) {
   const dir = mkdtempSync(join(tmpdir(), `ithyno-${name}-fixture-`));
@@ -394,9 +399,11 @@ describe("cli command builder args safety", () => {
     }
   });
 
-  it("keeps the bundled catalog consistent with server and web category metadata", () => {
+  it("keeps the bundled catalog consistent with server and web adapter/category metadata", () => {
     const catalog = JSON.parse(readFileSync(new URL("../agent-cli-capabilities.json", import.meta.url), "utf8"));
     for (const [id, adapter] of Object.entries(CLI_ADAPTERS)) {
+      const webAdapter = WEB_CLI_ADAPTERS[id as keyof typeof WEB_CLI_ADAPTERS];
+      expect(webAdapter).toBeDefined();
       const entry = catalog.adapters[id];
       expect(entry).toBeDefined();
       expect(entry.aliases).toEqual(adapter.aliases);
@@ -408,6 +415,21 @@ describe("cli command builder args safety", () => {
       expect(entry.fields.map((field: { category?: string }) => field.category ?? "advanced")).toEqual(
         adapter.fields.map((field) => getCliFieldCategory(field)),
       );
+      expect(entry.fields.map((field: { category?: string }) => field.category ?? "advanced")).toEqual(
+        webAdapter.fields.map((field) => getWebCliFieldCategory(field)),
+      );
+      expect(entry.danger).toEqual(webAdapter.dangerousFlags ?? []);
+      expect(Object.keys(CLI_FIELD_CATEGORY_CONFIG)).toEqual(Object.keys({
+        model: true,
+        reasoning: true,
+        permissions: true,
+        sandbox: true,
+        execution: true,
+        context: true,
+        "tools-access": true,
+        "unattended-dangerous": true,
+        advanced: true,
+      }));
     }
   });
 });
