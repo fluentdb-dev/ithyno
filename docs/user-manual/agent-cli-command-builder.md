@@ -8,12 +8,24 @@ See the source research note at [docs/ideas/2026-10-06-agent-cli-command-builder
 
 The builder only renders fields that the selected CLI reports in its installed `--help` output. Each adapter advertises a small allow-list of known flags and the UI omits any flag the current version does not mention.
 
+The fields are grouped in a deterministic order that matches the runtime contract:
+
+1. Model (`--model`, `--profile`, `--auto-tier`)
+2. Reasoning (`--effort`, `--reasoning-effort`)
+3. Permissions (`--permission-mode`, `--ask-for-approval`, `--approve-for-me`)
+4. Sandbox (`--sandbox`)
+5. Execution (`--mode`, `--autopilot`, `--plan`)
+6. Context (`--context`, `--add-dir`)
+7. Tools & Access (`--allow-tool`, `--deny-tool`, `--allow-url`, and equivalent adapter-defined access controls)
+8. Unattended / Dangerous (warning-colored, explicit opt-in only)
+9. Advanced (unrecognized argv editor, always last)
+
 - Claude Code: `--model`, `--effort`, `--permission-mode`, `--dangerously-skip-permissions`
 - Codex: `--model`, `--profile`, `--sandbox`, `--ask-for-approval`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`
 - Antigravity (`agy`): `--model`, `--effort`, `--mode`, `--sandbox`, `--dangerously-skip-permissions`
 - GitHub Copilot CLI: `--model`, `--reasoning-effort`, `--context`, `--auto-tier`, `--mode`, `--allow-all`, `--yolo`
 
-Dangerous controls remain visible but are labeled as dangerous before save, and they are off by default unless the user enables them intentionally.
+Dangerous controls remain visible but are labeled as dangerous before save, placed in the dedicated warning section, and they are off by default unless the user enables them intentionally.
 
 ## Model discovery and fallback
 

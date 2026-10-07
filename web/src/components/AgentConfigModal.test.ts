@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import {
+  CLI_FIELD_CATEGORY_ORDER,
+  getCliFieldCategory,
+  orderedCliFieldCategories,
+} from "../lib/commandBuilder";
+import {
   buildAgentConfigSavePayload,
   resolvedModelOptions,
   resolvedVisibleFields,
@@ -84,5 +89,28 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       args: ["--model", "gpt-5.1", "--profile", "fast"],
       description: "worker",
     });
+  });
+
+  it("categorizes fields in the required order and keeps empty categories hidden", () => {
+    expect(getCliFieldCategory({ flag: "--model", key: "model" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--auto-tier", key: "autoTier" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--reasoning-effort", key: "reasoningEffort" })).toBe("reasoning");
+    expect(getCliFieldCategory({ flag: "--permission-mode", key: "permissionMode" })).toBe("permissions");
+    expect(getCliFieldCategory({ flag: "--sandbox", key: "sandbox" })).toBe("sandbox");
+    expect(getCliFieldCategory({ flag: "--mode", key: "mode" })).toBe("execution");
+    expect(getCliFieldCategory({ flag: "--context", key: "context" })).toBe("context");
+    expect(getCliFieldCategory({ flag: "--allow-all", key: "allowAll" })).toBe("unattended-dangerous");
+    expect(CLI_FIELD_CATEGORY_ORDER).toEqual([
+      "model",
+      "reasoning",
+      "permissions",
+      "sandbox",
+      "execution",
+      "context",
+      "tools-access",
+      "unattended-dangerous",
+      "advanced",
+    ]);
+    expect(orderedCliFieldCategories([{ key: "model", label: "Model", flag: "--model", kind: "text", category: "model" }, { key: "reasoningEffort", label: "Reasoning", flag: "--reasoning-effort", kind: "select", category: "reasoning" }])).toEqual(["model", "reasoning", "advanced"]);
   });
 });

@@ -71,11 +71,11 @@ Alternative considered: persist a second structured builder object. This is reje
 
 The builder SHALL NOT add `-p`/`--print`, Codex `exec` prompt content, change IDs, artifact contracts, or other runtime prompt transport. Those remain resolved by `AgentRegistry` and `AgentRunner`. The preview labels the persisted portion separately from the runtime-added prompt portion so users do not confuse the two.
 
-### 5. Provide a staged UI rather than one generic form
+### 5. Provide a staged UI with deterministic category grouping
 
-The Agent dialog keeps Command selection first. Once the command maps to a supported adapter, the UI presents only fields supported by the installed version. Model is a searchable selector when discovery succeeds and an editable combobox when it does not. Permission and sandbox choices use descriptive options, with dangerous/unattended modes visibly identified. Advanced args and an exact argv preview remain available.
+The Agent dialog keeps Command selection first. Once the command maps to a supported adapter, the UI presents only fields supported by the installed version using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced. Model and Reasoning sections open by default; the remaining normal categories are collapsed until the user expands them, and empty categories are omitted entirely. Dangerous or unattended flags remain in their own warning-colored section instead of being mixed into permissions or sandbox controls.
 
-An unknown command continues to use the existing manual Args editor and is never blocked by the builder.
+The UI uses native `<details>/<summary>` sections for keyboard-accessible expansion and keeps the final Advanced args block as the last collapsible section. An unknown command continues to use the existing manual Args editor and is never blocked by the builder.
 
 ## Risks / Trade-offs
 

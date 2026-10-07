@@ -5,8 +5,8 @@ Agent configuration currently exposes `args` as a whitespace-separated text fiel
 ## What Changes
 
 - Add a CLI capability inspection layer for Claude Code, Codex, Antigravity CLI (`agy`), and GitHub Copilot CLI that runs bounded, argument-safe discovery commands and reports the installed version, supported builder fields, and discoverable models.
-- Add a structured command builder to the Agent add/edit dialog for model, reasoning/effort, approval/permission, sandbox, and other supported CLI-specific options.
-- Render an exact command/argument preview and serialize builder selections into the existing `agents.yaml` `command` and `args[]` fields without adding dispatcher-owned prompt or non-interactive flags.
+- Add a structured command builder to the Agent add/edit dialog with deterministic categories for model, reasoning, permissions, sandbox, execution, context, tools & access, unattended/dangerous controls, and a final Advanced argv section.
+- Render grouped, collapsible controls that keep Model and Reasoning open by default, hide empty categories, keep dangerous options in a separate warning section, and preserve the existing exact command + `args[]` preview and round-trip without adding dispatcher-owned prompt flags.
 - Preserve unrecognized and manually entered arguments through an Advanced args editor so upgrading ithyno does not erase valid CLI options.
 - Treat live model discovery as optional: use CLI-provided model enumeration when available, otherwise allow manual model entry and show the CLI-specific way to inspect models interactively.
 - Add timeout, output-size, and executable allow-list safeguards so capability inspection cannot become an arbitrary-command endpoint or block the dashboard.

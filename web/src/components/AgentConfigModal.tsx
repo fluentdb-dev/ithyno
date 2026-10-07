@@ -9,12 +9,17 @@ import type {
 import { getSessionToken } from "../runtime";
 import { commandForAgentRole } from "../lib/managerCommand";
 import {
+  CLI_FIELD_CATEGORY_CONFIG,
   detectCliArgConflicts,
+  getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
+  orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
   splitArgv,
+  type CliFieldCategory,
+  type CliFieldCategoryConfig,
 } from "../lib/commandBuilder";
 
 /**
@@ -207,7 +212,6 @@ export function AgentConfigModal({
     reason?: string;
   } | null>(null);
   const [capabilityState, setCapabilityState] = useState<"idle" | "loading" | "ready" | "error" | "timeout" | "missing">("idle");
-  const [showAdvancedArgs, setShowAdvancedArgs] = useState(false);
 
   useEffect(() => {
     const command = form.command.trim();
@@ -258,6 +262,67 @@ export function AgentConfigModal({
 
   const modelOptions = resolvedModelOptions(capability, selectedAdapter);
   const visibleFields = resolvedVisibleFields(capability, selectedAdapter, capabilityState);
+  const categorySections = useMemo<Array<{
+    category: CliFieldCategory;
+    fields: Array<{ key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }>;
+    config: CliFieldCategoryConfig;
+  }>>(() => {
+    const ordered = orderedCliFieldCategories(visibleFields);
+    const sections: Array<{
+      category: CliFieldCategory;
+      fields: Array<{ key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }>;
+      config: CliFieldCategoryConfig;
+    }> = [];
+
+    for (const category of ordered) {
+      if (category === "advanced") continue;
+      const fields = visibleFields.filter((field) => getCliFieldCategory(field) === category);
+      if (fields.length === 0) continue;
+      sections.push({
+        category,
+        fields,
+        config: CLI_FIELD_CATEGORY_CONFIG[category],
+      });
+    }
+
+    sections.push({
+      category: "advanced",
+      fields: [],
+      config: CLI_FIELD_CATEGORY_CONFIG.advanced,
+    });
+    return sections;
+  }, [visibleFields]);
+
+  const defaultExpandedCategories = useMemo<Record<CliFieldCategory, boolean>>(() => {
+    const defaultState = Object.fromEntries(
+      orderedCliFieldCategories(visibleFields).map((category) => [category, category === "model" || category === "reasoning"]),
+    ) as Record<CliFieldCategory, boolean>;
+    return {
+      model: defaultState.model ?? false,
+      reasoning: defaultState.reasoning ?? false,
+      permissions: defaultState.permissions ?? false,
+      sandbox: defaultState.sandbox ?? false,
+      execution: defaultState.execution ?? false,
+      context: defaultState.context ?? false,
+      "tools-access": defaultState["tools-access"] ?? false,
+      "unattended-dangerous": defaultState["unattended-dangerous"] ?? false,
+      advanced: defaultState.advanced ?? false,
+    };
+  }, [visibleFields]);
+
+  const [expandedCategories, setExpandedCategories] = useState<Record<CliFieldCategory, boolean>>(() => defaultExpandedCategories);
+
+  useEffect(() => {
+    setExpandedCategories((prev) => {
+      const next = { ...prev };
+      for (const category of orderedCliFieldCategories(visibleFields)) {
+        if (!(category in next)) {
+          next[category] = category === "model" || category === "reasoning";
+        }
+      }
+      return next;
+    });
+  }, [visibleFields]);
 
   const updateBuilderField = (field: string, value: string | boolean | undefined) => {
     const nextArgs = mergeCliArgs(splitArgv(form.args), { [field]: value });
@@ -397,73 +462,117 @@ export function AgentConfigModal({
               <legend>
                 CLI builder — {selectedAdapter.displayName}
               </legend>
-              <div className="agent-config-builder-grid">
-                {visibleFields.map((field) => {
-                  const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
-                  const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
-                  const isManualModelFallback = field.key === "model" && capability?.reason === "model probe failed";
-                  if (field.kind === "boolean") {
-                    return (
-                      <label key={field.key} className="agent-config-field agent-config-checkbox-field">
-                        <span>
-                          <input
-                            type="checkbox"
-                            checked={currentValue === "true"}
-                            onChange={(e) => updateBuilderField(canonicalKey, e.target.checked)}
-                          />{" "}
-                          {field.label}
-                          {field.dangerous && " — dangerous"}
-                        </span>
-                      </label>
-                    );
-                  }
-                  if (field.kind === "select") {
-                    return (
-                      <label key={field.key} className="agent-config-field">
-                        <span>{field.label}</span>
-                        <select
-                          value={currentValue}
-                          onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                        >
-                          <option value="">(unset)</option>
-                          {(field.choices ?? []).map((choice) => (
-                            <option key={choice} value={choice}>{choice}</option>
-                          ))}
-                        </select>
-                      </label>
-                    );
-                  }
-                  const modelListId = `${selectedAdapter?.id ?? "cli"}-models`;
-                  const hasDiscoveredModelOptions = modelOptions.length > 0;
-                  const shouldUseDatalist = field.key === "model" && hasDiscoveredModelOptions;
-                  const manualModelHint = isManualModelFallback ? " (manual entry)" : "";
+              <div className="agent-config-builder-groups">
+                {categorySections.map((section) => {
+                  const isAdvanced = section.category === "advanced";
+                  const categoryLabel = section.config.label;
+                  const header = (
+                    <summary>
+                      <span>{categoryLabel}</span>
+                      {section.config.dangerous && <span className="agent-config-danger-pill">Warning</span>}
+                    </summary>
+                  );
+
+                  const isExpanded = expandedCategories[section.category] ?? section.config.defaultOpen;
+
                   return (
-                    <label key={field.key} className="agent-config-field">
-                      <span>{field.label}{manualModelHint}</span>
-                      {shouldUseDatalist ? (
-                        <>
-                          <input
-                            type="text"
-                            list={modelListId}
-                            value={currentValue}
-                            onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                            placeholder={field.guidance ?? field.flag}
-                          />
-                          <datalist id={modelListId}>
-                            {modelOptions.map((option) => (
-                              <option key={option} value={option} />
-                            ))}
-                          </datalist>
-                        </>
+                    <details
+                      key={`${selectedAdapter.id}-${section.category}`}
+                      className={section.config.dangerous ? "agent-config-category agent-config-category-danger" : "agent-config-category"}
+                      open={isExpanded}
+                      onToggle={(event) => {
+                        setExpandedCategories((prev) => ({
+                          ...prev,
+                          [section.category]: event.currentTarget.open,
+                        }));
+                      }}
+                    >
+                      {header}
+                      {isAdvanced ? (
+                        <div className="agent-config-advanced-body">
+                          <label className="agent-config-field">
+                            <span>Advanced args (optional; exact argv preview)</span>
+                            <textarea
+                              value={form.args}
+                              onChange={(e) => setForm({ ...form, args: e.target.value })}
+                              rows={3}
+                              placeholder={'--flag "value" --unknown "preserve me"'}
+                            />
+                          </label>
+                        </div>
                       ) : (
-                        <input
-                          type="text"
-                          value={currentValue}
-                          onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                          placeholder={field.guidance ?? field.flag}
-                        />
+                        <div className="agent-config-builder-grid">
+                          {section.fields.map((field) => {
+                            const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
+                            const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
+                            const isManualModelFallback = field.key === "model" && capability?.reason === "model probe failed";
+                            if (field.kind === "boolean") {
+                              return (
+                                <label key={field.key} className="agent-config-field agent-config-checkbox-field">
+                                  <span>
+                                    <input
+                                      type="checkbox"
+                                      checked={currentValue === "true"}
+                                      onChange={(e) => updateBuilderField(canonicalKey, e.target.checked)}
+                                    />{" "}
+                                    {field.label}
+                                    {field.dangerous && " — dangerous"}
+                                  </span>
+                                </label>
+                              );
+                            }
+                            if (field.kind === "select") {
+                              return (
+                                <label key={field.key} className="agent-config-field">
+                                  <span>{field.label}</span>
+                                  <select
+                                    value={currentValue}
+                                    onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                                  >
+                                    <option value="">(unset)</option>
+                                    {(field.choices ?? []).map((choice) => (
+                                      <option key={choice} value={choice}>{choice}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              );
+                            }
+                            const modelListId = `${selectedAdapter?.id ?? "cli"}-models`;
+                            const hasDiscoveredModelOptions = modelOptions.length > 0;
+                            const shouldUseDatalist = field.key === "model" && hasDiscoveredModelOptions;
+                            const manualModelHint = isManualModelFallback ? " (manual entry)" : "";
+                            return (
+                              <label key={field.key} className="agent-config-field">
+                                <span>{field.label}{manualModelHint}</span>
+                                {shouldUseDatalist ? (
+                                  <>
+                                    <input
+                                      type="text"
+                                      list={modelListId}
+                                      value={currentValue}
+                                      onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                                      placeholder={field.guidance ?? field.flag}
+                                    />
+                                    <datalist id={modelListId}>
+                                      {modelOptions.map((option) => (
+                                        <option key={option} value={option} />
+                                      ))}
+                                    </datalist>
+                                  </>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={currentValue}
+                                    onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
+                                    placeholder={field.guidance ?? field.flag}
+                                  />
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
                       )}
-                    </label>
+                    </details>
                   );
                 })}
               </div>
@@ -481,29 +590,6 @@ export function AgentConfigModal({
                   Conflicting recognized args detected: {argConflicts.join(", ")}
                 </div>
               )}
-              <div className="agent-config-advanced">
-                <button
-                  type="button"
-                  className="agent-config-advanced-toggle"
-                  aria-expanded={showAdvancedArgs}
-                  onClick={() => setShowAdvancedArgs((v) => !v)}
-                >
-                  {showAdvancedArgs ? "▾" : "▸"} Advanced args
-                </button>
-                {showAdvancedArgs && (
-                  <div className="agent-config-advanced-body">
-                    <label className="agent-config-field">
-                      <span>Advanced args (optional; exact argv preview)</span>
-                      <textarea
-                        value={form.args}
-                        onChange={(e) => setForm({ ...form, args: e.target.value })}
-                        rows={3}
-                        placeholder={'--flag "value" --unknown "preserve me"'}
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
               <div className="muted">
                 Preview: {form.command ? `${form.command} ${joinArgv(splitArgv(form.args))}` : "(set command first)"}
               </div>

@@ -21,6 +21,23 @@ export type CodexModelMetadata = {
   defaultReasoningEffort?: string;
 };
 
+export type CliFieldCategory =
+  | "model"
+  | "reasoning"
+  | "permissions"
+  | "sandbox"
+  | "execution"
+  | "context"
+  | "tools-access"
+  | "unattended-dangerous"
+  | "advanced";
+
+export type CliFieldCategoryConfig = {
+  label: string;
+  defaultOpen: boolean;
+  dangerous?: boolean;
+};
+
 export const DISPATCHER_OWNED_PROMPT_FLAGS = new Set([
   "-p",
   "--print",
@@ -44,6 +61,7 @@ export type CliFieldDescriptor = {
   label: string;
   flag: string;
   kind: CliFieldKind;
+  category?: CliFieldCategory;
   choices?: readonly string[];
   dangerous?: boolean;
   guidance?: string;
@@ -124,16 +142,88 @@ export function probeFingerprintFromResult(result: {
   return stableHash([version, result.modelDiscovery ?? "none", fieldSignature, modelSignature, reason].join("::"));
 }
 
+export const CLI_FIELD_CATEGORY_ORDER: readonly CliFieldCategory[] = [
+  "model",
+  "reasoning",
+  "permissions",
+  "sandbox",
+  "execution",
+  "context",
+  "tools-access",
+  "unattended-dangerous",
+  "advanced",
+] as const;
+
+export const CLI_FIELD_CATEGORY_CONFIG: Record<CliFieldCategory, CliFieldCategoryConfig> = {
+  model: { label: "Model", defaultOpen: true },
+  reasoning: { label: "Reasoning", defaultOpen: true },
+  permissions: { label: "Permissions", defaultOpen: false },
+  sandbox: { label: "Sandbox", defaultOpen: false },
+  execution: { label: "Execution", defaultOpen: false },
+  context: { label: "Context", defaultOpen: false },
+  "tools-access": { label: "Tools & Access", defaultOpen: false },
+  "unattended-dangerous": { label: "Unattended / Dangerous", defaultOpen: false, dangerous: true },
+  advanced: { label: "Advanced", defaultOpen: false },
+};
+
+export function normalizeCliFieldCategory(value?: string | CliFieldCategory | null): CliFieldCategory {
+  if (value && value in CLI_FIELD_CATEGORY_CONFIG) return value as CliFieldCategory;
+  return "advanced";
+}
+
+export function getCliFieldCategory(field: Pick<CliFieldDescriptor, "category" | "dangerous" | "flag" | "key">): CliFieldCategory {
+  if (field.category) return normalizeCliFieldCategory(field.category);
+  if (field.dangerous) return "unattended-dangerous";
+  const flag = canonicalCliFlagName(field.flag || field.key || "");
+  if (["model", "profile", "auto-tier"].includes(flag)) return "model";
+  if (["effort", "reasoning-effort"].includes(flag)) return "reasoning";
+  if (["permission-mode", "ask-for-approval", "approve-for-me"].includes(flag)) return "permissions";
+  if (["sandbox"].includes(flag)) return "sandbox";
+  if (["mode", "autopilot", "plan"].includes(flag)) return "execution";
+  if (["context", "add-dir"].includes(flag)) return "context";
+  if (["allow-tool", "deny-tool", "allow-url", "deny-url", "allow-path", "deny-path"].includes(flag)) return "tools-access";
+  if (["yolo", "allow-all", "dangerously-skip-permissions", "dangerously-bypass-approvals-and-sandbox"].includes(flag)) return "unattended-dangerous";
+  return "advanced";
+}
+
+export function groupCliFieldsByCategory(fields: readonly CliFieldDescriptor[]): Record<CliFieldCategory, CliFieldDescriptor[]> {
+  const groups: Record<CliFieldCategory, CliFieldDescriptor[]> = {
+    model: [],
+    reasoning: [],
+    permissions: [],
+    sandbox: [],
+    execution: [],
+    context: [],
+    "tools-access": [],
+    "unattended-dangerous": [],
+    advanced: [],
+  };
+
+  for (const field of fields) {
+    const category = getCliFieldCategory(field);
+    groups[category].push(field);
+  }
+  return groups;
+}
+
+export function orderedCliFieldCategories(fields: readonly CliFieldDescriptor[]): CliFieldCategory[] {
+  const present = new Set<CliFieldCategory>();
+  for (const field of fields) {
+    present.add(getCliFieldCategory(field));
+  }
+  return CLI_FIELD_CATEGORY_ORDER.filter((category) => category === "advanced" || present.has(category));
+}
+
 export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
   claude: {
     id: "claude",
     aliases: ["claude", "claude-code"],
     displayName: "Claude Code",
     fields: [
-      { key: "model", label: "Model", flag: "--model", kind: "text", guidance: "Use a model alias or full name; CLI may expose /model interactively." },
-      { key: "effort", label: "Effort", flag: "--effort", kind: "select", choices: ["low", "medium", "high", "xhigh", "max"], guidance: "Sets the reasoning effort level." },
-      { key: "permissionMode", label: "Permission mode", flag: "--permission-mode", kind: "select", choices: ["default", "acceptEdits", "auto", "plan", "dontAsk", "bypassPermissions"], guidance: "Approval policy for tool use." },
-      { key: "dangerouslySkipPermissions", label: "Dangerous skip permissions", flag: "--dangerously-skip-permissions", kind: "boolean", dangerous: true, guidance: "Bypasses permission prompts." },
+      { key: "model", label: "Model", flag: "--model", kind: "text", category: "model", guidance: "Use a model alias or full name; CLI may expose /model interactively." },
+      { key: "effort", label: "Effort", flag: "--effort", kind: "select", category: "reasoning", choices: ["low", "medium", "high", "xhigh", "max"], guidance: "Sets the reasoning effort level." },
+      { key: "permissionMode", label: "Permission mode", flag: "--permission-mode", kind: "select", category: "permissions", choices: ["default", "acceptEdits", "auto", "plan", "dontAsk", "bypassPermissions"], guidance: "Approval policy for tool use." },
+      { key: "dangerouslySkipPermissions", label: "Dangerous skip permissions", flag: "--dangerously-skip-permissions", kind: "boolean", category: "unattended-dangerous", dangerous: true, guidance: "Bypasses permission prompts." },
     ],
     versionProbe: ["claude", "--version"],
     helpProbe: ["claude", "--help"],
@@ -147,12 +237,12 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     aliases: ["codex"],
     displayName: "Codex CLI",
     fields: [
-      { key: "model", label: "Model", flag: "--model", kind: "text" },
-      { key: "profile", label: "Profile", flag: "--profile", kind: "text" },
-      { key: "sandbox", label: "Sandbox", flag: "--sandbox", kind: "select", choices: ["read-only", "workspace-write", "danger-full-access"] },
-      { key: "approval", label: "Approval", flag: "--ask-for-approval", kind: "select", choices: ["on-request", "never"] },
-      { key: "approveForMe", label: "Approve for me", flag: "--approve-for-me", kind: "boolean" },
-      { key: "dangerouslyBypassApprovalsAndSandbox", label: "Dangerous bypass", flag: "--dangerously-bypass-approvals-and-sandbox", kind: "boolean", dangerous: true },
+      { key: "model", label: "Model", flag: "--model", kind: "text", category: "model" },
+      { key: "profile", label: "Profile", flag: "--profile", kind: "text", category: "model" },
+      { key: "sandbox", label: "Sandbox", flag: "--sandbox", kind: "select", category: "sandbox", choices: ["read-only", "workspace-write", "danger-full-access"] },
+      { key: "approval", label: "Approval", flag: "--ask-for-approval", kind: "select", category: "permissions", choices: ["on-request", "never"] },
+      { key: "approveForMe", label: "Approve for me", flag: "--approve-for-me", kind: "boolean", category: "permissions" },
+      { key: "dangerouslyBypassApprovalsAndSandbox", label: "Dangerous bypass", flag: "--dangerously-bypass-approvals-and-sandbox", kind: "boolean", category: "unattended-dangerous", dangerous: true },
     ],
     versionProbe: ["codex", "--version"],
     helpProbe: ["codex", "--help"],
@@ -166,11 +256,11 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     aliases: ["agy", "antigravity"],
     displayName: "Antigravity CLI",
     fields: [
-      { key: "model", label: "Model", flag: "--model", kind: "text" },
-      { key: "effort", label: "Effort", flag: "--effort", kind: "select", choices: ["low", "medium", "high", "xhigh", "max"] },
-      { key: "mode", label: "Mode", flag: "--mode", kind: "select", choices: ["accept-edits", "plan"] },
-      { key: "sandbox", label: "Sandbox", flag: "--sandbox", kind: "boolean" },
-      { key: "dangerouslySkipPermissions", label: "Dangerous skip permissions", flag: "--dangerously-skip-permissions", kind: "boolean", dangerous: true },
+      { key: "model", label: "Model", flag: "--model", kind: "text", category: "model" },
+      { key: "effort", label: "Effort", flag: "--effort", kind: "select", category: "reasoning", choices: ["low", "medium", "high", "xhigh", "max"] },
+      { key: "mode", label: "Mode", flag: "--mode", kind: "select", category: "execution", choices: ["accept-edits", "plan"] },
+      { key: "sandbox", label: "Sandbox", flag: "--sandbox", kind: "boolean", category: "sandbox" },
+      { key: "dangerouslySkipPermissions", label: "Dangerous skip permissions", flag: "--dangerously-skip-permissions", kind: "boolean", category: "unattended-dangerous", dangerous: true },
     ],
     versionProbe: ["agy", "--version"],
     helpProbe: ["agy", "--help"],
@@ -184,13 +274,13 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     aliases: ["copilot", "github-copilot"],
     displayName: "GitHub Copilot CLI",
     fields: [
-      { key: "model", label: "Model", flag: "--model", kind: "text" },
-      { key: "reasoningEffort", label: "Reasoning effort", flag: "--reasoning-effort", kind: "select", choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] },
-      { key: "context", label: "Context", flag: "--context", kind: "select", choices: ["default", "long_context"] },
-      { key: "autoTier", label: "Auto tier", flag: "--auto-tier", kind: "select", choices: ["efficiency", "balance", "intelligence"] },
-      { key: "mode", label: "Mode", flag: "--mode", kind: "select", choices: ["interactive", "plan", "autopilot"] },
-      { key: "allowAll", label: "Allow all", flag: "--allow-all", kind: "boolean", dangerous: true },
-      { key: "yolo", label: "YOLO", flag: "--yolo", kind: "boolean", dangerous: true },
+      { key: "model", label: "Model", flag: "--model", kind: "text", category: "model" },
+      { key: "reasoningEffort", label: "Reasoning effort", flag: "--reasoning-effort", kind: "select", category: "reasoning", choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] },
+      { key: "context", label: "Context", flag: "--context", kind: "select", category: "context", choices: ["default", "long_context"] },
+      { key: "autoTier", label: "Auto tier", flag: "--auto-tier", kind: "select", category: "model", choices: ["efficiency", "balance", "intelligence"] },
+      { key: "mode", label: "Mode", flag: "--mode", kind: "select", category: "execution", choices: ["interactive", "plan", "autopilot"] },
+      { key: "allowAll", label: "Allow all", flag: "--allow-all", kind: "boolean", category: "unattended-dangerous", dangerous: true },
+      { key: "yolo", label: "YOLO", flag: "--yolo", kind: "boolean", category: "unattended-dangerous", dangerous: true },
     ],
     versionProbe: ["copilot", "--version"],
     helpProbe: ["copilot", "--help"],

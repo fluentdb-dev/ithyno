@@ -45,21 +45,24 @@ The command builder SHALL use models returned by the installed CLI when a verifi
 
 ### Requirement: CLI-specific structured argument builder
 
-The Agent dialog SHALL provide structured controls for the installed CLI's supported model, reasoning or effort, approval or permission, sandbox, and other adapter-defined options. Unsupported controls SHALL be omitted or disabled rather than serialized speculatively.
+The Agent dialog SHALL provide structured controls for the installed CLI's supported model, reasoning or effort, approval or permission, sandbox, execution, context, tools & access, and adapter-defined options using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced. Unsupported or empty categories SHALL be omitted, and the builder SHALL use a deterministic category ordering when rendering controls.
 
 #### Scenario: Installed CLI supports a field
 - **WHEN** help probing confirms the adapter's flag is supported
 - **THEN** the corresponding control is enabled
 - **AND** its selected value is serialized to the CLI's correct argv form
+- **AND** the field appears under its category in the same deterministic order across adapters
 
 #### Scenario: Installed version lacks a field
 - **WHEN** help probing does not find a field's required flag
 - **THEN** the corresponding structured control is not selectable
 - **AND** the builder does not add that flag
+- **AND** the category is hidden when no supported fields remain for it
 
 #### Scenario: Dangerous unattended mode is selected
 - **WHEN** the user selects an option that bypasses approval or sandbox protections
 - **THEN** the UI clearly identifies the security impact before save
+- **AND** the option is placed in the dedicated Unattended / Dangerous section rather than mixed into Permissions or Sandbox
 - **AND** the option is not selected by default
 
 ### Requirement: Lossless existing argument round trip

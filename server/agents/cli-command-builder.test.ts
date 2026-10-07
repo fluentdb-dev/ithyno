@@ -5,9 +5,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CLI_ADAPTERS,
+  CLI_FIELD_CATEGORY_ORDER,
   detectCliArgConflicts,
+  formatArgvPreview,
+  getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
+  orderedCliFieldCategories,
   parseCliArgs,
   parseCodexModelListOutput,
   parseCodexModelMetadata,
@@ -152,6 +156,57 @@ describe("cli command builder args safety", () => {
     expect(resolveCliAdapter("copilot")).toBe(CLI_ADAPTERS.copilot);
     expect(CLI_ADAPTERS.codex.dangerousFlags).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(CLI_ADAPTERS.claude.modelDiscovery).toBe("manual");
+  });
+
+  it("assigns model and reasoning fields to the correct sections and keeps the category order deterministic", () => {
+    expect(getCliFieldCategory({ flag: "--model", key: "model" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--profile", key: "profile" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--auto-tier", key: "autoTier" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--effort", key: "effort" })).toBe("reasoning");
+    expect(getCliFieldCategory({ flag: "--reasoning-effort", key: "reasoningEffort" })).toBe("reasoning");
+    expect(getCliFieldCategory({ flag: "--permission-mode", key: "permissionMode" })).toBe("permissions");
+    expect(getCliFieldCategory({ flag: "--dangerously-bypass-approvals-and-sandbox", key: "dangerouslyBypassApprovalsAndSandbox" })).toBe("unattended-dangerous");
+    expect(getCliFieldCategory({ flag: "--allow-all", key: "allowAll" })).toBe("unattended-dangerous");
+    expect(orderedCliFieldCategories(CLI_ADAPTERS.copilot.fields)).toEqual([
+      "model",
+      "reasoning",
+      "execution",
+      "context",
+      "unattended-dangerous",
+      "advanced",
+    ]);
+    expect(CLI_FIELD_CATEGORY_ORDER).toEqual([
+      "model",
+      "reasoning",
+      "permissions",
+      "sandbox",
+      "execution",
+      "context",
+      "tools-access",
+      "unattended-dangerous",
+      "advanced",
+    ]);
+  });
+
+  it("omits empty categories, keeps Model and Reasoning open by default, and separates dangerous controls", () => {
+    const fields = [
+      { key: "model", label: "Model", flag: "--model", kind: "text", category: "model" },
+      { key: "reasoningEffort", label: "Reasoning effort", flag: "--reasoning-effort", kind: "select", category: "reasoning" },
+      { key: "dangerouslySkipPermissions", label: "Dangerous skip permissions", flag: "--dangerously-skip-permissions", kind: "boolean", category: "unattended-dangerous", dangerous: true },
+    ] as const;
+
+    expect(orderedCliFieldCategories(fields)).toEqual(["model", "reasoning", "unattended-dangerous", "advanced"]);
+    expect(getCliFieldCategory(fields[2])).toBe("unattended-dangerous");
+    expect(CLI_ADAPTERS.claude.fields.filter((field) => getCliFieldCategory(field) === "permissions")).toHaveLength(1);
+    expect(CLI_ADAPTERS.copilot.fields.filter((field) => getCliFieldCategory(field) === "unattended-dangerous")).toHaveLength(2);
+  });
+
+  it("keeps preview and save lossless for manual args and recognized updates", () => {
+    const args = ["--profile", "fast", "--unknown", "keep-me", "--model", "old-model", "--noise", "preserve"];
+    const merged = mergeCliArgs(args, { model: "new-model" });
+    expect(merged).toEqual(["--profile", "fast", "--unknown", "keep-me", "--noise", "preserve", "--model", "new-model"]);
+    expect(formatArgvPreview("codex", merged)).toBe("codex --profile fast --unknown keep-me --noise preserve --model new-model");
+    expect(sanitizePersistedArgs(merged)).toEqual(merged);
   });
 
   it("parses native model discovery output from agy and codex", () => {

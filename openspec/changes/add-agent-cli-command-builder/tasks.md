@@ -32,3 +32,10 @@
 - [x] 5.2 Add integration tests proving generated `agents.yaml` remains compatible with `AgentRegistry` and that runtime prompt injection is not duplicated.
 - [x] 5.3 Document the supported builder fields, how each CLI's models are discovered, version-dependent behavior, and the Advanced args fallback.
 - [x] 5.4 Run typecheck, unit tests, build, and strict OpenSpec validation.
+
+## 6. Structured field categorization and grouped UI
+
+- [x] 6.1 Add category metadata to the shared server/web field contracts with deterministic ordering for Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced.
+- [x] 6.2 Show only populated categories, open Model and Reasoning by default, keep other normal categories collapsed, and keep the Unattended / Dangerous section independent and explicit.
+- [x] 6.3 Preserve unknown argv exactly while previewing and saving the generated command and args array, and keep the final Advanced section as the last collapsible editor.
+- [x] 6.4 Validate the category logic with focused unit/component tests for assignment, ordering, omission, open/closed state, dangerous separation, and lossless save behavior.
