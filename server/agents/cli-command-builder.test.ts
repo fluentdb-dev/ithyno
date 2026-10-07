@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -391,6 +391,23 @@ describe("cli command builder args safety", () => {
       expect(resolveCliExecutablePath(fakeCodex)).toContain("codex");
     } finally {
       rmSync(fakeCodex, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the bundled catalog consistent with server and web category metadata", () => {
+    const catalog = JSON.parse(readFileSync(new URL("../agent-cli-capabilities.json", import.meta.url), "utf8"));
+    for (const [id, adapter] of Object.entries(CLI_ADAPTERS)) {
+      const entry = catalog.adapters[id];
+      expect(entry).toBeDefined();
+      expect(entry.aliases).toEqual(adapter.aliases);
+      expect(entry.modelDiscovery).toBe(adapter.modelDiscovery);
+      expect(entry.danger).toEqual(adapter.dangerousFlags ?? []);
+      expect(entry.fields.map((field: { flag: string }) => field.flag)).toEqual(
+        adapter.fields.map((field) => field.flag),
+      );
+      expect(entry.fields.map((field: { category?: string }) => field.category ?? "advanced")).toEqual(
+        adapter.fields.map((field) => getCliFieldCategory(field)),
+      );
     }
   });
 });

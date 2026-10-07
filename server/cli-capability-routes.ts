@@ -1,15 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { FastifyInstance } from "fastify";
-import {
-  CLI_CAPABILITY_CACHE,
-  probeCliAdapter,
-  probeFingerprintFromResult,
-  resolveCliAdapter,
-  resolveCliExecutablePath,
-} from "./agents/cli-command-builder.js";
+import bundledCliCatalog from "./agent-cli-capabilities.json";
+import { resolveCliAdapter } from "./agents/cli-command-builder.js";
 import { extractToken, verifyToken } from "./util/auth.js";
 
-export async function inspectCliCapability(command: string) {
+type CliCatalogEntry = {
+  id: string;
+  aliases: readonly string[];
+  displayName: string;
+  currentVersion?: string;
+  sourceVersion?: string;
+  fields: Array<{
+    key: string;
+    label: string;
+    flag: string;
+    kind: "text" | "select" | "boolean";
+    category?: string;
+    choices?: readonly string[];
+    dangerous?: boolean;
+    guidance?: string;
+  }>;
+  modelDiscovery: "native" | "manual" | "none";
+  modelGuidance: string;
+  availableModels: readonly string[];
+  modelMetadata: Array<Record<string, unknown>>;
+  danger: readonly string[];
+};
+
+type CliCatalog = {
+  schemaVersion: number;
+  adapters: Record<string, CliCatalogEntry>;
+};
+
+const cliCatalog = bundledCliCatalog as CliCatalog;
+
+export function readBundledCliCapability(command: string) {
   const adapter = resolveCliAdapter(command);
   if (!adapter) {
     return {
@@ -27,29 +52,42 @@ export async function inspectCliCapability(command: string) {
     };
   }
 
-  const executablePath = resolveCliExecutablePath(command);
-  const cachePrefix = `${adapter.id}:${executablePath || command}`;
-  const cachedEntry = Array.from(CLI_CAPABILITY_CACHE.entries())
-    .filter(([cacheKey]) => cacheKey.startsWith(`${cachePrefix}:`))
-    .sort(([, left], [, right]) => right.expiresAt - left.expiresAt)[0];
-  if (cachedEntry && Date.now() < cachedEntry[1].expiresAt) {
-    return cachedEntry[1].result as Record<string, unknown>;
+  const catalogEntry = cliCatalog.adapters[adapter.id];
+  if (!catalogEntry) {
+    return {
+      ok: false,
+      supported: false,
+      reason: "catalog-missing",
+      command,
+      adapter: adapter.id,
+      fields: adapter.fields,
+      modelDiscovery: adapter.modelDiscovery,
+      modelGuidance: adapter.modelGuidance,
+      availableModels: [],
+      modelMetadata: [],
+      danger: adapter.dangerousFlags ?? [],
+    };
   }
 
-  const result = await probeCliAdapter(adapter, executablePath || command);
-  const fingerprint = probeFingerprintFromResult(result);
-  const cacheKey = `${cachePrefix}:${fingerprint}`;
-  const cacheValue = {
-    ...result,
+  return {
+    ok: true,
+    supported: true,
     command,
-    ok: result.ok,
-    supported: result.supported,
-    reason: result.reason ?? (result.ok ? undefined : "probe-failed"),
-    executablePath,
-    probeFingerprint: fingerprint,
+    adapter: adapter.id,
+    fields: catalogEntry.fields,
+    modelDiscovery: catalogEntry.modelDiscovery,
+    modelGuidance: catalogEntry.modelGuidance,
+    availableModels: [...catalogEntry.availableModels],
+    modelMetadata: catalogEntry.modelMetadata,
+    currentVersion: catalogEntry.currentVersion ?? catalogEntry.sourceVersion,
+    sourceVersion: catalogEntry.sourceVersion ?? catalogEntry.currentVersion,
+    danger: [...catalogEntry.danger],
+    reason: undefined,
   };
-  CLI_CAPABILITY_CACHE.set(cacheKey, { result: cacheValue, expiresAt: Date.now() + 60_000 });
-  return cacheValue;
+}
+
+export async function inspectCliCapability(command: string) {
+  return readBundledCliCapability(command);
 }
 
 export async function registerCliCapabilityRoutes(fastify: FastifyInstance) {
