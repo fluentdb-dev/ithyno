@@ -12,6 +12,7 @@ import {
   parseCodexModelListOutput,
   parseCodexModelMetadata,
   parseModelListOutput,
+  probeCliAdapter,
   resolveCliAdapter,
   resolveCliExecutablePath,
   runCliProbe,
@@ -21,6 +22,14 @@ import {
   sanitizeProbeEnv,
   splitArgv,
 } from "./cli-command-builder.js";
+
+function makeFakeExecutable(name: string, script: string) {
+  const dir = mkdtempSync(join(tmpdir(), `ithyno-${name}-fixture-`));
+  const scriptPath = join(dir, name);
+  writeFileSync(scriptPath, script, "utf8");
+  chmodSync(scriptPath, 0o755);
+  return scriptPath;
+}
 
 function makeFakeCodexExecutable(mode: "valid" | "missing-init" | "missing-model-list") {
   const dir = mkdtempSync(join(tmpdir(), "ithyno-codex-fixture-"));
@@ -154,6 +163,65 @@ describe("cli command builder args safety", () => {
       "gpt-6.1-sol",
       "gpt-5.6-luna",
     ]);
+  });
+
+  it("ignores agy progress output and accepts only actual tab-separated model rows", () => {
+    const fixture = [
+      "Fetching available models...",
+      "gemini-3.8-flash-high\tGemini 3.8 Flash High",
+      "claude-sonnet-5-5-low\tClaude Sonnet 5.5 Low",
+      "gpt-oss-120b-medium\tGPT OSS 120B Medium",
+    ].join("\n");
+
+    expect(parseModelListOutput("agy", fixture)).toEqual([
+      "gemini-3.8-flash-high",
+      "claude-sonnet-5-5-low",
+      "gpt-oss-120b-medium",
+    ]);
+  });
+
+  it("detects Copilot capability flags from its top-level help output", async () => {
+    const fakeCopilot = makeFakeExecutable("copilot", [
+      "#!/usr/bin/env node",
+      "const args = process.argv.slice(2);",
+      "if (args.includes('--version')) { console.log('1.0.91'); process.exit(0); }",
+      "if (args.includes('--help')) {",
+      "  process.stdout.write([",
+      "    'GitHub Copilot CLI 1.0.91',",
+      "    '',",
+      "    'Usage: copilot [options] [command]',",
+      "    '',",
+      "    'Options:',",
+      "    '  --model <model>                 Choose a model',",
+      "    '  --reasoning-effort <level>      Reasoning effort (none, minimal, low, medium, high, xhigh, max)',",
+      "    '  --context <tier>                Context mode (default, long_context)',",
+      "    '  --auto-tier <preference>        Auto routing (efficiency, balance, intelligence)',",
+      "    '  --mode <mode>                  Execution mode (interactive, plan, autopilot)',",
+      "    '  --allow-all                    Allow all tool and URL usage',",
+      "    '  --yolo                         Skip required confirmation prompts',",
+      "    '',",
+      "    'Examples:',",
+      "    '  copilot --model gpt-5 --mode plan',",
+      "  ].join('\\n'));",
+      "  process.exit(0);",
+      "}",
+      "process.exit(1);",
+    ].join("\n"));
+
+    const result = await probeCliAdapter(CLI_ADAPTERS.copilot, fakeCopilot);
+    expect(result.ok).toBe(true);
+    expect(result.supported).toBe(true);
+    expect(result.fields.map((field) => field.flag)).toEqual(expect.arrayContaining([
+      "--model",
+      "--reasoning-effort",
+      "--context",
+      "--auto-tier",
+      "--mode",
+      "--allow-all",
+      "--yolo",
+    ]));
+
+    rmSync(fakeCopilot, { recursive: true, force: true });
   });
 
   it("strips credential-bearing env vars before probes", () => {

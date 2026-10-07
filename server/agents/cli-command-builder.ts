@@ -193,7 +193,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
       { key: "yolo", label: "YOLO", flag: "--yolo", kind: "boolean", dangerous: true },
     ],
     versionProbe: ["copilot", "--version"],
-    helpProbe: ["copilot", "help", "commands"],
+    helpProbe: ["copilot", "--help"],
     modelProbe: undefined,
     modelDiscovery: "manual",
     modelGuidance: "Copilot does not expose a verified non-interactive model list in this environment; use /model interactively or specify a model manually.",
@@ -776,8 +776,18 @@ export function parseModelListOutput(adapterId: CliAdapterId, output: string): s
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const ids = new Set<string>();
   for (const line of lines) {
-    const match = line.split(/\s+|\t+/).find(Boolean);
-    if (match) ids.add(match);
+    const normalized = line.toLowerCase();
+    if (normalized.includes("fetching available models") || normalized.includes("available models") || normalized.includes("no models available")) {
+      continue;
+    }
+
+    const match = line.split(/\t+|\s+/).find(Boolean);
+    if (!match) continue;
+
+    const candidate = match.trim();
+    if (!candidate || /^(fetching|available|models?|model)$/i.test(candidate)) continue;
+    if (!/[\d._:-]/.test(candidate) || !/^[A-Za-z0-9._:-]+$/.test(candidate)) continue;
+    ids.add(candidate);
   }
   return [...ids];
 }
