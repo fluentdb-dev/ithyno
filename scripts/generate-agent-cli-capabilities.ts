@@ -15,7 +15,7 @@ const outputPath = join(repoRoot, "server", "agent-cli-capabilities.json");
 
 if (!process.argv.includes("--write")) {
   console.error(
-    "Refusing to probe installed agent CLIs. Re-run with: node --import tsx scripts/generate-agent-cli-capabilities.ts --write",
+    "Refusing to probe installed agent CLIs. Re-run with: npm run generate:cli-catalog",
   );
   process.exit(1);
 }

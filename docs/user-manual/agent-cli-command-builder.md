@@ -15,7 +15,7 @@ Instead, the project ships a generated file at `server/agent-cli-capabilities.js
 Maintainers regenerate the catalog intentionally:
 
 ```bash
-ITHYNO_GENERATE_CLI_CATALOG=1 npm run generate:cli-catalog
+npm run generate:cli-catalog
 ```
 
 The script is allow-listed and only probes the supported CLIs when the maintainer explicitly runs it. The checked-in JSON is then reviewed and shipped with the app.

@@ -38,7 +38,7 @@ Alternative considered: probe the user's machine on demand and cache the results
 
 ### 2. Keep the catalog generator explicit and maintainable
 
-Maintainers run the generator only with an explicit environment guard (`ITHYNO_GENERATE_CLI_CATALOG=1` via `npm run generate:cli-catalog`). The script is allow-listed and only executes the supported installed CLIs for a developer snapshot. The generated JSON is deterministic and reviewable in git history.
+Maintainers run the generator through the explicit `npm run generate:cli-catalog` command. The npm script passes the generator's required `--write` opt-in on every platform; importing or invoking the generator without that flag refuses to probe. The script is allow-listed and only executes the supported installed CLIs for a developer snapshot. The generated JSON is deterministic and reviewable in git history.
 
 This keeps the runtime safe while still permitting a set of curated, versioned capability snapshots that can be reviewed before release.
 
