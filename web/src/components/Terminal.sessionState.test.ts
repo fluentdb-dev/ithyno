@@ -1,6 +1,11 @@
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  TmuxBrowserPanel,
+  buildTmuxHistoryCopyText,
   copilotWheelInput,
+  filterTmuxHistory,
   beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
   parseTerminalReplayProtocolMessage,
@@ -25,6 +30,17 @@ describe("Copilot wheel compatibility", () => {
     expect(copilotWheelInput("PowerShell", "none", 120)).toBeNull();
     expect(copilotWheelInput("GitHub Copilot", "vt200", 120)).toBeNull();
     expect(copilotWheelInput("GitHub Copilot", "none", 0)).toBeNull();
+  });
+});
+
+describe("tmux history filtering", () => {
+  it("keeps the original snapshot when the query is blank", () => {
+    expect(filterTmuxHistory("alpha\nbeta\n", "  ")).toBe("alpha\nbeta\n");
+  });
+
+  it("returns case-insensitive matching lines without changing their text", () => {
+    expect(filterTmuxHistory("Build passed\nwarning\nBUILD cached", "build"))
+      .toBe("Build passed\nBUILD cached");
   });
 });
 
@@ -176,6 +192,208 @@ describe("resolveTerminalSessionState", () => {
   it("ignores unrelated websocket payloads", () => {
     expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "data", payload: "x" }))).toBeNull();
     expect(parseTerminalSessionStatusMessage("not-json")).toBeNull();
+  });
+});
+
+describe("tmux browser panel", () => {
+  const topology = {
+    available: true,
+    provider: "psmux" as const,
+    version: "psmux 1.0",
+    capabilities: { topology: true, selection: false, history: false },
+    session: {
+      name: "project-session",
+      windows: [{
+        id: "@1",
+        index: 0,
+        name: "manager",
+        active: true,
+        paneCount: 2,
+        layout: "even-horizontal",
+        panes: [{
+          id: "%1",
+          windowId: "@1",
+          windowIndex: 0,
+          index: 0,
+          title: "logs",
+          active: true,
+          width: 120,
+          height: 30,
+          currentPath: "/tmp/project",
+        }, {
+          id: "%2",
+          windowId: "@1",
+          windowIndex: 0,
+          index: 1,
+          title: "shell",
+          active: false,
+          width: 120,
+          height: 30,
+          currentPath: "/tmp/project",
+        }],
+      }],
+    },
+    reason: "selection is disabled because select-pane is not supported by psmux; history is disabled because capture-pane is not supported by psmux",
+  };
+
+  it("renders capability-aware selection and history controls with explanatory titles", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology,
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("selection is disabled because select-pane is not supported by psmux");
+    expect(markup).toContain("capture-pane");
+    expect(markup).toContain('role="tab"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain("split");
+    expect(markup).not.toContain("kill");
+    expect(markup).not.toContain("rename");
+  });
+
+  it("shows navigation affordances and active state for window and pane selection", () => {
+    const activeTopology = {
+      ...topology,
+      capabilities: { topology: true, selection: true, history: true },
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: activeTopology,
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("0: manager");
+    expect(markup).toContain("0.0 logs");
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('title="Open retained tmux history"');
+  });
+
+  it("keeps history search, truncation, copy text, and empty/loading states explicit", () => {
+    const history = { paneId: "%1", content: "alpha\nbeta\ngamma\n", lineLimit: 3, truncated: true };
+    const searchMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history,
+        historyLoading: false,
+        query: "beta",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(searchMarkup).toContain("beta");
+    expect(searchMarkup).not.toContain("alpha");
+    expect(searchMarkup).toContain("Showing a bounded tail of the pane history.");
+    expect(buildTmuxHistoryCopyText(history.content, "beta")).toBe("beta");
+
+    const loadingMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history: null,
+        historyLoading: true,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(loadingMarkup).toContain("Loading history…");
+
+    const emptyMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history: { paneId: "%1", content: "", lineLimit: 50, truncated: false },
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(emptyMarkup).toContain("No pane history.");
+
+    const errorMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: "history probe failed",
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(errorMarkup).toContain("history probe failed");
+    expect(errorMarkup).not.toContain("split");
   });
 });
 

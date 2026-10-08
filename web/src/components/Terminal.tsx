@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -7,6 +7,8 @@ import { getSessionToken } from "../runtime";
 import { useAppliedTheme, type AppliedTheme } from "../hooks/useAppliedTheme";
 import { useStore } from "../store";
 import { writeClipboardText } from "../clipboardBridge";
+import { fetchTmuxHistory, fetchTmuxTopology, selectTmuxTarget } from "../api";
+import type { TmuxHistory, TmuxPane, TmuxTopology } from "../types";
 
 export type TerminalSessionState = "connected" | "reconnecting" | "lost";
 export type TerminalSessionStatus = "attached" | "reattached" | "missing" | "terminated" | null;
@@ -77,6 +79,258 @@ export function copilotWheelInput(
     return null;
   }
   return deltaY < 0 ? "\x1b[5~" : "\x1b[6~";
+}
+
+export function filterTmuxHistory(content: string, query: string): string {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return content;
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.toLocaleLowerCase().includes(normalized))
+    .join("\n");
+}
+
+export function buildTmuxHistoryCopyText(content: string, query: string): string {
+  return filterTmuxHistory(content, query);
+}
+
+export type TmuxBrowserPanelProps = {
+  topology: TmuxTopology | null;
+  open: boolean;
+  loading: boolean;
+  error: string | null;
+  historyPane: TmuxPane | null;
+  history: TmuxHistory | null;
+  historyLoading: boolean;
+  query: string;
+  copied: boolean;
+  onRefresh: () => void;
+  onClose: () => void;
+  onSelect: (target: { windowId?: string; paneId?: string }) => void;
+  onOpenHistory: (pane: TmuxPane) => void;
+  onShowPanes: () => void;
+  onCopyHistory: () => void;
+  onQueryChange: (value: string) => void;
+};
+
+export function TmuxBrowserPanel({
+  topology,
+  open,
+  loading,
+  error,
+  historyPane,
+  history,
+  historyLoading,
+  query,
+  copied,
+  onRefresh,
+  onClose,
+  onSelect,
+  onOpenHistory,
+  onShowPanes,
+  onCopyHistory,
+  onQueryChange,
+}: TmuxBrowserPanelProps) {
+  const visibleHistory = buildTmuxHistoryCopyText(history?.content ?? "", query);
+  const selectionDisabled = !topology?.capabilities.selection;
+  const historyDisabled = !topology?.capabilities.history;
+
+  if (!open || !topology?.session) return null;
+
+  return (
+    <section className="terminal-tmux-browser" aria-label="tmux session browser">
+      <header className="terminal-tmux-browser-head">
+        <div>
+          <strong>{topology.session.name}</strong>
+          <span>{topology.version ?? topology.provider}</span>
+        </div>
+        <div className="terminal-tmux-browser-actions">
+          <button type="button" onClick={() => onRefresh()} disabled={loading} aria-label="Refresh tmux topology">↻</button>
+          <button type="button" onClick={() => onClose()} aria-label="Close tmux browser">×</button>
+        </div>
+      </header>
+
+      {error && <div className="terminal-tmux-error" role="alert">{error}</div>}
+
+      {!historyPane && (
+        <>
+          <div className="terminal-tmux-windows" role="tablist" aria-label="tmux windows">
+            {topology.session.windows.map((window) => (
+              <button
+                key={window.id}
+                type="button"
+                role="tab"
+                aria-selected={window.active}
+                className={window.active ? "active" : ""}
+                disabled={selectionDisabled}
+                onClick={() => onSelect({ windowId: window.id })}
+              >
+                {window.index}: {window.name || "window"}
+              </button>
+            ))}
+          </div>
+
+          <div className="terminal-tmux-panes">
+            {topology.session.windows.flatMap((window) => window.panes.map((pane) => (
+              <article key={pane.id} className={`terminal-tmux-pane${pane.active && window.active ? " active" : ""}`}>
+                <button
+                  type="button"
+                  className="terminal-tmux-pane-select"
+                  aria-pressed={pane.active && window.active}
+                  disabled={selectionDisabled}
+                  onClick={() => onSelect({ paneId: pane.id })}
+                >
+                  <strong>{window.index}.{pane.index} {pane.title || "pane"}</strong>
+                  <span>{pane.width}×{pane.height}</span>
+                  <small title={pane.currentPath}>{pane.currentPath || "Unknown directory"}</small>
+                </button>
+                <button
+                  type="button"
+                  className="terminal-tmux-history-button"
+                  disabled={historyDisabled}
+                  title={historyDisabled ? (topology.reason ?? "History is unavailable for this tmux provider.") : "Open retained tmux history"}
+                  onClick={() => onOpenHistory(pane)}
+                >
+                  History
+                </button>
+              </article>
+            )))}
+          </div>
+        </>
+      )}
+
+      {historyPane && (
+        <div className="terminal-tmux-history">
+          <div className="terminal-tmux-history-toolbar">
+            <button type="button" onClick={() => onShowPanes()}>← Panes</button>
+            <strong>{historyPane.title || historyPane.id}</strong>
+            <button type="button" disabled={historyLoading} onClick={() => onOpenHistory(historyPane)}>Refresh</button>
+            <button
+              type="button"
+              disabled={!history}
+              onClick={() => onCopyHistory()}
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => { onQueryChange(event.target.value); }}
+            placeholder="Search captured history…"
+            aria-label="Search tmux history"
+          />
+          {history?.truncated && <div className="terminal-tmux-history-note">Showing a bounded tail of the pane history.</div>}
+          <pre tabIndex={0} aria-label="Captured tmux pane history">
+            {historyLoading ? "Loading history…" : visibleHistory || (query ? "No matching lines." : "No pane history.")}
+          </pre>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TmuxBrowserControl() {
+  const [topology, setTopology] = useState<TmuxTopology | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [historyPane, setHistoryPane] = useState<TmuxPane | null>(null);
+  const [history, setHistory] = useState<TmuxHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [query, setQuery] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setTopology(await fetchTmuxTopology());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const select = async (target: { windowId?: string; paneId?: string }) => {
+    setError(null);
+    try {
+      await selectTmuxTarget(target);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const openHistory = async (pane: TmuxPane) => {
+    setHistoryPane(pane);
+    setHistory(null);
+    setQuery("");
+    setCopied(false);
+    setHistoryLoading(true);
+    setError(null);
+    try {
+      setHistory(await fetchTmuxHistory(pane.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const visibleHistory = useMemo(
+    () => filterTmuxHistory(history?.content ?? "", query),
+    [history?.content, query],
+  );
+
+  // Do not add terminal chrome for projects that are not currently using a
+  // managed tmux session. A failed initial probe also leaves the existing
+  // terminal untouched; Settings/Doctor remains the place to diagnose tmux.
+  if (!loading && !topology?.session) return null;
+
+  const handleCopyHistory = () => {
+    const next = visibleHistory;
+    void writeClipboardText(next).then(() => setCopied(true)).catch((err) => setError(String(err)));
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`terminal-tmux-toggle${open ? " active" : ""}`}
+        aria-label="Browse tmux session"
+        aria-expanded={open}
+        title="Browse tmux windows, panes, and history"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {loading ? "…" : "tmux"}
+      </button>
+
+      <TmuxBrowserPanel
+        topology={topology}
+        open={open}
+        loading={loading}
+        error={error}
+        historyPane={historyPane}
+        history={history}
+        historyLoading={historyLoading}
+        query={query}
+        copied={copied}
+        onRefresh={() => { void refresh(); }}
+        onClose={() => { setOpen(false); setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); }}
+        onSelect={(target) => { void select(target); }}
+        onOpenHistory={(pane) => { void openHistory(pane); }}
+        onShowPanes={() => { setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); }}
+        onCopyHistory={handleCopyHistory}
+        onQueryChange={(value) => { setQuery(value); setCopied(false); }}
+      />
+    </>
+  );
 }
 
 export function parseTerminalReplayProtocolMessage(raw: unknown): TerminalReplayProtocolMessage | null {
@@ -696,6 +950,7 @@ export function Terminal() {
 
   return (
     <div ref={hostRef} className="terminal-host">
+      <TmuxBrowserControl />
       {presentation.showOverlay && (
         <div className="terminal-session-lost-overlay" role="alert">
           <div className="terminal-session-lost-card">

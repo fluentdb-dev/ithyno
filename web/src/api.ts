@@ -17,6 +17,8 @@ import type {
   ManagerStatus,
   TagDetail,
   TagIndex,
+  TmuxHistory,
+  TmuxTopology,
   ToggleResponse,
   WorkspaceState,
 } from "./types";
@@ -317,6 +319,36 @@ export async function setTmux(value: boolean): Promise<void> {
     { value },
   );
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Read the current project's ithyno-managed tmux topology. */
+export async function fetchTmuxTopology(): Promise<TmuxTopology> {
+  const res = await fetch("/api/tmux/topology", { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  if (!res.ok) throw new Error(`GET /api/tmux/topology failed: ${res.status}`);
+  return res.json();
+}
+
+/** Select a validated window or pane in the current project's tmux session. */
+export async function selectTmuxTarget(target: { windowId?: string; paneId?: string }): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>("/api/tmux/select", target);
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Capture a bounded text snapshot of a validated project tmux pane. */
+export async function fetchTmuxHistory(paneId: string, lines = 5_000): Promise<TmuxHistory> {
+  const query = new URLSearchParams({ paneId, lines: String(lines) });
+  const res = await fetch(`/api/tmux/history?${query}`, { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  const data = await res.json().catch(() => ({})) as TmuxHistory & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `GET /api/tmux/history failed: ${res.status}`);
+  return data;
 }
 
 /** Enable/disable + upsert/remove the top-level `agmsg:` block in

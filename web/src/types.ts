@@ -461,6 +461,53 @@ export type DoctorReport = {
   checkedAt: string;
 };
 
+// ---- project-scoped tmux browser -----------------------------------------
+
+export type TmuxPane = {
+  id: string;
+  windowId: string;
+  windowIndex: number;
+  index: number;
+  title: string;
+  active: boolean;
+  width: number;
+  height: number;
+  currentPath: string;
+};
+
+export type TmuxWindow = {
+  id: string;
+  index: number;
+  name: string;
+  active: boolean;
+  paneCount: number;
+  layout: string;
+  panes: TmuxPane[];
+};
+
+export type TmuxTopology = {
+  available: boolean;
+  provider: "tmux" | "psmux" | null;
+  version: string | null;
+  capabilities: {
+    topology: boolean;
+    selection: boolean;
+    history: boolean;
+  };
+  session: null | {
+    name: string;
+    windows: TmuxWindow[];
+  };
+  reason?: string;
+};
+
+export type TmuxHistory = {
+  paneId: string;
+  content: string;
+  lineLimit: number;
+  truncated: boolean;
+};
+
 // ---- browse mode (unify-open-project-3-branch) -----------------------------
 
 /** A node in the markdown-tree response from GET /api/browse/markdown-tree. */

@@ -87,6 +87,7 @@ import {
 import { registerEnvironmentRoutes } from "./environment/routes.js";
 import { registerProductionShutdown } from "./production-shutdown.js";
 import { startBridgeServer, stopBridgeServer, unregisterBridgeRuntime } from "./bridge.js";
+import { registerTmuxRoutes } from "./tmux-routes.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -219,6 +220,10 @@ fastify.addHook("onRequest", async (req, reply) => {
   );
   if (res.ok) return;
   reply.code(res.status).send({ error: res.error });
+});
+await fastify.register(registerTmuxRoutes, {
+  getProjectRoot,
+  isLocal,
 });
 
 // ---- WebSocket broadcast ---------------------------------------------------
