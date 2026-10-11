@@ -51,6 +51,14 @@ export type CliModelInfo = {
   source?: "native" | "manual";
 };
 
+export type CliSessionStartupMode = "new" | "picker" | "latest" | "custom";
+
+export type CliSessionStartupOption = {
+  value: Exclude<CliSessionStartupMode, "custom">;
+  label: string;
+  args: readonly string[];
+};
+
 export type CliAdapter = {
   id: CliAdapterId;
   aliases: readonly string[];
@@ -241,6 +249,96 @@ export function resolveCliAdapter(command?: string | null): CliAdapter | null {
     if (id === normalized || normalized === "antigravity" || normalized === "github-copilot") return adapter;
   }
   return null;
+}
+
+export function cliSessionStartupOptions(adapterId: CliAdapterId): readonly CliSessionStartupOption[] {
+  if (adapterId === "codex") {
+    return [
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "picker", label: "Choose a session to resume", args: ["resume"] },
+      { value: "latest", label: "Resume the latest session", args: ["resume", "--last"] },
+    ];
+  }
+  if (adapterId === "claude" || adapterId === "copilot") {
+    return [
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "picker", label: "Choose a session to resume", args: ["--resume"] },
+      { value: "latest", label: "Continue the latest session", args: ["--continue"] },
+    ];
+  }
+  return [];
+}
+
+export function detectCliSessionStartup(
+  adapterId: CliAdapterId,
+  args: readonly string[],
+): CliSessionStartupMode {
+  if (adapterId === "codex") {
+    const resumeIndex = args.indexOf("resume");
+    if (resumeIndex < 0) return "new";
+    const tail = args.slice(resumeIndex + 1);
+    if (tail.includes("--last")) return "latest";
+    const firstResumeArgument = tail[0];
+    return firstResumeArgument === undefined || firstResumeArgument.startsWith("-") ? "picker" : "custom";
+  }
+  if (adapterId === "claude" || adapterId === "copilot") {
+    if (args.includes("--continue") || (adapterId === "claude" && args.includes("-c"))) return "latest";
+    const resumeIndex = args.findIndex((arg) => arg === "--resume" || arg === "-r");
+    if (resumeIndex < 0) return "new";
+    const next = args[resumeIndex + 1];
+    return next === undefined || next.startsWith("-") ? "picker" : "custom";
+  }
+  return "new";
+}
+
+export function setCliSessionStartup(
+  adapterId: CliAdapterId,
+  args: readonly string[],
+  mode: Exclude<CliSessionStartupMode, "custom">,
+): string[] {
+  const options = cliSessionStartupOptions(adapterId);
+  const selected = options.find((option) => option.value === mode);
+  if (!selected) return [...args];
+
+  const preserved: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (adapterId === "codex" && token === "resume") {
+      const next = args[index + 1];
+      if (next === "--last") index += 1;
+      else if (next !== undefined && !next.startsWith("-")) index += 1;
+      continue;
+    }
+    if ((adapterId === "claude" || adapterId === "copilot") && token === "--continue") {
+      continue;
+    }
+    if (adapterId === "claude" && token === "-c") {
+      continue;
+    }
+    if ((adapterId === "claude" || adapterId === "copilot") && (token === "--resume" || token === "-r")) {
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) index += 1;
+      continue;
+    }
+    preserved.push(token);
+  }
+  return [...preserved, ...selected.args];
+}
+
+export function cliTextFieldPlaceholder(
+  adapterId: CliAdapterId,
+  field: Pick<CliFieldDescriptor, "key" | "label" | "guidance">,
+  modelOptions: readonly string[] = [],
+): string {
+  if (field.key === "model") {
+    if (modelOptions[0]) return `e.g. ${modelOptions[0]}`;
+    if (adapterId === "claude") return "e.g. sonnet or claude-sonnet-4-6";
+    if (adapterId === "agy") return "e.g. gemini-3.6-flash";
+    if (adapterId === "copilot") return "e.g. auto or a supported model name";
+    return "Enter a model name";
+  }
+  if (field.key === "profile") return "e.g. work or fast";
+  return field.guidance ?? `Enter ${field.label.toLowerCase()}`;
 }
 
 export type ParsedCliArgs = {

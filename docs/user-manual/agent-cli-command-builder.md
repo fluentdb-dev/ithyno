@@ -61,8 +61,8 @@ Examples:
 - Codex model metadata can include structured `supportedReasoningEfforts` entries, which the parser preserves rather than dropping them
 - prompts, runtime flags, and dispatcher-generated values such as `-p`, `--resume`, `--continue`, and Codex `exec` remain outside the saved `args[]` payload and are handled by the runtime instead
 
-## Advanced args fallback
+## Free-form args and Advanced preview
 
-Unsupported or custom argv remains available through the collapsible Advanced args editor. The field preserves every unknown argument and its original ordering so the user can keep project-specific or future flags without losing data.
+Unsupported or custom argv remains editable through the separate Free-form args field. It preserves unknown arguments so the user can keep project-specific or future flags without losing data. The collapsible Advanced section is read-only and shows the exact command and argv that will be saved.
 
 The exact argv preview shown beneath the builder reflects the persisted command + `args[]` values that will be written to `agents.yaml`. This is the escape hatch that keeps the UI forward-compatible when a CLI adds new flags or when the user deliberately writes a custom option that ithyno does not yet model.

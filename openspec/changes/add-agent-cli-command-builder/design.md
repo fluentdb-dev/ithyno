@@ -46,7 +46,7 @@ This keeps the runtime safe while still permitting a set of curated, versioned c
 
 No new builder-only fields are required in `agents.yaml`. The UI parses recognized arguments from the existing `args[]`, edits those values structurally, and writes the merged argv back through the existing Agent config endpoint.
 
-Unknown arguments remain ordered and are displayed in an Advanced args editor. Saving without editing them preserves them byte-for-byte as array elements. Conflicting duplicate recognized flags are surfaced to the user instead of silently discarded.
+Unknown arguments remain ordered and are editable in a dedicated free-form args field. Saving without editing them preserves them byte-for-byte as array elements. The Advanced section is a read-only exact command/argv preview, and conflicting duplicate recognized flags are surfaced to the user instead of silently discarded.
 
 Alternative considered: persist a second structured builder object. This is rejected because it creates two sources of truth and would require migrations in every consumer.
 
@@ -58,7 +58,7 @@ The builder SHALL NOT add `-p`/`--print`, Codex `exec` prompt content, change ID
 
 The Agent dialog keeps Command selection first. Once the command maps to a supported adapter, the UI presents only fields described in the catalog using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced. Model and Reasoning sections open by default; the remaining normal categories are collapsed until the user expands them, and empty categories are omitted entirely. Dangerous or unattended flags remain in their own warning-colored section instead of being mixed into permissions or sandbox controls.
 
-The UI uses native `<details>/<summary>` sections for keyboard-accessible expansion and keeps the final Advanced args block as the last collapsible section. An unknown command continues to use the existing manual Args editor and is never blocked by the builder.
+The UI uses native `<details>/<summary>` sections with an explicit disclosure indicator for keyboard-accessible expansion. A dedicated free-form args editor remains visible independently of those groups, and the final Advanced section provides a read-only exact argv preview. An unknown command continues to use the existing manual Args editor and is never blocked by the builder.
 
 ## Risks / Trade-offs
 
@@ -73,7 +73,7 @@ The UI uses native `<details>/<summary>` sections for keyboard-accessible expans
 
 1. Add the checked-in catalog and the maintainer-only generator without changing Agent persistence.
 2. Keep the parser/serializer and category logic fully deterministic in the server and web code.
-3. Replace the primary runtime probe path with catalog-backed lookup while keeping the Advanced args fallback intact.
+3. Replace the primary runtime probe path with catalog-backed lookup while keeping the free-form args fallback intact.
 4. Verify existing `agents.yaml` files reopen and save without argument drift.
 5. Roll back by removing the catalog entry or by regenerating it; the stored schema remains the same because persistence is unchanged.
 

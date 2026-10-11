@@ -14,7 +14,7 @@
 ## 3. Argument Parsing and Serialization
 
 - [x] 3.1 Implement per-adapter parsing of recognized builder fields from existing `args[]` while retaining unknown argv elements and their relative order.
-- [x] 3.2 Implement conflict detection and deterministic merging of edited structured values with preserved Advanced args.
+- [x] 3.2 Implement conflict detection and deterministic merging of edited structured values with preserved free-form args.
 - [x] 3.3 Ensure prompt/non-interactive transport, change IDs, and artifact-contract values remain excluded from persisted builder args.
 - [x] 3.4 Add round-trip tests for quoted/space-containing values, repeated flags, `--flag=value`, unknown options, option values, empty args, and Windows paths.
 
@@ -22,7 +22,7 @@
 
 - [x] 4.1 Replace the primary whitespace Args input with CLI-aware controls for supported model, reasoning/effort, approval/permission, sandbox, and adapter-specific fields.
 - [x] 4.2 Add asynchronous inspection states for loading, unavailable executable, timeout, discovery failure, and manual model entry with CLI-specific model-check guidance.
-- [x] 4.3 Add a collapsible argv-aware Advanced args editor that preserves unsupported options and surfaces recognized-option conflicts.
+- [x] 4.3 Add a dedicated free-form args editor, explicit category disclosure indicators, and a read-only Advanced argv preview while preserving unsupported options and surfacing recognized-option conflicts.
 - [x] 4.4 Add an exact persisted command/argv preview and clearly identify dangerous approval or sandbox bypass selections.
 - [x] 4.5 Preserve the existing manual configuration experience for unknown commands and verify add/edit dialog focus, paste, and save behavior.
 
@@ -30,7 +30,7 @@
 
 - [x] 5.1 Add component tests for each supported CLI, model-list/manual fallback states, dangerous-option warnings, conflict handling, and lossless edit/save behavior.
 - [x] 5.2 Add integration tests proving generated `agents.yaml` remains compatible with `AgentRegistry` and that runtime prompt injection is not duplicated.
-- [x] 5.3 Document the supported builder fields, how each CLI's models are discovered, version-dependent behavior, and the Advanced args fallback.
+- [x] 5.3 Document the supported builder fields, how each CLI's models are discovered, version-dependent behavior, and the free-form args fallback.
 - [x] 5.4 Run typecheck, unit tests, build, and strict OpenSpec validation.
 
 ## 6. Structured field categorization and grouped UI
@@ -44,7 +44,7 @@
 
 - [x] 7.1 Replace runtime inspection with a checked-in JSON capability catalog for Claude Code, Codex, Agy/Antigravity, and GitHub Copilot CLI.
 - [x] 7.2 Add a maintainer-only generator script and npm script that require an explicit `--write` opt-in and prohibit runtime probing of user environments.
-- [x] 7.3 Keep `/api/cli/capabilities` as a pure bundled lookup, preserving the existing `command` + `args[]` contract while keeping manual Advanced args and editable model entry intact.
+- [x] 7.3 Keep `/api/cli/capabilities` as a pure bundled lookup, preserving the existing `command` + `args[]` contract while keeping manual free-form args and editable model entry intact.
 - [x] 7.4 Confirm runtime route and UI modules invoke no subprocess functions, while the explicit developer generator remains the only place that may probe the allow-listed installed CLIs.
 - [x] 7.5 Strengthen drift coverage so the checked-in catalog is compared against both the server adapter definitions and the web adapter/category/danger definitions, while preserving deterministic bundle content for npm/Electron/VSIX packaging.
 - [x] 7.6 Update design and documentation to explain the maintainer regeneration workflow and to state that end users are not scanned or inspected.

@@ -10,13 +10,17 @@ import { getSessionToken } from "../runtime";
 import { commandForAgentRole } from "../lib/managerCommand";
 import {
   CLI_FIELD_CATEGORY_CONFIG,
+  cliSessionStartupOptions,
+  cliTextFieldPlaceholder,
   detectCliArgConflicts,
+  detectCliSessionStartup,
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
   orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
+  setCliSessionStartup,
   splitArgv,
   type CliFieldCategory,
   type CliFieldCategoryConfig,
@@ -259,6 +263,12 @@ export function AgentConfigModal({
   }, [form.command, selectedAdapter]);
 
   const modelOptions = resolvedModelOptions(capability, selectedAdapter);
+  const sessionStartupOptions = selectedAdapter && includesManager
+    ? cliSessionStartupOptions(selectedAdapter.id)
+    : [];
+  const sessionStartupMode = selectedAdapter && sessionStartupOptions.length > 0
+    ? detectCliSessionStartup(selectedAdapter.id, splitArgv(form.args))
+    : "new";
   const visibleFields = resolvedVisibleFields(capability, selectedAdapter, capabilityState);
   const categorySections = useMemo<Array<{
     category: CliFieldCategory;
@@ -460,13 +470,52 @@ export function AgentConfigModal({
               <legend>
                 CLI builder — {selectedAdapter.displayName}
               </legend>
+              <label className="agent-config-field agent-config-free-form-args">
+                <span>Free-form args (optional)</span>
+                <textarea
+                  value={form.args}
+                  onChange={(event) => setForm({ ...form, args: event.target.value })}
+                  rows={2}
+                  placeholder={'--flag "value" --custom-flag'}
+                />
+                <span className="muted">
+                  Enter or paste the complete argument list. The fields below update from this value.
+                </span>
+              </label>
+              {selectedAdapter && sessionStartupOptions.length > 0 && (
+                <label className="agent-config-field">
+                  <span>Session startup</span>
+                  <select
+                    value={sessionStartupMode}
+                    onChange={(event) => {
+                      if (event.target.value === "custom") return;
+                      const args = setCliSessionStartup(
+                        selectedAdapter.id,
+                        splitArgv(form.args),
+                        event.target.value as "new" | "picker" | "latest",
+                      );
+                      setForm({ ...form, args: joinArgv(args) });
+                    }}
+                  >
+                    {sessionStartupMode === "custom" && (
+                      <option value="custom">Custom resume target (edit free-form args)</option>
+                    )}
+                    {sessionStartupOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className="agent-config-builder-groups">
                 {categorySections.map((section) => {
                   const isAdvanced = section.category === "advanced";
                   const categoryLabel = section.config.label;
                   const header = (
                     <summary>
-                      <span>{categoryLabel}</span>
+                      <span className="agent-config-category-title">
+                        <span className="agent-config-category-chevron" aria-hidden="true">›</span>
+                        {categoryLabel}
+                      </span>
                       {section.config.dangerous && <span className="agent-config-danger-pill">Warning</span>}
                     </summary>
                   );
@@ -492,15 +541,12 @@ export function AgentConfigModal({
                       {header}
                       {isAdvanced ? (
                         <div className="agent-config-advanced-body">
-                          <label className="agent-config-field">
-                            <span>Advanced args (optional; exact argv preview)</span>
-                            <textarea
-                              value={form.args}
-                              onChange={(e) => setForm({ ...form, args: e.target.value })}
-                              rows={3}
-                              placeholder={'--flag "value" --unknown "preserve me"'}
-                            />
-                          </label>
+                          <span className="muted">Persisted command and argv (read-only)</span>
+                          <pre className="agent-config-argv-preview"><code>
+                            {form.command
+                              ? `${form.command}${form.args.trim() ? ` ${joinArgv(splitArgv(form.args))}` : ""}`
+                              : "(set command first)"}
+                          </code></pre>
                         </div>
                       ) : (
                         <div className="agent-config-builder-grid">
@@ -551,7 +597,7 @@ export function AgentConfigModal({
                                       list={modelListId}
                                       value={currentValue}
                                       onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                                      placeholder={field.guidance ?? field.flag}
+                                      placeholder={cliTextFieldPlaceholder(selectedAdapter.id, field, modelOptions)}
                                     />
                                     <datalist id={modelListId}>
                                       {modelOptions.map((option) => (
@@ -564,7 +610,7 @@ export function AgentConfigModal({
                                     type="text"
                                     value={currentValue}
                                     onChange={(e) => updateBuilderField(canonicalKey, e.target.value || undefined)}
-                                    placeholder={field.guidance ?? field.flag}
+                                    placeholder={cliTextFieldPlaceholder(selectedAdapter.id, field, modelOptions)}
                                   />
                                 )}
                               </label>
@@ -586,9 +632,6 @@ export function AgentConfigModal({
                   Conflicting recognized args detected: {argConflicts.join(", ")}
                 </div>
               )}
-              <div className="muted">
-                Preview: {form.command ? `${form.command} ${joinArgv(splitArgv(form.args))}` : "(set command first)"}
-              </div>
             </fieldset>
           ) : (
             <label className="agent-config-field">

@@ -12,7 +12,7 @@ The system SHALL ship a checked-in JSON capability catalog for Claude Code, Code
 #### Scenario: Unknown command is selected
 - **WHEN** an Agent command does not map to an allow-listed adapter
 - **THEN** the system reports that structured inspection is unsupported
-- **AND** the user can continue using manual Advanced args
+- **AND** the user can continue using the manual free-form args editor
 
 ### Requirement: Runtime catalog-only lookup
 
@@ -26,7 +26,7 @@ The runtime API and UI MUST read the generated catalog only. They MUST NOT spawn
 #### Scenario: Catalog entry is absent
 - **WHEN** the bundled JSON does not define a capability entry for the adapter
 - **THEN** the runtime falls back to the unsupported-command behavior
-- **AND** the user still retains the manual Advanced args editor
+- **AND** the user still retains the manual free-form args editor
 
 ### Requirement: Manual model entry remains valid
 
@@ -91,6 +91,8 @@ The command builder MUST NOT persist non-interactive prompt transport, change id
 ### Requirement: Exact argv preview and compatible persistence
 
 The dialog SHALL show the command and persisted argv that will be written. Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema so existing runners and manually authored configurations remain compatible.
+
+The structured groups SHALL expose a visible disclosure indicator. The free-form args editor SHALL remain separately editable, while the Advanced group SHALL present the exact command and argv as a read-only preview.
 
 #### Scenario: Structured selection is previewed and saved
 - **WHEN** the user changes a builder field

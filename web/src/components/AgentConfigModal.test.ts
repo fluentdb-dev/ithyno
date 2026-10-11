@@ -2,11 +2,15 @@
 import { describe, expect, it } from "vitest";
 import {
   CLI_FIELD_CATEGORY_ORDER,
+  cliSessionStartupOptions,
+  cliTextFieldPlaceholder,
+  detectCliSessionStartup,
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
   orderedCliFieldCategories,
   parseCliArgs,
+  setCliSessionStartup,
   splitArgv,
 } from "../lib/commandBuilder";
 import {
@@ -100,6 +104,30 @@ describe("AgentConfigModal — kebab-case name validation", () => {
 
     expect(joinArgv(args)).toBe("--model=-");
     expect(parseCliArgs(splitArgv(joinArgv(args))).values.model).toEqual(["-"]);
+  });
+
+  it("uses value examples instead of CLI flags as text placeholders", () => {
+    expect(cliTextFieldPlaceholder("codex", { key: "model", label: "Model" }, ["gpt-example"])).toBe("e.g. gpt-example");
+    expect(cliTextFieldPlaceholder("codex", { key: "profile", label: "Profile" })).toBe("e.g. work or fast");
+    expect(cliTextFieldPlaceholder("claude", { key: "model", label: "Model" })).toContain("sonnet");
+  });
+
+  it("builds manager-only session startup argv for each supported CLI", () => {
+    expect(cliSessionStartupOptions("agy")).toEqual([]);
+    expect(setCliSessionStartup("codex", ["--model", "gpt-example"], "latest")).toEqual([
+      "--model",
+      "gpt-example",
+      "resume",
+      "--last",
+    ]);
+    expect(detectCliSessionStartup("codex", ["--model", "gpt-example", "resume", "--last"])).toBe("latest");
+    expect(detectCliSessionStartup("codex", ["resume", "--last", "--model", "gpt-example"])).toBe("latest");
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--resume", "session-id"], "latest")).toEqual([
+      "--model",
+      "sonnet",
+      "--continue",
+    ]);
+    expect(detectCliSessionStartup("copilot", ["--resume", "named-session"])).toBe("custom");
   });
 
   it("categorizes fields in the required order and keeps empty categories hidden", () => {

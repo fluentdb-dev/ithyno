@@ -1601,6 +1601,9 @@ a.modal-btn:hover {
   flex-direction: column;
   gap: 8px;
 }
+.agent-config-free-form-args {
+  margin-bottom: 10px;
+}
 .agent-config-category {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1617,9 +1620,35 @@ a.modal-btn:hover {
   font-size: 12px;
   font-weight: 600;
 }
+.agent-config-category-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-config-category-chevron {
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+.agent-config-category[open] .agent-config-category-chevron {
+  transform: rotate(90deg);
+}
 .agent-config-category > .agent-config-builder-grid,
 .agent-config-category > .agent-config-advanced-body {
   padding: 0 10px 10px;
+}
+.agent-config-argv-preview {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .agent-config-category-danger {
   border-color: color-mix(in oklab, var(--danger) 55%, var(--border));
