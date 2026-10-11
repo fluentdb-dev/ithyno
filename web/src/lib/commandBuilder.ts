@@ -366,7 +366,15 @@ export function mergeCliArgs(
       appended.push(flag);
       continue;
     }
-    appended.push(flag, String(value));
+    const stringValue = String(value);
+    // Keep values that begin with "-" attached to their flag. Otherwise a
+    // partially typed value such as "-" is parsed as another option on the
+    // next render and the original field is incorrectly shown as `true`.
+    if (stringValue.startsWith("-")) {
+      appended.push(`${flag}=${stringValue}`);
+      continue;
+    }
+    appended.push(flag, stringValue);
   }
 
   return [...preserved, ...appended];

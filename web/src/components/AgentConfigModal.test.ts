@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   CLI_FIELD_CATEGORY_ORDER,
   getCliFieldCategory,
+  joinArgv,
+  mergeCliArgs,
   orderedCliFieldCategories,
+  parseCliArgs,
+  splitArgv,
 } from "../lib/commandBuilder";
 import {
   buildAgentConfigSavePayload,
@@ -89,6 +93,13 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       args: ["--model", "gpt-5.1", "--profile", "fast"],
       description: "worker",
     });
+  });
+
+  it("preserves a partially typed dash-prefixed field value", () => {
+    const args = mergeCliArgs([], { model: "-" });
+
+    expect(joinArgv(args)).toBe("--model=-");
+    expect(parseCliArgs(splitArgv(joinArgv(args))).values.model).toEqual(["-"]);
   });
 
   it("categorizes fields in the required order and keeps empty categories hidden", () => {
