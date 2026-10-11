@@ -479,9 +479,13 @@ export function AgentConfigModal({
                       className={section.config.dangerous ? "agent-config-category agent-config-category-danger" : "agent-config-category"}
                       open={isExpanded}
                       onToggle={(event) => {
+                        // React clears currentTarget after the event handler returns.
+                        // Capture the DOM value before entering the deferred state
+                        // updater instead of reading from the event inside it.
+                        const isOpen = event.currentTarget.open;
                         setExpandedCategories((prev) => ({
                           ...prev,
-                          [section.category]: event.currentTarget.open,
+                          [section.category]: isOpen,
                         }));
                       }}
                     >
