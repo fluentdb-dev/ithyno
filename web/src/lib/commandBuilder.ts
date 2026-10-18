@@ -54,7 +54,7 @@ export type CliModelInfo = {
 export type CliSessionStartupMode = "managed" | "new" | "picker" | "latest" | "custom";
 
 export type CliSessionStartupOption = {
-  value: Exclude<CliSessionStartupMode, "custom">;
+  value: CliSessionStartupMode;
   label: string;
   args: readonly string[];
 };
@@ -274,6 +274,13 @@ export function cliSessionStartupOptions(adapterId: CliAdapterId): readonly CliS
       { value: "latest", label: "Continue the latest session", args: ["--continue"] },
     ];
   }
+  if (adapterId === "agy") {
+    return [
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "latest", label: "Continue the latest session", args: ["--continue"] },
+      { value: "custom", label: "Resume by conversation ID", args: [] },
+    ];
+  }
   return [];
 }
 
@@ -297,13 +304,17 @@ export function detectCliSessionStartup(
     const next = args[resumeIndex + 1];
     return next === undefined || next.startsWith("-") ? "picker" : "custom";
   }
+  if (adapterId === "agy") {
+    if (args.includes("--conversation")) return "custom";
+    if (args.includes("--continue") || args.includes("-c")) return "latest";
+  }
   return "new";
 }
 
 export function setCliSessionStartup(
   adapterId: CliAdapterId,
   args: readonly string[],
-  mode: Exclude<CliSessionStartupMode, "custom">,
+  mode: CliSessionStartupMode,
 ): string[] {
   const options = cliSessionStartupOptions(adapterId);
   const selected = options.find((option) => option.value === mode);
@@ -319,6 +330,14 @@ export function setCliSessionStartup(
       continue;
     }
     if ((adapterId === "claude" || adapterId === "copilot") && token === "--continue") {
+      continue;
+    }
+    if (adapterId === "agy" && (token === "--continue" || token === "-c")) {
+      continue;
+    }
+    if (adapterId === "agy" && token === "--conversation") {
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) index += 1;
       continue;
     }
     if (adapterId === "claude" && token === "-c") {
@@ -337,6 +356,24 @@ export function setCliSessionStartup(
     preserved.push(token);
   }
   return [...preserved, ...selected.args];
+}
+
+export function cliSessionTarget(adapterId: CliAdapterId, args: readonly string[]): string {
+  if (adapterId !== "agy") return "";
+  const index = args.indexOf("--conversation");
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value !== undefined && !value.startsWith("-") ? value : "";
+}
+
+export function setCliSessionTarget(
+  adapterId: CliAdapterId,
+  args: readonly string[],
+  target: string,
+): string[] {
+  const preserved = setCliSessionStartup(adapterId, args, "custom");
+  const trimmed = target.trim();
+  if (adapterId === "agy" && trimmed) return [...preserved, "--conversation", trimmed];
+  return preserved;
 }
 
 function equivalentCliField(
@@ -402,6 +439,19 @@ export function resetFreeFormCliArgs(
 
     if ((adapter.id === "claude" || adapter.id === "copilot") && token === "--continue") {
       kept.push(token);
+      continue;
+    }
+    if (adapter.id === "agy" && (token === "--continue" || token === "-c")) {
+      kept.push(token);
+      continue;
+    }
+    if (adapter.id === "agy" && token === "--conversation") {
+      kept.push(token);
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        kept.push(next);
+        index += 1;
+      }
       continue;
     }
     if (adapter.id === "claude" && token === "-c") {

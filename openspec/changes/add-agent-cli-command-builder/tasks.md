@@ -26,6 +26,7 @@
 - [x] 4.4 Clearly identify dangerous approval or sandbox bypass selections without adding a redundant Advanced argv preview.
 - [x] 4.5 Preserve the existing manual configuration experience for unknown commands and verify add/edit dialog focus, paste, and save behavior.
 - [x] 4.6 Add Claude's managed project session ID to the Manager UI and persist its startup policy independently from normal CLI arguments.
+- [x] 4.7 Add Agy new/latest/conversation-ID session controls with a dedicated required Conversation ID field.
 
 ## 5. Verification and Documentation
 
@@ -35,6 +36,7 @@
 - [x] 5.4 Run typecheck, unit tests, build, and strict OpenSpec validation.
 - [x] 5.5 Document catalog input sources, maintainer regeneration, local real-CLI argv validation, token behavior, test limitations, and the fixture-only CI policy.
 - [x] 5.6 Test first-launch `--session-id`, subsequent `--resume`, explicit fresh-session override, config persistence, and composition with model arguments.
+- [x] 5.7 Test Agy `--continue`, `--conversation <id>`, session argument replacement, and preservation of unrelated CLI options.
 
 ## 6. Structured field categorization and grouped UI
 

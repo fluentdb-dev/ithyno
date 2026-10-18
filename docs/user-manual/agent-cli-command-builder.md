@@ -138,4 +138,6 @@ The other choices have different semantics:
 - **Continue the latest session** uses the CLI's latest-session behavior.
 - A manually entered `--resume <id>` or Claude `--session-id <id>` is shown as a custom session target.
 
+For an Agy Manager, the dialog provides **Start a new session**, **Continue the latest session**, and **Resume by conversation ID**. The last option shows a dedicated Conversation ID field and saves it as `--conversation <id>`; `--continue` remains an explicit choice because it can fail when no prior conversation exists.
+
 Older `agents.yaml` files without `sessionStartup` keep their existing behavior. For backward compatibility, a Claude Manager with no arguments still uses ithyno's managed project session strategy; a Manager with explicit arguments continues to use those arguments exactly until it is saved through the updated UI.

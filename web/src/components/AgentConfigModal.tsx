@@ -11,6 +11,7 @@ import { getSessionToken } from "../runtime";
 import { commandForAgentRole } from "../lib/managerCommand";
 import {
   CLI_FIELD_CATEGORY_CONFIG,
+  cliSessionTarget,
   cliSessionStartupOptions,
   cliTextFieldPlaceholder,
   detectCliArgConflicts,
@@ -24,6 +25,7 @@ import {
   resolveCliAdapter,
   resetFreeFormCliArgs,
   setCliSessionStartup,
+  setCliSessionTarget,
   splitArgv,
   type CliFieldCategory,
   type CliFieldCategoryConfig,
@@ -386,6 +388,14 @@ export function AgentConfigModal({
     if (!form.command.trim()) {
       errs.command = "command required";
     }
+    if (
+      includesManager
+      && selectedAdapter?.id === "agy"
+      && sessionStartupMode === "custom"
+      && !cliSessionTarget("agy", splitArgv(form.args))
+    ) {
+      errs.sessionTarget = "conversation ID required";
+    }
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -552,8 +562,7 @@ export function AgentConfigModal({
                   <select
                     value={sessionStartupMode}
                     onChange={(event) => {
-                      if (event.target.value === "custom") return;
-                      const sessionStartup = event.target.value as Exclude<AgentSessionStartup, "custom">;
+                      const sessionStartup = event.target.value as AgentSessionStartup;
                       const args = setCliSessionStartup(
                         selectedAdapter.id,
                         splitArgv(form.args),
@@ -562,13 +571,30 @@ export function AgentConfigModal({
                       setForm({ ...form, args: joinArgv(args), sessionStartup });
                     }}
                   >
-                    {sessionStartupMode === "custom" && (
+                    {sessionStartupMode === "custom" && !sessionStartupOptions.some((option) => option.value === "custom") && (
                       <option value="custom">Custom session target (edit free-form args)</option>
                     )}
                     {sessionStartupOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
+                  {selectedAdapter.id === "agy" && sessionStartupMode === "custom" && (
+                    <>
+                      <span>Conversation ID</span>
+                      <input
+                        type="text"
+                        value={cliSessionTarget("agy", splitArgv(form.args))}
+                        onChange={(event) => {
+                          const args = setCliSessionTarget("agy", splitArgv(form.args), event.target.value);
+                          setForm({ ...form, args: joinArgv(args), sessionStartup: "custom" });
+                        }}
+                        placeholder="Conversation ID"
+                      />
+                      {fieldErrors.sessionTarget && (
+                        <span className="form-field-error">{fieldErrors.sessionTarget}</span>
+                      )}
+                    </>
+                  )}
                   {selectedAdapter.id === "claude" && sessionStartupMode === "managed" && (
                     <span className="muted">
                       ithyno creates a project session ID on first launch and resumes that same ID later. Other CLI options remain active.

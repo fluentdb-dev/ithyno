@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLI_FIELD_CATEGORY_ORDER,
+  cliSessionTarget,
   cliSessionStartupOptions,
   cliTextFieldPlaceholder,
   detectCliSessionStartup,
@@ -14,6 +15,7 @@ import {
   resolveCliAdapter,
   resetFreeFormCliArgs,
   setCliSessionStartup,
+  setCliSessionTarget,
   splitArgv,
 } from "../lib/commandBuilder";
 import {
@@ -126,7 +128,24 @@ describe("AgentConfigModal — kebab-case name validation", () => {
   });
 
   it("builds manager-only session startup argv for each supported CLI", () => {
-    expect(cliSessionStartupOptions("agy")).toEqual([]);
+    expect(cliSessionStartupOptions("agy")).toEqual([
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "latest", label: "Continue the latest session", args: ["--continue"] },
+      { value: "custom", label: "Resume by conversation ID", args: [] },
+    ]);
+    expect(setCliSessionStartup("agy", ["--model", "gemini-example"], "latest")).toEqual([
+      "--model",
+      "gemini-example",
+      "--continue",
+    ]);
+    expect(detectCliSessionStartup("agy", ["--conversation", "conversation-123"])).toBe("custom");
+    expect(cliSessionTarget("agy", ["--conversation", "conversation-123"])).toBe("conversation-123");
+    expect(setCliSessionTarget("agy", ["--continue", "--model", "gemini-example"], "conversation-456")).toEqual([
+      "--model",
+      "gemini-example",
+      "--conversation",
+      "conversation-456",
+    ]);
     expect(cliSessionStartupOptions("claude")[0]).toMatchObject({
       value: "managed",
       label: "Managed project session ID",

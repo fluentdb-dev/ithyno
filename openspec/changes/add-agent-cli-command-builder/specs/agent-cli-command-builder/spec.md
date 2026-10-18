@@ -121,3 +121,17 @@ The Manager command builder SHALL expose Claude's ithyno-managed project session
 - **WHEN** the user selects a fresh session, the session picker, the latest session, or supplies a custom session target
 - **THEN** that explicit selection overrides the managed project session behavior
 - **AND** the UI preserves it independently from model and permission options
+
+### Requirement: Agy session continuation is configurable
+
+The Manager command builder SHALL expose Agy's supported new-session, latest-conversation, and conversation-ID startup modes without requiring session flags in Free-form args.
+
+#### Scenario: Latest Agy conversation is selected
+- **WHEN** an Agy Manager selects Continue the latest session
+- **THEN** the saved arguments contain `--continue`
+- **AND** no `--conversation` argument remains
+
+#### Scenario: Agy conversation ID is selected
+- **WHEN** an Agy Manager selects Resume by conversation ID and enters an ID
+- **THEN** the saved arguments contain `--conversation <id>`
+- **AND** saving is blocked when the ID is empty
