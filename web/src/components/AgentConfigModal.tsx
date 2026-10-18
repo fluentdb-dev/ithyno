@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import type {
   AgentConfigPayload,
@@ -161,6 +161,7 @@ export function AgentConfigModal({
     return deriveInitialForm(seed);
   }, [seed, addModePrefill]);
   const [form, setForm] = useState(initial);
+  const lastRecognizedAdapterRef = useRef(resolveCliAdapter(initial.command));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -173,6 +174,7 @@ export function AgentConfigModal({
 
   useEffect(() => {
     setForm(initial);
+    lastRecognizedAdapterRef.current = resolveCliAdapter(initial.command);
     setError(null);
     setFieldErrors({});
   }, [initial]);
@@ -468,13 +470,15 @@ export function AgentConfigModal({
               onChange={(e) => {
                 const nextCommand = e.target.value;
                 setForm((current) => {
-                  const previousAdapter = resolveCliAdapter(current.command);
+                  const previousAdapter = resolveCliAdapter(current.command)
+                    ?? lastRecognizedAdapterRef.current;
                   const nextAdapter = resolveCliAdapter(nextCommand);
                   const nextArgs = migrateCliArgsForAdapterSwitch(
                     splitArgv(current.args),
                     previousAdapter,
                     nextAdapter,
                   );
+                  if (nextAdapter) lastRecognizedAdapterRef.current = nextAdapter;
                   return {
                     ...current,
                     command: nextCommand,

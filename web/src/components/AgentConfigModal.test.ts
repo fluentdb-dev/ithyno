@@ -177,6 +177,26 @@ describe("AgentConfigModal — kebab-case name validation", () => {
     )).toEqual(["--model", "gpt-example"]);
   });
 
+  it("drops Copilot-only options when switching to Codex", () => {
+    expect(migrateCliArgsForAdapterSwitch(
+      [
+        "--continue",
+        "--auto-tier",
+        "efficiency",
+        "--reasoning-effort",
+        "medium",
+        "--mode",
+        "plan",
+        "--context",
+        "default",
+        "--model",
+        "gpt-6.1-sol",
+      ],
+      resolveCliAdapter("copilot"),
+      resolveCliAdapter("codex"),
+    )).toEqual(["--model", "gpt-6.1-sol"]);
+  });
+
   it("categorizes fields in the required order and keeps empty categories hidden", () => {
     expect(getCliFieldCategory({ flag: "--model", key: "model" })).toBe("model");
     expect(getCliFieldCategory({ flag: "--auto-tier", key: "autoTier" })).toBe("model");
