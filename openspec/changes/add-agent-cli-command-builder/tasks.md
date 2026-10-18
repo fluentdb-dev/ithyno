@@ -32,6 +32,7 @@
 - [x] 5.2 Add integration tests proving generated `agents.yaml` remains compatible with `AgentRegistry` and that runtime prompt injection is not duplicated.
 - [x] 5.3 Document the supported builder fields, how each CLI's models are discovered, version-dependent behavior, and the free-form args fallback.
 - [x] 5.4 Run typecheck, unit tests, build, and strict OpenSpec validation.
+- [x] 5.5 Document catalog input sources, maintainer regeneration, local real-CLI argv validation, token behavior, test limitations, and the fixture-only CI policy.
 
 ## 6. Structured field categorization and grouped UI
 

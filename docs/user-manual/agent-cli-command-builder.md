@@ -20,6 +20,54 @@ npm run generate:cli-catalog
 
 The script is allow-listed and only probes the supported CLIs when the maintainer explicitly runs it. The checked-in JSON is then reviewed and shipped with the app.
 
+### Where the CLI arguments and models come from
+
+The generator does not scrape arbitrary commands from an end user's machine. Its inputs are deliberately split by responsibility:
+
+- Supported argument names, kinds, choices, categories, aliases, and dangerous flags are maintained in `server/agents/cli-command-builder.ts`.
+- Claude Code model suggestions are maintained from Anthropic's official model-alias reference.
+- GitHub Copilot CLI model suggestions are maintained from GitHub's official supported-model reference.
+- Codex model suggestions are captured from the allow-listed `codex app-server` `model/list` request when a maintainer regenerates the catalog.
+- Antigravity model suggestions are captured from the allow-listed `agy models` command when a maintainer regenerates the catalog.
+- Installed CLI versions are recorded as snapshot metadata. They do not cause the shipped application to probe an end user's CLI.
+
+After changing an adapter or refreshing model data, run the generator and review the resulting JSON diff:
+
+```bash
+npm run generate:cli-catalog
+git diff -- server/agent-cli-capabilities.json
+```
+
+Do not accept a generated model list as an availability guarantee. Account permissions, organization policy, gateways, and later CLI releases can change which models a user can actually run.
+
+### Testing generated arguments against installed CLIs
+
+The deterministic parser and UI tests use fixtures and run as part of the normal test suite. A separate maintainer smoke test can validate the generated argument combinations against the real CLIs installed on the development machine:
+
+```bash
+npm run test:cli-argv
+```
+
+This command:
+
+1. Finds the supported installed CLIs (`claude`, `codex`, `agy`, and `copilot`).
+2. Builds adapter-specific argument combinations from the checked-in catalog.
+3. Starts each CLI with those arguments but sends no prompt or model input.
+4. Treats an immediate argument-parser rejection as a failure.
+5. Stops a CLI after a short grace period if it accepted the arguments and remained running.
+
+Because no prompt is submitted, the smoke test does not request model inference or consume inference tokens. A CLI may still perform its normal local startup, authentication check, or session lookup before it exits or is stopped.
+
+Missing CLIs are reported as skipped by default. For a release-maintainer machine that is expected to have every supported CLI installed, use:
+
+```bash
+npm run test:cli-argv:all
+```
+
+The real-CLI smoke test is intentionally not run in GitHub Actions because hosted runners do not contain authenticated installations of every supported CLI. CI runs `scripts/verify-agent-cli-argv.test.mjs` instead; that fixture test checks adapter isolation, dangerous-flag separation, and parser-error classification without starting external CLIs.
+
+The smoke test proves that the installed CLI parser accepts the generated flags and their placement. It does not prove model entitlement, authentication, successful inference, or compatibility with every historical and future CLI version.
+
 ## Supported field behavior
 
 The builder renders the fields defined in the bundled catalog. These are grouped in a deterministic order that matches the runtime contract:

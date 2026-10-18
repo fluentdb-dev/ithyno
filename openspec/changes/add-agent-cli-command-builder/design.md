@@ -42,6 +42,10 @@ Maintainers run the generator through the explicit `npm run generate:cli-catalog
 
 This keeps the runtime safe while still permitting a set of curated, versioned capability snapshots that can be reviewed before release.
 
+The catalog generator and the real-CLI argv smoke test are separate operations. `npm run generate:cli-catalog` refreshes the reviewed snapshot. `npm run test:cli-argv` starts only allow-listed installed CLIs with catalog-derived arguments, supplies no prompt, recognizes parser rejection output, and terminates accepted long-running invocations after a bounded grace period. `npm run test:cli-argv:all` additionally requires every supported CLI to be installed.
+
+The real-CLI smoke test remains an explicit maintainer action and is not part of GitHub Actions. CI uses deterministic fixtures only, because hosted runners neither install nor authenticate every supported agent CLI. This also prevents a repository test from unexpectedly contacting a model provider. No prompt is submitted by the maintainer smoke test, so it performs no model inference, although an individual CLI may still initialize its local configuration, check authentication, or inspect resumable sessions.
+
 ### 3. Keep `command` and `args[]` as the persistence contract
 
 No new builder-only fields are required in `agents.yaml`. The UI parses recognized arguments from the existing `args[]`, edits those values structurally, and writes the merged argv back through the existing Agent config endpoint.
