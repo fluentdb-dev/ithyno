@@ -498,18 +498,7 @@ export function AgentConfigModal({
                 CLI builder — {selectedAdapter.displayName}
               </legend>
               <div className="agent-config-field agent-config-free-form-args">
-                <div className="agent-config-free-form-header">
-                  <span>Free-form args (optional)</span>
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    disabled={!form.args.trim()}
-                    onClick={() => setForm((current) => ({ ...current, args: "" }))}
-                    title="Clear all CLI arguments in this draft"
-                  >
-                    Reset arguments
-                  </button>
-                </div>
+                <span>Free-form args (optional)</span>
                 <textarea
                   value={form.args}
                   onChange={(event) => setForm({ ...form, args: event.target.value })}
@@ -773,6 +762,15 @@ export function AgentConfigModal({
           {error && <div className="parse-error">⚠ {error}</div>}
 
           <div className="modal-actions">
+            <button
+              type="button"
+              className="ghost agent-config-reset-args"
+              disabled={submitting || !form.args.trim()}
+              onClick={() => setForm((current) => ({ ...current, args: "" }))}
+              title="Clear Session startup, structured CLI options, and free-form arguments in this draft"
+            >
+              Reset all arguments
+            </button>
             <button type="button" className="ghost" onClick={onCancel} disabled={submitting}>
               Cancel
             </button>
