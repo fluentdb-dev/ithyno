@@ -358,6 +358,74 @@ export function migrateCliArgsForAdapterSwitch(
   return mergeCliArgs(withoutPreviousSession, removals);
 }
 
+/**
+ * Keep only arguments managed by the current adapter, including its dedicated
+ * session-startup controls. Everything else belongs to the free-form portion
+ * of the draft and is discarded by the scoped reset action.
+ */
+export function resetFreeFormCliArgs(
+  args: readonly string[],
+  adapter: CliAdapter,
+): string[] {
+  const fieldsByFlag = new Map(
+    adapter.fields.map((field) => [canonicalCliFlagName(field.flag), field]),
+  );
+  const kept: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === undefined) continue;
+
+    if (adapter.id === "codex" && token === "resume") {
+      kept.push(token);
+      const next = args[index + 1];
+      if (next === "--last" || (next !== undefined && !next.startsWith("-"))) {
+        kept.push(next);
+        index += 1;
+      }
+      continue;
+    }
+
+    if ((adapter.id === "claude" || adapter.id === "copilot") && token === "--continue") {
+      kept.push(token);
+      continue;
+    }
+    if (adapter.id === "claude" && token === "-c") {
+      kept.push(token);
+      continue;
+    }
+    if ((adapter.id === "claude" || adapter.id === "copilot") && (token === "--resume" || token === "-r")) {
+      kept.push(token);
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        kept.push(next);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (!token.startsWith("-") || token === "-") continue;
+    const bareFlag = token.split("=", 1)[0];
+    const field = fieldsByFlag.get(canonicalCliFlagName(bareFlag));
+    if (!field) {
+      const next = args[index + 1];
+      if (!token.includes("=") && next !== undefined && !next.startsWith("-")) index += 1;
+      continue;
+    }
+
+    kept.push(token);
+    if (field.kind !== "boolean" && !token.includes("=")) {
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        kept.push(next);
+        index += 1;
+      }
+    }
+  }
+
+  return kept;
+}
+
 export function cliTextFieldPlaceholder(
   adapterId: CliAdapterId,
   field: Pick<CliFieldDescriptor, "key" | "label" | "guidance">,

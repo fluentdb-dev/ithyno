@@ -1604,6 +1604,17 @@ a.modal-btn:hover {
 .agent-config-free-form-args {
   margin-bottom: 10px;
 }
+.agent-config-free-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.agent-config-free-form-reset {
+  min-width: 28px;
+  padding: 2px 5px;
+  line-height: 1.2;
+}
 .agent-config-modal .agent-config-reset-args {
   margin-right: auto;
 }

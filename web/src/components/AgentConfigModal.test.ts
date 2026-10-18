@@ -12,6 +12,7 @@ import {
   orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
+  resetFreeFormCliArgs,
   setCliSessionStartup,
   splitArgv,
 } from "../lib/commandBuilder";
@@ -195,6 +196,29 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       resolveCliAdapter("copilot"),
       resolveCliAdapter("codex"),
     )).toEqual(["--model", "gpt-6.1-sol"]);
+  });
+
+  it("resets only free-form and foreign arguments for the current CLI", () => {
+    const copilot = resolveCliAdapter("copilot");
+    expect(copilot).not.toBeNull();
+
+    expect(resetFreeFormCliArgs([
+      "--continue",
+      "--model",
+      "claude-sonnet-5.5",
+      "--mode",
+      "plan",
+      "--sandbox",
+      "read-only",
+      "--custom-flag",
+      "custom-value",
+    ], copilot!)).toEqual([
+      "--continue",
+      "--model",
+      "claude-sonnet-5.5",
+      "--mode",
+      "plan",
+    ]);
   });
 
   it("categorizes fields in the required order and keeps empty categories hidden", () => {

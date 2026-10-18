@@ -21,6 +21,7 @@ import {
   orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
+  resetFreeFormCliArgs,
   setCliSessionStartup,
   splitArgv,
   type CliFieldCategory,
@@ -279,6 +280,13 @@ export function AgentConfigModal({
     ? detectCliSessionStartup(selectedAdapter.id, splitArgv(form.args))
     : "new";
   const visibleFields = resolvedVisibleFields(capability, selectedAdapter, capabilityState);
+  const managedOnlyArgs = useMemo(
+    () => selectedAdapter
+      ? resetFreeFormCliArgs(splitArgv(form.args), selectedAdapter)
+      : splitArgv(form.args),
+    [form.args, selectedAdapter],
+  );
+  const hasFreeFormArgs = joinArgv(managedOnlyArgs) !== joinArgv(splitArgv(form.args));
   const categorySections = useMemo<Array<{
     category: CliFieldCategory;
     fields: Array<{ key: string; label: string; flag: string; kind: "text" | "select" | "boolean"; choices?: readonly string[]; dangerous?: boolean; guidance?: string }>;
@@ -498,7 +506,22 @@ export function AgentConfigModal({
                 CLI builder — {selectedAdapter.displayName}
               </legend>
               <div className="agent-config-field agent-config-free-form-args">
-                <span>Free-form args (optional)</span>
+                <div className="agent-config-free-form-header">
+                  <span>Free-form args (optional)</span>
+                  <button
+                    type="button"
+                    className="ghost agent-config-free-form-reset"
+                    disabled={!hasFreeFormArgs}
+                    onClick={() => setForm((current) => ({
+                      ...current,
+                      args: joinArgv(resetFreeFormCliArgs(splitArgv(current.args), selectedAdapter)),
+                    }))}
+                    title="Remove only arguments not managed by this CLI builder"
+                    aria-label="Reset free-form arguments"
+                  >
+                    🔄
+                  </button>
+                </div>
                 <textarea
                   value={form.args}
                   onChange={(event) => setForm({ ...form, args: event.target.value })}
