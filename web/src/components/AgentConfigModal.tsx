@@ -497,8 +497,19 @@ export function AgentConfigModal({
               <legend>
                 CLI builder — {selectedAdapter.displayName}
               </legend>
-              <label className="agent-config-field agent-config-free-form-args">
-                <span>Free-form args (optional)</span>
+              <div className="agent-config-field agent-config-free-form-args">
+                <div className="agent-config-free-form-header">
+                  <span>Free-form args (optional)</span>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    disabled={!form.args.trim()}
+                    onClick={() => setForm((current) => ({ ...current, args: "" }))}
+                    title="Clear all CLI arguments in this draft"
+                  >
+                    Reset arguments
+                  </button>
+                </div>
                 <textarea
                   value={form.args}
                   onChange={(event) => setForm({ ...form, args: event.target.value })}
@@ -508,7 +519,7 @@ export function AgentConfigModal({
                 <span className="muted">
                   Enter or paste the complete argument list. The fields below update from this value.
                 </span>
-              </label>
+              </div>
               {selectedAdapter && sessionStartupOptions.length > 0 && (
                 <label className="agent-config-field">
                   <span>Session startup</span>
