@@ -68,4 +68,30 @@ describe("cli capability routes", () => {
       await app.close();
     }
   });
+
+  it("serves GitHub's documented Copilot CLI model IDs from the bundled catalog", async () => {
+    const app = Fastify({ logger: false });
+    app.register(registerCliCapabilityRoutes);
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/cli/capabilities?command=copilot",
+        headers: { "X-Session-Token": SESSION_TOKEN },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().availableModels).toEqual(expect.arrayContaining([
+        "auto",
+        "claude-sonnet-5.5",
+        "gpt-6.1-sol",
+        "gpt-5.3-codex",
+        "gemini-3.8-flash",
+      ]));
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });

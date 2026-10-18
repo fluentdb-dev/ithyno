@@ -216,7 +216,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     helpProbe: ["copilot", "help", "commands"],
     modelProbe: undefined,
     modelDiscovery: "manual",
-    modelGuidance: "Copilot does not expose a verified non-interactive model list in this environment; use /model interactively or specify a model manually.",
+    modelGuidance: "Suggestions come from GitHub's official Copilot CLI supported-models reference. Availability depends on the user's plan and organization policy; the field remains editable.",
     dangerousFlags: ["--allow-all", "--yolo", "--no-ask-user"],
   },
 };

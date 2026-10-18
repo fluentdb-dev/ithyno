@@ -181,9 +181,12 @@ Command Builderの主要候補:
 | Ask-user disable | `--no-ask-user` | unattended worker向け |
 
 helpから非対話のモデル一覧コマンドは確認できなかった。対話セッションでは`/model`を
-使用する。調査環境の対話runtimeは認証情報を読めず完全な一覧を取得できなかったため、
-Builderは`auto`を候補にしつつ任意のmodel名を手入力可能にする。BYOKでは
-`COPILOT_MODEL`等により任意provider/modelが使われるため、静的一覧による制限は不可。
+使用する。一方、GitHub公式の
+[Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#supported-models)
+は`--model`へ渡せるcanonical model IDを公開している。その一覧をmaintainer生成カタログの
+候補として収録する。利用可能性はplanやorganization policyに依存し、BYOKでは
+`COPILOT_MODEL`等により追加provider/modelも使えるため、Builderは候補へ制限せず任意の
+model名を手入力可能にする。
 
 `-p` / `--prompt`はAgentRunnerがworker promptを付与するためBuilderの保存対象外とする。
 

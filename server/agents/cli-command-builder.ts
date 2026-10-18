@@ -86,6 +86,28 @@ export type CliAdapter = {
   dangerousFlags?: readonly string[];
 };
 
+/**
+ * Model IDs documented by the GitHub Copilot CLI command reference.
+ *
+ * This is a reviewed catalog input, not an entitlement check. Availability
+ * still depends on the user's Copilot plan and organization policy.
+ * Source: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#supported-models
+ */
+export const COPILOT_DOCUMENTED_MODELS = [
+  "auto",
+  "claude-sonnet-5.5",
+  "gpt-5.4",
+  "gpt-6.1-sol",
+  "gpt-6-astra",
+  "gpt-6-luna",
+  "claude-opus-5.5",
+  "claude-haiku-5.5",
+  "claude-haiku-4.5",
+  "gpt-5.3-codex",
+  "gemini-3.7-flash",
+  "gemini-3.8-flash",
+] as const;
+
 export type CliProbeResult = {
   ok: boolean;
   command: readonly string[];
@@ -286,7 +308,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     helpProbe: ["copilot", "--help"],
     modelProbe: undefined,
     modelDiscovery: "manual",
-    modelGuidance: "Copilot does not expose a verified non-interactive model list in this environment; use /model interactively or specify a model manually.",
+    modelGuidance: "Suggestions come from GitHub's official Copilot CLI supported-models reference. Availability depends on the user's plan and organization policy; the field remains editable.",
     dangerousFlags: ["--allow-all", "--yolo", "--no-ask-user"],
   },
 };

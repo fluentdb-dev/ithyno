@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CLI_ADAPTERS,
+  COPILOT_DOCUMENTED_MODELS,
   CLI_FIELD_CATEGORY_ORDER,
   detectCliArgConflicts,
   formatArgvPreview,
@@ -431,6 +432,7 @@ describe("cli command builder args safety", () => {
         advanced: true,
       }));
     }
+    expect(catalog.adapters.copilot.availableModels).toEqual(COPILOT_DOCUMENTED_MODELS);
   });
 
   it("uses adapter-specific option kinds when different CLIs share a flag", () => {

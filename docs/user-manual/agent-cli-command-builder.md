@@ -47,7 +47,8 @@ The model field is always editable. Catalog entries represent a snapshot of mode
 
 - `agy`: model suggestions come from `agy models` in the maintainers' snapshot
 - Codex: model suggestions come from the app-server `model/list` path when the dev snapshot exposes it
-- Claude Code and Copilot: the catalog records the manual or interactive model guidance and leaves the field editable for manual names
+- Claude Code: the catalog records the manual or interactive model guidance and leaves the field editable for manual names
+- GitHub Copilot CLI: model suggestions are copied into the reviewed catalog from GitHub's official [Copilot CLI supported-models reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#supported-models); the field remains editable because plan and organization policy affect availability
 
 When a model suggestion is stale or unavailable, ithyno keeps the structured fields visible and does not mark the adapter as unsupported. The model field stays editable, and the user can type a model name or reuse a previous value.
 

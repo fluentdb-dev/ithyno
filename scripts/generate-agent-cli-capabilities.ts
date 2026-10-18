@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CLI_ADAPTERS,
+  COPILOT_DOCUMENTED_MODELS,
   parseModelListOutput,
   runCodexAppServerModelProbeDetailed,
 } from "../server/agents/cli-command-builder.js";
@@ -32,6 +33,13 @@ function resolveInstalledCommand(alias: string) {
 }
 
 async function populateModels(adapterId: string, executablePath: string | null) {
+  if (adapterId === "copilot") {
+    return {
+      availableModels: [...COPILOT_DOCUMENTED_MODELS],
+      modelMetadata: [],
+    };
+  }
+
   if (!executablePath) {
     return { availableModels: [], modelMetadata: [] };
   }
