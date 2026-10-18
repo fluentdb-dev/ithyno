@@ -8,6 +8,7 @@ import {
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
+  migrateCliArgsForAdapterSwitch,
   orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
@@ -139,6 +140,41 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       "--continue",
     ]);
     expect(detectCliSessionStartup("copilot", ["--resume", "named-session"])).toBe("custom");
+  });
+
+  it("drops Codex-only options when switching to Copilot", () => {
+    const migrated = migrateCliArgsForAdapterSwitch(
+      [
+        "resume",
+        "--last",
+        "--ask-for-approval",
+        "on-request",
+        "--sandbox",
+        "read-only",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--model",
+        "claude-sonnet-5.5",
+        "--custom-flag",
+        "custom-value",
+      ],
+      resolveCliAdapter("codex"),
+      resolveCliAdapter("copilot"),
+    );
+
+    expect(migrated).toEqual([
+      "--model",
+      "claude-sonnet-5.5",
+      "--custom-flag",
+      "custom-value",
+    ]);
+  });
+
+  it("removes a shared flag when its meaning differs between CLIs", () => {
+    expect(migrateCliArgsForAdapterSwitch(
+      ["--sandbox", "workspace-write", "--model", "gpt-example"],
+      resolveCliAdapter("codex"),
+      resolveCliAdapter("agy"),
+    )).toEqual(["--model", "gpt-example"]);
   });
 
   it("categorizes fields in the required order and keeps empty categories hidden", () => {

@@ -17,6 +17,7 @@ import {
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
+  migrateCliArgsForAdapterSwitch,
   orderedCliFieldCategories,
   parseCliArgs,
   resolveCliAdapter,
@@ -464,7 +465,23 @@ export function AgentConfigModal({
             <input
               type="text"
               value={form.command}
-              onChange={(e) => setForm({ ...form, command: e.target.value })}
+              onChange={(e) => {
+                const nextCommand = e.target.value;
+                setForm((current) => {
+                  const previousAdapter = resolveCliAdapter(current.command);
+                  const nextAdapter = resolveCliAdapter(nextCommand);
+                  const nextArgs = migrateCliArgsForAdapterSwitch(
+                    splitArgv(current.args),
+                    previousAdapter,
+                    nextAdapter,
+                  );
+                  return {
+                    ...current,
+                    command: nextCommand,
+                    args: joinArgv(nextArgs),
+                  };
+                });
+              }}
               placeholder="e.g. claude"
             />
             {fieldErrors.command && (

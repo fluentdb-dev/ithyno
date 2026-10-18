@@ -325,6 +325,39 @@ export function setCliSessionStartup(
   return [...preserved, ...selected.args];
 }
 
+function equivalentCliField(
+  field: CliFieldDescriptor,
+  candidate: CliFieldDescriptor,
+): boolean {
+  return canonicalCliFlagName(field.flag) === canonicalCliFlagName(candidate.flag)
+    && field.kind === candidate.kind
+    && JSON.stringify(field.choices ?? []) === JSON.stringify(candidate.choices ?? []);
+}
+
+/**
+ * Remove options that belong only to the previous CLI when the Command field
+ * switches between supported adapters. Shared fields with the same shape and
+ * genuinely free-form arguments are retained.
+ */
+export function migrateCliArgsForAdapterSwitch(
+  args: readonly string[],
+  previousAdapter: CliAdapter | null,
+  nextAdapter: CliAdapter | null,
+): string[] {
+  if (!previousAdapter || !nextAdapter || previousAdapter.id === nextAdapter.id) {
+    return [...args];
+  }
+
+  const withoutPreviousSession = setCliSessionStartup(previousAdapter.id, args, "new");
+  const fieldsToRemove = previousAdapter.fields.filter(
+    (field) => !nextAdapter.fields.some((candidate) => equivalentCliField(field, candidate)),
+  );
+  const removals = Object.fromEntries(
+    fieldsToRemove.map((field) => [canonicalCliFlagName(field.flag), undefined]),
+  );
+  return mergeCliArgs(withoutPreviousSession, removals);
+}
+
 export function cliTextFieldPlaceholder(
   adapterId: CliAdapterId,
   field: Pick<CliFieldDescriptor, "key" | "label" | "guidance">,
