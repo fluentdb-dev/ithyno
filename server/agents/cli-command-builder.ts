@@ -332,11 +332,24 @@ export type ParsedCliArgs = {
   conflicts: string[];
 };
 
-export function parseCliArgs(args: readonly string[]): ParsedCliArgs {
+export function parseCliArgs(
+  args: readonly string[],
+  adapter?: Pick<CliAdapter, "fields"> | null,
+): ParsedCliArgs {
   const values: Record<string, string[]> = {};
   const unknown: string[] = [];
   const conflicts: string[] = [];
   const seen = new Map<string, string>();
+  const knownKeys = adapter
+    ? new Set(adapter.fields.flatMap((field) => [field.flag, field.key, canonicalCliFlagName(field.flag)]))
+    : KNOWN_CLI_ARG_KEYS;
+  const booleanKeys = adapter
+    ? new Set(
+        adapter.fields
+          .filter((field) => field.kind === "boolean")
+          .flatMap((field) => [field.flag, field.key, canonicalCliFlagName(field.flag)]),
+      )
+    : BOOLEAN_CLI_ARG_KEYS;
 
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
@@ -363,8 +376,8 @@ export function parseCliArgs(args: readonly string[]): ParsedCliArgs {
       continue;
     }
 
-    const isKnown = KNOWN_CLI_ARG_KEYS.has(bareFlag) || KNOWN_CLI_ARG_KEYS.has(canonical) || KNOWN_CLI_ARG_KEYS.has(bareFlag.replace(/^--?/, ""));
-    const isBooleanFlag = BOOLEAN_CLI_ARG_KEYS.has(bareFlag) || BOOLEAN_CLI_ARG_KEYS.has(canonical) || BOOLEAN_CLI_ARG_KEYS.has(bareFlag.replace(/^--?/, ""));
+    const isKnown = knownKeys.has(bareFlag) || knownKeys.has(canonical) || knownKeys.has(bareFlag.replace(/^--?/, ""));
+    const isBooleanFlag = booleanKeys.has(bareFlag) || booleanKeys.has(canonical) || booleanKeys.has(bareFlag.replace(/^--?/, ""));
     if (token.includes("=")) {
       if (isKnown) {
         if (seen.has(canonical) && seen.get(canonical) !== nextValue) conflicts.push(canonical);
@@ -403,8 +416,11 @@ export function parseCliArgs(args: readonly string[]): ParsedCliArgs {
   return { values, unknown, conflicts: [...new Set(conflicts)] };
 }
 
-export function detectCliArgConflicts(args: readonly string[]): string[] {
-  return parseCliArgs(args).conflicts;
+export function detectCliArgConflicts(
+  args: readonly string[],
+  adapter?: Pick<CliAdapter, "fields"> | null,
+): string[] {
+  return parseCliArgs(args, adapter).conflicts;
 }
 
 export function mergeCliArgs(

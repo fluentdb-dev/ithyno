@@ -10,6 +10,7 @@ import {
   mergeCliArgs,
   orderedCliFieldCategories,
   parseCliArgs,
+  resolveCliAdapter,
   setCliSessionStartup,
   splitArgv,
 } from "../lib/commandBuilder";
@@ -104,6 +105,16 @@ describe("AgentConfigModal — kebab-case name validation", () => {
 
     expect(joinArgv(args)).toBe("--model=-");
     expect(parseCliArgs(splitArgv(joinArgv(args))).values.model).toEqual(["-"]);
+  });
+
+  it("parses Codex sandbox as a valued option despite Agy using the same flag as boolean", () => {
+    const codex = resolveCliAdapter("codex");
+    const agy = resolveCliAdapter("agy");
+
+    expect(parseCliArgs(["--sandbox", "workspace-write"], codex).values.sandbox).toEqual([
+      "workspace-write",
+    ]);
+    expect(parseCliArgs(["--sandbox"], agy).values.sandbox).toEqual(["true"]);
   });
 
   it("uses value examples instead of CLI flags as text placeholders", () => {

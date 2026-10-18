@@ -202,8 +202,14 @@ export function AgentConfigModal({
 
   const includesManager = form.roles.includes("manager");
   const selectedAdapter = useMemo(() => resolveCliAdapter(form.command), [form.command]);
-  const parsedArgs = useMemo(() => parseCliArgs(splitArgv(form.args)), [form.args]);
-  const argConflicts = useMemo(() => detectCliArgConflicts(splitArgv(form.args)), [form.args]);
+  const parsedArgs = useMemo(
+    () => parseCliArgs(splitArgv(form.args), selectedAdapter),
+    [form.args, selectedAdapter],
+  );
+  const argConflicts = useMemo(
+    () => detectCliArgConflicts(splitArgv(form.args), selectedAdapter),
+    [form.args, selectedAdapter],
+  );
   const [capability, setCapability] = useState<{
     ok: boolean;
     supported: boolean;

@@ -432,4 +432,11 @@ describe("cli command builder args safety", () => {
       }));
     }
   });
+
+  it("uses adapter-specific option kinds when different CLIs share a flag", () => {
+    expect(parseCliArgs(["--sandbox", "workspace-write"], CLI_ADAPTERS.codex).values.sandbox).toEqual([
+      "workspace-write",
+    ]);
+    expect(parseCliArgs(["--sandbox"], CLI_ADAPTERS.agy).values.sandbox).toEqual(["true"]);
+  });
 });
