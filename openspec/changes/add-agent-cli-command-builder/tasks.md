@@ -22,8 +22,8 @@
 
 - [x] 4.1 Replace the primary whitespace Args input with CLI-aware controls for supported model, reasoning/effort, approval/permission, sandbox, and adapter-specific fields.
 - [x] 4.2 Add asynchronous inspection states for loading, unavailable executable, timeout, discovery failure, and manual model entry with CLI-specific model-check guidance.
-- [x] 4.3 Add a dedicated free-form args editor, explicit category disclosure indicators, and a read-only Advanced argv preview while preserving unsupported options and surfacing recognized-option conflicts.
-- [x] 4.4 Add an exact persisted command/argv preview and clearly identify dangerous approval or sandbox bypass selections.
+- [x] 4.3 Add a dedicated free-form args editor and explicit category disclosure indicators while preserving unsupported options and surfacing recognized-option conflicts.
+- [x] 4.4 Clearly identify dangerous approval or sandbox bypass selections without adding a redundant Advanced argv preview.
 - [x] 4.5 Preserve the existing manual configuration experience for unknown commands and verify add/edit dialog focus, paste, and save behavior.
 - [x] 4.6 Add Claude's managed project session ID to the Manager UI and persist its startup policy independently from normal CLI arguments.
 
@@ -40,7 +40,7 @@
 
 - [x] 6.1 Add category metadata to the shared server/web field contracts with deterministic ordering for Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced.
 - [x] 6.2 Show only populated categories, open Model and Reasoning by default, keep other normal categories collapsed, and keep the Unattended / Dangerous section independent and explicit.
-- [x] 6.3 Preserve unknown argv exactly while previewing and saving the generated command and args array, and keep the final Advanced section as the last collapsible editor.
+- [x] 6.3 Preserve unknown argv exactly while saving the generated command and args array, and omit the redundant Advanced preview section.
 - [x] 6.4 Validate the category logic with focused unit/component tests for assignment, ordering, omission, open/closed state, dangerous separation, and lossless save behavior.
 
 ## 7. Catalog-only architecture and maintainer refresh

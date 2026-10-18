@@ -313,11 +313,6 @@ export function AgentConfigModal({
       });
     }
 
-    sections.push({
-      category: "advanced",
-      fields: [],
-      config: CLI_FIELD_CATEGORY_CONFIG.advanced,
-    });
     return sections;
   }, [visibleFields]);
 
@@ -583,7 +578,6 @@ export function AgentConfigModal({
               )}
               <div className="agent-config-builder-groups">
                 {categorySections.map((section) => {
-                  const isAdvanced = section.category === "advanced";
                   const categoryLabel = section.config.label;
                   const header = (
                     <summary>
@@ -614,18 +608,8 @@ export function AgentConfigModal({
                       }}
                     >
                       {header}
-                      {isAdvanced ? (
-                        <div className="agent-config-advanced-body">
-                          <span className="muted">Persisted command and argv (read-only)</span>
-                          <pre className="agent-config-argv-preview"><code>
-                            {form.command
-                              ? `${form.command}${form.args.trim() ? ` ${joinArgv(splitArgv(form.args))}` : ""}`
-                              : "(set command first)"}
-                          </code></pre>
-                        </div>
-                      ) : (
-                        <div className="agent-config-builder-grid">
-                          {section.fields.map((field) => {
+                      <div className="agent-config-builder-grid">
+                        {section.fields.map((field) => {
                             const canonicalKey = field.flag.replace(/^--?/, "").replace(/-+/g, "-");
                             const currentValue = parsedArgs.values[canonicalKey]?.[0] ?? "";
                             if (field.kind === "boolean") {
@@ -690,9 +674,8 @@ export function AgentConfigModal({
                                 )}
                               </label>
                             );
-                          })}
-                        </div>
-                      )}
+                        })}
+                      </div>
                     </details>
                   );
                 })}

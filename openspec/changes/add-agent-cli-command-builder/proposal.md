@@ -7,7 +7,7 @@ Agent configuration currently exposes `args` as a whitespace-separated text fiel
 - Add a checked-in generated CLI capability catalog for Claude Code, Codex, Antigravity CLI (`agy`), and GitHub Copilot CLI. The catalog records aliases, observed source version, supported fields, categories, kinds, choices, danger metadata, model guidance, and any models discoverable on the development machine.
 - Add a maintainer-only generator script and npm script that may run allow-listed CLI probes only when a maintainer explicitly opts in. The script writes deterministic JSON under the server package so it is included in npm, Electron, and VSIX builds.
 - Replace runtime CLI inspection with a pure catalog lookup. The `/api/cli/capabilities` contract stays available for the UI but becomes a static lookup only; it no longer resolves executable paths, caches by runtime probe fingerprint, or times out on live processes.
-- Preserve the existing command + `args[]` persistence contract, keep model fields editable, provide a separate free-form args editor with a read-only Advanced preview, and retain parser/serializer safety and unknown argv round trips.
+- Preserve the existing command + `args[]` persistence contract, keep model fields editable, provide a separate free-form args editor without a redundant Advanced preview, and retain parser/serializer safety and unknown argv round trips.
 - Add catalog schema, drift, and consistency tests so the generated JSON stays aligned with the server and web category/danger metadata without invoking any subprocesses at runtime.
 - Document that maintainers regenerate the catalog and that end users are not scanned or inspected by the application.
 

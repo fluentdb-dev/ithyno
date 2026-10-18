@@ -80,7 +80,8 @@ The builder renders the fields defined in the bundled catalog. These are grouped
 6. Context (`--context`, `--add-dir`)
 7. Tools & Access (`--allow-tool`, `--deny-tool`, `--allow-url`, and equivalent adapter-defined access controls)
 8. Unattended / Dangerous (warning-colored, explicit opt-in only)
-9. Advanced (unrecognized argv editor, always last)
+
+Arguments not represented by these groups remain editable in the separate Free-form args field.
 
 - Claude Code: `--model`, `--effort`, `--permission-mode`, `--dangerously-skip-permissions`
 - Codex: `--model`, `--profile`, `--sandbox`, `--ask-for-approval`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`
@@ -110,11 +111,9 @@ Examples:
 - Codex model metadata can include structured `supportedReasoningEfforts` entries, which the parser preserves rather than dropping them
 - worker prompts and dispatcher-generated values such as `-p`, change IDs, artifact contracts, and Codex `exec` remain outside the saved `args[]` payload; Manager session choices are tracked by `sessionStartup` and their CLI-specific resume flags are resolved at PTY startup
 
-## Free-form args and Advanced preview
+## Free-form args
 
-Unsupported or custom argv remains editable through the separate Free-form args field. It preserves unknown arguments so the user can keep project-specific or future flags without losing data. The collapsible Advanced section is read-only and shows the exact command and argv that will be saved.
-
-The exact argv preview shown beneath the builder reflects the persisted command + `args[]` values that will be written to `agents.yaml`. This is the escape hatch that keeps the UI forward-compatible when a CLI adds new flags or when the user deliberately writes a custom option that ithyno does not yet model.
+Unsupported or custom argv remains editable through the separate Free-form args field. It preserves unknown arguments so the user can keep project-specific or future flags without losing data. The dialog does not show a separate Advanced preview; the editable structured controls and Free-form args are the source of the saved `command` and `args[]` values.
 
 ## Manager session startup
 

@@ -48,28 +48,28 @@ The real-CLI smoke test remains an explicit maintainer action and is not part of
 
 ### 3. Keep `command` and `args[]` as the persistence contract
 
-No new builder-only fields are required in `agents.yaml`. The UI parses recognized arguments from the existing `args[]`, edits those values structurally, and writes the merged argv back through the existing Agent config endpoint.
+The UI parses recognized arguments from the existing `args[]`, edits those values structurally, and writes the merged argv back through the existing Agent config endpoint. Manager session lifecycle is stored separately in the optional `sessionStartup` field.
 
-Unknown arguments remain ordered and are editable in a dedicated free-form args field. Saving without editing them preserves them byte-for-byte as array elements. The Advanced section is a read-only exact command/argv preview, and conflicting duplicate recognized flags are surfaced to the user instead of silently discarded.
+Unknown arguments remain ordered and are editable in a dedicated free-form args field. Saving without editing them preserves them byte-for-byte as array elements. Conflicting duplicate recognized flags are surfaced to the user instead of silently discarded.
 
 Alternative considered: persist a second structured builder object. This is rejected because it creates two sources of truth and would require migrations in every consumer.
 
 ### 4. Separate user-owned launch options from dispatcher-owned prompt arguments
 
-The builder SHALL NOT add `-p`/`--print`, Codex `exec` prompt content, change IDs, artifact contracts, or other runtime prompt transport. Those remain resolved by `AgentRegistry` and `AgentRunner`. The preview labels the persisted portion separately from the runtime-added prompt portion so users do not confuse the two.
+The builder SHALL NOT add `-p`/`--print`, Codex `exec` prompt content, change IDs, artifact contracts, or other runtime prompt transport. Those remain resolved by `AgentRegistry` and `AgentRunner`.
 
 ### 5. Provide a staged UI with deterministic category grouping
 
-The Agent dialog keeps Command selection first. Once the command maps to a supported adapter, the UI presents only fields described in the catalog using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced. Model and Reasoning sections open by default; the remaining normal categories are collapsed until the user expands them, and empty categories are omitted entirely. Dangerous or unattended flags remain in their own warning-colored section instead of being mixed into permissions or sandbox controls.
+The Agent dialog keeps Command selection first. Once the command maps to a supported adapter, the UI presents fields described in the catalog using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, and Unattended / Dangerous. Model and Reasoning sections open by default; the remaining normal categories are collapsed until the user expands them, and empty categories are omitted entirely. Dangerous or unattended flags remain in their own warning-colored section instead of being mixed into permissions or sandbox controls.
 
-The UI uses native `<details>/<summary>` sections with an explicit disclosure indicator for keyboard-accessible expansion. A dedicated free-form args editor remains visible independently of those groups, and the final Advanced section provides a read-only exact argv preview. An unknown command continues to use the existing manual Args editor and is never blocked by the builder.
+The UI uses native `<details>/<summary>` sections with an explicit disclosure indicator for keyboard-accessible expansion. A dedicated free-form args editor remains visible independently of those groups. The UI omits a redundant read-only Advanced preview; an unknown command continues to use the existing manual Args editor and is never blocked by the builder.
 
 ## Risks / Trade-offs
 
 - **Catalog drift** → Keep the generator and the JSON under version control and add drift tests that compare the catalog against the static adapter metadata used by the web and server.
 - **Account-specific model availability** → Treat catalog models as suggestions, not authorization. The model field stays editable so users can override or enter a different value when required by their account or provider.
 - **Builder overwrites an option it does not understand** → Round-trip unknown argv tokens and test mixed recognized/unrecognized sequences.
-- **Quoted values cannot be represented by the current whitespace text field** → Make the canonical UI state an argv array and provide an argv-aware Advanced editor rather than splitting on whitespace at save time.
+- **Quoted values cannot be represented by a naive whitespace split** → Use the argv-aware free-form editor and parser rather than splitting on whitespace at save time.
 - **Dangerous approval options become too easy to enable** → Label their impact, require an explicit selection, and do not enable them by default.
 - **Windows executable names and process behavior differ** → Resolve adapter aliases independently from the executable path and test `.exe`/`.cmd` compatibility in the static catalog and parser logic.
 

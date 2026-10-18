@@ -44,7 +44,7 @@ The command builder SHALL treat catalog model entries as suggestions rather than
 
 ### Requirement: CLI-specific structured argument builder
 
-The Agent dialog SHALL provide structured controls for the supported model, reasoning or effort, approval or permission, sandbox, execution, context, tools & access, and adapter-defined options using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, Unattended / Dangerous, and Advanced. Unsupported or empty categories SHALL be omitted, and the builder SHALL use a deterministic category ordering when rendering controls.
+The Agent dialog SHALL provide structured controls for the supported model, reasoning or effort, approval or permission, sandbox, execution, context, tools & access, and adapter-defined options using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, and Unattended / Dangerous. Unsupported or empty categories SHALL be omitted, and the builder SHALL use a deterministic category ordering when rendering controls. Arguments outside these visible groups SHALL remain editable through Free-form args rather than a separate Advanced group.
 
 #### Scenario: Catalog supports a field
 - **WHEN** the bundled catalog identifies an adapter field
@@ -88,16 +88,15 @@ The command builder MUST NOT persist non-interactive prompt transport, change id
 - **THEN** `agents.yaml` contains only user-selected launch options in `args[]`
 - **AND** prompt delivery remains the responsibility of the existing runtime resolver
 
-### Requirement: Exact argv preview and compatible persistence
+### Requirement: Compatible persistence without a redundant Advanced preview
 
-The dialog SHALL show the command and persisted argv that will be written. Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema for CLI options, with an optional manager-only `sessionStartup` field that keeps session lifecycle policy separate from ordinary argv. Existing runners and manually authored configurations that omit `sessionStartup` SHALL remain compatible.
+Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema for CLI options, with an optional manager-only `sessionStartup` field that keeps session lifecycle policy separate from ordinary argv. Existing runners and manually authored configurations that omit `sessionStartup` SHALL remain compatible.
 
-The structured groups SHALL expose a visible disclosure indicator. The free-form args editor SHALL remain separately editable, while the Advanced group SHALL present the exact command and argv as a read-only preview.
+The structured groups SHALL expose a visible disclosure indicator. The free-form args editor SHALL remain separately editable. The dialog SHALL NOT add a redundant Advanced group solely to preview the combined argv.
 
-#### Scenario: Structured selection is previewed and saved
+#### Scenario: Structured selection is saved
 - **WHEN** the user changes a builder field
-- **THEN** the exact persisted argv preview updates before save
-- **AND** saving writes the same argv elements through the existing Agent config endpoint
+- **THEN** saving writes the corresponding argv elements through the existing Agent config endpoint
 
 #### Scenario: Unsupported CLI uses manual args
 - **WHEN** the command has no adapter
