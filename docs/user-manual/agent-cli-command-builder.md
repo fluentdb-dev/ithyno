@@ -108,10 +108,35 @@ Examples:
 
 - a CLI may add or remove flags between versions, so the generator snapshot is the source of truth for supported options in the shipped app
 - Codex model metadata can include structured `supportedReasoningEfforts` entries, which the parser preserves rather than dropping them
-- prompts, runtime flags, and dispatcher-generated values such as `-p`, `--resume`, `--continue`, and Codex `exec` remain outside the saved `args[]` payload and are handled by the runtime instead
+- worker prompts and dispatcher-generated values such as `-p`, change IDs, artifact contracts, and Codex `exec` remain outside the saved `args[]` payload; Manager session choices are tracked by `sessionStartup` and their CLI-specific resume flags are resolved at PTY startup
 
 ## Free-form args and Advanced preview
 
 Unsupported or custom argv remains editable through the separate Free-form args field. It preserves unknown arguments so the user can keep project-specific or future flags without losing data. The collapsible Advanced section is read-only and shows the exact command and argv that will be saved.
 
 The exact argv preview shown beneath the builder reflects the persisted command + `args[]` values that will be written to `agents.yaml`. This is the escape hatch that keeps the UI forward-compatible when a CLI adds new flags or when the user deliberately writes a custom option that ithyno does not yet model.
+
+## Manager session startup
+
+Session startup is shown only when editing a Manager and the selected CLI supports it. For Claude Code, **Managed project session ID** is the default for newly declared Managers. The policy is stored separately from normal CLI arguments:
+
+```yaml
+agents:
+  - name: manager
+    mode: live-shell
+    roles: [manager]
+    command: claude
+    sessionStartup: managed
+    args: [--model, sonnet]
+```
+
+On the first launch, ithyno creates a project-local UUID in `.ithyno/session-claude` and starts Claude with `--session-id <UUID>`. On later launches it uses `--resume <UUID>`. Options such as `--model` remain active in both cases.
+
+The other choices have different semantics:
+
+- **Start a new session** starts the CLI without a resume target.
+- **Choose a session to resume** uses the CLI's session picker.
+- **Continue the latest session** uses the CLI's latest-session behavior.
+- A manually entered `--resume <id>` or Claude `--session-id <id>` is shown as a custom session target.
+
+Older `agents.yaml` files without `sessionStartup` keep their existing behavior. For backward compatibility, a Claude Manager with no arguments still uses ithyno's managed project session strategy; a Manager with explicit arguments continues to use those arguments exactly until it is saved through the updated UI.

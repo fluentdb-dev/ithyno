@@ -90,7 +90,7 @@ The command builder MUST NOT persist non-interactive prompt transport, change id
 
 ### Requirement: Exact argv preview and compatible persistence
 
-The dialog SHALL show the command and persisted argv that will be written. Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema so existing runners and manually authored configurations remain compatible.
+The dialog SHALL show the command and persisted argv that will be written. Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema for CLI options, with an optional manager-only `sessionStartup` field that keeps session lifecycle policy separate from ordinary argv. Existing runners and manually authored configurations that omit `sessionStartup` SHALL remain compatible.
 
 The structured groups SHALL expose a visible disclosure indicator. The free-form args editor SHALL remain separately editable, while the Advanced group SHALL present the exact command and argv as a read-only preview.
 
@@ -103,3 +103,22 @@ The structured groups SHALL expose a visible disclosure indicator. The free-form
 - **WHEN** the command has no adapter
 - **THEN** the user can edit argv manually
 - **AND** the saved Agent remains executable by the existing runner
+
+### Requirement: Claude managed project session is selectable
+
+The Manager command builder SHALL expose Claude's ithyno-managed project session as a session startup choice. The selected policy SHALL remain active when model, permission, or other normal CLI arguments are also configured.
+
+#### Scenario: Managed Claude session starts for the first time
+- **WHEN** a Claude Manager selects the managed project session option
+- **AND** the project has no saved Claude session id
+- **THEN** ithyno creates a project-local session id
+- **AND** launches Claude with `--session-id <id>` plus the configured normal CLI arguments
+
+#### Scenario: Managed Claude session is reopened
+- **WHEN** the project already has an ithyno-managed Claude session id
+- **THEN** ithyno launches Claude with `--resume <id>` plus the configured normal CLI arguments
+
+#### Scenario: Explicit session behavior is selected
+- **WHEN** the user selects a fresh session, the session picker, the latest session, or supplies a custom session target
+- **THEN** that explicit selection overrides the managed project session behavior
+- **AND** the UI preserves it independently from model and permission options

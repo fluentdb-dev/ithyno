@@ -51,7 +51,7 @@ export type CliModelInfo = {
   source?: "native" | "manual";
 };
 
-export type CliSessionStartupMode = "new" | "picker" | "latest" | "custom";
+export type CliSessionStartupMode = "managed" | "new" | "picker" | "latest" | "custom";
 
 export type CliSessionStartupOption = {
   value: Exclude<CliSessionStartupMode, "custom">;
@@ -259,7 +259,15 @@ export function cliSessionStartupOptions(adapterId: CliAdapterId): readonly CliS
       { value: "latest", label: "Resume the latest session", args: ["resume", "--last"] },
     ];
   }
-  if (adapterId === "claude" || adapterId === "copilot") {
+  if (adapterId === "claude") {
+    return [
+      { value: "managed", label: "Managed project session ID", args: [] },
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "picker", label: "Choose a session to resume", args: ["--resume"] },
+      { value: "latest", label: "Continue the latest session", args: ["--continue"] },
+    ];
+  }
+  if (adapterId === "copilot") {
     return [
       { value: "new", label: "Start a new session", args: [] },
       { value: "picker", label: "Choose a session to resume", args: ["--resume"] },
@@ -283,6 +291,7 @@ export function detectCliSessionStartup(
   }
   if (adapterId === "claude" || adapterId === "copilot") {
     if (args.includes("--continue") || (adapterId === "claude" && args.includes("-c"))) return "latest";
+    if (adapterId === "claude" && args.includes("--session-id")) return "custom";
     const resumeIndex = args.findIndex((arg) => arg === "--resume" || arg === "-r");
     if (resumeIndex < 0) return "new";
     const next = args[resumeIndex + 1];
@@ -313,6 +322,11 @@ export function setCliSessionStartup(
       continue;
     }
     if (adapterId === "claude" && token === "-c") {
+      continue;
+    }
+    if (adapterId === "claude" && token === "--session-id") {
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("-")) index += 1;
       continue;
     }
     if ((adapterId === "claude" || adapterId === "copilot") && (token === "--resume" || token === "-r")) {

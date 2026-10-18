@@ -25,6 +25,7 @@
 - [x] 4.3 Add a dedicated free-form args editor, explicit category disclosure indicators, and a read-only Advanced argv preview while preserving unsupported options and surfacing recognized-option conflicts.
 - [x] 4.4 Add an exact persisted command/argv preview and clearly identify dangerous approval or sandbox bypass selections.
 - [x] 4.5 Preserve the existing manual configuration experience for unknown commands and verify add/edit dialog focus, paste, and save behavior.
+- [x] 4.6 Add Claude's managed project session ID to the Manager UI and persist its startup policy independently from normal CLI arguments.
 
 ## 5. Verification and Documentation
 
@@ -33,6 +34,7 @@
 - [x] 5.3 Document the supported builder fields, how each CLI's models are discovered, version-dependent behavior, and the free-form args fallback.
 - [x] 5.4 Run typecheck, unit tests, build, and strict OpenSpec validation.
 - [x] 5.5 Document catalog input sources, maintainer regeneration, local real-CLI argv validation, token behavior, test limitations, and the fixture-only CI policy.
+- [x] 5.6 Test first-launch `--session-id`, subsequent `--resume`, explicit fresh-session override, config persistence, and composition with model arguments.
 
 ## 6. Structured field categorization and grouped UI
 

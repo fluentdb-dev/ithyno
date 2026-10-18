@@ -5,6 +5,7 @@ import type {
   AgentConfigPayload,
   AgentMode,
   AgentPublic,
+  AgentSessionStartup,
 } from "../types";
 import { getSessionToken } from "../runtime";
 import { commandForAgentRole } from "../lib/managerCommand";
@@ -87,6 +88,7 @@ export function buildAgentConfigSavePayload({
     args: string;
     description: string;
     detached: boolean;
+    sessionStartup?: AgentSessionStartup;
   };
   includesManager: boolean;
   agmsg: unknown;
@@ -116,6 +118,7 @@ export function buildAgentConfigSavePayload({
     prompts: Object.keys(prompts).length > 0 ? prompts : undefined,
     description: form.description.trim() || undefined,
     detached: includesManager ? undefined : form.detached,
+    sessionStartup: includesManager ? form.sessionStartup : undefined,
   };
   if (form.command.trim()) {
     payload.command = form.command.trim();
@@ -277,7 +280,7 @@ export function AgentConfigModal({
     ? cliSessionStartupOptions(selectedAdapter.id)
     : [];
   const sessionStartupMode = selectedAdapter && sessionStartupOptions.length > 0
-    ? detectCliSessionStartup(selectedAdapter.id, splitArgv(form.args))
+    ? form.sessionStartup ?? detectCliSessionStartup(selectedAdapter.id, splitArgv(form.args))
     : "new";
   const visibleFields = resolvedVisibleFields(capability, selectedAdapter, capabilityState);
   const managedOnlyArgs = useMemo(
@@ -487,10 +490,14 @@ export function AgentConfigModal({
                     nextAdapter,
                   );
                   if (nextAdapter) lastRecognizedAdapterRef.current = nextAdapter;
+                  const adapterChanged = previousAdapter?.id !== nextAdapter?.id;
                   return {
                     ...current,
                     command: nextCommand,
                     args: joinArgv(nextArgs),
+                    sessionStartup: includesManager && adapterChanged
+                      ? (nextAdapter?.id === "claude" ? "managed" : nextAdapter ? "new" : undefined)
+                      : current.sessionStartup,
                   };
                 });
               }}
@@ -524,7 +531,19 @@ export function AgentConfigModal({
                 </div>
                 <textarea
                   value={form.args}
-                  onChange={(event) => setForm({ ...form, args: event.target.value })}
+                  onChange={(event) => {
+                    const args = event.target.value;
+                    const detected = selectedAdapter
+                      ? detectCliSessionStartup(selectedAdapter.id, splitArgv(args))
+                      : "new";
+                    setForm((current) => ({
+                      ...current,
+                      args,
+                      sessionStartup: includesManager
+                        ? (detected === "new" && current.sessionStartup === "managed" ? "managed" : detected)
+                        : current.sessionStartup,
+                    }));
+                  }}
                   rows={2}
                   placeholder={'--flag "value" --custom-flag'}
                 />
@@ -539,21 +558,27 @@ export function AgentConfigModal({
                     value={sessionStartupMode}
                     onChange={(event) => {
                       if (event.target.value === "custom") return;
+                      const sessionStartup = event.target.value as Exclude<AgentSessionStartup, "custom">;
                       const args = setCliSessionStartup(
                         selectedAdapter.id,
                         splitArgv(form.args),
-                        event.target.value as "new" | "picker" | "latest",
+                        sessionStartup,
                       );
-                      setForm({ ...form, args: joinArgv(args) });
+                      setForm({ ...form, args: joinArgv(args), sessionStartup });
                     }}
                   >
                     {sessionStartupMode === "custom" && (
-                      <option value="custom">Custom resume target (edit free-form args)</option>
+                      <option value="custom">Custom session target (edit free-form args)</option>
                     )}
                     {sessionStartupOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
+                  {selectedAdapter.id === "claude" && sessionStartupMode === "managed" && (
+                    <span className="muted">
+                      ithyno creates a project session ID on first launch and resumes that same ID later. Other CLI options remain active.
+                    </span>
+                  )}
                 </label>
               )}
               <div className="agent-config-builder-groups">
@@ -789,7 +814,13 @@ export function AgentConfigModal({
               type="button"
               className="ghost agent-config-reset-args"
               disabled={submitting || !form.args.trim()}
-              onClick={() => setForm((current) => ({ ...current, args: "" }))}
+              onClick={() => setForm((current) => ({
+                ...current,
+                args: "",
+                sessionStartup: includesManager && selectedAdapter
+                  ? (selectedAdapter.id === "claude" ? "managed" : "new")
+                  : current.sessionStartup,
+              }))}
               title="Clear Session startup, structured CLI options, and free-form arguments in this draft"
             >
               Reset all arguments
@@ -816,6 +847,7 @@ type FormState = {
   prompts: Record<string, string>;
   description: string;
   detached: boolean;
+  sessionStartup?: AgentSessionStartup;
 };
 
 /**
@@ -867,6 +899,7 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
       prompts: {},
       description: "",
       detached: false,
+      sessionStartup: undefined,
     };
   }
   // Defensive read: the server may still be running the pre-reshape
@@ -896,5 +929,11 @@ function deriveInitialForm(seed: AgentPublic | "new"): FormState {
     prompts: promptsFromSeed,
     description: seed.description ?? "",
     detached: seed.detached === true,
+    sessionStartup: seed.sessionStartup
+      ?? (rolesFromSeed.includes("manager") && resolveCliAdapter(seed.command)?.id === "claude" && (seed.args ?? []).length === 0
+        ? "managed"
+        : rolesFromSeed.includes("manager") && resolveCliAdapter(seed.command)
+          ? detectCliSessionStartup(resolveCliAdapter(seed.command)!.id, seed.args ?? [])
+          : undefined),
   };
 }

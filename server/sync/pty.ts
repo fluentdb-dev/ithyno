@@ -16,7 +16,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
-import { hasAgentsYaml } from "../agents/registry.js";
+import { canonicalCli, hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
 import { resolveDevelopmentEnvironmentValues, sanitizeChildEnvironment } from "../environment/index.js";
 
@@ -244,7 +244,16 @@ export function ptyStartup(
   let initialInput: string | undefined;
   if (manager && manager.command) {
     const args = manager.args ?? [];
-    if (args.length === 0) {
+    if (manager.sessionStartup === "managed" && canonicalCli(manager.command) === "claude") {
+      // The session policy is independent from normal CLI options. This
+      // keeps the stable per-project session id active when users also set
+      // --model, --permission-mode, or other Manager arguments in the UI.
+      baseStartup = [resolveClaudeSessionStartup(projectRoot), ...args.map(shellQuote)].join(" ");
+    } else if (manager.sessionStartup !== undefined) {
+      // Explicit UI policy: session flags, if any, are already represented
+      // in args. `new` intentionally means a plain fresh CLI invocation.
+      baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    } else if (args.length === 0) {
       // Empty args → defer to per-CLI Manager startup strategy
       // (Claude gets --session-id mint / --resume; other CLIs get
       // plain command as safe first-launch default). Explicit args in

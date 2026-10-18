@@ -373,6 +373,43 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
     const line = ptyStartup(reg, dir).startup;
     expect(line).toBe("claude --dangerously-skip-permissions");
   });
+
+  it("managed Claude session startup composes the project session id with configured args", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: claude
+    sessionStartup: managed
+    args: [--model, sonnet]
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+    const first = ptyStartup(reg, dir).startup;
+    expect(first).toMatch(/^claude --session-id [0-9a-f-]{36} --model sonnet$/);
+    const second = ptyStartup(reg, dir).startup;
+    expect(second).toMatch(/^claude --resume [0-9a-f-]{36} --model sonnet$/);
+  });
+
+  it("explicit new-session policy does not opt into the managed Claude session id", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: claude
+    sessionStartup: new
+    args: [--model, sonnet]
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+    expect(ptyStartup(reg, dir).startup).toBe("claude --model sonnet");
+  });
 });
 
 describe("buildManagerPtyEnv", () => {

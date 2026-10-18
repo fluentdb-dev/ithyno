@@ -1703,6 +1703,7 @@ fastify.get("/api/manager/status", async (req, reply) => {
         description: managerEntry.description,
         command: managerEntry.command,
         args: managerEntry.args,
+        sessionStartup: managerEntry.sessionStartup,
         hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
         detached: managerEntry.detached,
         mode: managerEntry.mode,

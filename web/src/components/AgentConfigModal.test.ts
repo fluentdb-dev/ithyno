@@ -127,6 +127,19 @@ describe("AgentConfigModal — kebab-case name validation", () => {
 
   it("builds manager-only session startup argv for each supported CLI", () => {
     expect(cliSessionStartupOptions("agy")).toEqual([]);
+    expect(cliSessionStartupOptions("claude")[0]).toMatchObject({
+      value: "managed",
+      label: "Managed project session ID",
+    });
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--continue"], "managed")).toEqual([
+      "--model",
+      "sonnet",
+    ]);
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--session-id", "fixed-id"], "managed")).toEqual([
+      "--model",
+      "sonnet",
+    ]);
+    expect(detectCliSessionStartup("claude", ["--session-id", "fixed-id"])).toBe("custom");
     expect(setCliSessionStartup("codex", ["--model", "gpt-example"], "latest")).toEqual([
       "--model",
       "gpt-example",
@@ -141,6 +154,30 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       "--continue",
     ]);
     expect(detectCliSessionStartup("copilot", ["--resume", "named-session"])).toBe("custom");
+  });
+
+  it("persists the manager session startup policy separately from CLI args", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "manager",
+        roles: ["manager"],
+        prompts: {},
+        command: "claude",
+        args: "--model sonnet",
+        description: "",
+        detached: false,
+        sessionStartup: "managed",
+      },
+      includesManager: true,
+      agmsg: null,
+      isAdd: false,
+      existingNames: ["manager"],
+    });
+
+    expect(payload).toMatchObject({
+      sessionStartup: "managed",
+      args: ["--model", "sonnet"],
+    });
   });
 
   it("drops Codex-only options when switching to Copilot", () => {
