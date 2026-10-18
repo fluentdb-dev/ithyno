@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  CLAUDE_CODE_DOCUMENTED_MODELS,
   CLI_ADAPTERS,
   COPILOT_DOCUMENTED_MODELS,
   parseModelListOutput,
@@ -33,6 +34,13 @@ function resolveInstalledCommand(alias: string) {
 }
 
 async function populateModels(adapterId: string, executablePath: string | null) {
+  if (adapterId === "claude") {
+    return {
+      availableModels: [...CLAUDE_CODE_DOCUMENTED_MODELS],
+      modelMetadata: [],
+    };
+  }
+
   if (adapterId === "copilot") {
     return {
       availableModels: [...COPILOT_DOCUMENTED_MODELS],
@@ -80,9 +88,7 @@ async function main() {
       : null;
 
     const currentVersion = versionProbe?.stdout?.trim() || versionProbe?.stderr?.trim() || undefined;
-    const { availableModels, modelMetadata } = installedPath
-      ? await populateModels(adapterId, installedPath)
-      : { availableModels: [], modelMetadata: [] };
+    const { availableModels, modelMetadata } = await populateModels(adapterId, installedPath);
 
     adapters[adapterId] = {
       id: adapter.id,

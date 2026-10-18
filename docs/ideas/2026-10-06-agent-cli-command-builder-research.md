@@ -192,6 +192,13 @@ model名を手入力可能にする。
 
 ## Command Builderの実装契約
 
+Claude Codeについては、非対話のmodel-list commandを前提にせず、Anthropic公式の
+[Claude Code model configuration](https://code.claude.com/docs/en/model-config#model-aliases)
+に掲載された`best`、`fable`、`sonnet`、`opus`、`haiku`、long-context alias、
+`opusplan`とAnthropic APIの代表的な完全名をmaintainer生成カタログへ収録する。
+Bedrock、Foundry、Google Cloud、LLM gatewayではmodel IDが異なるため、候補による
+入力制限は行わない。
+
 ### 1. Adapterで差分を閉じ込める
 
 CLIごとに次を持つadapterを作る。

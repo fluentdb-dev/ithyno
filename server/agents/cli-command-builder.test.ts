@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_CODE_DOCUMENTED_MODELS,
   CLI_ADAPTERS,
   COPILOT_DOCUMENTED_MODELS,
   CLI_FIELD_CATEGORY_ORDER,
@@ -432,6 +433,7 @@ describe("cli command builder args safety", () => {
         advanced: true,
       }));
     }
+    expect(catalog.adapters.claude.availableModels).toEqual(CLAUDE_CODE_DOCUMENTED_MODELS);
     expect(catalog.adapters.copilot.availableModels).toEqual(COPILOT_DOCUMENTED_MODELS);
   });
 

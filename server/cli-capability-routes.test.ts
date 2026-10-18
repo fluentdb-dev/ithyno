@@ -94,4 +94,31 @@ describe("cli capability routes", () => {
       await app.close();
     }
   });
+
+  it("serves Anthropic's documented Claude Code model aliases from the bundled catalog", async () => {
+    const app = Fastify({ logger: false });
+    app.register(registerCliCapabilityRoutes);
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/cli/capabilities?command=claude",
+        headers: { "X-Session-Token": SESSION_TOKEN },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().availableModels).toEqual(expect.arrayContaining([
+        "best",
+        "fable",
+        "sonnet",
+        "opus",
+        "haiku",
+        "opusplan",
+      ]));
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });

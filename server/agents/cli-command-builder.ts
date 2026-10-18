@@ -108,6 +108,27 @@ export const COPILOT_DOCUMENTED_MODELS = [
   "gemini-3.8-flash",
 ] as const;
 
+/**
+ * Model aliases and Anthropic API names documented by Claude Code.
+ * Provider-specific IDs and gateway aliases remain valid manual entries.
+ * Source: https://code.claude.com/docs/en/model-config#model-aliases
+ */
+export const CLAUDE_CODE_DOCUMENTED_MODELS = [
+  "best",
+  "fable",
+  "sonnet",
+  "opus",
+  "haiku",
+  "sonnet[1m]",
+  "opus[1m]",
+  "opusplan",
+  "claude-fable-5-1",
+  "claude-fable-5",
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
+] as const;
+
 export type CliProbeResult = {
   ok: boolean;
   command: readonly string[];
@@ -251,7 +272,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     helpProbe: ["claude", "--help"],
     modelProbe: undefined,
     modelDiscovery: "manual",
-    modelGuidance: "Claude Code offers no verified non-interactive model list in this environment; use /model interactively or enter a model name manually.",
+    modelGuidance: "Suggestions come from Anthropic's official Claude Code model configuration reference. Provider-specific and gateway model names remain editable.",
     dangerousFlags: ["--dangerously-skip-permissions"],
   },
   codex: {

@@ -61,8 +61,22 @@
         }
       ],
       "modelDiscovery": "manual",
-      "modelGuidance": "Claude Code offers no verified non-interactive model list in this environment; use /model interactively or enter a model name manually.",
-      "availableModels": [],
+      "modelGuidance": "Suggestions come from Anthropic's official Claude Code model configuration reference. Provider-specific and gateway model names remain editable.",
+      "availableModels": [
+        "best",
+        "fable",
+        "sonnet",
+        "opus",
+        "haiku",
+        "sonnet[1m]",
+        "opus[1m]",
+        "opusplan",
+        "claude-fable-5-1",
+        "claude-fable-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ],
       "modelMetadata": [],
       "danger": [
         "--dangerously-skip-permissions"

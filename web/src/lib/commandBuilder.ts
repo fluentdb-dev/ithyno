@@ -159,7 +159,7 @@ export const CLI_ADAPTERS: Record<CliAdapterId, CliAdapter> = {
     helpProbe: ["claude", "--help"],
     modelProbe: undefined,
     modelDiscovery: "manual",
-    modelGuidance: "Claude Code offers no verified non-interactive model list in this environment; use /model interactively or enter a model name manually.",
+    modelGuidance: "Suggestions come from Anthropic's official Claude Code model configuration reference. Provider-specific and gateway model names remain editable.",
     dangerousFlags: ["--dangerously-skip-permissions"],
   },
   codex: {
