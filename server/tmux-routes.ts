@@ -3,6 +3,8 @@ import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { extractToken, verifyToken } from "./util/auth.js";
 import {
   captureTmuxPaneHistory,
+  executeTmuxAction,
+  getTmuxActionCatalog,
   getTmuxTopology,
   selectTmuxTarget,
   TmuxBrowserError,
@@ -36,6 +38,13 @@ export const registerTmuxRoutes: FastifyPluginAsync<TmuxRoutesOptions> = async (
   options,
 ) => {
   const operationOptions = { runner: options.runner, platform: options.platform };
+  const projectActionLocks = new Map<string, Promise<void>>();
+  const withProjectActionLock = async <T>(projectRoot: string, action: () => Promise<T>): Promise<T> => {
+    const previous = projectActionLocks.get(projectRoot) ?? Promise.resolve();
+    const run = previous.then(() => action());
+    projectActionLocks.set(projectRoot, run.then(() => undefined, () => undefined));
+    return await run;
+  };
 
   fastify.get("/api/tmux/topology", async (req, reply) => {
     if (!options.isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
@@ -71,6 +80,59 @@ export const registerTmuxRoutes: FastifyPluginAsync<TmuxRoutesOptions> = async (
     }
     try {
       return await captureTmuxPaneHistory(options.getProjectRoot(), paneId, lines, operationOptions);
+    } catch (error) {
+      return reply.code(errorStatus(error)).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  fastify.get('/api/tmux/actions', async (req, reply) => {
+    if (!options.isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+    if (!authorized(req)) return reply.code(401).send({ error: "auth required" });
+    try {
+      const topology = await getTmuxTopology(options.getProjectRoot(), operationOptions);
+      if (!topology.available || !topology.session) {
+        return reply.code(409).send({ error: topology.reason ?? "No tmux session exists for this project" });
+      }
+      return getTmuxActionCatalog(topology.provider ?? "tmux");
+    } catch (error) {
+      return reply.code(500).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  fastify.post<{ Body: { actionId?: unknown; paneId?: unknown } }>('/api/tmux/action', async (req, reply) => {
+    if (!options.isLocal(req.socket.remoteAddress ?? undefined)) return reply.code(403).send({ error: "local only" });
+    if (!authorized(req)) return reply.code(401).send({ error: "auth required" });
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return reply.code(400).send({ error: "exact body shape must be { actionId: string } or { actionId: \"close-pane\", paneId: string }" });
+    }
+    const keys = Object.keys(body);
+    const actionId = typeof body.actionId === "string" ? body.actionId : undefined;
+    if (!actionId) {
+      return reply.code(400).send({ error: "actionId must be a non-empty string" });
+    }
+
+    if (actionId === "close-pane") {
+      if (keys.length !== 2 || !Object.prototype.hasOwnProperty.call(body, "paneId") || typeof body.paneId !== "string" || body.paneId.length === 0) {
+        return reply.code(400).send({ error: "exact body shape is { actionId: \"close-pane\", paneId: string }" });
+      }
+      try {
+        const projectRoot = options.getProjectRoot();
+        const result = await withProjectActionLock(projectRoot, async () => executeTmuxAction(projectRoot, actionId, operationOptions, body.paneId as string));
+        return { ok: true, actionId: result.actionId, paneId: body.paneId };
+      } catch (error) {
+        return reply.code(errorStatus(error)).send({ error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    if (keys.length !== 1 || !Object.prototype.hasOwnProperty.call(body, "actionId")) {
+      return reply.code(400).send({ error: "exact body shape is { actionId: string }" });
+    }
+
+    try {
+      const projectRoot = options.getProjectRoot();
+      const result = await withProjectActionLock(projectRoot, async () => executeTmuxAction(projectRoot, actionId, operationOptions));
+      return { ok: true, actionId: result.actionId };
     } catch (error) {
       return reply.code(errorStatus(error)).send({ error: error instanceof Error ? error.message : String(error) });
     }

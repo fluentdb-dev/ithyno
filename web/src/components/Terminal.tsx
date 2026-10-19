@@ -7,8 +7,8 @@ import { getSessionToken } from "../runtime";
 import { useAppliedTheme, type AppliedTheme } from "../hooks/useAppliedTheme";
 import { useStore } from "../store";
 import { writeClipboardText } from "../clipboardBridge";
-import { fetchTmuxHistory, fetchTmuxTopology, selectTmuxTarget } from "../api";
-import type { TmuxHistory, TmuxPane, TmuxTopology } from "../types";
+import { executeTmuxAction, fetchTmuxActionCatalog, fetchTmuxHistory, fetchTmuxTopology, selectTmuxTarget } from "../api";
+import type { TmuxActionCatalogEntry, TmuxHistory, TmuxPane, TmuxTopology } from "../types";
 
 export type TerminalSessionState = "connected" | "reconnecting" | "lost";
 export type TerminalSessionStatus = "attached" | "reattached" | "missing" | "terminated" | null;
@@ -106,14 +106,37 @@ export type TmuxBrowserPanelProps = {
   historyLoading: boolean;
   query: string;
   copied: boolean;
+  actionCatalog?: TmuxActionCatalogEntry[];
+  pendingActionId?: string | null;
+  actionError?: string | null;
+  cheatsheetOpen?: boolean;
+  closeSessionConfirmOpen?: boolean;
+  paneCloseTarget?: TmuxPane | null;
+  onToggleCheatsheet?: () => void;
   onRefresh: () => void;
   onClose: () => void;
+  onRequestCloseSession?: () => void;
+  onCancelCloseSession?: () => void;
+  onConfirmCloseSession?: () => void;
+  onRequestClosePane?: (pane: TmuxPane) => void;
+  onCancelClosePane?: () => void;
+  onConfirmClosePane?: () => void;
   onSelect: (target: { windowId?: string; paneId?: string }) => void;
   onOpenHistory: (pane: TmuxPane) => void;
   onShowPanes: () => void;
   onCopyHistory: () => void;
   onQueryChange: (value: string) => void;
+  onExecuteAction?: (actionId: string, paneId?: string) => void;
 };
+
+function groupTmuxActions(actions: TmuxActionCatalogEntry[] | undefined): Record<string, TmuxActionCatalogEntry[]> {
+  return (actions ?? []).reduce<Record<string, TmuxActionCatalogEntry[]>>((all, action) => {
+    const bucket = action.group ?? "navigation";
+    all[bucket] ??= [];
+    all[bucket].push(action);
+    return all;
+  }, {});
+}
 
 export function TmuxBrowserPanel({
   topology,
@@ -125,96 +148,266 @@ export function TmuxBrowserPanel({
   historyLoading,
   query,
   copied,
+  actionCatalog,
+  pendingActionId,
+  actionError,
+  cheatsheetOpen = false,
+  closeSessionConfirmOpen = false,
+  paneCloseTarget = null,
+  onToggleCheatsheet,
   onRefresh,
   onClose,
+  onRequestCloseSession,
+  onCancelCloseSession,
+  onConfirmCloseSession,
+  onRequestClosePane,
+  onCancelClosePane,
+  onConfirmClosePane,
   onSelect,
   onOpenHistory,
   onShowPanes,
   onCopyHistory,
   onQueryChange,
+  onExecuteAction,
 }: TmuxBrowserPanelProps) {
   const visibleHistory = buildTmuxHistoryCopyText(history?.content ?? "", query);
   const selectionDisabled = !topology?.capabilities.selection;
   const historyDisabled = !topology?.capabilities.history;
+  const groupedActions = groupTmuxActions(actionCatalog);
+  const session = topology?.session;
 
-  if (!open || !topology?.session) return null;
+  if (!open || !session) return null;
 
   return (
     <section className="terminal-tmux-browser" aria-label="tmux session browser">
       <header className="terminal-tmux-browser-head">
         <div>
-          <strong>{topology.session.name}</strong>
+          <strong>{session.name}</strong>
           <span>{topology.version ?? topology.provider}</span>
         </div>
         <div className="terminal-tmux-browser-actions">
-          <button type="button" onClick={() => onRefresh()} disabled={loading} aria-label="Refresh tmux topology">↻</button>
-          <button type="button" onClick={() => onClose()} aria-label="Close tmux browser">×</button>
+          <button
+            type="button"
+            className="terminal-tmux-close-session-button"
+            onClick={() => onRequestCloseSession?.()}
+            aria-label={`Stop tmux session ${session.name}`}
+            title={`Stop tmux session ${session.name}`}
+          >
+            Stop session
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleCheatsheet?.()}
+            aria-label={cheatsheetOpen ? "Close tmux shortcuts" : "Open tmux shortcuts"}
+            title={cheatsheetOpen ? "Close tmux shortcuts" : "Open tmux shortcuts"}
+          >
+            {cheatsheetOpen ? "?" : "?"}
+          </button>
+          <button type="button" onClick={() => onRefresh()} disabled={loading} aria-label="Refresh tmux topology" title="Refresh tmux topology">↻</button>
+          <button type="button" onClick={() => onClose()} aria-label="Hide tmux panel" title="Hide tmux panel">×</button>
         </div>
       </header>
+
+      {closeSessionConfirmOpen && (
+        <div className="terminal-tmux-close-confirm" aria-label={`Confirm stopping tmux session ${session.name}`} role="alertdialog">
+          <strong>Stop session {session.name}?</strong>
+          <p>This stops the Manager and every window and pane in this session; it does not merely hide the tmux panel.</p>
+          <div className="terminal-tmux-close-confirm-actions">
+            <button
+              type="button"
+              onClick={() => onCancelCloseSession?.()}
+              aria-label={`Cancel stopping tmux session ${session.name}`}
+              title={`Cancel stopping tmux session ${session.name}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onConfirmCloseSession?.()}
+              aria-label={`Stop tmux session ${session.name}`}
+              title={`Stop tmux session ${session.name}`}
+            >
+              Stop session
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="terminal-tmux-error" role="alert">{error}</div>}
 
       {!historyPane && (
-        <>
-          <div className="terminal-tmux-windows" role="tablist" aria-label="tmux windows">
-            {topology.session.windows.map((window) => (
-              <button
-                key={window.id}
-                type="button"
-                role="tab"
-                aria-selected={window.active}
-                className={window.active ? "active" : ""}
-                disabled={selectionDisabled}
-                onClick={() => onSelect({ windowId: window.id })}
-              >
-                {window.index}: {window.name || "window"}
-              </button>
-            ))}
+        cheatsheetOpen ? (
+          <div className="terminal-tmux-cheatsheet" aria-label="tmux cheat sheet">
+            <div className="terminal-tmux-cheatsheet-head">
+              <button type="button" onClick={() => onToggleCheatsheet?.()} aria-label="Return to windows and panes" title="Return to windows and panes" className="terminal-tmux-cheatsheet-back">← Windows & panes</button>
+              <strong>Cheat sheet</strong>
+              <span>Default tmux shortcuts</span>
+            </div>
+            {actionCatalog && actionCatalog.length > 0 ? (
+              <>
+                <p className="terminal-tmux-cheatsheet-note">The default tmux prefix is Ctrl+B; press Ctrl+B, release it, then press the following key.</p>
+                {Object.entries(groupedActions).map(([group, actions]) => (
+                  <div key={group} className="terminal-tmux-cheatsheet-group">
+                    <h4>{group}</h4>
+                    <div className="terminal-tmux-cheatsheet-list">
+                      {actions.map((action) => {
+                        const clientOnly = action.availability === "client-only";
+                        const executable = action.availability === "executable";
+                        const disabled = action.availability === "unsupported"
+                          || action.availability === "reference-only"
+                          || (!!pendingActionId && (executable || clientOnly))
+                          || (!onExecuteAction && executable);
+                        const label = action.label;
+                        const title = action.availability === "reference-only"
+                          ? "Reference-only destructive shortcut; not executable from ithyno."
+                          : action.availability === "unsupported"
+                            ? `Unsupported by ${topology.provider ?? "this tmux provider"}.`
+                            : action.description;
+                        return (
+                          <button
+                            key={action.id}
+                            type="button"
+                            className="terminal-tmux-cheatsheet-action"
+                            aria-label={disabled ? `${label} unavailable` : `Run tmux action ${label}`}
+                            title={title}
+                            disabled={disabled}
+                            onClick={() => {
+                              if (disabled) return;
+                              if (action.availability === "client-only") {
+                                if (action.id === "refresh-topology") onRefresh();
+                                else if (action.id === "open-history") {
+                                  const activePane = session.windows.flatMap((window) => window.panes).find((pane) => pane.active) ?? session.windows[0]?.panes[0];
+                                  if (activePane) onOpenHistory(activePane);
+                                }
+                                return;
+                              }
+                              onExecuteAction?.(action.id);
+                            }}
+                          >
+                            <span>{label}</span>
+                            <small>
+                              <strong>Shortcut</strong>: {action.shortcut}
+                            </small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {actionError && <div className="terminal-tmux-error" role="alert">{actionError}</div>}
+              </>
+            ) : (
+              <div className="terminal-tmux-cheatsheet-empty">No tmux shortcuts are available for this provider.</div>
+            )}
           </div>
-
-          <div className="terminal-tmux-panes">
-            {topology.session.windows.flatMap((window) => window.panes.map((pane) => (
-              <article key={pane.id} className={`terminal-tmux-pane${pane.active && window.active ? " active" : ""}`}>
+        ) : (
+          <>
+            <div className="terminal-tmux-windows" role="tablist" aria-label="tmux windows">
+              {session.windows.map((window) => (
                 <button
+                  key={window.id}
                   type="button"
-                  className="terminal-tmux-pane-select"
-                  aria-pressed={pane.active && window.active}
+                  role="tab"
+                  aria-selected={window.active}
+                  aria-label={`Select window ${window.index}: ${window.name || "window"}`}
+                  title={`Select window ${window.index}: ${window.name || "window"}`}
+                  className={window.active ? "active" : ""}
                   disabled={selectionDisabled}
-                  onClick={() => onSelect({ paneId: pane.id })}
+                  onClick={() => onSelect({ windowId: window.id })}
                 >
-                  <strong>{window.index}.{pane.index} {pane.title || "pane"}</strong>
-                  <span>{pane.width}×{pane.height}</span>
-                  <small title={pane.currentPath}>{pane.currentPath || "Unknown directory"}</small>
+                  {window.index}: {window.name || "window"}
                 </button>
-                <button
-                  type="button"
-                  className="terminal-tmux-history-button"
-                  disabled={historyDisabled}
-                  title={historyDisabled ? (topology.reason ?? "History is unavailable for this tmux provider.") : "Open retained tmux history"}
-                  onClick={() => onOpenHistory(pane)}
-                >
-                  History
-                </button>
-              </article>
-            )))}
-          </div>
-        </>
+              ))}
+            </div>
+
+            <div className="terminal-tmux-panes">
+              {session.windows.flatMap((window) => window.panes.map((pane) => {
+                const paneLabel = `${window.index}.${pane.index} ${pane.title || "pane"}`;
+                const paneCloseLabel = `Close pane ${paneLabel}`;
+                const paneCloseConfirmOpen = paneCloseTarget?.id === pane.id;
+
+                return (
+                  <article key={pane.id} className={`terminal-tmux-pane${pane.active && window.active ? " active" : ""}`}>
+                    <button
+                      type="button"
+                      className="terminal-tmux-pane-select"
+                      aria-label={`Select pane ${paneLabel}`}
+                      aria-pressed={pane.active && window.active}
+                      title={`Select pane ${paneLabel}`}
+                      disabled={selectionDisabled}
+                      onClick={() => onSelect({ paneId: pane.id })}
+                    >
+                      <strong>{paneLabel}</strong>
+                      <span>{pane.width}×{pane.height}</span>
+                      <small title={pane.currentPath}>{pane.currentPath || "Unknown directory"}</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="terminal-tmux-pane-close"
+                      aria-label={paneCloseLabel}
+                      title={paneCloseLabel}
+                      onClick={() => onRequestClosePane?.(pane)}
+                    >
+                      ×
+                    </button>
+                    <button
+                      type="button"
+                      className="terminal-tmux-history-button"
+                      aria-label={historyDisabled ? `History unavailable for pane ${paneLabel}` : `Open retained tmux history for pane ${paneLabel}`}
+                      disabled={historyDisabled}
+                      title={historyDisabled ? (topology.reason ?? "History is unavailable for this tmux provider.") : `Open retained tmux history for pane ${paneLabel}`}
+                      onClick={() => onOpenHistory(pane)}
+                    >
+                      History
+                    </button>
+                    {paneCloseConfirmOpen && (
+                      <div className="terminal-tmux-pane-close-confirm" aria-label={`Confirm closing pane ${paneLabel}`} role="alertdialog">
+                        <strong>Close pane {paneLabel}?</strong>
+                        <p>This will stop the running process in this pane.</p>
+                        <div className="terminal-tmux-close-confirm-actions">
+                          <button
+                            type="button"
+                            onClick={() => onCancelClosePane?.()}
+                            aria-label={`Cancel closing pane ${paneLabel}`}
+                            title={`Cancel closing pane ${paneLabel}`}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onConfirmClosePane?.()}
+                            aria-label={`Confirm closing pane ${paneLabel}`}
+                            title={`Confirm closing pane ${paneLabel}`}
+                          >
+                            Close pane
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              }))}
+            </div>
+          </>
+        )
       )}
 
       {historyPane && (
         <div className="terminal-tmux-history">
           <div className="terminal-tmux-history-toolbar">
-            <button type="button" onClick={() => onShowPanes()}>← Panes</button>
+          <button type="button" aria-label="Return to pane list" title="Return to pane list" onClick={() => onShowPanes()}>← Panes</button>
             <strong>{historyPane.title || historyPane.id}</strong>
-            <button type="button" disabled={historyLoading} onClick={() => onOpenHistory(historyPane)}>Refresh</button>
+          <button type="button" aria-label="Refresh tmux history" title="Refresh tmux history" disabled={historyLoading} onClick={() => onOpenHistory(historyPane)}>Refresh</button>
             <button
               type="button"
-              disabled={!history}
-              onClick={() => onCopyHistory()}
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
+            aria-label={copied ? "Copied tmux history to clipboard" : "Copy tmux history to clipboard"}
+            title={copied ? "Copied tmux history to clipboard" : "Copy tmux history to clipboard"}
+            disabled={!history}
+            onClick={() => onCopyHistory()}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
           <input
             type="search"
             value={query}
@@ -242,12 +435,20 @@ function TmuxBrowserControl() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  const [closeSessionConfirmOpen, setCloseSessionConfirmOpen] = useState(false);
+  const [paneCloseTarget, setPaneCloseTarget] = useState<TmuxPane | null>(null);
+  const [actionCatalog, setActionCatalog] = useState<TmuxActionCatalogEntry[] | null>(null);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
     setError(null);
     try {
-      setTopology(await fetchTmuxTopology());
+      const nextTopology = await fetchTmuxTopology();
+      setTopology(nextTopology);
+      setActionCatalog(nextTopology.session ? await fetchTmuxActionCatalog() : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -267,6 +468,7 @@ function TmuxBrowserControl() {
         const next = await fetchTmuxTopology();
         if (cancelled) return;
         setTopology(next);
+        setActionCatalog(next.session ? await fetchTmuxActionCatalog() : null);
         setError(null);
         shouldRetry = !next.session;
       } catch (err) {
@@ -301,7 +503,24 @@ function TmuxBrowserControl() {
     }
   };
 
+  const executeAction = async (actionId: string, paneId?: string) => {
+    if (pendingActionId) return;
+    setPendingActionId(actionId);
+    setActionError(null);
+    setCloseSessionConfirmOpen(false);
+    setPaneCloseTarget(null);
+    try {
+      await executeTmuxAction(actionId, paneId);
+      await refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
   const openHistory = async (pane: TmuxPane) => {
+    setCheatsheetOpen(false);
     setHistoryPane(pane);
     setHistory(null);
     setQuery("");
@@ -355,13 +574,27 @@ function TmuxBrowserControl() {
         historyLoading={historyLoading}
         query={query}
         copied={copied}
+        actionCatalog={actionCatalog ?? undefined}
+        pendingActionId={pendingActionId}
+        actionError={actionError}
+        cheatsheetOpen={cheatsheetOpen}
+        closeSessionConfirmOpen={closeSessionConfirmOpen}
+        paneCloseTarget={paneCloseTarget}
+        onToggleCheatsheet={() => { setCheatsheetOpen((value) => !value); }}
         onRefresh={() => { void refresh(); }}
-        onClose={() => { setOpen(false); setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); }}
+        onClose={() => { setOpen(false); setCheatsheetOpen(false); setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); setCloseSessionConfirmOpen(false); setPaneCloseTarget(null); }}
+        onRequestCloseSession={() => { setCloseSessionConfirmOpen(true); setPaneCloseTarget(null); }}
+        onCancelCloseSession={() => { setCloseSessionConfirmOpen(false); }}
+        onConfirmCloseSession={() => { void executeAction("kill-session"); }}
+        onRequestClosePane={(pane) => { setPaneCloseTarget(pane); setCloseSessionConfirmOpen(false); }}
+        onCancelClosePane={() => { setPaneCloseTarget(null); }}
+        onConfirmClosePane={() => { if (!paneCloseTarget) return; void executeAction("close-pane", paneCloseTarget.id); }}
         onSelect={(target) => { void select(target); }}
         onOpenHistory={(pane) => { void openHistory(pane); }}
-        onShowPanes={() => { setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); }}
+        onShowPanes={() => { setCheatsheetOpen(false); setHistoryPane(null); setHistory(null); setQuery(""); setCopied(false); setPaneCloseTarget(null); }}
         onCopyHistory={handleCopyHistory}
         onQueryChange={(value) => { setQuery(value); setCopied(false); }}
+        onExecuteAction={(actionId, paneId) => { void executeAction(actionId, paneId); }}
       />
     </>
   );

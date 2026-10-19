@@ -508,6 +508,41 @@ export type TmuxHistory = {
   truncated: boolean;
 };
 
+export type TmuxActionId =
+  | "next-window"
+  | "previous-window"
+  | "last-window"
+  | "pane-left"
+  | "pane-right"
+  | "pane-up"
+  | "pane-down"
+  | "create-window"
+  | "split-left"
+  | "split-right"
+  | "split-top"
+  | "split-bottom"
+  | "toggle-pane-zoom"
+  | "cycle-layout"
+  | "refresh-topology"
+  | "open-history"
+  | "close-pane"
+  | "kill-pane"
+  | "kill-window"
+  | "kill-session";
+
+export type TmuxActionAvailability = "executable" | "unsupported" | "client-only" | "reference-only";
+export type TmuxActionGroup = "navigation" | "pane" | "layout" | "history" | "session";
+
+export type TmuxActionCatalogEntry = {
+  id: TmuxActionId;
+  group: TmuxActionGroup;
+  label: string;
+  shortcut: string;
+  availability: TmuxActionAvailability;
+  supported: boolean;
+  description: string;
+};
+
 // ---- browse mode (unify-open-project-3-branch) -----------------------------
 
 /** A node in the markdown-tree response from GET /api/browse/markdown-tree. */

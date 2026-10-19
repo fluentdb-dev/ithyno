@@ -2363,6 +2363,13 @@ a.modal-btn:hover {
   width: 26px;
   height: 26px;
 }
+.terminal-tmux-close-session-button {
+  width: auto !important;
+  min-width: 88px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .terminal-tmux-browser button:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--accent);
@@ -2370,6 +2377,45 @@ a.modal-btn:hover {
 .terminal-tmux-browser button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+.terminal-tmux-close-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--warning) 10%, var(--panel)) ;
+  color: var(--text);
+}
+.terminal-tmux-close-confirm strong {
+  font-size: 12px;
+}
+.terminal-tmux-close-confirm p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.terminal-tmux-close-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.terminal-tmux-close-confirm-actions button {
+  min-width: 100px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.terminal-tmux-close-confirm-actions button:last-child {
+  background: color-mix(in oklab, var(--danger) 18%, var(--panel-2));
+  border-color: color-mix(in oklab, var(--danger) 60%, var(--border));
+  color: var(--text);
 }
 .terminal-tmux-error,
 .terminal-tmux-history-note {
@@ -2449,6 +2495,77 @@ a.modal-btn:hover {
   align-self: flex-end;
   padding: 3px 8px;
   font-size: 10px;
+}
+.terminal-tmux-cheatsheet {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--panel-2) 60%, transparent);
+}
+.terminal-tmux-cheatsheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.terminal-tmux-cheatsheet-back {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.terminal-tmux-cheatsheet-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 12px 4px;
+}
+.terminal-tmux-cheatsheet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.terminal-tmux-cheatsheet-group h4 {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.terminal-tmux-cheatsheet-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+.terminal-tmux-cheatsheet-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 48px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.terminal-tmux-cheatsheet-action small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.terminal-tmux-cheatsheet-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 .terminal-tmux-history {
   display: flex;

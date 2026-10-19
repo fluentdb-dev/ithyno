@@ -17,7 +17,7 @@ This change depends on that foundation. It adds a discoverable shortcut referenc
 **Non-Goals:**
 
 - Accept arbitrary tmux commands, command fragments, key sequences, or client-supplied session names.
-- Execute kill-pane, kill-window, kill-session, detach, or other destructive shortcuts in the initial version.
+- Expose the cheat-sheet kill-pane or kill-window shortcuts as directly executable actions. Those entries remain reference-only; pane termination is available only through the pane row's explicit, confirmed, topology-validated close control.
 - Replace tmux's full command palette or configuration system.
 - Add tmux chrome to VS Code delegated terminals.
 
@@ -27,14 +27,15 @@ This change depends on that foundation. It adds a discoverable shortcut referenc
 
 Define a catalog whose stable action IDs map to group, label, displayed shortcut, required capability, destructive/reference-only state, and server operation. The UI renders from this catalog so shortcut documentation and executable behavior cannot silently drift.
 
-The initial executable set is:
+The executable set includes the current project session close action alongside standard navigation and layout actions:
 
 - window navigation: next, previous, and last window;
 - pane navigation: left, right, up, and down;
 - layout: create window, split left/right, split top/bottom, toggle pane zoom, and cycle layout;
+- session control: close the current canonical project tmux session;
 - client-only helpers: refresh topology and open the selected pane's retained history.
 
-Destructive shortcuts may be listed for learning purposes but are marked reference-only and have no executable server mapping.
+Pane- and window-kill shortcuts remain visible for learning purposes but stay reference-only and have no direct executable server mapping. A separate `close-pane` semantic action is available only from a concrete pane row; it requires confirmation and validates that pane against the current project session before executing the fixed kill operation.
 
 ### Execute semantic actions, not simulated keystrokes
 
@@ -50,9 +51,9 @@ Action execution lives beside the tmux topology adapter. Each provider reports t
 
 After a successful action, the client fetches a fresh topology snapshot and updates active window/pane state. The terminal WebSocket and PTY are not recreated. Errors remain in the cheat-sheet panel and do not close or restart the terminal.
 
-### Keep destructive operations reference-only
+### Support closing the current project session explicitly
 
-Killing a pane or window can terminate the Manager and requires reliable Manager-pane identity plus recovery semantics. Until those contracts exist, destructive shortcuts are visible as documentation but cannot be invoked from ithyno.
+Closing the current project session is a controlled, project-scoped action: it stops the Manager and all windows/panes in the derived session, while a pane or window kill remains intentionally reference-only. The server resolves the canonical tmux session name from the current project root and executes only the fixed `kill-session -t <canonical-name>` argv without accepting any client-provided session target.
 
 ## Risks / Trade-offs
 

@@ -17,6 +17,7 @@ import type {
   ManagerStatus,
   TagDetail,
   TagIndex,
+  TmuxActionCatalogEntry,
   TmuxHistory,
   TmuxTopology,
   ToggleResponse,
@@ -330,6 +331,28 @@ export async function fetchTmuxTopology(): Promise<TmuxTopology> {
   }
   if (!res.ok) throw new Error(`GET /api/tmux/topology failed: ${res.status}`);
   return res.json();
+}
+
+/** Read the tmux browser's allowlisted cheat-sheet catalog for the current project. */
+export async function fetchTmuxActionCatalog(): Promise<TmuxActionCatalogEntry[]> {
+  const res = await fetch("/api/tmux/actions", { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  if (!res.ok) throw new Error(`GET /api/tmux/actions failed: ${res.status}`);
+  return res.json();
+}
+
+/** Execute an allowlisted tmux action in the current project's session. */
+export async function executeTmuxAction(actionId: string, paneId?: string): Promise<{ actionId: string; paneId?: string }> {
+  const payload = actionId === "close-pane" ? { actionId, paneId } : { actionId };
+  const { status, data } = await postJson<{ ok?: boolean; actionId?: string; paneId?: string; error?: string }>("/api/tmux/action", payload);
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+  return {
+    actionId: data.actionId ?? actionId,
+    paneId: data.paneId ?? paneId,
+  };
 }
 
 /** Select a validated window or pane in the current project's tmux session. */
