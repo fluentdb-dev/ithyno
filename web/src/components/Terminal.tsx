@@ -13,6 +13,8 @@ import type { TmuxHistory, TmuxPane, TmuxTopology } from "../types";
 export type TerminalSessionState = "connected" | "reconnecting" | "lost";
 export type TerminalSessionStatus = "attached" | "reattached" | "missing" | "terminated" | null;
 export const TERMINAL_SESSION_LOST_TIMEOUT_MS = 15_000;
+const TMUX_INITIAL_PROBE_INTERVAL_MS = 500;
+const TMUX_INITIAL_PROBE_ATTEMPTS = 20;
 
 /**
  * Start (or retain) the deadline for obtaining a PTY attachment handshake.
@@ -254,7 +256,39 @@ function TmuxBrowserControl() {
   };
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    let attempt = 0;
+    let retryTimer: number | undefined;
+
+    const probe = async () => {
+      attempt += 1;
+      let shouldRetry = false;
+      try {
+        const next = await fetchTmuxTopology();
+        if (cancelled) return;
+        setTopology(next);
+        setError(null);
+        shouldRetry = !next.session;
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        shouldRetry = true;
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+
+      // The terminal mounts before Manager auto-launch has created its tmux
+      // session. Retry briefly so the control appears without a page reload.
+      if (!cancelled && shouldRetry && attempt < TMUX_INITIAL_PROBE_ATTEMPTS) {
+        retryTimer = window.setTimeout(() => { void probe(); }, TMUX_INITIAL_PROBE_INTERVAL_MS);
+      }
+    };
+
+    void probe();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   const select = async (target: { windowId?: string; paneId?: string }) => {
