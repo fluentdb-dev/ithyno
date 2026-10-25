@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   TmuxBrowserPanel,
+  TmuxBrowserControl,
   buildTmuxHistoryCopyText,
   copilotWheelInput,
   filterTmuxHistory,
@@ -41,6 +42,16 @@ describe("tmux history filtering", () => {
   it("returns case-insensitive matching lines without changing their text", () => {
     expect(filterTmuxHistory("Build passed\nwarning\nBUILD cached", "build"))
       .toBe("Build passed\nBUILD cached");
+  });
+});
+
+describe("tmux terminal controls", () => {
+  it("renders independent window browser and shortcut controls", () => {
+    const markup = renderToStaticMarkup(React.createElement(TmuxBrowserControl));
+
+    expect(markup).toContain('aria-label="Browse tmux session"');
+    expect(markup).toContain('aria-label="Open tmux shortcuts"');
+    expect(markup.match(/<button/g)).toHaveLength(2);
   });
 });
 
@@ -328,7 +339,7 @@ describe("tmux browser panel", () => {
     expect(markup).toContain('title="Open retained tmux history for pane 0.0 logs"');
   });
 
-  it("starts with the windows and panes view visible and opens the shortcuts from the header", () => {
+  it("starts with the windows and panes view visible without embedding the shortcut toggle", () => {
     const onToggle = vi.fn();
     const markup = renderToStaticMarkup(
       React.createElement(TmuxBrowserPanel, {
@@ -342,7 +353,7 @@ describe("tmux browser panel", () => {
         query: "",
         copied: false,
         actionCatalog: [
-          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
         ],
         onRefresh: vi.fn(),
         onClose: vi.fn(),
@@ -355,7 +366,7 @@ describe("tmux browser panel", () => {
       }),
     );
 
-    expect(markup).toContain('aria-label="Open tmux shortcuts"');
+    expect(markup).not.toContain('aria-label="Open tmux shortcuts"');
     expect(markup).toContain("0: manager");
     expect(markup).not.toContain("Cheat sheet");
   });
@@ -373,7 +384,7 @@ describe("tmux browser panel", () => {
         query: "",
         copied: false,
         actionCatalog: [
-          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
           { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
         ],
         cheatsheetOpen: true,
@@ -390,7 +401,7 @@ describe("tmux browser panel", () => {
 
     expect(markup).toContain("Cheat sheet");
     expect(markup).toContain('aria-label="Return to windows and panes"');
-    expect(markup).toContain('aria-label="Close tmux shortcuts"');
+    expect(markup).not.toContain('aria-label="Close tmux shortcuts"');
     expect(markup).not.toContain("0: manager");
   });
 
@@ -516,6 +527,7 @@ describe("tmux browser panel", () => {
     expect(markup).toContain('title="Refresh tmux topology"');
     expect(markup).toContain('aria-label="Return to windows and panes"');
     expect(markup).toContain('aria-label="Hide tmux panel"');
+    expect(markup).toContain('class="terminal-tmux-panel-close-button"');
     expect(markup).toContain('title="Stop tmux session project-session"');
     expect(markup).toContain('title="Cancel stopping tmux session project-session"');
   });
@@ -534,7 +546,7 @@ describe("tmux browser panel", () => {
         copied: false,
         cheatsheetOpen: true,
         actionCatalog: [
-          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
         ],
         actionError: "Action failed",
         onRefresh: vi.fn(),
@@ -568,8 +580,8 @@ describe("tmux browser panel", () => {
       copied: false,
       cheatsheetOpen: true,
       actionCatalog: [
-        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
-        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B, then x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B → x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
         { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
       ],
       pendingActionId: "next-window",
@@ -599,8 +611,8 @@ describe("tmux browser panel", () => {
       copied: false,
       cheatsheetOpen: true,
       actionCatalog: [
-        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
-        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B, then x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B → x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
         { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
       ],
       pendingActionId: "next-window",
@@ -636,7 +648,7 @@ describe("tmux browser panel", () => {
       query: "",
       copied: false,
       actionCatalog: [
-        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B, then n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
         { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
       ],
       pendingActionId: null,

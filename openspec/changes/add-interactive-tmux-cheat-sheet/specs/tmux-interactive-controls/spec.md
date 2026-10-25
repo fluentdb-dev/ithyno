@@ -1,11 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Interactive tmux cheat sheet
-The embedded terminal SHALL provide a cheat sheet for an available ithyno-managed tmux session that groups default tmux shortcuts by purpose and identifies whether each entry is executable, unsupported by the active provider, or reference-only. Each entry SHALL display the default key sequence using the tmux prefix so the shortcut is explicit and unambiguous.
+The embedded terminal SHALL provide separate controls for the tmux window/pane browser and the tmux cheat sheet. The cheat sheet for an available ithyno-managed tmux session SHALL group default tmux shortcuts by purpose and identify whether each entry is executable, unsupported by the active provider, or reference-only. Each entry SHALL display the default key sequence using the tmux prefix so the shortcut is explicit and unambiguous.
 
-#### Scenario: Open the cheat sheet
-- **WHEN** a user opens the cheat sheet from the tmux session browser
+#### Scenario: Open the cheat sheet independently
+- **WHEN** a user activates the dedicated shortcut control next to the tmux browser control
 - **THEN** the system displays grouped actions with a human-readable label and the default tmux key sequence, including the default prefix instruction for novice users
+
+#### Scenario: Open the session browser independently
+- **WHEN** a user activates the dedicated window/pane browser control
+- **THEN** the system displays the tmux window and pane topology without first opening the cheat sheet
 
 #### Scenario: Session close is explicit and supported
 - **WHEN** the user chooses the Stop session action for the current project session
@@ -17,7 +21,7 @@ The embedded terminal SHALL provide a cheat sheet for an available ithyno-manage
 
 #### Scenario: Reference-only destructive shortcut
 - **WHEN** the cheat sheet displays a pane or window kill shortcut
-- **THEN** the system marks it as reference-only, shows the default tmux key sequence (`Ctrl+B, then x` or `Ctrl+B, then &`), and does not provide an executable action
+- **THEN** the system marks it as reference-only, shows the default tmux key sequence (`Ctrl+B → x` or `Ctrl+B → &`), and does not provide an executable action
 
 ### Requirement: Allowlisted semantic tmux actions
 The server MUST accept only stable, predefined tmux action IDs and MUST translate each accepted ID into a fixed subprocess argument vector without executing a shell or accepting client-provided tmux commands, flags, key sequences, or session names.

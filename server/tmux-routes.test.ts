@@ -73,8 +73,8 @@ describe("tmux browser routes", () => {
     const catalogResponse = await instance.inject({ method: "GET", url: "/api/tmux/actions", headers });
     expect(catalogResponse.statusCode).toBe(200);
     expect(catalogResponse.json()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "next-window", availability: "executable", shortcut: "Ctrl+B, then n" }),
-      expect.objectContaining({ id: "kill-pane", availability: "reference-only", shortcut: "Ctrl+B, then x" }),
+      expect.objectContaining({ id: "next-window", availability: "executable", shortcut: "Ctrl+B → n" }),
+      expect.objectContaining({ id: "kill-pane", availability: "reference-only", shortcut: "Ctrl+B → x" }),
       expect.objectContaining({ id: "refresh-topology", availability: "client-only", shortcut: "Click Refresh" }),
     ]));
 

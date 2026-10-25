@@ -177,8 +177,8 @@ describe("tmux browser", () => {
     const tmuxEntries = getTmuxActionCatalog("tmux");
     const psmuxEntries = getTmuxActionCatalog("psmux");
 
-    expect(tmuxEntries.some((entry) => entry.id === "next-window" && entry.availability === "executable" && entry.shortcut === "Ctrl+B, then n")).toBe(true);
-    expect(tmuxEntries.some((entry) => entry.id === "kill-pane" && entry.availability === "reference-only" && entry.shortcut === "Ctrl+B, then x")).toBe(true);
+    expect(tmuxEntries.some((entry) => entry.id === "next-window" && entry.availability === "executable" && entry.shortcut === "Ctrl+B → n")).toBe(true);
+    expect(tmuxEntries.some((entry) => entry.id === "kill-pane" && entry.availability === "reference-only" && entry.shortcut === "Ctrl+B → x")).toBe(true);
     expect(tmuxEntries.some((entry) => entry.id === "kill-session" && entry.shortcut === "Click Stop session")).toBe(true);
     expect(psmuxEntries.some((entry) => entry.id === "next-window" && entry.supported)).toBe(true);
     expect(psmuxEntries.some((entry) => entry.id === "create-window" && entry.availability === "unsupported")).toBe(true);

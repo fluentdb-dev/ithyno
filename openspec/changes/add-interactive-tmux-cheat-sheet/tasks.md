@@ -25,4 +25,4 @@
 
 - [x] 4.1 Document the interactive cheat sheet, default-binding caveat, supported action set, provider degradation, and reference-only destructive shortcuts.
 - [x] 4.2 Run focused server and web tests, the full test suite, typecheck, build, and strict OpenSpec validation.
-- [ ] 4.3 Manually verify navigation, window creation, pane splitting, zoom/layout actions, history/refresh helpers, and Manager continuity in an ithyno-managed tmux session.
+- [x] 4.3 Manually verify navigation, window creation, pane splitting, zoom/layout actions, history/refresh helpers, and Manager continuity in an ithyno-managed tmux session.

@@ -25,4 +25,4 @@
 
 - [x] 4.1 Document the tmux browser, retained history behavior, initial read-only scope, and psmux capability degradation.
 - [x] 4.2 Run focused server and web tests, the full test suite, typecheck, build, and strict OpenSpec validation.
-- [ ] 4.3 Manually verify an ithyno-managed tmux session can switch windows/panes and inspect history without restarting the Manager.
+- [x] 4.3 Manually verify an ithyno-managed tmux session can switch windows/panes and inspect history without restarting the Manager.

@@ -195,16 +195,16 @@ export function TmuxBrowserPanel({
           >
             Stop session
           </button>
+          <button type="button" onClick={() => onRefresh()} disabled={loading} aria-label="Refresh tmux topology" title="Refresh tmux topology">↻</button>
           <button
             type="button"
-            onClick={() => onToggleCheatsheet?.()}
-            aria-label={cheatsheetOpen ? "Close tmux shortcuts" : "Open tmux shortcuts"}
-            title={cheatsheetOpen ? "Close tmux shortcuts" : "Open tmux shortcuts"}
+            className="terminal-tmux-panel-close-button"
+            onClick={() => onClose()}
+            aria-label="Hide tmux panel"
+            title="Hide tmux panel"
           >
-            {cheatsheetOpen ? "?" : "?"}
+            ×
           </button>
-          <button type="button" onClick={() => onRefresh()} disabled={loading} aria-label="Refresh tmux topology" title="Refresh tmux topology">↻</button>
-          <button type="button" onClick={() => onClose()} aria-label="Hide tmux panel" title="Hide tmux panel">×</button>
         </div>
       </header>
 
@@ -245,7 +245,7 @@ export function TmuxBrowserPanel({
             </div>
             {actionCatalog && actionCatalog.length > 0 ? (
               <>
-                <p className="terminal-tmux-cheatsheet-note">The default tmux prefix is Ctrl+B; press Ctrl+B, release it, then press the following key.</p>
+                <p className="terminal-tmux-cheatsheet-note">Press Ctrl+B, release it, then press the key shown after →.</p>
                 {Object.entries(groupedActions).map(([group, actions]) => (
                   <div key={group} className="terminal-tmux-cheatsheet-group">
                     <h4>{group}</h4>
@@ -425,7 +425,7 @@ export function TmuxBrowserPanel({
   );
 }
 
-function TmuxBrowserControl() {
+export function TmuxBrowserControl() {
   const [topology, setTopology] = useState<TmuxTopology | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -551,18 +551,61 @@ function TmuxBrowserControl() {
     void writeClipboardText(next).then(() => setCopied(true)).catch((err) => setError(String(err)));
   };
 
+  const toggleBrowser = () => {
+    if (open && !cheatsheetOpen && !historyPane) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    setCheatsheetOpen(false);
+    setHistoryPane(null);
+    setHistory(null);
+    setQuery("");
+    setCopied(false);
+    setCloseSessionConfirmOpen(false);
+    setPaneCloseTarget(null);
+  };
+
+  const toggleShortcuts = () => {
+    if (open && cheatsheetOpen) {
+      setOpen(false);
+      setCheatsheetOpen(false);
+      return;
+    }
+    setOpen(true);
+    setCheatsheetOpen(true);
+    setHistoryPane(null);
+    setHistory(null);
+    setQuery("");
+    setCopied(false);
+    setCloseSessionConfirmOpen(false);
+    setPaneCloseTarget(null);
+  };
+
   return (
     <>
-      <button
-        type="button"
-        className={`terminal-tmux-toggle${open ? " active" : ""}`}
-        aria-label="Browse tmux session"
-        aria-expanded={open}
-        title="Browse tmux windows, panes, and history"
-        onClick={() => setOpen((value) => !value)}
-      >
-        {loading ? "…" : "tmux"}
-      </button>
+      <div className="terminal-tmux-controls">
+        <button
+          type="button"
+          className={`terminal-tmux-toggle${open && !cheatsheetOpen ? " active" : ""}`}
+          aria-label="Browse tmux session"
+          aria-expanded={open && !cheatsheetOpen}
+          title="Browse tmux windows, panes, and history"
+          onClick={toggleBrowser}
+        >
+          {loading ? "…" : "🪟"}
+        </button>
+        <button
+          type="button"
+          className={`terminal-tmux-toggle${open && cheatsheetOpen ? " active" : ""}`}
+          aria-label="Open tmux shortcuts"
+          aria-expanded={open && cheatsheetOpen}
+          title="Open tmux shortcuts"
+          onClick={toggleShortcuts}
+        >
+          ?
+        </button>
+      </div>
 
       <TmuxBrowserPanel
         topology={topology}
