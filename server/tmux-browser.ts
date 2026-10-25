@@ -496,12 +496,32 @@ export async function executeTmuxAction(
   if (!topology.session) throw new TmuxBrowserError("session-missing", "No tmux session exists for this project");
 
   const session = topology.session;
+  const provider = topology.provider ?? "tmux";
+
+  // For psmux, probe list-commands once at the start to determine what's actually available
+  let availableCommands: Set<string> | undefined;
+  if (provider === "psmux") {
+    try {
+      availableCommands = await getAvailableTmuxCommands(runner, "psmux");
+    } catch (error) {
+      throw new TmuxBrowserError(
+        "unsupported",
+        `psmux command probe failed; cannot verify action support: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   const validatedPaneId = typeof paneId === "string" ? paneId : undefined;
   if (actionId === "close-pane") {
     if (!validatedPaneId) throw new TmuxBrowserError("target-missing", "paneId is required to close a pane");
     if (!/^%\d+$/.test(validatedPaneId)) throw new TmuxBrowserError("target-missing", "Invalid pane target");
     const pane = session.windows.flatMap((window) => window.panes).find((candidate) => candidate.id === validatedPaneId);
     if (!pane) throw new TmuxBrowserError("target-missing", "Pane is not part of the current project session");
+
+    // For psmux, verify kill-pane is available before executing
+    if (provider === "psmux" && !availableCommands?.has("kill-pane")) {
+      throw new TmuxBrowserError("unsupported", "kill-pane is not supported by this psmux version");
+    }
 
     try {
       await runner(["kill-pane", "-t", validatedPaneId]);
@@ -515,21 +535,12 @@ export async function executeTmuxAction(
     return { actionId: "close-pane" };
   }
 
-  const catalog = getTmuxActionCatalog(topology.provider ?? "tmux");
+  // Build catalog with probed commands for psmux (or undefined for tmux/others)
+  const catalog = getTmuxActionCatalog(provider, availableCommands);
   const action = catalog.find((entry) => entry.id === actionId) ?? null;
   if (!action) throw new TmuxBrowserError("unsupported", `Unknown tmux action: ${actionId}`);
   if (!isTmuxActionExecutable(action)) {
     throw new TmuxBrowserError("unsupported", `${action.label} is not executable from ithyno`);
-  }
-
-  // For psmux, verify the action is still supported by the actual available commands
-  if (topology.provider === "psmux") {
-    const availableCommands = await getAvailableTmuxCommands(runner, "psmux");
-    const catalogWithProbe = getTmuxActionCatalog(topology.provider, availableCommands);
-    const actionWithProbe = catalogWithProbe.find((entry) => entry.id === actionId);
-    if (!actionWithProbe || !isTmuxActionExecutable(actionWithProbe)) {
-      throw new TmuxBrowserError("unsupported", `${action.label} is not supported by the installed psmux version`);
-    }
   }
 
   const activeWindow = session.windows.find((window) => window.active) ?? session.windows[0];

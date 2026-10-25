@@ -328,4 +328,82 @@ describe("tmux browser", () => {
     const nextWindowCalls = run.mock.calls.filter((c) => c[0]?.[0] === "next-window");
     expect(nextWindowCalls).toHaveLength(0);
   });
+
+  it("executes a supported psmux action when its command is proven via list-commands", async () => {
+    const windows = "@1\t0\tmanager\t1\t1\tlayout-a\n";
+    const panes = "%1\t@1\t0\t0\tManager\t1\t100\t30\t/tmp/project\n";
+
+    // Mock runner: next-window IS in the available commands
+    const commandsWithNavigation = new Set(["next-window", "select-window", "select-pane"]);
+    const run = vi.fn(async (args) => {
+      const key = args[0];
+      if (key === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (key === "has-session") return { stdout: "", stderr: "" };
+      if (key === "list-windows") return { stdout: windows, stderr: "" };
+      if (key === "list-panes") return { stdout: panes, stderr: "" };
+      if (key === "list-commands") return { stdout: Array.from(commandsWithNavigation).join("\n") + "\n", stderr: "" };
+      return { stdout: "", stderr: "" };
+    });
+
+    // Execute next-window action on psmux with next-window proven in available commands
+    const result = await executeTmuxAction("/tmp/project", "next-window", { runner: run, platform: "win32" });
+    expect(result.actionId).toBe("next-window");
+
+    // Verify that next-window WAS invoked (should have been called once with the session target)
+    const nextWindowCalls = run.mock.calls.filter((c) => c[0]?.[0] === "next-window");
+    expect(nextWindowCalls.length).toBeGreaterThan(0);
+  });
+
+  it("rejects close-pane without proven kill-pane on psmux", async () => {
+    const windows = "@1\t0\tmanager\t1\t1\tlayout-a\n";
+    const panes = "%1\t@1\t0\t0\tManager\t1\t100\t30\t/tmp/project\n";
+
+    // Mock runner: kill-pane is NOT in the available commands
+    const commandsWithoutKillPane = new Set(["select-window", "select-pane"]);
+    const run = vi.fn(async (args) => {
+      const key = args[0];
+      if (key === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (key === "has-session") return { stdout: "", stderr: "" };
+      if (key === "list-windows") return { stdout: windows, stderr: "" };
+      if (key === "list-panes") return { stdout: panes, stderr: "" };
+      if (key === "list-commands") return { stdout: Array.from(commandsWithoutKillPane).join("\n") + "\n", stderr: "" };
+      if (key === "kill-pane") throw new Error("kill-pane should not be invoked when not in available commands");
+      return { stdout: "", stderr: "" };
+    });
+
+    // Try to close a pane on psmux without kill-pane in the proven commands
+    await expect(
+      executeTmuxAction("/tmp/project", "close-pane", { runner: run, platform: "win32" }, "%1")
+    ).rejects.toMatchObject({ kind: "unsupported" });
+
+    // Verify that kill-pane was never actually invoked
+    const killPaneCalls = run.mock.calls.filter((c) => c[0]?.[0] === "kill-pane");
+    expect(killPaneCalls).toHaveLength(0);
+  });
+
+  it("executes close-pane when kill-pane is proven on psmux", async () => {
+    const windows = "@1\t0\tmanager\t1\t1\tlayout-a\n";
+    const panes = "%1\t@1\t0\t0\tManager\t1\t100\t30\t/tmp/project\n";
+
+    // Mock runner: kill-pane IS in the available commands
+    const commandsWithKillPane = new Set(["select-window", "select-pane", "kill-pane"]);
+    const run = vi.fn(async (args) => {
+      const key = args[0];
+      if (key === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (key === "has-session") return { stdout: "", stderr: "" };
+      if (key === "list-windows") return { stdout: windows, stderr: "" };
+      if (key === "list-panes") return { stdout: panes, stderr: "" };
+      if (key === "list-commands") return { stdout: Array.from(commandsWithKillPane).join("\n") + "\n", stderr: "" };
+      return { stdout: "", stderr: "" };
+    });
+
+    // Close a pane on psmux with kill-pane proven in available commands
+    const result = await executeTmuxAction("/tmp/project", "close-pane", { runner: run, platform: "win32" }, "%1");
+    expect(result.actionId).toBe("close-pane");
+
+    // Verify that kill-pane WAS invoked with the correct pane target
+    const killPaneCalls = run.mock.calls.filter((c) => c[0]?.[0] === "kill-pane");
+    expect(killPaneCalls.length).toBeGreaterThan(0);
+    expect(killPaneCalls[0]?.[0]).toEqual(["kill-pane", "-t", "%1"]);
+  });
 });
