@@ -7,10 +7,11 @@ The tmux session browser makes windows, panes, and retained history visible, but
 - Add an interactive tmux cheat sheet to the embedded terminal's tmux browser.
 - Group common actions by navigation, pane layout, window management, history, and session control, and show each action's native tmux shortcut.
 - Make supported entries clickable so users can invoke the equivalent action without typing the shortcut.
+- Add an explicit Stop session action that resolves the current canonical project session and stops the Manager plus every window and pane for that session.
 - Execute actions through an explicit server-side allowlist and structured arguments rather than accepting arbitrary tmux commands or keystrokes.
 - Refresh the project-scoped topology after an action and preserve the Manager PTY, terminal connection, and current dashboard state.
 - Distinguish available, provider-unsupported, and intentionally non-executable shortcuts in the UI, including provider-specific degradation for psmux.
-- Keep destructive shortcuts such as killing a pane, window, or session reference-only in the initial implementation; do not expose arbitrary command execution.
+- Keep pane and window kill shortcuts reference-only; the supported close action is limited to the current project session and never accepts a client-supplied target.
 
 ## Capabilities
 
@@ -20,7 +21,7 @@ The tmux session browser makes windows, panes, and retained history visible, but
 
 ### Modified Capabilities
 
-None.
+- `tmux-session-browser`: Extended to support allowlisted create, split, navigate, and layout actions within the current ithyno-managed project session, plus explicitly confirmed pane-close and session-stop actions.
 
 ## Impact
 

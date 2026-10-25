@@ -2280,6 +2280,371 @@ a.modal-btn:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+
+.terminal-tmux-controls {
+  position: absolute;
+  top: 6px;
+  right: 42px;
+  z-index: 10;
+  display: flex;
+  gap: 5px;
+}
+.terminal-tmux-toggle {
+  width: 26px;
+  min-width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+  opacity: 0.72;
+}
+.terminal-tmux-toggle:hover,
+.terminal-tmux-toggle.active {
+  color: var(--text);
+  border-color: var(--accent);
+  opacity: 1;
+}
+.terminal-tmux-browser {
+  position: absolute;
+  inset: 36px 8px 8px;
+  z-index: 15;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--panel) 97%, var(--terminal-bg));
+  color: var(--text);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+}
+.terminal-tmux-browser button,
+.terminal-tmux-browser input {
+  font: inherit;
+}
+.terminal-tmux-browser-head,
+.terminal-tmux-history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.terminal-tmux-browser-head > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.terminal-tmux-browser-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.terminal-tmux-browser-head span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.terminal-tmux-browser-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  gap: 5px;
+}
+.terminal-tmux-browser-actions button,
+.terminal-tmux-history-toolbar button,
+.terminal-tmux-history-button {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.terminal-tmux-browser-actions button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  padding: 0;
+}
+.terminal-tmux-browser-actions .terminal-tmux-panel-close-button {
+  width: 26px !important;
+  min-width: 26px;
+  max-width: 26px;
+  height: 26px;
+  aspect-ratio: 1;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+}
+.terminal-tmux-close-session-button {
+  width: auto !important;
+  min-width: 88px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.terminal-tmux-browser button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.terminal-tmux-browser button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.terminal-tmux-close-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--warning) 10%, var(--panel)) ;
+  color: var(--text);
+}
+.terminal-tmux-close-confirm strong {
+  font-size: 12px;
+}
+.terminal-tmux-close-confirm p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.terminal-tmux-close-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.terminal-tmux-close-confirm-actions button {
+  min-width: 100px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.terminal-tmux-close-confirm-actions button:last-child {
+  background: color-mix(in oklab, var(--danger) 18%, var(--panel-2));
+  border-color: color-mix(in oklab, var(--danger) 60%, var(--border));
+  color: var(--text);
+}
+.terminal-tmux-error,
+.terminal-tmux-history-note {
+  padding: 7px 10px;
+  color: var(--warning);
+  font-size: 11px;
+}
+.terminal-tmux-windows {
+  display: flex;
+  gap: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.terminal-tmux-windows button {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.terminal-tmux-windows button.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in oklab, var(--accent) 14%, var(--panel));
+}
+.terminal-tmux-panes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  overflow: auto;
+}
+.terminal-tmux-pane {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.terminal-tmux-pane.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.terminal-tmux-pane-select {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  min-width: 0;
+  gap: 3px 8px;
+  padding: 3px 30px 3px 3px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.terminal-tmux-pane-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+}
+.terminal-tmux-pane-select strong,
+.terminal-tmux-pane-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-tmux-pane-select span,
+.terminal-tmux-pane-select small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.terminal-tmux-pane-select small {
+  grid-column: 1 / -1;
+}
+.terminal-tmux-history-button {
+  align-self: flex-end;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+.terminal-tmux-cheatsheet {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--panel-2) 60%, transparent);
+}
+.terminal-tmux-cheatsheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.terminal-tmux-cheatsheet-back {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.terminal-tmux-cheatsheet-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 12px 4px;
+}
+.terminal-tmux-cheatsheet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.terminal-tmux-cheatsheet-group h4 {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.terminal-tmux-cheatsheet-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+.terminal-tmux-cheatsheet-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 48px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.terminal-tmux-cheatsheet-action small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.terminal-tmux-cheatsheet-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.terminal-tmux-history {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.terminal-tmux-history-toolbar {
+  justify-content: flex-start;
+}
+.terminal-tmux-history-toolbar strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-tmux-history-toolbar button {
+  padding: 4px 8px;
+}
+.terminal-tmux-history > input {
+  margin: 8px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.terminal-tmux-history > pre {
+  min-height: 0;
+  flex: 1;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--terminal-bg);
+  color: var(--fg-primary);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  user-select: text;
+}
 /* Warn state: PTY WebSocket has closed */
 .terminal-reconnect-warn {
   opacity: 1;

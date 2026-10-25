@@ -283,7 +283,7 @@ export function ptyStartup(
       ? { startup: baseStartup }
       : { startup: baseStartup, initialInput };
   }
-  const session = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
+  const session = resolvedTmuxSessionName(projectRoot);
   // A tmux server outlives the PTY client that created it. Explicitly put the
   // dashboard identity in a new session and register those names with
   // update-environment before `-A` attaches to an existing session. The shell
@@ -336,6 +336,16 @@ export function tmuxSessionName(projectRoot?: string): string {
   if (!projectRoot) return "ithyno";
   const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 12);
   return `ithyno-${hash}`;
+}
+
+/** Resolve the exact project session target used by both PTY startup and the
+ * tmux browser. The explicit environment override remains authoritative for
+ * operators that already use it. */
+export function resolvedTmuxSessionName(
+  projectRoot?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
 }
 
 function tmuxMissingFallback(): string {
@@ -681,7 +691,7 @@ export function terminateAllLivePtys(oldProjectRoot?: string): void {
   }
 
   if (oldProjectRoot) {
-    const sessionName = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(oldProjectRoot);
+    const sessionName = resolvedTmuxSessionName(oldProjectRoot);
     try {
       spawnSync("tmux", ["kill-session", "-t", sessionName], { stdio: "ignore", timeout: 3000 });
     } catch {
