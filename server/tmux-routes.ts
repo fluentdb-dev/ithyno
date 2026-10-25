@@ -4,6 +4,7 @@ import { extractToken, verifyToken } from "./util/auth.js";
 import {
   captureTmuxPaneHistory,
   executeTmuxAction,
+  getAvailableTmuxCommands,
   getTmuxActionCatalog,
   getTmuxTopology,
   selectTmuxTarget,
@@ -93,7 +94,15 @@ export const registerTmuxRoutes: FastifyPluginAsync<TmuxRoutesOptions> = async (
       if (!topology.available || !topology.session) {
         return reply.code(409).send({ error: topology.reason ?? "No tmux session exists for this project" });
       }
-      return getTmuxActionCatalog(topology.provider ?? "tmux");
+      const provider = topology.provider ?? "tmux";
+      let availableCommands: Set<string> | undefined;
+      if (provider === "psmux") {
+        const runner = operationOptions.runner;
+        if (runner) {
+          availableCommands = await getAvailableTmuxCommands(runner, "psmux");
+        }
+      }
+      return getTmuxActionCatalog(provider, availableCommands);
     } catch (error) {
       return reply.code(500).send({ error: error instanceof Error ? error.message : String(error) });
     }

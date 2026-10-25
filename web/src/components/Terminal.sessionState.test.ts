@@ -1,6 +1,7 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import type { TmuxActionCatalogEntry } from "../types";
 import {
   TmuxBrowserPanel,
   TmuxBrowserControl,
@@ -757,6 +758,102 @@ describe("tmux browser panel", () => {
     );
     expect(errorMarkup).toContain("history probe failed");
     expect(errorMarkup).not.toContain("split");
+  });
+
+  it("selects the active window and then its active pane for history (multi-window regression test)", () => {
+    const multiWindowTopology = {
+      ...topology,
+      capabilities: { topology: true, selection: true, history: true },
+      session: {
+        ...topology.session,
+        windows: [
+          {
+            id: "@1",
+            index: 0,
+            name: "first",
+            active: false,
+            paneCount: 1,
+            layout: "even-vertical",
+            panes: [{
+              id: "%1",
+              windowId: "@1",
+              windowIndex: 0,
+              index: 0,
+              title: "first-pane",
+              active: true,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }],
+          },
+          {
+            id: "@2",
+            index: 1,
+            name: "second",
+            active: true,
+            paneCount: 2,
+            layout: "even-horizontal",
+            panes: [{
+              id: "%2",
+              windowId: "@2",
+              windowIndex: 1,
+              index: 0,
+              title: "secondary-first",
+              active: false,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }, {
+              id: "%3",
+              windowId: "@2",
+              windowIndex: 1,
+              index: 1,
+              title: "secondary-active",
+              active: true,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }],
+          },
+        ],
+      },
+    };
+
+    const onOpenHistory = vi.fn();
+    const openHistoryAction: TmuxActionCatalogEntry = { id: "open-history", group: "history", label: "Open pane history", shortcut: "Click History", availability: "client-only", supported: true, description: "Open history." };
+
+    const element = TmuxBrowserPanel({
+      topology: multiWindowTopology,
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      cheatsheetOpen: true,
+      actionCatalog: [openHistoryAction],
+      pendingActionId: null,
+      actionError: null,
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      onOpenHistory,
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onExecuteAction: vi.fn(),
+    });
+
+    const historyButton = findButtonNode(element, "Open pane history");
+    const clickHistory = historyButton?.props.onClick as (() => void) | undefined;
+    clickHistory?.();
+
+    // Should open history for the active pane in the active window (@2:%3),
+    // not the first pane with active=true across all windows (@1:%1).
+    expect(onOpenHistory).toHaveBeenCalledOnce();
+    expect(onOpenHistory).toHaveBeenCalledWith(multiWindowTopology.session.windows[1].panes[1]);
   });
 });
 

@@ -276,7 +276,8 @@ export function TmuxBrowserPanel({
                               if (action.availability === "client-only") {
                                 if (action.id === "refresh-topology") onRefresh();
                                 else if (action.id === "open-history") {
-                                  const activePane = session.windows.flatMap((window) => window.panes).find((pane) => pane.active) ?? session.windows[0]?.panes[0];
+                                  const activeWindow = session.windows.find((window) => window.active) ?? session.windows[0];
+                                  const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
                                   if (activePane) onOpenHistory(activePane);
                                 }
                                 return;

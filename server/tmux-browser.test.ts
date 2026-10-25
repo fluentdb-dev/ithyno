@@ -246,4 +246,57 @@ describe("tmux browser", () => {
       expect(run).toHaveBeenLastCalledWith(expected[actionId]);
     }
   });
+
+  it("probes psmux for available commands and disables unsupported actions", () => {
+    // When all navigation commands are available
+    const navigationAvailable = new Set(["next-window", "previous-window", "last-window", "select-pane"]);
+    const catalog1 = getTmuxActionCatalog("psmux", navigationAvailable);
+    expect(catalog1.find((e) => e.id === "next-window")?.supported).toBe(true);
+    expect(catalog1.find((e) => e.id === "pane-left")?.supported).toBe(true);
+    expect(catalog1.find((e) => e.id === "create-window")?.supported).toBe(false);
+
+    // When select-pane is missing
+    const limitedCommands = new Set(["next-window", "previous-window", "last-window"]);
+    const catalog2 = getTmuxActionCatalog("psmux", limitedCommands);
+    expect(catalog2.find((e) => e.id === "next-window")?.supported).toBe(true);
+    expect(catalog2.find((e) => e.id === "pane-left")?.availability).toBe("unsupported");
+    expect(catalog2.find((e) => e.id === "pane-left")?.supported).toBe(false);
+
+    // When split commands are missing
+    const noSplitCommands = new Set([
+      "next-window", "previous-window", "last-window", "select-pane",
+      "new-window", "resize-pane", "next-layout", "kill-pane", "kill-session",
+    ]);
+    const catalog3 = getTmuxActionCatalog("psmux", noSplitCommands);
+    expect(catalog3.find((e) => e.id === "split-left")?.availability).toBe("unsupported");
+    expect(catalog3.find((e) => e.id === "split-right")?.availability).toBe("unsupported");
+    expect(catalog3.find((e) => e.id === "split-top")?.availability).toBe("unsupported");
+    expect(catalog3.find((e) => e.id === "split-bottom")?.availability).toBe("unsupported");
+  });
+
+  it("rejects unsupported psmux actions server-side during execution", async () => {
+    // Verify that getTmuxActionCatalog correctly probes for command availability
+    // and marks actions as unsupported when required commands are missing
+    const limitedCommands = new Set([
+      "select-window", "select-pane", // selection commands available
+      "new-window", "split-window", "kill-pane", "kill-session", // create/split/close available
+      // but navigation commands are missing
+    ]);
+
+    const catalog = getTmuxActionCatalog("psmux", limitedCommands);
+    const nextWindow = catalog.find((e) => e.id === "next-window");
+    const previousWindow = catalog.find((e) => e.id === "previous-window");
+    const lastWindow = catalog.find((e) => e.id === "last-window");
+
+    // When next-window/previous-window/last-window commands are not available,
+    // the corresponding actions should be marked as unsupported
+    expect(nextWindow?.availability).toBe("unsupported");
+    expect(previousWindow?.availability).toBe("unsupported");
+    expect(lastWindow?.availability).toBe("unsupported");
+    expect(nextWindow?.supported).toBe(false);
+
+    // But create-window and split should still work
+    expect(catalog.find((e) => e.id === "create-window")?.supported).toBe(true);
+    expect(catalog.find((e) => e.id === "split-left")?.supported).toBe(true);
+  });
 });

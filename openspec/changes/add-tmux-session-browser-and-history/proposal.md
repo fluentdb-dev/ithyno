@@ -4,10 +4,9 @@ Ithyno can keep a Manager alive inside a project-scoped tmux session, but the da
 
 ## What Changes
 
-- Add a read-only tmux browser for ithyno-managed sessions, windows, and panes, with active-state, role, Change, and pane-layout context where available.
+- Add a read-only tmux browser for ithyno-managed sessions, windows, and panes, with active-state and pane-layout context.
 - Allow users to select an existing tmux window or pane from the embedded terminal UI without typing tmux key sequences.
 - Add a pane-history drawer backed by tmux history, with scrolling, refresh, search, selection, and copy support.
-- Link terminal-capable agent jobs to their managed tmux pane when that association is known.
 - Detect tmux/psmux capabilities and hide or disable unsupported controls instead of assuming full Unix tmux compatibility.
 - Keep the initial surface non-destructive: it does not create, split, rename, kill, or reorder tmux windows and panes.
 

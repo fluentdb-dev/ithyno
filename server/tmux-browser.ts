@@ -67,6 +67,28 @@ async function detectTmuxCapabilities(
   }
 }
 
+export async function getAvailableTmuxCommands(
+  runner: TmuxCommandRunner,
+  provider: "tmux" | "psmux",
+): Promise<Set<string>> {
+  if (provider === "tmux") {
+    // tmux always supports all standard commands
+    return new Set([
+      "next-window", "previous-window", "last-window", "select-pane",
+      "new-window", "split-window", "resize-pane", "next-layout",
+      "kill-pane", "kill-session",
+    ]);
+  }
+
+  try {
+    const commands = await runner(["list-commands", "-F", "#{command}"]);
+    return new Set(normalizeCommandList(commands.stdout));
+  } catch {
+    // If probe fails, assume minimal psmux support
+    return new Set(["select-window", "select-pane"]);
+  }
+}
+
 export type TmuxPane = {
   id: string;
   windowId: string;
@@ -170,27 +192,60 @@ export const TMUX_ACTION_CATALOG: readonly TmuxActionCatalogEntry[] = [
   { id: "kill-session", group: "session", label: "Stop session", shortcut: "Click Stop session", availability: "executable", supported: true, description: "Stop the Manager and every window and pane in the current project session; it does not merely hide the tmux panel." },
 ];
 
-export function getTmuxActionCatalog(provider: "tmux" | "psmux" | null = "tmux"): TmuxActionCatalogEntry[] {
+export function getTmuxActionCatalog(
+  provider: "tmux" | "psmux" | null = "tmux",
+  availableCommands?: Set<string>,
+): TmuxActionCatalogEntry[] {
   if (!provider) return [];
-  const override: Partial<Record<TmuxActionId, boolean>> = provider === "psmux"
-    ? {
-        "create-window": false,
-        "split-left": false,
-        "split-right": false,
-        "split-top": false,
-        "split-bottom": false,
-      }
-    : {};
+
+  // Map each action to the command(s) it requires
+  const commandsRequired: Partial<Record<TmuxActionId, string[]>> = {
+    "next-window": ["next-window"],
+    "previous-window": ["previous-window"],
+    "last-window": ["last-window"],
+    "pane-left": ["select-pane"],
+    "pane-right": ["select-pane"],
+    "pane-up": ["select-pane"],
+    "pane-down": ["select-pane"],
+    "create-window": ["new-window"],
+    "split-left": ["split-window"],
+    "split-right": ["split-window"],
+    "split-top": ["split-window"],
+    "split-bottom": ["split-window"],
+    "toggle-pane-zoom": ["resize-pane"],
+    "cycle-layout": ["next-layout"],
+    "kill-session": ["kill-session"],
+    "close-pane": ["kill-pane"],
+  };
 
   return TMUX_ACTION_CATALOG.map((entry) => {
-    const supported = override[entry.id] ?? entry.supported;
-    if (provider === "psmux" && entry.availability === "executable" && !supported) {
-      return { ...entry, availability: "unsupported", supported: false };
-    }
-    if (entry.availability === "reference-only") {
+    // Reference-only and client-only entries are never executable
+    if (entry.availability === "reference-only" || entry.availability === "client-only") {
       return { ...entry, supported: false };
     }
-    return { ...entry, supported };
+
+    // For tmux (full implementation), all executable actions are supported
+    if (provider === "tmux") {
+      return { ...entry, supported: true };
+    }
+
+    // For psmux, check if required commands are available
+    if (provider === "psmux" && availableCommands) {
+      const required = commandsRequired[entry.id] ?? [];
+      const supported = required.length > 0 && required.every((cmd) => availableCommands.has(cmd));
+      if (!supported) {
+        return { ...entry, availability: "unsupported", supported: false };
+      }
+      return { ...entry, supported: true };
+    }
+
+    // Fallback to original hardcoded psmux overrides if no availableCommands provided
+    const overriddenUnsupported = ["create-window", "split-left", "split-right", "split-top", "split-bottom"].includes(entry.id);
+    if (provider === "psmux" && overriddenUnsupported) {
+      return { ...entry, availability: "unsupported", supported: false };
+    }
+
+    return { ...entry, supported: entry.supported };
   });
 }
 
@@ -464,6 +519,16 @@ export async function executeTmuxAction(
   if (!action) throw new TmuxBrowserError("unsupported", `Unknown tmux action: ${actionId}`);
   if (!isTmuxActionExecutable(action)) {
     throw new TmuxBrowserError("unsupported", `${action.label} is not executable from ithyno`);
+  }
+
+  // For psmux, verify the action is still supported by the actual available commands
+  if (topology.provider === "psmux") {
+    const availableCommands = await getAvailableTmuxCommands(runner, "psmux");
+    const catalogWithProbe = getTmuxActionCatalog(topology.provider, availableCommands);
+    const actionWithProbe = catalogWithProbe.find((entry) => entry.id === actionId);
+    if (!actionWithProbe || !isTmuxActionExecutable(actionWithProbe)) {
+      throw new TmuxBrowserError("unsupported", `${action.label} is not supported by the installed psmux version`);
+    }
   }
 
   const activeWindow = session.windows.find((window) => window.active) ?? session.windows[0];
