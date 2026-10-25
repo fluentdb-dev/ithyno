@@ -21,7 +21,7 @@ The tmux session browser makes windows, panes, and retained history visible, but
 
 ### Modified Capabilities
 
-None.
+- `tmux-session-browser`: Extended to support allowlisted create, split, navigate, and layout actions within the current ithyno-managed project session, plus explicitly confirmed pane-close and session-stop actions.
 
 ## Impact
 

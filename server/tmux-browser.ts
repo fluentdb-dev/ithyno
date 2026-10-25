@@ -80,13 +80,8 @@ export async function getAvailableTmuxCommands(
     ]);
   }
 
-  try {
-    const commands = await runner(["list-commands", "-F", "#{command}"]);
-    return new Set(normalizeCommandList(commands.stdout));
-  } catch {
-    // If probe fails, assume minimal psmux support
-    return new Set(["select-window", "select-pane"]);
-  }
+  const commands = await runner(["list-commands", "-F", "#{command}"]);
+  return new Set(normalizeCommandList(commands.stdout));
 }
 
 export type TmuxPane = {
@@ -230,19 +225,21 @@ export function getTmuxActionCatalog(
     }
 
     // For psmux, check if required commands are available
-    if (provider === "psmux" && availableCommands) {
+    if (provider === "psmux") {
+      if (!availableCommands) {
+        // No proven commands; all server-executable actions must be unsupported
+        if (entry.availability === "executable") {
+          return { ...entry, availability: "unsupported", supported: false };
+        }
+        return { ...entry, supported: false };
+      }
+
       const required = commandsRequired[entry.id] ?? [];
       const supported = required.length > 0 && required.every((cmd) => availableCommands.has(cmd));
       if (!supported) {
         return { ...entry, availability: "unsupported", supported: false };
       }
       return { ...entry, supported: true };
-    }
-
-    // Fallback to original hardcoded psmux overrides if no availableCommands provided
-    const overriddenUnsupported = ["create-window", "split-left", "split-right", "split-top", "split-bottom"].includes(entry.id);
-    if (provider === "psmux" && overriddenUnsupported) {
-      return { ...entry, availability: "unsupported", supported: false };
     }
 
     return { ...entry, supported: entry.supported };
@@ -283,6 +280,10 @@ const defaultRunner: TmuxCommandRunner = async (args) => {
     throw error;
   }
 };
+
+export function getDefaultTmuxRunner(): TmuxCommandRunner {
+  return defaultRunner;
+}
 
 function asBool(value: string): boolean {
   return value === "1" || value === "on" || value === "true";

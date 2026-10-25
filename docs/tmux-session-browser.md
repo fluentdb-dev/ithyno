@@ -50,7 +50,7 @@ The cheat sheet groups tmux shortcuts by purpose and shows whether each entry is
 - **Stop session** — Stop the Manager and every window and pane in the current project session. Clicking this action requires an inline confirmation. It does not merely hide the tmux panel.
 
 ### Reference-Only Shortcuts
-- **Kill pane** (`Ctrl+B → x`) and **Kill window** (`Ctrl+B → &`) are shown for reference but not executable from ithyno in this release.
+- **Kill pane** (`Ctrl+B → x`) and **Kill window** (`Ctrl+B → &`) are shown for reference only and are not executable from ithyno. Use the dedicated **Stop session** action to stop the Manager and all project windows and panes when needed.
 
 ## Capability Awareness
 
@@ -63,4 +63,3 @@ All cheat-sheet actions (create, split, navigate, layout, close, stop session) o
 ## Initial Operation Scope
 
 The browser and cheat sheet support topology refresh, window and pane selection, history inspection, and a pane-specific close confirmation that stops only that pane's running process. An explicit session-level control, "Stop session", stops the Manager and every window and pane in the current project session when confirmed.
-

@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SESSION_TOKEN } from "./util/auth.js";
 import { registerTmuxRoutes } from "./tmux-routes.js";
-import type { TmuxCommandRunner } from "./tmux-browser.js";
+import type { TmuxActionCatalogEntry, TmuxCommandRunner } from "./tmux-browser.js";
 
 const windows = "@1\t0\tmanager\t1\t1\tlayout\n";
 const panes = "%1\t@1\t0\t0\tManager\t1\t100\t30\t/tmp/project\n";
@@ -19,14 +19,14 @@ function runner(): TmuxCommandRunner {
 }
 
 const apps: Array<ReturnType<typeof Fastify>> = [];
-async function app(run = runner(), root = "/tmp/project") {
+async function app(run = runner(), root = "/tmp/project", platform: NodeJS.Platform = "darwin") {
   const instance = Fastify();
   apps.push(instance);
   await instance.register(registerTmuxRoutes, {
     getProjectRoot: () => root,
     isLocal: (address) => address === "127.0.0.1",
     runner: run,
-    platform: "darwin",
+    platform,
   });
   await instance.ready();
   return instance;
@@ -198,5 +198,66 @@ describe("tmux browser routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ paneId: "%1", content: "retained history\n", lineLimit: 100 });
     expect((await instance.inject({ method: "GET", url: "/api/tmux/history?paneId=%251&lines=0", headers })).statusCode).toBe(400);
+  });
+
+  it("probes psmux for available commands when fetching action catalog", async () => {
+    const run = vi.fn(async (args) => {
+      if (args[0] === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (args[0] === "has-session") return { stdout: "", stderr: "" };
+      if (args[0] === "list-windows") return { stdout: windows, stderr: "" };
+      if (args[0] === "list-panes") return { stdout: panes, stderr: "" };
+      if (args[0] === "list-commands") {
+        return {
+          stdout: "select-window\nselect-pane\n",
+          stderr: "",
+        };
+      }
+      return { stdout: "", stderr: "" };
+    });
+    const instance = await app(run, "/tmp/project", "win32");
+    const headers = { "x-session-token": SESSION_TOKEN };
+
+    const response = await instance.inject({ method: "GET", url: "/api/tmux/actions", headers });
+    expect(response.statusCode).toBe(200);
+    const catalog = response.json();
+
+    // Verify that list-commands was called (only psmux probes)
+    expect(run).toHaveBeenCalledWith(["list-commands", "-F", "#{command}"]);
+
+    // With only select-window and select-pane available, navigation commands (next-window, etc.) should be unsupported
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "next-window")?.supported).toBe(false);
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "next-window")?.availability).toBe("unsupported");
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "pane-left")?.supported).toBe(true); // pane-left only needs select-pane
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "create-window")?.supported).toBe(false); // new-window not in available
+  });
+
+  it("does not advertise unproven actions when psmux probe fails", async () => {
+    const run = vi.fn(async (args) => {
+      if (args[0] === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (args[0] === "has-session") return { stdout: "", stderr: "" };
+      if (args[0] === "list-windows") return { stdout: windows, stderr: "" };
+      if (args[0] === "list-panes") return { stdout: panes, stderr: "" };
+      if (args[0] === "list-commands") {
+        throw new Error("psmux list-commands probe failed");
+      }
+      return { stdout: "", stderr: "" };
+    });
+    const instance = await app(run, "/tmp/project", "win32");
+    const headers = { "x-session-token": SESSION_TOKEN };
+
+    const response = await instance.inject({ method: "GET", url: "/api/tmux/actions", headers });
+    expect(response.statusCode).toBe(200);
+    const catalog = response.json();
+
+    // When probe fails, all executable server-side actions must be unsupported
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "next-window")?.supported).toBe(false);
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "next-window")?.availability).toBe("unsupported");
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "create-window")?.supported).toBe(false);
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "split-left")?.supported).toBe(false);
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "kill-session")?.supported).toBe(false);
+
+    // But client-only and reference-only entries remain accessible
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "refresh-topology")?.availability).toBe("client-only");
+    expect(catalog.find((e: TmuxActionCatalogEntry) => e.id === "kill-pane")?.availability).toBe("reference-only");
   });
 });

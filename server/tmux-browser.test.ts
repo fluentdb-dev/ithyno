@@ -175,13 +175,20 @@ describe("tmux browser", () => {
 
   it("exposes a typed action catalog with reference-only entries and psmux degradation", () => {
     const tmuxEntries = getTmuxActionCatalog("tmux");
-    const psmuxEntries = getTmuxActionCatalog("psmux");
+    const psmuxEntriesUnprobed = getTmuxActionCatalog("psmux"); // No probe results
+    const psmuxEntriesProbed = getTmuxActionCatalog("psmux", new Set(["next-window", "select-pane"])); // With probe results
 
     expect(tmuxEntries.some((entry) => entry.id === "next-window" && entry.availability === "executable" && entry.shortcut === "Ctrl+B → n")).toBe(true);
     expect(tmuxEntries.some((entry) => entry.id === "kill-pane" && entry.availability === "reference-only" && entry.shortcut === "Ctrl+B → x")).toBe(true);
     expect(tmuxEntries.some((entry) => entry.id === "kill-session" && entry.shortcut === "Click Stop session")).toBe(true);
-    expect(psmuxEntries.some((entry) => entry.id === "next-window" && entry.supported)).toBe(true);
-    expect(psmuxEntries.some((entry) => entry.id === "create-window" && entry.availability === "unsupported")).toBe(true);
+
+    // When psmux has no proven commands, all executable actions must be unsupported
+    expect(psmuxEntriesUnprobed.some((entry) => entry.id === "next-window" && entry.supported)).toBe(false);
+    expect(psmuxEntriesUnprobed.some((entry) => entry.id === "create-window" && entry.availability === "unsupported")).toBe(true);
+
+    // When psmux has proven commands, supported actions are marked accordingly
+    expect(psmuxEntriesProbed.some((entry) => entry.id === "next-window" && entry.supported)).toBe(true);
+    expect(psmuxEntriesProbed.some((entry) => entry.id === "create-window" && entry.availability === "unsupported")).toBe(true);
   });
 
   it("executes only allowlisted actions and rejects destructive reference-only entries", async () => {
@@ -274,29 +281,51 @@ describe("tmux browser", () => {
     expect(catalog3.find((e) => e.id === "split-bottom")?.availability).toBe("unsupported");
   });
 
-  it("rejects unsupported psmux actions server-side during execution", async () => {
-    // Verify that getTmuxActionCatalog correctly probes for command availability
-    // and marks actions as unsupported when required commands are missing
-    const limitedCommands = new Set([
-      "select-window", "select-pane", // selection commands available
-      "new-window", "split-window", "kill-pane", "kill-session", // create/split/close available
-      // but navigation commands are missing
-    ]);
+  it("disables all executable actions when psmux probe fails and no commands are proven", () => {
+    // When availableCommands is undefined (probe failed), all server-executable actions must be unsupported
+    const catalog = getTmuxActionCatalog("psmux", undefined);
 
-    const catalog = getTmuxActionCatalog("psmux", limitedCommands);
-    const nextWindow = catalog.find((e) => e.id === "next-window");
-    const previousWindow = catalog.find((e) => e.id === "previous-window");
-    const lastWindow = catalog.find((e) => e.id === "last-window");
+    // All executable actions in the catalog must be marked unsupported and unavailable
+    expect(catalog.find((e) => e.id === "next-window")?.supported).toBe(false);
+    expect(catalog.find((e) => e.id === "next-window")?.availability).toBe("unsupported");
+    expect(catalog.find((e) => e.id === "create-window")?.supported).toBe(false);
+    expect(catalog.find((e) => e.id === "create-window")?.availability).toBe("unsupported");
+    expect(catalog.find((e) => e.id === "split-left")?.supported).toBe(false);
+    expect(catalog.find((e) => e.id === "split-left")?.availability).toBe("unsupported");
+    expect(catalog.find((e) => e.id === "kill-session")?.supported).toBe(false);
+    expect(catalog.find((e) => e.id === "kill-session")?.availability).toBe("unsupported");
 
-    // When next-window/previous-window/last-window commands are not available,
-    // the corresponding actions should be marked as unsupported
-    expect(nextWindow?.availability).toBe("unsupported");
-    expect(previousWindow?.availability).toBe("unsupported");
-    expect(lastWindow?.availability).toBe("unsupported");
-    expect(nextWindow?.supported).toBe(false);
+    // But client-only and reference-only entries remain unchanged
+    expect(catalog.find((e) => e.id === "refresh-topology")?.availability).toBe("client-only");
+    expect(catalog.find((e) => e.id === "open-history")?.availability).toBe("client-only");
+    expect(catalog.find((e) => e.id === "kill-pane")?.availability).toBe("reference-only");
+    expect(catalog.find((e) => e.id === "kill-window")?.availability).toBe("reference-only");
+  });
 
-    // But create-window and split should still work
-    expect(catalog.find((e) => e.id === "create-window")?.supported).toBe(true);
-    expect(catalog.find((e) => e.id === "split-left")?.supported).toBe(true);
+  it("executes action only when psmux has proven the required command via list-commands", async () => {
+    const windows = "@1\t0\tmanager\t1\t1\tlayout-a\n";
+    const panes = "%1\t@1\t0\t0\tManager\t1\t100\t30\t/tmp/project\n";
+
+    // Mock runner: next-window is NOT in the available commands
+    const commandsWithoutNavigation = new Set(["select-window", "select-pane"]);
+    const run = vi.fn(async (args) => {
+      const key = args[0];
+      if (key === "-V") return { stdout: "psmux 1.0\n", stderr: "" };
+      if (key === "has-session") return { stdout: "", stderr: "" };
+      if (key === "list-windows") return { stdout: windows, stderr: "" };
+      if (key === "list-panes") return { stdout: panes, stderr: "" };
+      if (key === "list-commands") return { stdout: Array.from(commandsWithoutNavigation).join("\n") + "\n", stderr: "" };
+      if (key === "next-window") throw new Error("next-window should not be invoked when not in available commands");
+      return { stdout: "", stderr: "" };
+    });
+
+    // Try to execute next-window action on psmux without next-window in the proven commands
+    await expect(
+      executeTmuxAction("/tmp/project", "next-window", { runner: run, platform: "win32" })
+    ).rejects.toMatchObject({ kind: "unsupported" });
+
+    // Verify that next-window was never actually invoked
+    const nextWindowCalls = run.mock.calls.filter((c) => c[0]?.[0] === "next-window");
+    expect(nextWindowCalls).toHaveLength(0);
   });
 });

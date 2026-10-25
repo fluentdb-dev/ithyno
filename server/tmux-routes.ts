@@ -5,6 +5,7 @@ import {
   captureTmuxPaneHistory,
   executeTmuxAction,
   getAvailableTmuxCommands,
+  getDefaultTmuxRunner,
   getTmuxActionCatalog,
   getTmuxTopology,
   selectTmuxTarget,
@@ -97,9 +98,11 @@ export const registerTmuxRoutes: FastifyPluginAsync<TmuxRoutesOptions> = async (
       const provider = topology.provider ?? "tmux";
       let availableCommands: Set<string> | undefined;
       if (provider === "psmux") {
-        const runner = operationOptions.runner;
-        if (runner) {
+        const runner = operationOptions.runner ?? getDefaultTmuxRunner();
+        try {
           availableCommands = await getAvailableTmuxCommands(runner, "psmux");
+        } catch {
+          // Probe failure: no proven commands; leave availableCommands undefined
         }
       }
       return getTmuxActionCatalog(provider, availableCommands);
