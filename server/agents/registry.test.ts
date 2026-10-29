@@ -771,6 +771,8 @@ describe("canonicalCli — CLI identity normalization", () => {
 
   it("leaves 'claude' unchanged", () => {
     expect(canonicalCli("claude")).toBe("claude");
+    expect(canonicalCli("/usr/local/bin/claude-code")).toBe("claude");
+    expect(canonicalCli("C:\\Tools\\codex.exe")).toBe("codex");
   });
 
   it("leaves 'codex' unchanged", () => {

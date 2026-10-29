@@ -54,6 +54,7 @@ import { AgentRegistry, type AgentDef } from "./agents/registry.js";
 import { AgentRunner, type RunnerExecutionMode, type JobSummary, type JobStatus } from "./agents/runner.js";
 import { validateRunPayload, type RunBody } from "./agents/run-validation.js";
 import { applyAgentConfigPayload, coercePayload, writeAgmsg, writeParallelExecution, writeTmux } from "./agents/config-writer.js";
+import { registerCliCapabilityRoutes } from "./cli-capability-routes.js";
 import { syncSpawnOptions } from "./agents/spawn-options-writer.js";
 import { extractDiff, type DiffPayload } from "./agents/diff.js";
 import { setExecutionInFrontmatter, type ExecutionMode } from "./parser/proposal-edit.js";
@@ -510,6 +511,8 @@ fastify.get("/api/health", async () => {
       : { available: false as const, reason: pty.reason },
   };
 });
+
+fastify.register(registerCliCapabilityRoutes);
 
 fastify.get("/api/about", async () => getAboutInfo());
 
@@ -1705,6 +1708,7 @@ fastify.get("/api/manager/status", async (req, reply) => {
         description: managerEntry.description,
         command: managerEntry.command,
         args: managerEntry.args,
+        sessionStartup: managerEntry.sessionStartup,
         hasEnv: !!managerEntry.env && Object.keys(managerEntry.env).length > 0,
         detached: managerEntry.detached,
         mode: managerEntry.mode,

@@ -1596,6 +1596,81 @@ a.modal-btn:hover {
   gap: 10px;
   padding-top: 6px;
 }
+.agent-config-builder-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-config-free-form-args {
+  margin-bottom: 10px;
+}
+.agent-config-free-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.agent-config-free-form-reset {
+  min-width: 28px;
+  padding: 2px 5px;
+  line-height: 1.2;
+}
+.agent-config-modal .agent-config-reset-args {
+  margin-right: auto;
+}
+.agent-config-category {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.agent-config-category > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-config-category-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-config-category-chevron {
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+.agent-config-category[open] .agent-config-category-chevron {
+  transform: rotate(90deg);
+}
+.agent-config-category > .agent-config-builder-grid,
+.agent-config-category > .agent-config-advanced-body {
+  padding: 0 10px 10px;
+}
+.agent-config-category-danger {
+  border-color: color-mix(in oklab, var(--danger) 55%, var(--border));
+  background: color-mix(in oklab, var(--danger) 8%, var(--panel));
+}
+.agent-config-category-danger > summary {
+  color: var(--danger);
+}
+.agent-config-danger-pill {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in oklab, var(--danger) 50%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
 .agent-config-field {
   display: flex;
   flex-direction: column;

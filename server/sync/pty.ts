@@ -16,7 +16,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
-import { hasAgentsYaml } from "../agents/registry.js";
+import { canonicalCli, hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
 import { resolveDevelopmentEnvironmentValues, sanitizeChildEnvironment } from "../environment/index.js";
 
@@ -164,8 +164,8 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * `.ithyno/session-id` file (Claude-only from day one) is still read
  * as fallback for existing dev environments.
  */
-function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
-  if (!projectRoot) return "claude";
+function resolveClaudeSessionStartup(projectRoot: string | undefined, command = "claude"): string {
+  if (!projectRoot) return shellQuote(command);
   const idPath = join(projectRoot, ".ithyno", "session-claude");
   const legacyPath = join(projectRoot, ".ithyno", "session-id");
   let uuid = "";
@@ -179,7 +179,7 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
     if (uuid) break;
   }
   if (uuid) {
-    return `claude --resume ${shellQuote(uuid)}`;
+    return `${shellQuote(command)} --resume ${shellQuote(uuid)}`;
   }
   // First launch (or empty/corrupt file): mint + write + create.
   const fresh = randomUUID();
@@ -191,7 +191,7 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
      * will create the conversation, we just won't be able to resume
      * next time. Better than a broken shell. */
   }
-  return `claude --session-id ${shellQuote(fresh)}`;
+  return `${shellQuote(command)} --session-id ${shellQuote(fresh)}`;
 }
 
 /**
@@ -244,7 +244,16 @@ export function ptyStartup(
   let initialInput: string | undefined;
   if (manager && manager.command) {
     const args = manager.args ?? [];
-    if (args.length === 0) {
+    if (manager.sessionStartup === "managed" && canonicalCli(manager.command) === "claude") {
+      // The session policy is independent from normal CLI options. This
+      // keeps the stable per-project session id active when users also set
+      // --model, --permission-mode, or other Manager arguments in the UI.
+      baseStartup = [resolveClaudeSessionStartup(projectRoot, manager.command), ...args.map(shellQuote)].join(" ");
+    } else if (manager.sessionStartup !== undefined) {
+      // Explicit UI policy: session flags, if any, are already represented
+      // in args. `new` intentionally means a plain fresh CLI invocation.
+      baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    } else if (args.length === 0) {
       // Empty args → defer to per-CLI Manager startup strategy
       // (Claude gets --session-id mint / --resume; other CLIs get
       // plain command as safe first-launch default). Explicit args in

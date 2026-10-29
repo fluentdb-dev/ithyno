@@ -207,12 +207,14 @@ export type AboutInfo = {
 
 // ---- agent-runner ----------------------------------------------------------
 export type AgentMode = "single-prompt" | "live-shell";
+export type AgentSessionStartup = "managed" | "new" | "picker" | "latest" | "custom";
 
 export type AgentPublic = {
   name: string;
   description?: string;
   command?: string;
   args?: string[];
+  sessionStartup?: AgentSessionStartup;
   hasEnv: boolean;
   detached?: boolean;
   /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
@@ -264,6 +266,7 @@ export type AgentConfigPayload =
       prompts?: Record<string, string>;
       command?: string;
       args?: string[];
+      sessionStartup?: AgentSessionStartup;
       description?: string;
       detached?: boolean;
     }

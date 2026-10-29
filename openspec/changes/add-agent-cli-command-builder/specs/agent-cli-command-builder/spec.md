@@ -1,65 +1,67 @@
 ## ADDED Requirements
 
-### Requirement: Allow-listed CLI capability inspection
+### Requirement: Bundled CLI capability catalog
 
-The system SHALL inspect supported Agent CLIs through an allow-listed adapter for Claude Code, Codex, Antigravity CLI, and GitHub Copilot CLI. Inspection SHALL report the installed version, supported structured options, model-discovery status, and any discovered models without accepting an arbitrary probe command from the client.
+The system SHALL ship a checked-in JSON capability catalog for Claude Code, Codex, Antigravity CLI, and GitHub Copilot CLI. The catalog SHALL include the aliases, observed source version, supported structured fields, category/kind/choice metadata, danger metadata, model guidance, and any discoverable models for the developer snapshot used to create the bundle.
 
-#### Scenario: Supported CLI is inspected
-- **WHEN** the Agent dialog requests capabilities for an installed recognized CLI
-- **THEN** the server executes only the adapter-defined version, help, and optional model-list argv
-- **AND** returns the installed version and the builder fields supported by that CLI version
+#### Scenario: Supported CLI is selected
+- **WHEN** the Agent dialog requests capabilities for a supported command
+- **THEN** the server reads the bundled catalog entry for that adapter
+- **AND** returns the field metadata, category layout, and model suggestions without invoking any user-environment subprocesses
 
 #### Scenario: Unknown command is selected
 - **WHEN** an Agent command does not map to an allow-listed adapter
 - **THEN** the system reports that structured inspection is unsupported
-- **AND** the user can continue using manual Advanced args
+- **AND** the user can continue using the manual free-form args editor
 
-### Requirement: Bounded non-blocking discovery
+### Requirement: Runtime catalog-only lookup
 
-Every CLI inspection process MUST run without a shell and SHALL have a timeout, output-size limit, and deterministic termination behavior. Inspection failure SHALL NOT prevent the Agent configuration from being saved manually.
+The runtime API and UI MUST read the generated catalog only. They MUST NOT spawn `claude`, `codex`, `agy`, `copilot`, `app-server`, or model-list commands while the dashboard is open or while the user edits an Agent command.
 
-#### Scenario: Model discovery hangs
-- **WHEN** a CLI model-list command does not exit before its timeout
-- **THEN** the server terminates the probe
-- **AND** the dialog reports model discovery as unavailable
-- **AND** manual model entry remains enabled
+#### Scenario: Command builder opens
+- **WHEN** the Agent dialog loads or changes the selected command
+- **THEN** it resolves the static catalog entry from the bundled JSON
+- **AND** it does not launch a process or inspect the local machine
 
-#### Scenario: CLI is not installed
-- **WHEN** the selected recognized command cannot be resolved or executed
-- **THEN** the dialog displays an executable-not-found state
-- **AND** does not discard the Agent's existing command or arguments
+#### Scenario: Catalog entry is absent
+- **WHEN** the bundled JSON does not define a capability entry for the adapter
+- **THEN** the runtime falls back to the unsupported-command behavior
+- **AND** the user still retains the manual free-form args editor
 
-### Requirement: Account-aware model selection with manual fallback
+### Requirement: Manual model entry remains valid
 
-The command builder SHALL use models returned by the installed CLI when a verified non-interactive discovery mechanism exists. When it does not exist or fails, the builder SHALL provide editable manual model entry and show the adapter's CLI-specific model inspection guidance rather than presenting a hard-coded list as authoritative.
+The command builder SHALL treat catalog model entries as suggestions rather than an entitlement, authorization, or guarantee of availability. The model field SHALL remain editable so users can override account-specific or provider-specific model names.
 
-#### Scenario: Agy returns models
-- **WHEN** `agy models` succeeds for the selected Agy executable
-- **THEN** the model selector offers the returned models
-- **AND** selecting one serializes it with Agy's supported model flag
+#### Scenario: Model list is stale
+- **WHEN** the catalog includes a snapshot of models that do not match the current account or gateway state
+- **THEN** the UI still allows manual model entry
+- **AND** the model value is saved without forcing an explicit catalog authorization check
 
-#### Scenario: CLI only exposes an interactive picker
-- **WHEN** the selected CLI has no verified non-interactive model-list mechanism
+#### Scenario: CLI exposes interactive model guidance
+- **WHEN** the catalog marks a CLI as manual or interactive for model discovery
 - **THEN** the model field accepts a manually entered model name
-- **AND** the dialog identifies the CLI's interactive model inspection command
+- **AND** the dialog shows the CLI's guidance instead of implying that the catalog is authoritative
 
 ### Requirement: CLI-specific structured argument builder
 
-The Agent dialog SHALL provide structured controls for the installed CLI's supported model, reasoning or effort, approval or permission, sandbox, and other adapter-defined options. Unsupported controls SHALL be omitted or disabled rather than serialized speculatively.
+The Agent dialog SHALL provide structured controls for the supported model, reasoning or effort, approval or permission, sandbox, execution, context, tools & access, and adapter-defined options using the canonical ordered groups Model, Reasoning, Permissions, Sandbox, Execution, Context, Tools & Access, and Unattended / Dangerous. Unsupported or empty categories SHALL be omitted, and the builder SHALL use a deterministic category ordering when rendering controls. Arguments outside these visible groups SHALL remain editable through Free-form args rather than a separate Advanced group.
 
-#### Scenario: Installed CLI supports a field
-- **WHEN** help probing confirms the adapter's flag is supported
+#### Scenario: Catalog supports a field
+- **WHEN** the bundled catalog identifies an adapter field
 - **THEN** the corresponding control is enabled
 - **AND** its selected value is serialized to the CLI's correct argv form
+- **AND** the field appears under its category in the same deterministic order across adapters
 
 #### Scenario: Installed version lacks a field
-- **WHEN** help probing does not find a field's required flag
+- **WHEN** a catalog entry omits a field or a future version removes it
 - **THEN** the corresponding structured control is not selectable
 - **AND** the builder does not add that flag
+- **AND** the category is hidden when no supported fields remain for it
 
 #### Scenario: Dangerous unattended mode is selected
 - **WHEN** the user selects an option that bypasses approval or sandbox protections
 - **THEN** the UI clearly identifies the security impact before save
+- **AND** the option is placed in the dedicated Unattended / Dangerous section rather than mixed into Permissions or Sandbox
 - **AND** the option is not selected by default
 
 ### Requirement: Lossless existing argument round trip
@@ -86,16 +88,50 @@ The command builder MUST NOT persist non-interactive prompt transport, change id
 - **THEN** `agents.yaml` contains only user-selected launch options in `args[]`
 - **AND** prompt delivery remains the responsibility of the existing runtime resolver
 
-### Requirement: Exact argv preview and compatible persistence
+### Requirement: Compatible persistence without a redundant Advanced preview
 
-The dialog SHALL show the command and persisted argv that will be written. Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema so existing runners and manually authored configurations remain compatible.
+Saving SHALL continue to use the existing `agents.yaml` `command` and `args[]` schema for CLI options, with an optional manager-only `sessionStartup` field that keeps session lifecycle policy separate from ordinary argv. Existing runners and manually authored configurations that omit `sessionStartup` SHALL remain compatible.
 
-#### Scenario: Structured selection is previewed and saved
+The structured groups SHALL expose a visible disclosure indicator. The free-form args editor SHALL remain separately editable. The dialog SHALL NOT add a redundant Advanced group solely to preview the combined argv.
+
+#### Scenario: Structured selection is saved
 - **WHEN** the user changes a builder field
-- **THEN** the exact persisted argv preview updates before save
-- **AND** saving writes the same argv elements through the existing Agent config endpoint
+- **THEN** saving writes the corresponding argv elements through the existing Agent config endpoint
 
 #### Scenario: Unsupported CLI uses manual args
 - **WHEN** the command has no adapter
 - **THEN** the user can edit argv manually
 - **AND** the saved Agent remains executable by the existing runner
+
+### Requirement: Claude managed project session is selectable
+
+The Manager command builder SHALL expose Claude's ithyno-managed project session as a session startup choice. The selected policy SHALL remain active when model, permission, or other normal CLI arguments are also configured.
+
+#### Scenario: Managed Claude session starts for the first time
+- **WHEN** a Claude Manager selects the managed project session option
+- **AND** the project has no saved Claude session id
+- **THEN** ithyno creates a project-local session id
+- **AND** launches Claude with `--session-id <id>` plus the configured normal CLI arguments
+
+#### Scenario: Managed Claude session is reopened
+- **WHEN** the project already has an ithyno-managed Claude session id
+- **THEN** ithyno launches Claude with `--resume <id>` plus the configured normal CLI arguments
+
+#### Scenario: Explicit session behavior is selected
+- **WHEN** the user selects a fresh session, the session picker, the latest session, or supplies a custom session target
+- **THEN** that explicit selection overrides the managed project session behavior
+- **AND** the UI preserves it independently from model and permission options
+
+### Requirement: Agy session continuation is configurable
+
+The Manager command builder SHALL expose Agy's supported new-session, latest-conversation, and conversation-ID startup modes without requiring session flags in Free-form args.
+
+#### Scenario: Latest Agy conversation is selected
+- **WHEN** an Agy Manager selects Continue the latest session
+- **THEN** the saved arguments contain `--continue`
+- **AND** no `--conversation` argument remains
+
+#### Scenario: Agy conversation ID is selected
+- **WHEN** an Agy Manager selects Resume by conversation ID and enters an ID
+- **THEN** the saved arguments contain `--conversation <id>`
+- **AND** saving is blocked when the ID is empty
