@@ -580,13 +580,73 @@ export function joinArgv(args: readonly string[]): string {
     .join(" ");
 }
 
-/**
- * Preserve the current args array without deleting anonymous or user-controlled
- * tokens. The builder must decide what to drop per CLI adapter; generic config
- * writes must never rewrite user-owned argv.
- */
-export function sanitizePersistedArgs(args: readonly string[]): string[] {
-  return [...args].filter((arg) => arg !== undefined && arg !== null);
+/** Keep user-owned argv while excluding invocation-time transport that the
+ * registry/runner must supply for each dispatched task. */
+const PERSISTED_PROMPT_FLAGS = new Set([
+  "-p",
+  "--print",
+  "--prompt",
+]);
+
+const PERSISTED_RUNTIME_VALUE_FLAGS = new Set([
+  "--artifact-contract",
+  "--change-id",
+  "--worktree",
+  "--cwd",
+]);
+
+/** Remove invocation-time prompt/artifact transport before writing agents.yaml. */
+export function sanitizePersistedArgs(
+  args: readonly string[],
+  adapterId?: CliAdapterId,
+): string[] {
+  const out: string[] = [];
+  let removePrompt = false;
+  const adapterFields = adapterId
+    ? new Map(CLI_ADAPTERS[adapterId].fields.map((field) => [canonicalCliFlagName(field.flag), field]))
+    : null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === undefined) continue;
+    const bareFlag = token.split("=", 1)[0];
+
+    if (PERSISTED_PROMPT_FLAGS.has(bareFlag)) {
+      if (!token.includes("=") && args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      else if (!token.includes("=")) removePrompt = true;
+      continue;
+    }
+    if (PERSISTED_RUNTIME_VALUE_FLAGS.has(bareFlag)) {
+      if (!token.includes("=") && args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      continue;
+    }
+    if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(token)) {
+      if (args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      continue;
+    }
+    if (adapterId === "codex" && token === "exec") {
+      removePrompt = true;
+      continue;
+    }
+    if (removePrompt) {
+      if (!token.startsWith("-")) {
+        removePrompt = false;
+        continue;
+      }
+      out.push(token);
+      if (!token.includes("=")) {
+        const field = adapterFields?.get(canonicalCliFlagName(token));
+        const next = args[index + 1];
+        if (field?.kind !== "boolean" && next !== undefined && !next.startsWith("-")) {
+          out.push(next);
+          index += 1;
+        }
+      }
+      continue;
+    }
+    out.push(token);
+  }
+  return out;
 }
 
 const PROBE_TIMEOUT_MS = 12_000;

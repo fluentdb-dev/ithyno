@@ -394,6 +394,26 @@ describe("Manager startup — per-CLI dispatch (empty args → smart resolver)",
     expect(second).toMatch(/^claude --resume [0-9a-f-]{36} --model sonnet$/);
   });
 
+  it("managed Claude session preserves an explicitly configured executable path", async () => {
+    writeFileSync(
+      join(dir, "agents.yaml"),
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: /opt/tools/claude-code
+    sessionStartup: managed
+    args: [--model, sonnet]
+`,
+    );
+    const reg = new AgentRegistry(dir);
+    await reg.load();
+
+    expect(ptyStartup(reg, dir).startup).toMatch(
+      /^\/opt\/tools\/claude-code --session-id [0-9a-f-]{36} --model sonnet$/,
+    );
+  });
+
   it("explicit new-session policy does not opt into the managed Claude session id", async () => {
     writeFileSync(
       join(dir, "agents.yaml"),

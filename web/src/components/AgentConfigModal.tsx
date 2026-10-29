@@ -16,6 +16,7 @@ import {
   cliTextFieldPlaceholder,
   detectCliArgConflicts,
   detectCliSessionStartup,
+  extractFreeFormCliArgs,
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
@@ -24,6 +25,8 @@ import {
   parseCliArgs,
   resolveCliAdapter,
   resetFreeFormCliArgs,
+  replaceFreeFormCliArgs,
+  sanitizePersistedArgs,
   setCliSessionStartup,
   setCliSessionTarget,
   splitArgv,
@@ -124,7 +127,8 @@ export function buildAgentConfigSavePayload({
   };
   if (form.command.trim()) {
     payload.command = form.command.trim();
-    payload.args = splitArgv(form.args);
+    const adapter = resolveCliAdapter(form.command);
+    payload.args = sanitizePersistedArgs(splitArgv(form.args), adapter?.id);
   }
   return payload;
 }
@@ -167,6 +171,10 @@ export function AgentConfigModal({
     return deriveInitialForm(seed);
   }, [seed, addModePrefill]);
   const [form, setForm] = useState(initial);
+  const [freeFormDraft, setFreeFormDraft] = useState(() => {
+    const adapter = resolveCliAdapter(initial.command);
+    return adapter ? joinArgv(extractFreeFormCliArgs(splitArgv(initial.args), adapter)) : initial.args;
+  });
   const lastRecognizedAdapterRef = useRef(resolveCliAdapter(initial.command));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +188,9 @@ export function AgentConfigModal({
 
   useEffect(() => {
     setForm(initial);
-    lastRecognizedAdapterRef.current = resolveCliAdapter(initial.command);
+    const adapter = resolveCliAdapter(initial.command);
+    lastRecognizedAdapterRef.current = adapter;
+    setFreeFormDraft(adapter ? joinArgv(extractFreeFormCliArgs(splitArgv(initial.args), adapter)) : initial.args);
     setError(null);
     setFieldErrors({});
   }, [initial]);
@@ -485,25 +495,26 @@ export function AgentConfigModal({
               value={form.command}
               onChange={(e) => {
                 const nextCommand = e.target.value;
-                setForm((current) => {
-                  const previousAdapter = resolveCliAdapter(current.command)
-                    ?? lastRecognizedAdapterRef.current;
-                  const nextAdapter = resolveCliAdapter(nextCommand);
-                  const nextArgs = migrateCliArgsForAdapterSwitch(
-                    splitArgv(current.args),
-                    previousAdapter,
-                    nextAdapter,
-                  );
-                  if (nextAdapter) lastRecognizedAdapterRef.current = nextAdapter;
-                  const adapterChanged = previousAdapter?.id !== nextAdapter?.id;
-                  return {
-                    ...current,
-                    command: nextCommand,
-                    args: joinArgv(nextArgs),
-                    sessionStartup: includesManager && adapterChanged
-                      ? (nextAdapter?.id === "claude" ? "managed" : nextAdapter ? "new" : undefined)
-                      : current.sessionStartup,
-                  };
+                const previousAdapter = resolveCliAdapter(form.command)
+                  ?? lastRecognizedAdapterRef.current;
+                const nextAdapter = resolveCliAdapter(nextCommand);
+                const nextArgs = migrateCliArgsForAdapterSwitch(
+                  splitArgv(form.args),
+                  previousAdapter,
+                  nextAdapter,
+                );
+                if (nextAdapter) lastRecognizedAdapterRef.current = nextAdapter;
+                const adapterChanged = previousAdapter?.id !== nextAdapter?.id;
+                setFreeFormDraft(nextAdapter
+                  ? joinArgv(extractFreeFormCliArgs(nextArgs, nextAdapter))
+                  : joinArgv(nextArgs));
+                setForm({
+                  ...form,
+                  command: nextCommand,
+                  args: joinArgv(nextArgs),
+                  sessionStartup: includesManager && adapterChanged
+                    ? (nextAdapter?.id === "claude" ? "managed" : nextAdapter ? "new" : undefined)
+                    : form.sessionStartup,
                 });
               }}
               placeholder="e.g. claude"
@@ -524,10 +535,13 @@ export function AgentConfigModal({
                     type="button"
                     className="ghost agent-config-free-form-reset"
                     disabled={!hasFreeFormArgs}
-                    onClick={() => setForm((current) => ({
-                      ...current,
-                      args: joinArgv(resetFreeFormCliArgs(splitArgv(current.args), selectedAdapter)),
-                    }))}
+                    onClick={() => {
+                      setForm((current) => ({
+                        ...current,
+                        args: joinArgv(resetFreeFormCliArgs(splitArgv(current.args), selectedAdapter)),
+                      }));
+                      setFreeFormDraft("");
+                    }}
                     title="Remove only arguments not managed by this CLI builder"
                     aria-label="Reset free-form arguments"
                   >
@@ -535,25 +549,25 @@ export function AgentConfigModal({
                   </button>
                 </div>
                 <textarea
-                  value={form.args}
+                  value={freeFormDraft}
                   onChange={(event) => {
-                    const args = event.target.value;
-                    const detected = selectedAdapter
-                      ? detectCliSessionStartup(selectedAdapter.id, splitArgv(args))
-                      : "new";
+                    const draft = event.target.value;
+                    setFreeFormDraft(draft);
+                    const args = replaceFreeFormCliArgs(
+                      splitArgv(form.args),
+                      splitArgv(draft),
+                      selectedAdapter,
+                    );
                     setForm((current) => ({
                       ...current,
-                      args,
-                      sessionStartup: includesManager
-                        ? (detected === "new" && current.sessionStartup === "managed" ? "managed" : detected)
-                        : current.sessionStartup,
+                      args: joinArgv(args),
                     }));
                   }}
                   rows={2}
                   placeholder={'--flag "value" --custom-flag'}
                 />
                 <span className="muted">
-                  Enter or paste the complete argument list. The fields below update from this value.
+                  Enter only custom arguments that are not represented by the structured fields below.
                 </span>
               </div>
               {selectedAdapter && sessionStartupOptions.length > 0 && (
@@ -823,13 +837,16 @@ export function AgentConfigModal({
               type="button"
               className="ghost agent-config-reset-args"
               disabled={submitting || !form.args.trim()}
-              onClick={() => setForm((current) => ({
-                ...current,
-                args: "",
-                sessionStartup: includesManager && selectedAdapter
-                  ? (selectedAdapter.id === "claude" ? "managed" : "new")
-                  : current.sessionStartup,
-              }))}
+              onClick={() => {
+                setForm((current) => ({
+                  ...current,
+                  args: "",
+                  sessionStartup: includesManager && selectedAdapter
+                    ? (selectedAdapter.id === "claude" ? "managed" : "new")
+                    : current.sessionStartup,
+                }));
+                setFreeFormDraft("");
+              }}
               title="Clear Session startup, structured CLI options, and free-form arguments in this draft"
             >
               Reset all arguments

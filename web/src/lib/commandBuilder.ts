@@ -490,6 +490,90 @@ export function resetFreeFormCliArgs(
   return kept;
 }
 
+const PERSISTED_PROMPT_FLAGS = new Set([
+  "-p",
+  "--print",
+  "--prompt",
+]);
+
+const PERSISTED_RUNTIME_VALUE_FLAGS = new Set([
+  "--artifact-contract",
+  "--change-id",
+  "--worktree",
+  "--cwd",
+]);
+
+/** Remove invocation-time prompt/artifact transport before writing agents.yaml. */
+export function sanitizePersistedArgs(
+  args: readonly string[],
+  adapterId?: CliAdapterId,
+): string[] {
+  const out: string[] = [];
+  let removePrompt = false;
+  const adapterFields = adapterId
+    ? new Map(CLI_ADAPTERS[adapterId].fields.map((field) => [canonicalCliFlagName(field.flag), field]))
+    : null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === undefined) continue;
+    const bareFlag = token.split("=", 1)[0];
+
+    if (PERSISTED_PROMPT_FLAGS.has(bareFlag)) {
+      if (!token.includes("=") && args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      else if (!token.includes("=")) removePrompt = true;
+      continue;
+    }
+    if (PERSISTED_RUNTIME_VALUE_FLAGS.has(bareFlag)) {
+      if (!token.includes("=") && args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      continue;
+    }
+    if (/^(?:\/opsx:|\/ithy-opsx:|openspec-|ithy-opsx-)/.test(token)) {
+      if (args[index + 1] !== undefined && !args[index + 1].startsWith("-")) index += 1;
+      continue;
+    }
+    if (adapterId === "codex" && token === "exec") {
+      removePrompt = true;
+      continue;
+    }
+    if (removePrompt) {
+      if (!token.startsWith("-")) {
+        removePrompt = false;
+        continue;
+      }
+      out.push(token);
+      if (!token.includes("=")) {
+        const field = adapterFields?.get(canonicalCliFlagName(token));
+        const next = args[index + 1];
+        if (field?.kind !== "boolean" && next !== undefined && !next.startsWith("-")) {
+          out.push(next);
+          index += 1;
+        }
+      }
+      continue;
+    }
+    out.push(token);
+  }
+  return out;
+}
+
+/** Return only argv not represented by structured fields or session controls. */
+export function extractFreeFormCliArgs(args: readonly string[], adapter: CliAdapter): string[] {
+  const withoutSession = setCliSessionStartup(adapter.id, args, "new");
+  return parseCliArgs(sanitizePersistedArgs(withoutSession, adapter.id), adapter).unknown;
+}
+
+/** Replace the free-form portion while retaining structured and session argv. */
+export function replaceFreeFormCliArgs(
+  args: readonly string[],
+  freeFormArgs: readonly string[],
+  adapter: CliAdapter,
+): string[] {
+  const managed = resetFreeFormCliArgs(sanitizePersistedArgs(args, adapter.id), adapter);
+  const free = extractFreeFormCliArgs(freeFormArgs, adapter);
+  return [...managed, ...free];
+}
+
 export function cliTextFieldPlaceholder(
   adapterId: CliAdapterId,
   field: Pick<CliFieldDescriptor, "key" | "label" | "guidance">,
@@ -713,9 +797,8 @@ export function joinArgv(args: readonly string[]): string {
     .join(" ");
 }
 
-export function sanitizePersistedArgs(args: readonly string[]): string[] {
-  return [...args].filter((arg) => arg !== undefined && arg !== null);
-}
+// sanitizePersistedArgs is defined above next to the free-form partitioning
+// helpers because all three functions enforce the same persistence boundary.
 
 export function parseCodexModelListOutput(output: string): string[] {
   const text = output.trim();

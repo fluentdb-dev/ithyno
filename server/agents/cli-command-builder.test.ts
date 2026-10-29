@@ -100,7 +100,7 @@ function makeFakeCodexExecutable(mode: "valid" | "missing-init" | "missing-model
 }
 
 describe("cli command builder args safety", () => {
-  it("preserves user-owned manager and codex options without broad sanitization", () => {
+  it("removes dispatcher-owned prompt transport while preserving user options", () => {
     const args = [
       "--profile",
       "fast",
@@ -119,7 +119,14 @@ describe("cli command builder args safety", () => {
       "last",
     ];
 
-    expect(sanitizePersistedArgs(args)).toEqual(args);
+    expect(sanitizePersistedArgs(args, "codex")).toEqual([
+      "--profile", "fast",
+      "--model", "sonnet",
+      "--foo", "bar",
+      "--dangerously-skip-permissions",
+      "--session-id", "abc123",
+      "--resume", "last",
+    ]);
     expect(parseCliArgs(args).values).toMatchObject({
       profile: ["fast"],
       model: ["sonnet"],
@@ -129,6 +136,36 @@ describe("cli command builder args safety", () => {
     expect(parseCliArgs(args).unknown).toContain("bar");
     expect(parseCliArgs(args).unknown).toContain("--resume");
     expect(parseCliArgs(args).unknown).toContain("abc123");
+  });
+
+  it("removes a Codex exec prompt without dropping structured options after the subcommand", () => {
+    expect(sanitizePersistedArgs([
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "--model=gpt-6.1-sol",
+      "implement the change",
+    ], "codex")).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--model=gpt-6.1-sol",
+    ]);
+  });
+
+  it("removes a deferred Claude print prompt while retaining intervening structured options", () => {
+    expect(sanitizePersistedArgs([
+      "--print",
+      "--model",
+      "sonnet",
+      "runtime prompt",
+      "--custom",
+      "keep",
+    ], "claude")).toEqual([
+      "--model",
+      "sonnet",
+      "--custom",
+      "keep",
+    ]);
   });
 
   it("round-trips quoted values without collapsing spaces", () => {

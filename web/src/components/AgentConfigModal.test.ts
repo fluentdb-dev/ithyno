@@ -6,6 +6,7 @@ import {
   cliSessionStartupOptions,
   cliTextFieldPlaceholder,
   detectCliSessionStartup,
+  extractFreeFormCliArgs,
   getCliFieldCategory,
   joinArgv,
   mergeCliArgs,
@@ -14,6 +15,7 @@ import {
   parseCliArgs,
   resolveCliAdapter,
   resetFreeFormCliArgs,
+  replaceFreeFormCliArgs,
   setCliSessionStartup,
   setCliSessionTarget,
   splitArgv,
@@ -101,6 +103,32 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       command: "codex",
       args: ["--model", "gpt-5.1", "--profile", "fast"],
       description: "worker",
+    });
+  });
+
+  it("excludes invocation-time prompt transport from the saved worker config", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "codex-code",
+        roles: ["code"],
+        prompts: {},
+        command: "codex",
+        args: '--model gpt-6.1-sol exec --sandbox workspace-write "runtime prompt" --custom keep',
+        description: "",
+        detached: false,
+      },
+      includesManager: false,
+      agmsg: null,
+      isAdd: false,
+      existingNames: [],
+    });
+
+    expect(payload).toMatchObject({
+      args: [
+        "--model", "gpt-6.1-sol",
+        "--sandbox", "workspace-write",
+        "--custom", "keep",
+      ],
     });
   });
 
@@ -274,6 +302,20 @@ describe("AgentConfigModal — kebab-case name validation", () => {
       "claude-sonnet-5.5",
       "--mode",
       "plan",
+    ]);
+  });
+
+  it("edits only free-form argv while retaining structured and session options", () => {
+    const copilot = resolveCliAdapter("copilot")!;
+    const args = ["--continue", "--model", "gpt-6.1-sol", "--custom", "old"];
+
+    expect(extractFreeFormCliArgs(args, copilot)).toEqual(["--custom", "old"]);
+    expect(replaceFreeFormCliArgs(args, ["--other", "new value"], copilot)).toEqual([
+      "--continue",
+      "--model",
+      "gpt-6.1-sol",
+      "--other",
+      "new value",
     ]);
   });
 
