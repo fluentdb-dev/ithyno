@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { chmodSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 export const PLATFORM_ESBUILD_PACKAGES = [
@@ -33,10 +34,18 @@ function readPackageVersion(packageJsonPath, packageName) {
 }
 
 export function resolveAuthoritativeEsbuildVersion(repoRoot) {
-  return readPackageVersion(
-    resolve(repoRoot, "node_modules", "esbuild", "package.json"),
-    "the lockfile-backed root esbuild package",
-  );
+  let packageJsonPath;
+  try {
+    // Worktrees commonly reuse the main checkout's node_modules rather than
+    // creating a second full installation. Resolve exactly as Node would from
+    // the worktree root so both layouts use the lockfile-backed package.
+    packageJsonPath = createRequire(resolve(repoRoot, "package.json")).resolve("esbuild/package.json");
+  } catch (error) {
+    throw new Error(
+      `cannot resolve the lockfile-backed root esbuild package from ${repoRoot}; install repository dependencies before packaging: ${error.message}`,
+    );
+  }
+  return readPackageVersion(packageJsonPath, "the lockfile-backed root esbuild package");
 }
 
 export function createEsbuildRuntimeDependencies(version) {

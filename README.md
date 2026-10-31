@@ -21,6 +21,7 @@ Electron app, agent workflows, and project documentation.
 - [`docs/architecture.md`](./docs/architecture.md) — architecture, tech choices, data model, and two-way sync design.
 - [`docs/bridge-security.md`](./docs/bridge-security.md) — local bridge runtime, same-user security boundary, and IPC contract for CLI/MCP clients.
 - [`docs/user-manual/bridge.md`](./docs/user-manual/bridge.md) — end-user setup and troubleshooting for the local bridge and MCP flow.
+- [`docs/tmux-session-browser.md`](./docs/tmux-session-browser.md) — project-scoped tmux windows, panes, and retained terminal history.
 - [`docs/roadmap.md`](./docs/roadmap.md) — phased implementation roadmap.
 
 ### Getting started
