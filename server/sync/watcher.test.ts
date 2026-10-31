@@ -11,15 +11,74 @@
  * Note: These tests write real files to a tmpdir and rely on chokidar's
  * file-system events. A short delay allows the watcher to settle.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import type { FSWatcher } from "chokidar";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ImportTargetWatcher } from "./watcher.js";
+import { ImportTargetWatcher, ProjectRootWatcher, Watcher, shouldFallbackToPolling, type WatchFactory } from "./watcher.js";
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+function createFakeWatchFactory() {
+  const instances: Array<{
+    emitter: EventEmitter & { close: ReturnType<typeof vi.fn> };
+    options: Record<string, unknown>;
+  }> = [];
+  const factory: WatchFactory = (_path, options) => {
+    const emitter = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+    emitter.close = vi.fn(async () => undefined);
+    instances.push({ emitter, options: options as Record<string, unknown> });
+    return emitter as unknown as FSWatcher;
+  };
+  return { factory, instances };
+}
+
+describe("watcher native-to-polling fallback", () => {
+  it("recognizes only native watcher resource and permission failures", () => {
+    expect(shouldFallbackToPolling(Object.assign(new Error("denied"), { code: "EPERM" }))).toBe(true);
+    expect(shouldFallbackToPolling(Object.assign(new Error("files"), { code: "EMFILE" }))).toBe(true);
+    expect(shouldFallbackToPolling(Object.assign(new Error("watches"), { code: "ENOSPC" }))).toBe(true);
+    expect(shouldFallbackToPolling(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(false);
+  });
+
+  it("restarts the OpenSpec watcher with polling after EPERM and handles later errors", async () => {
+    const { factory, instances } = createFakeWatchFactory();
+    const watcher = new Watcher("/project/openspec", () => undefined, factory);
+    watcher.start();
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].options.usePolling).toBeUndefined();
+    instances[0].emitter.emit("error", Object.assign(new Error("operation not permitted"), { code: "EPERM" }));
+    await sleep(0);
+
+    expect(instances).toHaveLength(2);
+    expect(instances[0].emitter.close).toHaveBeenCalledTimes(1);
+    expect(instances[1].options).toMatchObject({ usePolling: true, interval: 100 });
+
+    // The polling watcher also has an error listener, so this must neither
+    // throw nor start an unbounded third watcher.
+    expect(() => instances[1].emitter.emit("error", new Error("poll failed"))).not.toThrow();
+    expect(instances).toHaveLength(2);
+    await watcher.stop();
+  });
+
+  it("applies the same fallback to the project-root watcher", async () => {
+    const { factory, instances } = createFakeWatchFactory();
+    const watcher = new ProjectRootWatcher("/project", () => undefined, factory);
+    watcher.start();
+
+    instances[0].emitter.emit("error", Object.assign(new Error("operation not permitted"), { code: "EPERM" }));
+    await sleep(0);
+
+    expect(instances).toHaveLength(2);
+    expect(instances[1].options).toMatchObject({ usePolling: true, interval: 100 });
+    await watcher.stop();
+  });
+});
 
 describe("ImportTargetWatcher", () => {
   let tmpDir: string;
