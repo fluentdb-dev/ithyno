@@ -19,7 +19,8 @@ function normalizeCommandList(output: string): string[] {
   return output
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+    .map((line) => /^([a-z][a-z0-9-]*)(?:\s|\(|$)/.exec(line)?.[1] ?? null)
+    .filter((command): command is string => command !== null);
 }
 
 async function detectTmuxCapabilities(

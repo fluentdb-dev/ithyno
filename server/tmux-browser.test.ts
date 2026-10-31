@@ -4,6 +4,7 @@ import { resolvedTmuxSessionName } from "./sync/pty.js";
 import {
   captureTmuxPaneHistory,
   executeTmuxAction,
+  getAvailableTmuxCommands,
   getTmuxActionCatalog,
   getTmuxTopology,
   parseTmuxTopology,
@@ -30,7 +31,20 @@ function runner(overrides: Record<string, { stdout?: string; stderr?: string; er
   });
 }
 
+const tmuxOptions = (run: TmuxCommandRunner) => ({ runner: run, platform: "darwin" as const });
+
 describe("tmux browser", () => {
+  it("normalizes the descriptive command list returned by psmux on Windows", async () => {
+    const run = vi.fn(async () => ({
+      stdout: "Available commands:\n  capture-pane              - Capture pane contents\n  select-pane (selectp)     - Select a pane\n  select-window (selectw)   - Select a window\n",
+      stderr: "",
+    }));
+
+    await expect(getAvailableTmuxCommands(run, "psmux")).resolves.toEqual(
+      new Set(["capture-pane", "select-pane", "select-window"]),
+    );
+  });
+
   it("parses windows and panes into a nested topology", () => {
     const result = parseTmuxTopology("ithyno-test", windows, panes);
     expect(result?.windows).toHaveLength(2);
@@ -66,21 +80,21 @@ describe("tmux browser", () => {
 
   it("selects only windows returned by the fresh topology", async () => {
     const run = runner();
-    await selectTmuxTarget("/tmp/project", { windowId: "@2" }, { runner: run });
+    await selectTmuxTarget("/tmp/project", { windowId: "@2" }, tmuxOptions(run));
     expect(run).toHaveBeenCalledWith(expect.arrayContaining(["select-window", "-t"]));
-    await expect(selectTmuxTarget("/tmp/project", { windowId: "@99" }, { runner: run }))
+    await expect(selectTmuxTarget("/tmp/project", { windowId: "@99" }, tmuxOptions(run)))
       .rejects.toMatchObject({ kind: "target-missing" });
   });
 
   it("selects a pane through its containing window", async () => {
     const run = runner();
-    await selectTmuxTarget("/tmp/project", { paneId: "%3" }, { runner: run });
+    await selectTmuxTarget("/tmp/project", { paneId: "%3" }, tmuxOptions(run));
     expect(run).toHaveBeenCalledWith(["select-pane", "-t", "%3"]);
   });
 
   it("captures bounded history without selecting the pane", async () => {
     const run = runner();
-    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 200, { runner: run });
+    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 200, tmuxOptions(run));
     expect(result).toMatchObject({ paneId: "%2", lineLimit: 200, content: "one\ntwo\nthree\n" });
     expect(run).toHaveBeenCalledWith(["capture-pane", "-p", "-J", "-S", "-200", "-t", "%2"]);
     expect(run).not.toHaveBeenCalledWith(expect.arrayContaining(["select-pane"]));
@@ -88,13 +102,13 @@ describe("tmux browser", () => {
 
   it("enforces exact line limits without marking exact-size captures as truncated", async () => {
     const run = runner({ "capture-pane": { stdout: "one\ntwo\nthree\n" } });
-    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 3, { runner: run });
+    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 3, tmuxOptions(run));
     expect(result).toMatchObject({ paneId: "%2", lineLimit: 3, content: "one\ntwo\nthree\n", truncated: false });
   });
 
   it("applies a tail cut when capture exceeds the configured limit", async () => {
     const run = runner({ "capture-pane": { stdout: "one\ntwo\nthree\nfour\nfive\n" } });
-    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 3, { runner: run });
+    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 3, tmuxOptions(run));
     expect(result).toMatchObject({ paneId: "%2", lineLimit: 3, truncated: true });
     expect(result.content).toBe("three\nfour\nfive\n");
   });
@@ -102,7 +116,7 @@ describe("tmux browser", () => {
   it("truncates by byte cap and preserves the tail", async () => {
     const payload = "a".repeat(700_000);
     const run = runner({ "capture-pane": { stdout: payload } });
-    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 10_000, { runner: run });
+    const result = await captureTmuxPaneHistory("/tmp/project", "%2", 10_000, tmuxOptions(run));
     expect(result.truncated).toBe(true);
     expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(512 * 1024);
     expect(result.content.endsWith("a")).toBe(true);
@@ -195,18 +209,18 @@ describe("tmux browser", () => {
     const run = runner();
     const sessionName = resolvedTmuxSessionName("/tmp/project");
 
-    await executeTmuxAction("/tmp/project", "next-window", { runner: run });
+    await executeTmuxAction("/tmp/project", "next-window", tmuxOptions(run));
     expect(run).toHaveBeenCalledWith(["next-window", "-t", sessionName]);
 
-    await executeTmuxAction("/tmp/project", "close-pane", { runner: run }, "%2");
+    await executeTmuxAction("/tmp/project", "close-pane", tmuxOptions(run), "%2");
     expect(run).toHaveBeenCalledWith(["kill-pane", "-t", "%2"]);
     expect(run).not.toHaveBeenCalledWith(expect.arrayContaining(["kill-session", "-t", sessionName]));
 
-    await executeTmuxAction("/tmp/project", "kill-session", { runner: run });
+    await executeTmuxAction("/tmp/project", "kill-session", tmuxOptions(run));
     expect(run).toHaveBeenCalledWith(["kill-session", "-t", sessionName]);
 
-    await expect(executeTmuxAction("/tmp/project", "kill-pane", { runner: run })).rejects.toMatchObject({ kind: "unsupported" });
-    await expect(executeTmuxAction("/tmp/project", "unknown-action", { runner: run })).rejects.toMatchObject({ kind: "unsupported" });
+    await expect(executeTmuxAction("/tmp/project", "kill-pane", tmuxOptions(run))).rejects.toMatchObject({ kind: "unsupported" });
+    await expect(executeTmuxAction("/tmp/project", "unknown-action", tmuxOptions(run))).rejects.toMatchObject({ kind: "unsupported" });
   });
 
   it("uses distinct fixed command vectors for each executable action", async () => {
@@ -249,7 +263,7 @@ describe("tmux browser", () => {
     };
 
     for (const actionId of executableIds) {
-      await executeTmuxAction("/tmp/project", actionId, { runner: run });
+      await executeTmuxAction("/tmp/project", actionId, tmuxOptions(run));
       expect(run).toHaveBeenLastCalledWith(expected[actionId]);
     }
   });
