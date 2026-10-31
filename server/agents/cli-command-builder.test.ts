@@ -36,15 +36,20 @@ import {
 
 function makeFakeExecutable(name: string, script: string) {
   const dir = mkdtempSync(join(tmpdir(), `ithyno-${name}-fixture-`));
-  const scriptPath = join(dir, name);
+  const scriptPath = join(dir, process.platform === "win32" ? `${name}.js` : name);
   writeFileSync(scriptPath, script, "utf8");
   chmodSync(scriptPath, 0o755);
+  if (process.platform === "win32") {
+    const commandPath = join(dir, `${name}.cmd`);
+    writeFileSync(commandPath, `@echo off\r\n"${process.execPath}" "%~dp0${name}.js" %*\r\n`, "utf8");
+    return commandPath;
+  }
   return scriptPath;
 }
 
 function makeFakeCodexExecutable(mode: "valid" | "missing-init" | "missing-model-list") {
   const dir = mkdtempSync(join(tmpdir(), "ithyno-codex-fixture-"));
-  const scriptPath = join(dir, "codex");
+  const scriptPath = join(dir, process.platform === "win32" ? "codex.js" : "codex");
   const script = [
     "#!/usr/bin/env node",
     `const mode = ${JSON.stringify(mode)};`,
@@ -96,6 +101,11 @@ function makeFakeCodexExecutable(mode: "valid" | "missing-init" | "missing-model
   ].join("\n");
   writeFileSync(scriptPath, script, "utf8");
   chmodSync(scriptPath, 0o755);
+  if (process.platform === "win32") {
+    const commandPath = join(dir, "codex.cmd");
+    writeFileSync(commandPath, `@echo off\r\n"${process.execPath}" "%~dp0codex.js" %*\r\n`, "utf8");
+    return commandPath;
+  }
   return scriptPath;
 }
 

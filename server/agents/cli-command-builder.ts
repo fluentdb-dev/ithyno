@@ -679,6 +679,10 @@ function terminateChild(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM")
   }, 1000).unref?.();
 }
 
+function requiresWindowsCommandShell(executablePath: string): boolean {
+  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(executablePath);
+}
+
 function parseJsonPayloads(text: string): unknown[] {
   const packets: unknown[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -806,7 +810,7 @@ export async function runCodexAppServerModelProbeDetailed(executablePath = "code
       resolve({ models: [], metadata: [] });
     }, PROBE_TIMEOUT_MS);
     child = spawn(executablePath, ["app-server"], {
-      shell: false,
+      shell: requiresWindowsCommandShell(executablePath),
       stdio: ["pipe", "pipe", "pipe"],
       env: sanitizeProbeEnv(process.env),
     });
@@ -892,7 +896,7 @@ export async function runCliProbe(argv: readonly string[], options: { timeoutMs?
     let timedOut = false;
     let settled = false;
     const child = spawn(spawnCommand, rest, {
-      shell: false,
+      shell: requiresWindowsCommandShell(spawnCommand),
       stdio: ["ignore", "pipe", "pipe"],
       env: sanitizeProbeEnv(process.env),
     });
