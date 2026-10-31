@@ -5,6 +5,22 @@ import { join, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { sha1 } from "../util/hash.js";
 
+type WatchOptions = NonNullable<Parameters<typeof chokidar.watch>[1]>;
+export type WatchFactory = (path: string, options: WatchOptions) => FSWatcher;
+
+const NATIVE_WATCH_FALLBACK_CODES = new Set(["EPERM", "EMFILE", "ENOSPC"]);
+
+export function shouldFallbackToPolling(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+  return NATIVE_WATCH_FALLBACK_CODES.has(code);
+}
+
+function watcherErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Watches the openspec/ tree for external (AI / human-editor) edits and reports
  * them, while suppressing the server's own writes (echo suppression, §6.3).
@@ -16,10 +32,12 @@ import { sha1 } from "../util/hash.js";
 export class Watcher {
   private watcher: FSWatcher | null = null;
   private writtenHashes = new Map<string, string>();
+  private stopped = false;
 
   constructor(
     private readonly openspecDir: string,
     private readonly onExternalChange: (filePath: string, event: "change" | "add" | "unlink") => void,
+    private readonly watchFactory: WatchFactory = (path, options) => chokidar.watch(path, options),
   ) {}
 
   recordWrite(filePath: string, hash: string): void {
@@ -27,10 +45,19 @@ export class Watcher {
   }
 
   start(): void {
-    this.watcher = chokidar.watch(this.openspecDir, {
+    this.stopped = false;
+    this.startWatcher(false);
+  }
+
+  private startWatcher(usePolling: boolean): void {
+    if (this.stopped) return;
+
+    const watcher = this.watchFactory(this.openspecDir, {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+      ...(usePolling ? { usePolling: true, interval: 100 } : {}),
     });
+    this.watcher = watcher;
 
     const handle = async (event: "change" | "add" | "unlink", filePath: string) => {
       // .md is the historical scope; `.openspec.yaml` per-change sidecars
@@ -61,14 +88,44 @@ export class Watcher {
       this.onExternalChange(filePath, event);
     };
 
-    this.watcher
+    watcher
+      .on("error", (error: unknown) => {
+        if (this.stopped || this.watcher !== watcher) return;
+
+        if (!usePolling && shouldFallbackToPolling(error)) {
+          // Detach this instance before closing so duplicate native errors
+          // cannot schedule more than one polling watcher.
+          this.watcher = null;
+          console.warn(
+            `[watcher] native watch failed for ${this.openspecDir}; falling back to polling: ${watcherErrorMessage(error)}`,
+          );
+          void watcher.close()
+            .catch((closeError: unknown) => {
+              console.warn(`[watcher] failed to close native watcher: ${watcherErrorMessage(closeError)}`);
+            })
+            .finally(() => {
+              if (!this.stopped) this.startWatcher(true);
+            });
+          return;
+        }
+
+        // An error event without a listener terminates Node. Once polling is
+        // already active there is no safer watcher backend to retry, so keep
+        // the server alive and surface the degraded monitoring state.
+        console.warn(
+          `[watcher] ${usePolling ? "polling" : "native"} watch error for ${this.openspecDir}: ${watcherErrorMessage(error)}`,
+        );
+      })
       .on("change", (p) => void handle("change", p))
       .on("add", (p) => void handle("add", p))
       .on("unlink", (p) => void handle("unlink", p));
   }
 
   async stop(): Promise<void> {
-    await this.watcher?.close();
+    this.stopped = true;
+    const watcher = this.watcher;
+    this.watcher = null;
+    await watcher?.close();
   }
 }
 
@@ -97,19 +154,28 @@ export class ProjectRootWatcher {
   constructor(
     private readonly projectRoot: string,
     private readonly onOpenspecCreated: () => void,
+    private readonly watchFactory: WatchFactory = (path, options) => chokidar.watch(path, options),
   ) {}
 
   start(): void {
+    this.stopped = false;
+    this.startWatcher(false);
+  }
+
+  private startWatcher(usePolling: boolean): void {
+    if (this.stopped) return;
     const openspecDir = join(this.projectRoot, "openspec");
     // Watch the project root at depth 0 only — we care only about the
     // `openspec/` directory appearing directly inside the root, not
     // recursive changes inside it (the real Watcher handles those once
     // handed control).
-    this.watcher = chokidar.watch(this.projectRoot, {
+    const watcher = this.watchFactory(this.projectRoot, {
       ignoreInitial: true,
       depth: 0,
       awaitWriteFinish: false,
+      ...(usePolling ? { usePolling: true, interval: 100 } : {}),
     });
+    this.watcher = watcher;
 
     const handleAdd = (filePath: string) => {
       if (this.stopped) return;
@@ -127,14 +193,38 @@ export class ProjectRootWatcher {
       this.onOpenspecCreated();
     };
 
-    this.watcher
+    watcher
+      .on("error", (error: unknown) => {
+        if (this.stopped || this.watcher !== watcher) return;
+
+        if (!usePolling && shouldFallbackToPolling(error)) {
+          this.watcher = null;
+          console.warn(
+            `[watcher] native project-root watch failed for ${this.projectRoot}; falling back to polling: ${watcherErrorMessage(error)}`,
+          );
+          void watcher.close()
+            .catch((closeError: unknown) => {
+              console.warn(`[watcher] failed to close native project-root watcher: ${watcherErrorMessage(closeError)}`);
+            })
+            .finally(() => {
+              if (!this.stopped) this.startWatcher(true);
+            });
+          return;
+        }
+
+        console.warn(
+          `[watcher] ${usePolling ? "polling" : "native"} project-root watch error for ${this.projectRoot}: ${watcherErrorMessage(error)}`,
+        );
+      })
       .on("addDir", handleAdd)
       .on("add", handleAdd);
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    await this.watcher?.close();
+    const watcher = this.watcher;
+    this.watcher = null;
+    await watcher?.close();
   }
 }
 
@@ -196,7 +286,13 @@ export class ImportTargetWatcher {
       }
     };
 
-    this.watcher.on("add", handleAdd);
+    this.watcher
+      .on("error", (error: unknown) => {
+        // This watcher already uses polling. Handling the event prevents a
+        // transient filesystem error from terminating the entire server.
+        console.warn(`[watcher] import-target watch error for ${this.targetPath}: ${watcherErrorMessage(error)}`);
+      })
+      .on("add", handleAdd);
   }
 
   private _complete(): void {
