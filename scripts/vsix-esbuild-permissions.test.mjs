@@ -52,6 +52,15 @@ describe("VSIX esbuild executable permissions", () => {
     );
   });
 
+  it("resolves the main checkout installation from a worktree without local dependencies", () => {
+    const root = createTempRoot();
+    const worktree = resolve(root, ".worktrees", "feature");
+    mkdirSync(worktree, { recursive: true });
+    writePackage(resolve(root, "node_modules"), "esbuild", "0.28.1");
+
+    expect(resolveAuthoritativeEsbuildVersion(worktree)).toBe("0.28.1");
+  });
+
   it("accepts an aligned staged runtime", () => {
     const root = createTempRoot();
     for (const packageName of ["esbuild", ...PLATFORM_ESBUILD_PACKAGES]) {

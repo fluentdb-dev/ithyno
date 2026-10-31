@@ -1,6 +1,13 @@
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import type { TmuxActionCatalogEntry } from "../types";
 import {
+  TmuxBrowserPanel,
+  TmuxBrowserControl,
+  buildTmuxHistoryCopyText,
   copilotWheelInput,
+  filterTmuxHistory,
   beginTerminalAttachmentWindow,
   parseTerminalSessionStatusMessage,
   parseTerminalReplayProtocolMessage,
@@ -25,6 +32,27 @@ describe("Copilot wheel compatibility", () => {
     expect(copilotWheelInput("PowerShell", "none", 120)).toBeNull();
     expect(copilotWheelInput("GitHub Copilot", "vt200", 120)).toBeNull();
     expect(copilotWheelInput("GitHub Copilot", "none", 0)).toBeNull();
+  });
+});
+
+describe("tmux history filtering", () => {
+  it("keeps the original snapshot when the query is blank", () => {
+    expect(filterTmuxHistory("alpha\nbeta\n", "  ")).toBe("alpha\nbeta\n");
+  });
+
+  it("returns case-insensitive matching lines without changing their text", () => {
+    expect(filterTmuxHistory("Build passed\nwarning\nBUILD cached", "build"))
+      .toBe("Build passed\nBUILD cached");
+  });
+});
+
+describe("tmux terminal controls", () => {
+  it("renders independent window browser and shortcut controls", () => {
+    const markup = renderToStaticMarkup(React.createElement(TmuxBrowserControl));
+
+    expect(markup).toContain('aria-label="Browse tmux session"');
+    expect(markup).toContain('aria-label="Open tmux shortcuts"');
+    expect(markup.match(/<button/g)).toHaveLength(2);
   });
 });
 
@@ -176,6 +204,656 @@ describe("resolveTerminalSessionState", () => {
   it("ignores unrelated websocket payloads", () => {
     expect(parseTerminalSessionStatusMessage(JSON.stringify({ type: "data", payload: "x" }))).toBeNull();
     expect(parseTerminalSessionStatusMessage("not-json")).toBeNull();
+  });
+});
+
+function findButtonNode(node: unknown, label: string): { props: any } | null {
+  const matches = findButtonNodes(node, label);
+  return matches[0] ?? null;
+}
+
+function findButtonNodes(node: unknown, label: string): Array<{ props: any }> {
+  if (!node || typeof node !== "object") return [];
+  if (Array.isArray(node)) {
+    return node.flatMap((child) => findButtonNodes(child, label));
+  }
+  const results: Array<{ props: any }> = [];
+  if ("type" in node && node.type === "button") {
+    const props = (node as any).props ?? {};
+    const text = props.children;
+    const flattened = Array.isArray(text)
+      ? text.map((value: unknown) => typeof value === "string" ? value : (typeof value === "object" && value && "props" in value ? String((value as any).props?.children ?? "") : "")).join("")
+      : typeof text === "string" ? text : "";
+    if (flattened.includes(label)) results.push(node as any);
+  }
+  const props = "props" in node ? (node as any).props : undefined;
+  if (props && typeof props === "object") {
+    results.push(...findButtonNodes(props.children, label));
+    results.push(...findButtonNodes(props, label));
+  }
+  return results;
+}
+
+describe("tmux browser panel", () => {
+  const topology = {
+    available: true,
+    provider: "psmux" as const,
+    version: "psmux 1.0",
+    capabilities: { topology: true, selection: false, history: false },
+    session: {
+      name: "project-session",
+      windows: [{
+        id: "@1",
+        index: 0,
+        name: "manager",
+        active: true,
+        paneCount: 2,
+        layout: "even-horizontal",
+        panes: [{
+          id: "%1",
+          windowId: "@1",
+          windowIndex: 0,
+          index: 0,
+          title: "logs",
+          active: true,
+          width: 120,
+          height: 30,
+          currentPath: "/tmp/project",
+        }, {
+          id: "%2",
+          windowId: "@1",
+          windowIndex: 0,
+          index: 1,
+          title: "shell",
+          active: false,
+          width: 120,
+          height: 30,
+          currentPath: "/tmp/project",
+        }],
+      }],
+    },
+    reason: "selection is disabled because select-pane is not supported by psmux; history is disabled because capture-pane is not supported by psmux",
+  };
+
+  it("renders capability-aware selection and history controls with explanatory titles", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology,
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("selection is disabled because select-pane is not supported by psmux");
+    expect(markup).toContain("capture-pane");
+    expect(markup).toContain('role="tab"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain("split");
+    expect(markup).not.toContain("kill");
+    expect(markup).not.toContain("rename");
+  });
+
+  it("shows navigation affordances and active state for window and pane selection", () => {
+    const activeTopology = {
+      ...topology,
+      capabilities: { topology: true, selection: true, history: true },
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: activeTopology,
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("0: manager");
+    expect(markup).toContain("0.0 logs");
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('title="Open retained tmux history for pane 0.0 logs"');
+  });
+
+  it("starts with the windows and panes view visible without embedding the shortcut toggle", () => {
+    const onToggle = vi.fn();
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        actionCatalog: [
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        ],
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+        onToggleCheatsheet: onToggle,
+      }),
+    );
+
+    expect(markup).not.toContain('aria-label="Open tmux shortcuts"');
+    expect(markup).toContain("0: manager");
+    expect(markup).not.toContain("Cheat sheet");
+  });
+
+  it("replaces the pane view with the cheat sheet and provides a close back button", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        actionCatalog: [
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+          { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
+        ],
+        cheatsheetOpen: true,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+        onToggleCheatsheet: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("Cheat sheet");
+    expect(markup).toContain('aria-label="Return to windows and panes"');
+    expect(markup).not.toContain('aria-label="Close tmux shortcuts"');
+    expect(markup).not.toContain("0: manager");
+  });
+
+  it("opens a confirmation and calls confirm or cancel only when the user chooses", () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    const element = TmuxBrowserPanel({
+      topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      actionCatalog: [
+        { id: "kill-session", group: "session", label: "Stop session", shortcut: "Click Stop session", availability: "executable", supported: true, description: "Stop the current project session." },
+      ],
+      closeSessionConfirmOpen: true,
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onRequestCloseSession: vi.fn(),
+      onCancelCloseSession: onCancel,
+      onConfirmCloseSession: onConfirm,
+      onSelect: vi.fn(),
+      onOpenHistory: vi.fn(),
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onToggleCheatsheet: vi.fn(),
+    });
+
+    const cancelButton = findButtonNode(element, "Cancel");
+    const confirmButtons = findButtonNodes(element, "Stop session");
+    expect(element).not.toBeNull();
+    expect(renderToStaticMarkup(React.createElement("div", null, "This stops the Manager and every window and pane in this session; it does not merely hide the tmux panel."))).toContain("every window and pane in this session");
+    cancelButton?.props.onClick?.();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(confirmButtons.length).toBeGreaterThan(1);
+    const confirmButton = confirmButtons[confirmButtons.length - 1];
+    confirmButton.props.onClick?.();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens an inline pane close confirmation and keeps it separate from the session stop flow", () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    const element = TmuxBrowserPanel({
+      topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      actionCatalog: [
+        { id: "kill-session", group: "session", label: "Stop session", shortcut: "Click Stop session", availability: "executable", supported: true, description: "Stop the current project session." },
+      ],
+      paneCloseTarget: topology.session.windows[0].panes[0],
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onRequestCloseSession: vi.fn(),
+      onCancelCloseSession: vi.fn(),
+      onConfirmCloseSession: vi.fn(),
+      onRequestClosePane: vi.fn(),
+      onCancelClosePane: onCancel,
+      onConfirmClosePane: onConfirm,
+      onSelect: vi.fn(),
+      onOpenHistory: vi.fn(),
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onToggleCheatsheet: vi.fn(),
+    });
+
+    const cancelButton = findButtonNode(element, "Cancel");
+    const confirmButtons = findButtonNodes(element, "Close pane");
+    expect(element).not.toBeNull();
+    expect(renderToStaticMarkup(React.createElement("div", null, "This will stop the running process in this pane."))).toContain("stop the running process in this pane");
+    cancelButton?.props.onClick?.();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(confirmButtons.length).toBeGreaterThan(0);
+    const confirmButton = confirmButtons[confirmButtons.length - 1];
+    confirmButton.props.onClick?.();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes hover captions and aria labels for tmux controls", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        closeSessionConfirmOpen: true,
+        cheatsheetOpen: true,
+        actionCatalog: [
+          { id: "kill-session", group: "session", label: "Stop session", shortcut: "Click Stop session", availability: "executable", supported: true, description: "Stop the current project session." },
+        ],
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+        onToggleCheatsheet: vi.fn(),
+        onRequestCloseSession: vi.fn(),
+        onCancelCloseSession: vi.fn(),
+        onConfirmCloseSession: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain('aria-label="Stop tmux session project-session"');
+    expect(markup).toContain('title="Refresh tmux topology"');
+    expect(markup).toContain('aria-label="Return to windows and panes"');
+    expect(markup).toContain('aria-label="Hide tmux panel"');
+    expect(markup).toContain('class="terminal-tmux-panel-close-button"');
+    expect(markup).toContain('title="Stop tmux session project-session"');
+    expect(markup).toContain('title="Cancel stopping tmux session project-session"');
+  });
+
+  it("keeps history separate from the shortcut overlay and preserves visible error output", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: "Action failed",
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history: { paneId: "%1", content: "alpha\nbeta\n", lineLimit: 5, truncated: false },
+        historyLoading: false,
+        query: "",
+        copied: false,
+        cheatsheetOpen: true,
+        actionCatalog: [
+          { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        ],
+        actionError: "Action failed",
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+        onToggleCheatsheet: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain('aria-label="Captured tmux pane history"');
+    expect(markup).not.toContain("Cheat sheet");
+    expect(markup).toContain("Action failed");
+  });
+
+  it("renders client-only and executable actions correctly and disables all pending controls", () => {
+    const onRefresh = vi.fn();
+    const onExecuteAction = vi.fn();
+    const element = TmuxBrowserPanel({
+      topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      cheatsheetOpen: true,
+      actionCatalog: [
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B → x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
+        { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
+      ],
+      pendingActionId: "next-window",
+      actionError: "Action failed",
+      onRefresh,
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      onOpenHistory: vi.fn(),
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onExecuteAction,
+    });
+
+    const refreshButton = findButtonNode(element, "Refresh topology");
+    const nextButton = findButtonNode(element, "Next window");
+    const killButton = findButtonNode(element, "Kill pane");
+    const markup = renderToStaticMarkup(React.createElement(TmuxBrowserPanel, {
+      topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      cheatsheetOpen: true,
+      actionCatalog: [
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "kill-pane", group: "session", label: "Kill pane", shortcut: "Ctrl+B → x", availability: "reference-only", supported: false, description: "Reference-only destructive shortcut." },
+        { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
+      ],
+      pendingActionId: "next-window",
+      actionError: "Action failed",
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      onOpenHistory: vi.fn(),
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onExecuteAction,
+    }));
+
+    expect(markup).toContain("Shortcut");
+    expect(markup).not.toContain("<strong>Command</strong>");
+    expect(markup).not.toContain("<strong>Action</strong>");
+    expect(refreshButton?.props.disabled).toBe(true);
+    expect(nextButton?.props.disabled).toBe(true);
+    expect(killButton?.props.disabled).toBe(true);
+
+    const clickRefresh = refreshButton?.props.onClick as (() => void) | undefined;
+    clickRefresh?.();
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(renderToStaticMarkup(React.createElement(TmuxBrowserPanel, {
+      topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+      open: true,
+      loading: false,
+      error: "Action failed",
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      actionCatalog: [
+        { id: "next-window", group: "navigation", label: "Next window", shortcut: "Ctrl+B → n", availability: "executable", supported: true, description: "Move to the next window." },
+        { id: "refresh-topology", group: "history", label: "Refresh topology", shortcut: "Click Refresh", availability: "client-only", supported: true, description: "Refresh topology." },
+      ],
+      pendingActionId: null,
+      actionError: "Action failed",
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      onOpenHistory: vi.fn(),
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onExecuteAction,
+    }))).toContain("Action failed");
+  });
+
+  it("keeps history search, truncation, copy text, and empty/loading states explicit", () => {
+    const history = { paneId: "%1", content: "alpha\nbeta\ngamma\n", lineLimit: 3, truncated: true };
+    const searchMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history,
+        historyLoading: false,
+        query: "beta",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(searchMarkup).toContain("beta");
+    expect(searchMarkup).not.toContain("alpha");
+    expect(searchMarkup).toContain("Showing a bounded tail of the pane history.");
+    expect(buildTmuxHistoryCopyText(history.content, "beta")).toBe("beta");
+
+    const loadingMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history: null,
+        historyLoading: true,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(loadingMarkup).toContain("Loading history…");
+
+    const emptyMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: null,
+        historyPane: { ...topology.session.windows[0].panes[0], title: "logs" },
+        history: { paneId: "%1", content: "", lineLimit: 50, truncated: false },
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(emptyMarkup).toContain("No pane history.");
+
+    const errorMarkup = renderToStaticMarkup(
+      React.createElement(TmuxBrowserPanel, {
+        topology: { ...topology, capabilities: { topology: true, selection: true, history: true } },
+        open: true,
+        loading: false,
+        error: "history probe failed",
+        historyPane: null,
+        history: null,
+        historyLoading: false,
+        query: "",
+        copied: false,
+        onRefresh: vi.fn(),
+        onClose: vi.fn(),
+        onSelect: vi.fn(),
+        onOpenHistory: vi.fn(),
+        onShowPanes: vi.fn(),
+        onCopyHistory: vi.fn(),
+        onQueryChange: vi.fn(),
+      }),
+    );
+    expect(errorMarkup).toContain("history probe failed");
+    expect(errorMarkup).not.toContain("split");
+  });
+
+  it("selects the active window and then its active pane for history (multi-window regression test)", () => {
+    const multiWindowTopology = {
+      ...topology,
+      capabilities: { topology: true, selection: true, history: true },
+      session: {
+        ...topology.session,
+        windows: [
+          {
+            id: "@1",
+            index: 0,
+            name: "first",
+            active: false,
+            paneCount: 1,
+            layout: "even-vertical",
+            panes: [{
+              id: "%1",
+              windowId: "@1",
+              windowIndex: 0,
+              index: 0,
+              title: "first-pane",
+              active: true,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }],
+          },
+          {
+            id: "@2",
+            index: 1,
+            name: "second",
+            active: true,
+            paneCount: 2,
+            layout: "even-horizontal",
+            panes: [{
+              id: "%2",
+              windowId: "@2",
+              windowIndex: 1,
+              index: 0,
+              title: "secondary-first",
+              active: false,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }, {
+              id: "%3",
+              windowId: "@2",
+              windowIndex: 1,
+              index: 1,
+              title: "secondary-active",
+              active: true,
+              width: 120,
+              height: 30,
+              currentPath: "/tmp/project",
+            }],
+          },
+        ],
+      },
+    };
+
+    const onOpenHistory = vi.fn();
+    const openHistoryAction: TmuxActionCatalogEntry = { id: "open-history", group: "history", label: "Open pane history", shortcut: "Click History", availability: "client-only", supported: true, description: "Open history." };
+
+    const element = TmuxBrowserPanel({
+      topology: multiWindowTopology,
+      open: true,
+      loading: false,
+      error: null,
+      historyPane: null,
+      history: null,
+      historyLoading: false,
+      query: "",
+      copied: false,
+      cheatsheetOpen: true,
+      actionCatalog: [openHistoryAction],
+      pendingActionId: null,
+      actionError: null,
+      onRefresh: vi.fn(),
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      onOpenHistory,
+      onShowPanes: vi.fn(),
+      onCopyHistory: vi.fn(),
+      onQueryChange: vi.fn(),
+      onExecuteAction: vi.fn(),
+    });
+
+    const historyButton = findButtonNode(element, "Open pane history");
+    const clickHistory = historyButton?.props.onClick as (() => void) | undefined;
+    clickHistory?.();
+
+    // Should open history for the active pane in the active window (@2:%3),
+    // not the first pane with active=true across all windows (@1:%1).
+    expect(onOpenHistory).toHaveBeenCalledOnce();
+    expect(onOpenHistory).toHaveBeenCalledWith(multiWindowTopology.session.windows[1].panes[1]);
   });
 });
 
