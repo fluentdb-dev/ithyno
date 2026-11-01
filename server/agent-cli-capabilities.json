@@ -1,0 +1,455 @@
+{
+  "schemaVersion": 1,
+  "adapters": {
+    "claude": {
+      "id": "claude",
+      "aliases": [
+        "claude",
+        "claude-code"
+      ],
+      "displayName": "Claude Code",
+      "currentVersion": "2.1.153 (Claude Code)",
+      "sourceVersion": "2.1.153 (Claude Code)",
+      "fields": [
+        {
+          "key": "model",
+          "label": "Model",
+          "flag": "--model",
+          "kind": "text",
+          "category": "model",
+          "guidance": "Use a model alias or full name; CLI may expose /model interactively."
+        },
+        {
+          "key": "effort",
+          "label": "Effort",
+          "flag": "--effort",
+          "kind": "select",
+          "category": "reasoning",
+          "choices": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "guidance": "Sets the reasoning effort level."
+        },
+        {
+          "key": "permissionMode",
+          "label": "Permission mode",
+          "flag": "--permission-mode",
+          "kind": "select",
+          "category": "permissions",
+          "choices": [
+            "default",
+            "acceptEdits",
+            "auto",
+            "plan",
+            "dontAsk",
+            "bypassPermissions"
+          ],
+          "guidance": "Approval policy for tool use."
+        },
+        {
+          "key": "dangerouslySkipPermissions",
+          "label": "Dangerous skip permissions",
+          "flag": "--dangerously-skip-permissions",
+          "kind": "boolean",
+          "category": "unattended-dangerous",
+          "dangerous": true,
+          "guidance": "Bypasses permission prompts."
+        }
+      ],
+      "modelDiscovery": "manual",
+      "modelGuidance": "Suggestions come from Anthropic's official Claude Code model configuration reference. Provider-specific and gateway model names remain editable.",
+      "availableModels": [
+        "best",
+        "fable",
+        "sonnet",
+        "opus",
+        "haiku",
+        "sonnet[1m]",
+        "opus[1m]",
+        "opusplan",
+        "claude-fable-5-1",
+        "claude-fable-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ],
+      "modelMetadata": [],
+      "danger": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    "codex": {
+      "id": "codex",
+      "aliases": [
+        "codex"
+      ],
+      "displayName": "Codex CLI",
+      "currentVersion": "codex-cli 0.160.1",
+      "sourceVersion": "codex-cli 0.160.1",
+      "fields": [
+        {
+          "key": "model",
+          "label": "Model",
+          "flag": "--model",
+          "kind": "text",
+          "category": "model"
+        },
+        {
+          "key": "profile",
+          "label": "Profile",
+          "flag": "--profile",
+          "kind": "text",
+          "category": "model"
+        },
+        {
+          "key": "sandbox",
+          "label": "Sandbox",
+          "flag": "--sandbox",
+          "kind": "select",
+          "category": "sandbox",
+          "choices": [
+            "read-only",
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        {
+          "key": "approval",
+          "label": "Approval",
+          "flag": "--ask-for-approval",
+          "kind": "select",
+          "category": "permissions",
+          "choices": [
+            "on-request",
+            "never"
+          ]
+        },
+        {
+          "key": "approveForMe",
+          "label": "Approve for me",
+          "flag": "--approve-for-me",
+          "kind": "boolean",
+          "category": "permissions"
+        },
+        {
+          "key": "dangerouslyBypassApprovalsAndSandbox",
+          "label": "Dangerous bypass",
+          "flag": "--dangerously-bypass-approvals-and-sandbox",
+          "kind": "boolean",
+          "category": "unattended-dangerous",
+          "dangerous": true
+        }
+      ],
+      "modelDiscovery": "native",
+      "modelGuidance": "Codex app-server model/list is preferred when available; if it fails, keep the model field editable and enter a value manually.",
+      "availableModels": [
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna"
+      ],
+      "modelMetadata": [
+        {
+          "id": "gpt-6.1-sol",
+          "model": "gpt-6.1-sol",
+          "displayName": "GPT-6.1-Sol",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultReasoningEffort": "low"
+        },
+        {
+          "id": "gpt-6-astra",
+          "model": "gpt-6-astra",
+          "displayName": "GPT-6-Astra",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultReasoningEffort": "low"
+        },
+        {
+          "id": "gpt-6-sol",
+          "model": "gpt-6-sol",
+          "displayName": "GPT-6-Sol",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultReasoningEffort": "medium"
+        },
+        {
+          "id": "gpt-6-luna",
+          "model": "gpt-6-luna",
+          "displayName": "GPT-6-Luna",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultReasoningEffort": "medium"
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "model": "gpt-5.6-sol",
+          "displayName": "GPT-5.6-Sol",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultReasoningEffort": "low"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "model": "gpt-5.6-terra",
+          "displayName": "GPT-5.6-Terra",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultReasoningEffort": "medium"
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "model": "gpt-5.6-luna",
+          "displayName": "GPT-5.6-Luna",
+          "supportedReasoningEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultReasoningEffort": "medium"
+        }
+      ],
+      "danger": [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--approve-for-me"
+      ]
+    },
+    "agy": {
+      "id": "agy",
+      "aliases": [
+        "agy",
+        "antigravity"
+      ],
+      "displayName": "Antigravity CLI",
+      "currentVersion": "1.3.1",
+      "sourceVersion": "1.3.1",
+      "fields": [
+        {
+          "key": "model",
+          "label": "Model",
+          "flag": "--model",
+          "kind": "text",
+          "category": "model"
+        },
+        {
+          "key": "effort",
+          "label": "Effort",
+          "flag": "--effort",
+          "kind": "select",
+          "category": "reasoning",
+          "choices": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "flag": "--mode",
+          "kind": "select",
+          "category": "execution",
+          "choices": [
+            "accept-edits",
+            "plan"
+          ]
+        },
+        {
+          "key": "sandbox",
+          "label": "Sandbox",
+          "flag": "--sandbox",
+          "kind": "boolean",
+          "category": "sandbox"
+        },
+        {
+          "key": "dangerouslySkipPermissions",
+          "label": "Dangerous skip permissions",
+          "flag": "--dangerously-skip-permissions",
+          "kind": "boolean",
+          "category": "unattended-dangerous",
+          "dangerous": true
+        }
+      ],
+      "modelDiscovery": "native",
+      "modelGuidance": "Agy exposes models via `agy models`; if that command fails, keep manual input available.",
+      "availableModels": [
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-medium",
+        "gemini-3.8-flash-low",
+        "gemini-3.7-flash-high",
+        "gemini-3.7-flash-medium",
+        "gemini-3.7-flash-low",
+        "gemini-3.6-flash-high",
+        "gemini-3.6-flash-medium",
+        "gemini-3.6-flash-low",
+        "gemini-3.1-pro-high",
+        "gemini-3.1-pro-low",
+        "claude-opus-5-5-low",
+        "claude-opus-5-5-medium",
+        "claude-opus-5-5-high",
+        "claude-sonnet-5-5-low",
+        "claude-sonnet-5-5-medium",
+        "claude-sonnet-5-5-high",
+        "gpt-oss-120b-medium"
+      ],
+      "modelMetadata": [],
+      "danger": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    "copilot": {
+      "id": "copilot",
+      "aliases": [
+        "copilot",
+        "github-copilot"
+      ],
+      "displayName": "GitHub Copilot CLI",
+      "currentVersion": "GitHub Copilot CLI 1.0.93.\nRun 'copilot update' to check for updates.",
+      "sourceVersion": "GitHub Copilot CLI 1.0.93.\nRun 'copilot update' to check for updates.",
+      "fields": [
+        {
+          "key": "model",
+          "label": "Model",
+          "flag": "--model",
+          "kind": "text",
+          "category": "model"
+        },
+        {
+          "key": "reasoningEffort",
+          "label": "Reasoning effort",
+          "flag": "--reasoning-effort",
+          "kind": "select",
+          "category": "reasoning",
+          "choices": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "key": "context",
+          "label": "Context",
+          "flag": "--context",
+          "kind": "select",
+          "category": "context",
+          "choices": [
+            "default",
+            "long_context"
+          ]
+        },
+        {
+          "key": "autoTier",
+          "label": "Auto tier",
+          "flag": "--auto-tier",
+          "kind": "select",
+          "category": "model",
+          "choices": [
+            "efficiency",
+            "balance",
+            "intelligence"
+          ]
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "flag": "--mode",
+          "kind": "select",
+          "category": "execution",
+          "choices": [
+            "interactive",
+            "plan",
+            "autopilot"
+          ]
+        },
+        {
+          "key": "allowAll",
+          "label": "Allow all",
+          "flag": "--allow-all",
+          "kind": "boolean",
+          "category": "unattended-dangerous",
+          "dangerous": true
+        },
+        {
+          "key": "yolo",
+          "label": "YOLO",
+          "flag": "--yolo",
+          "kind": "boolean",
+          "category": "unattended-dangerous",
+          "dangerous": true
+        }
+      ],
+      "modelDiscovery": "manual",
+      "modelGuidance": "Suggestions come from GitHub's official Copilot CLI supported-models reference. Availability depends on the user's plan and organization policy; the field remains editable.",
+      "availableModels": [
+        "auto",
+        "claude-sonnet-5.5",
+        "gpt-5.4",
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "claude-opus-5.5",
+        "claude-haiku-5.5",
+        "claude-haiku-4.5",
+        "gpt-5.3-codex",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash"
+      ],
+      "modelMetadata": [],
+      "danger": [
+        "--allow-all",
+        "--yolo",
+        "--no-ask-user"
+      ]
+    }
+  }
+}
