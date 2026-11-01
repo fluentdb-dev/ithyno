@@ -11,8 +11,22 @@ updates:
     groups:
       npm-production:
         dependency-type: production
+        update-types:
+          - minor
+          - patch
       npm-development:
         dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Vitest 5 requires Node.js >=22.12, while ithyno still supports Node 20.
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@vitest/mocker"
+        update-types:
+          - version-update:semver-major
     open-pull-requests-limit: 10
 
   - package-ecosystem: github-actions
