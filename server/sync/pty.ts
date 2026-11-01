@@ -16,7 +16,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 import type { AgentRegistry } from "../agents/registry.js";
-import { hasAgentsYaml } from "../agents/registry.js";
+import { canonicalCli, hasAgentsYaml } from "../agents/registry.js";
 import { SESSION_TOKEN } from "../util/auth.js";
 import { resolveDevelopmentEnvironmentValues, sanitizeChildEnvironment } from "../environment/index.js";
 
@@ -164,8 +164,8 @@ export function _setTmuxCacheForTest(v: boolean | null): void {
  * `.ithyno/session-id` file (Claude-only from day one) is still read
  * as fallback for existing dev environments.
  */
-function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
-  if (!projectRoot) return "claude";
+function resolveClaudeSessionStartup(projectRoot: string | undefined, command = "claude"): string {
+  if (!projectRoot) return shellQuote(command);
   const idPath = join(projectRoot, ".ithyno", "session-claude");
   const legacyPath = join(projectRoot, ".ithyno", "session-id");
   let uuid = "";
@@ -179,7 +179,7 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
     if (uuid) break;
   }
   if (uuid) {
-    return `claude --resume ${shellQuote(uuid)}`;
+    return `${shellQuote(command)} --resume ${shellQuote(uuid)}`;
   }
   // First launch (or empty/corrupt file): mint + write + create.
   const fresh = randomUUID();
@@ -191,7 +191,7 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
      * will create the conversation, we just won't be able to resume
      * next time. Better than a broken shell. */
   }
-  return `claude --session-id ${shellQuote(fresh)}`;
+  return `${shellQuote(command)} --session-id ${shellQuote(fresh)}`;
 }
 
 /**
@@ -203,9 +203,9 @@ function resolveClaudeSessionStartup(projectRoot: string | undefined): string {
  * session resume).
  *
  * Adding session persistence for a new CLI = add its strategy here.
- * The picker's "(unverified)" label in InitDialog SHALL be dropped for a
- * CLI once its strategy is landed AND the dispatch skill resolves in
- * that CLI's command surface.
+ * Session-resume support is independent from Manager verification in the
+ * InitDialog. A CLI may be verified for dispatch while still using the plain
+ * first-launch fallback here.
  */
 type ManagerStartupStrategy = (projectRoot: string | undefined) => string;
 
@@ -244,7 +244,16 @@ export function ptyStartup(
   let initialInput: string | undefined;
   if (manager && manager.command) {
     const args = manager.args ?? [];
-    if (args.length === 0) {
+    if (manager.sessionStartup === "managed" && canonicalCli(manager.command) === "claude") {
+      // The session policy is independent from normal CLI options. This
+      // keeps the stable per-project session id active when users also set
+      // --model, --permission-mode, or other Manager arguments in the UI.
+      baseStartup = [resolveClaudeSessionStartup(projectRoot, manager.command), ...args.map(shellQuote)].join(" ");
+    } else if (manager.sessionStartup !== undefined) {
+      // Explicit UI policy: session flags, if any, are already represented
+      // in args. `new` intentionally means a plain fresh CLI invocation.
+      baseStartup = [manager.command, ...args.map(shellQuote)].join(" ");
+    } else if (args.length === 0) {
       // Empty args → defer to per-CLI Manager startup strategy
       // (Claude gets --session-id mint / --resume; other CLIs get
       // plain command as safe first-launch default). Explicit args in
@@ -283,7 +292,7 @@ export function ptyStartup(
       ? { startup: baseStartup }
       : { startup: baseStartup, initialInput };
   }
-  const session = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
+  const session = resolvedTmuxSessionName(projectRoot);
   // A tmux server outlives the PTY client that created it. Explicitly put the
   // dashboard identity in a new session and register those names with
   // update-environment before `-A` attaches to an existing session. The shell
@@ -336,6 +345,16 @@ export function tmuxSessionName(projectRoot?: string): string {
   if (!projectRoot) return "ithyno";
   const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 12);
   return `ithyno-${hash}`;
+}
+
+/** Resolve the exact project session target used by both PTY startup and the
+ * tmux browser. The explicit environment override remains authoritative for
+ * operators that already use it. */
+export function resolvedTmuxSessionName(
+  projectRoot?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env.ITHYNO_TMUX_SESSION || tmuxSessionName(projectRoot);
 }
 
 function tmuxMissingFallback(): string {
@@ -681,7 +700,7 @@ export function terminateAllLivePtys(oldProjectRoot?: string): void {
   }
 
   if (oldProjectRoot) {
-    const sessionName = process.env.ITHYNO_TMUX_SESSION || tmuxSessionName(oldProjectRoot);
+    const sessionName = resolvedTmuxSessionName(oldProjectRoot);
     try {
       spawnSync("tmux", ["kill-session", "-t", sessionName], { stdio: "ignore", timeout: 3000 });
     } catch {
