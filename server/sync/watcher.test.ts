@@ -88,7 +88,7 @@ describe("watcher native-to-polling fallback", () => {
     instances[0].emitter.emit("unlink", "changes/example/tasks.md");
 
     expect(onExternalChange).toHaveBeenCalledWith(
-      "/project/openspec/changes/example/tasks.md",
+      join("/project/openspec", "changes/example/tasks.md"),
       "unlink",
     );
     await watcher.stop();
