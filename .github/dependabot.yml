@@ -20,11 +20,10 @@ updates:
           - minor
           - patch
     ignore:
-      # Vitest 5 requires Node.js >=22.12, while ithyno still supports Node 20.
-      - dependency-name: vitest
-        update-types:
-          - version-update:semver-major
-      - dependency-name: "@vitest/mocker"
+      # Major upgrades need individual compatibility review. Dependabot's
+      # grouped security updates can otherwise include majors even though the
+      # regular groups above are limited to minor and patch releases.
+      - dependency-name: "*"
         update-types:
           - version-update:semver-major
     open-pull-requests-limit: 10
