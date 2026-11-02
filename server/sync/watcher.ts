@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import chokidar, { type FSWatcher } from "chokidar";
 import { readFile } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { sha1 } from "../util/hash.js";
 
 type WatchOptions = NonNullable<Parameters<typeof chokidar.watch>[1]>;
 export type WatchFactory = (path: string, options: WatchOptions) => FSWatcher;
+
+const defaultWatchFactory: WatchFactory = (path, options) =>
+  chokidar.watch(".", { ...options, cwd: path });
+
+function absoluteEventPath(root: string, filePath: string): string {
+  return isAbsolute(filePath) ? filePath : join(root, filePath);
+}
 
 const NATIVE_WATCH_FALLBACK_CODES = new Set(["EPERM", "EMFILE", "ENOSPC"]);
 
@@ -37,9 +44,7 @@ export class Watcher {
   constructor(
     private readonly openspecDir: string,
     private readonly onExternalChange: (filePath: string, event: "change" | "add" | "unlink") => void,
-    private readonly watchFactory: WatchFactory = (path, options) =>
-      // lgtm[js/path-injection] -- Watches the authenticated user's explicitly selected local project.
-      chokidar.watch(path, options),
+    private readonly watchFactory: WatchFactory = defaultWatchFactory,
   ) {}
 
   recordWrite(filePath: string, hash: string): void {
@@ -62,6 +67,7 @@ export class Watcher {
     this.watcher = watcher;
 
     const handle = async (event: "change" | "add" | "unlink", filePath: string) => {
+      filePath = absoluteEventPath(this.openspecDir, filePath);
       // .md is the historical scope; `.openspec.yaml` per-change sidecars
       // carry mutable machine state (phase, priorPhase, escalatedAt) that
       // must propagate to clients on external edit — landed by
@@ -156,9 +162,7 @@ export class ProjectRootWatcher {
   constructor(
     private readonly projectRoot: string,
     private readonly onOpenspecCreated: () => void,
-    private readonly watchFactory: WatchFactory = (path, options) =>
-      // lgtm[js/path-injection] -- Watches the authenticated user's explicitly selected local project.
-      chokidar.watch(path, options),
+    private readonly watchFactory: WatchFactory = defaultWatchFactory,
   ) {}
 
   start(): void {
@@ -183,6 +187,7 @@ export class ProjectRootWatcher {
 
     const handleAdd = (filePath: string) => {
       if (this.stopped) return;
+      filePath = absoluteEventPath(this.projectRoot, filePath);
       // Normalize: chokidar emits the path of the added entry. On `mkdir
       // openspec`, chokidar fires `addDir` with the path of the new dir.
       // We accept either the exact openspec/ path or any path that begins

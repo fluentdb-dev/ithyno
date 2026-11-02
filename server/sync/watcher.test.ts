@@ -78,6 +78,33 @@ describe("watcher native-to-polling fallback", () => {
     expect(instances[1].options).toMatchObject({ usePolling: true, interval: 100 });
     await watcher.stop();
   });
+
+  it("normalizes cwd-relative OpenSpec events to absolute paths", async () => {
+    const { factory, instances } = createFakeWatchFactory();
+    const onExternalChange = vi.fn();
+    const watcher = new Watcher("/project/openspec", onExternalChange, factory);
+    watcher.start();
+
+    instances[0].emitter.emit("unlink", "changes/example/tasks.md");
+
+    expect(onExternalChange).toHaveBeenCalledWith(
+      "/project/openspec/changes/example/tasks.md",
+      "unlink",
+    );
+    await watcher.stop();
+  });
+
+  it("recognizes a cwd-relative openspec directory event", async () => {
+    const { factory, instances } = createFakeWatchFactory();
+    const onOpenspecCreated = vi.fn();
+    const watcher = new ProjectRootWatcher("/project", onOpenspecCreated, factory);
+    watcher.start();
+
+    instances[0].emitter.emit("addDir", "openspec");
+
+    expect(onOpenspecCreated).toHaveBeenCalledTimes(1);
+    await watcher.stop();
+  });
 });
 
 describe("ImportTargetWatcher", () => {
