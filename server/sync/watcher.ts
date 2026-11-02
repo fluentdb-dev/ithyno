@@ -37,7 +37,8 @@ export class Watcher {
   constructor(
     private readonly openspecDir: string,
     private readonly onExternalChange: (filePath: string, event: "change" | "add" | "unlink") => void,
-    private readonly watchFactory: WatchFactory = (path, options) => chokidar.watch(path, options),
+    private readonly watchFactory: WatchFactory = (path, options) =>
+      chokidar.watch(path, options), // codeql[js/path-injection] -- Watches the authenticated user's explicitly selected local project.
   ) {}
 
   recordWrite(filePath: string, hash: string): void {
@@ -154,7 +155,8 @@ export class ProjectRootWatcher {
   constructor(
     private readonly projectRoot: string,
     private readonly onOpenspecCreated: () => void,
-    private readonly watchFactory: WatchFactory = (path, options) => chokidar.watch(path, options),
+    private readonly watchFactory: WatchFactory = (path, options) =>
+      chokidar.watch(path, options), // codeql[js/path-injection] -- Watches the authenticated user's explicitly selected local project.
   ) {}
 
   start(): void {

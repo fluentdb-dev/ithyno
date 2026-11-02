@@ -13,6 +13,10 @@ concurrency:
 jobs:
   dependency-review:
     name: Review dependency changes
+    # Dependency changes are reviewed when they enter develop. Re-running the
+    # full develop-to-main release diff also makes GitHub misidentify the local
+    # `electron/` workspace as the public `electron` package at the app version.
+    if: github.base_ref != 'main' || github.head_ref != 'develop'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
