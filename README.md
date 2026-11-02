@@ -120,6 +120,18 @@ for normal use, the [troubleshooting guide](https://fluentdb-dev.github.io/ithyn
 for environment-specific issues, and the [architecture document](./docs/architecture.md#11-manager-terminal-and-local-security)
 for PTY and security details.
 
+Agent settings include CLI-specific argument builders for models, profiles,
+approval/sandbox behavior, reasoning, and session startup. tmux-backed Manager
+terminals also expose project-scoped windows, panes, retained history, and
+interactive shortcut controls without restarting the Manager process.
+
+### Secrets
+
+The **Secrets** workspace manages project `.env*` profiles and uses bundled
+dotenvx support for encryption and decryption. Private `.env.keys` material
+remains project-local and must stay out of Git. See the
+[Secrets user manual](./docs/user-manual/development-environment.md).
+
 ### CLI response-waiting notifications
 
 Notifications are opt-in. `ithyno init` scaffolds the host-specific notification
@@ -161,11 +173,11 @@ Legend: ✅ confirmed, ❌ currently not working.
 
 ### TODO
 
-- [ ] Expand GitHub Copilot support.
-- [ ] Add a development environment-variable manager powered by dotenvx.
+- [x] Add GitHub Copilot Manager/Worker Skills, notifications, and verified Manager selection.
+- [x] Add a dotenvx-powered Secrets workspace for project environment profiles.
 - [ ] Add management for externally provided skills.
-- [ ] Add argument builders tailored to each agent harness.
-- [ ] Improve tmux configuration and operation through the GUI.
+- [x] Add argument builders tailored to each agent harness.
+- [x] Add tmux window, pane, history, and shortcut controls to the GUI.
 - [ ] Verify communication between Claude Code sessions.
 
 ---

@@ -129,6 +129,12 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout release metadata
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
+
+      - name: Prepare release notes from CHANGELOG
+        run: node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME}" CHANGELOG.md release-notes.md
+
       - name: Download all matrix artifacts
         # Omitting `name:` pulls every artifact this workflow uploaded
         # (one per matrix OS plus one VS Code artifact). Each lands in its own subdirectory
@@ -156,16 +162,6 @@ jobs:
             dist-artifacts/**/ithyno-*.tgz
           fail_on_unmatched_files: true
           draft: false
-          prerelease: false
-          body: |
-            Built from tag `${{ github.ref_name }}` (commit ${{ github.sha }}).
-
-            Assets are attached below. Pick the one for your platform:
-            - `ithyno-*-mac-x64.dmg` / `ithyno-*-mac-arm64.dmg` — macOS
-            - `ithyno-*-win-x64-installer.exe` / `ithyno-*-win-arm64-installer.exe` — Windows (Installer)
-            - `ithyno-*-win-x64.exe` / `ithyno-*-win-arm64.exe` — Windows (Portable / Non-installer)
-            - `ithyno-*-linux-x64.AppImage` / `ithyno-*-linux-arm64.AppImage` — Linux
-            - `ithyno-*.vsix` — VS Code extension
-            - `ithyno-*.tgz` — project-local CLI package used by initialization
-
-            Release notes: edit this Release description to add details.
+          prerelease: true
+          body_path: release-notes.md
+          generate_release_notes: true

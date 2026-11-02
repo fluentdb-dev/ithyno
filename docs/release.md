@@ -1,14 +1,15 @@
 # Release process
 
 This document describes the manual steps a maintainer runs to cut a new
-ithyno release. The workflow is deliberately narrow: local reproducible builds
-and a git tag. Signing, notarization, marketplace publication, and GitHub
-Release automation are **out of scope** for this workflow — see
-[Out of scope](#out-of-scope) below.
+ithyno release. The workflow combines local verification with a tag-triggered
+GitHub Actions build. Signing, notarization, marketplace publication, and npm
+registry publication remain **out of scope** — see [Out of scope](#out-of-scope)
+below.
 
 ## Maintainer sequence
 
-1. **Bump the version** across all four owned `package.json` files:
+1. **Bump the version** across the three owned `package.json` files and the
+   root `package-lock.json`:
 
    ```sh
    npm run release:version -- <next-version>
@@ -50,6 +51,11 @@ Release automation are **out of scope** for this workflow — see
    git push origin v<version>
    ```
 
+   The tag starts the three-platform release workflow. After all build jobs
+   succeed, GitHub creates a prerelease, uploads the Electron, VSIX, and CLI
+   artifacts, and copies the matching `CHANGELOG.md` section into the Release
+   description. GitHub-generated comparison notes are appended automatically.
+
 ## Out of scope
 
 The following are **not** handled by this workflow and are tracked as
@@ -61,7 +67,6 @@ follow-ups:
 | Notarization (macOS) | Requires an Apple ID with notarization entitlements and Xcode tools. |
 | VS Code Marketplace publish | Requires a `VSCE_PAT` personal access token from the publisher account. |
 | npm registry publish | Requires an npm access token and a decision on the package scope. |
-| GitHub Release automation | Requires `gh release create` wiring and a `GITHUB_TOKEN` with `contents: write`. |
 | Auto-update wiring | Requires a signed update manifest and a distribution server (e.g. S3, GitHub Releases). |
 
 When these follow-ups are implemented, update this document to reflect the new
