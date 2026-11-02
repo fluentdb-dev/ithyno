@@ -17,6 +17,8 @@ import { commandForAgentRole } from "../manager-command.js";
  *   - `mode: single-prompt | live-shell` — controls spawn behavior
  *   - `roles: string[]` — dispatch labels (single-role and multi-role OK)
  *   - `prompts: { <role>: string }` — per-role prompt override
+ *   - `sessionStartup?: managed | new | picker | latest | custom` —
+ *     Manager session lifecycle, independent from normal CLI args
  *   - `runtime?: string` — shared-defaults reference (command/args/prompts)
  *
  * Old shapes (scalar `role`, `initialInput`, `runtime + prompt` without
@@ -25,6 +27,7 @@ import { commandForAgentRole } from "../manager-command.js";
  */
 
 export type AgentMode = "single-prompt" | "live-shell";
+export type AgentSessionStartup = "managed" | "new" | "picker" | "latest" | "custom";
 
 export type AgentDef = {
   name: string;
@@ -33,6 +36,9 @@ export type AgentDef = {
   command?: string;
   /** Args for the spawned command. */
   args?: string[];
+  /** Manager-only session startup policy. `managed` currently means the
+   *  per-project Claude session id maintained under `.ithyno/`. */
+  sessionStartup?: AgentSessionStartup;
   env?: Record<string, string>;
   /** Run out-of-process with file-backed output so it survives server restarts. */
   detached?: boolean;
@@ -116,6 +122,7 @@ const KNOWN_AGENT_KEYS = new Set([
   "description",
   "command",
   "args",
+  "sessionStartup",
   "env",
   "prompt",
   "prompts",
@@ -154,8 +161,11 @@ export const BUILT_IN_ROLE_PROMPTS: Readonly<Record<string, string>> = {
  * Unknown / arbitrary executable names are returned as-is (lowercased).
  */
 export function canonicalCli(command: string | undefined): string {
-  const c = (command ?? "").toLowerCase().trim();
+  const raw = (command ?? "").toLowerCase().trim();
+  const c = (raw.split(/[\\/]/).pop() ?? raw).replace(/\.(exe|cmd|bat)$/i, "");
   if (c === "antigravity") return "agy";
+  if (c === "claude-code") return "claude";
+  if (c === "github-copilot") return "copilot";
   return c;
 }
 
@@ -359,6 +369,15 @@ function normalizeAgent(
     args = o.args.map(String);
   }
 
+  let sessionStartup: AgentSessionStartup | undefined;
+  if (o.sessionStartup !== undefined) {
+    const allowed: readonly AgentSessionStartup[] = ["managed", "new", "picker", "latest", "custom"];
+    if (typeof o.sessionStartup !== "string" || !allowed.includes(o.sessionStartup as AgentSessionStartup)) {
+      throw new Error(`${label}.sessionStartup must be one of ${allowed.join(", ")}`);
+    }
+    sessionStartup = o.sessionStartup as AgentSessionStartup;
+  }
+
   if (!command) {
     throw new Error(`${label}: must declare 'command'`);
   }
@@ -423,6 +442,12 @@ function normalizeAgent(
       `${label}: role 'manager' requires mode: live-shell (got '${mode}')`,
     );
   }
+  if (sessionStartup !== undefined && !roles.includes("manager")) {
+    throw new Error(`${label}.sessionStartup is only valid for a manager agent`);
+  }
+  if (sessionStartup === "managed" && canonicalCli(command) !== "claude") {
+    throw new Error(`${label}.sessionStartup 'managed' is currently supported only for Claude`);
+  }
 
   // ---- env ----
   const env =
@@ -451,6 +476,7 @@ function normalizeAgent(
     description,
     command,
     args,
+    sessionStartup,
     env,
     detached,
     mode,

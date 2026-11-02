@@ -1,5 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
+import {
+  CLI_FIELD_CATEGORY_ORDER,
+  cliSessionTarget,
+  cliSessionStartupOptions,
+  cliTextFieldPlaceholder,
+  detectCliSessionStartup,
+  extractFreeFormCliArgs,
+  getCliFieldCategory,
+  joinArgv,
+  mergeCliArgs,
+  migrateCliArgsForAdapterSwitch,
+  orderedCliFieldCategories,
+  parseCliArgs,
+  resolveCliAdapter,
+  resetFreeFormCliArgs,
+  replaceFreeFormCliArgs,
+  setCliSessionStartup,
+  setCliSessionTarget,
+  splitArgv,
+} from "../lib/commandBuilder";
+import {
+  buildAgentConfigSavePayload,
+  resolvedModelOptions,
+  resolvedVisibleFields,
+} from "./AgentConfigModal";
 
 // Client-side kebab-case validation regex mirrored from
 // web/src/components/AgentConfigModal.tsx. Extracted so the same
@@ -40,5 +65,280 @@ describe("AgentConfigModal — kebab-case name validation", () => {
 
   it("rejects empty string", () => {
     expect(KEBAB_RE.test("")).toBe(false);
+  });
+
+  it("prefers fetched model IDs and hides static fields after failed probes", () => {
+    expect(resolvedModelOptions({ availableModels: ["gpt-5.1", "claude-3.7-sonnet"] }, null)).toEqual([
+      "gpt-5.1",
+      "claude-3.7-sonnet",
+    ]);
+    expect(resolvedVisibleFields(null, { fields: [{ key: "model", label: "Model", flag: "--model", kind: "text" }] }, "error")).toEqual([]);
+    expect(resolvedVisibleFields(null, { fields: [{ key: "model", label: "Model", flag: "--model", kind: "text" }] }, "idle")).toMatchObject([
+      { key: "model", flag: "--model" },
+    ]);
+  });
+
+  it("serializes the agent save payload with fetched models and manual args intact", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "",
+        roles: ["code"],
+        prompts: { code: "" },
+        command: "codex",
+        args: '--model "gpt-5.1" --profile "fast"',
+        description: "worker",
+        detached: false,
+      },
+      includesManager: false,
+      agmsg: null,
+      isAdd: true,
+      existingNames: ["code-worker"],
+    });
+
+    expect(payload).toMatchObject({
+      action: "upsert",
+      name: "codex-code",
+      roles: ["code"],
+      mode: "single-prompt",
+      command: "codex",
+      args: ["--model", "gpt-5.1", "--profile", "fast"],
+      description: "worker",
+    });
+  });
+
+  it("excludes invocation-time prompt transport from the saved worker config", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "codex-code",
+        roles: ["code"],
+        prompts: {},
+        command: "codex",
+        args: '--model gpt-6.1-sol exec --sandbox workspace-write "runtime prompt" --custom keep',
+        description: "",
+        detached: false,
+      },
+      includesManager: false,
+      agmsg: null,
+      isAdd: false,
+      existingNames: [],
+    });
+
+    expect(payload).toMatchObject({
+      args: [
+        "--model", "gpt-6.1-sol",
+        "--sandbox", "workspace-write",
+        "--custom", "keep",
+      ],
+    });
+  });
+
+  it("preserves a partially typed dash-prefixed field value", () => {
+    const args = mergeCliArgs([], { model: "-" });
+
+    expect(joinArgv(args)).toBe("--model=-");
+    expect(parseCliArgs(splitArgv(joinArgv(args))).values.model).toEqual(["-"]);
+  });
+
+  it("parses Codex sandbox as a valued option despite Agy using the same flag as boolean", () => {
+    const codex = resolveCliAdapter("codex");
+    const agy = resolveCliAdapter("agy");
+
+    expect(parseCliArgs(["--sandbox", "workspace-write"], codex).values.sandbox).toEqual([
+      "workspace-write",
+    ]);
+    expect(parseCliArgs(["--sandbox"], agy).values.sandbox).toEqual(["true"]);
+  });
+
+  it("uses value examples instead of CLI flags as text placeholders", () => {
+    expect(cliTextFieldPlaceholder("codex", { key: "model", label: "Model" }, ["gpt-example"])).toBe("e.g. gpt-example");
+    expect(cliTextFieldPlaceholder("codex", { key: "profile", label: "Profile" })).toBe("e.g. work or fast");
+    expect(cliTextFieldPlaceholder("claude", { key: "model", label: "Model" })).toContain("sonnet");
+  });
+
+  it("builds manager-only session startup argv for each supported CLI", () => {
+    expect(cliSessionStartupOptions("agy")).toEqual([
+      { value: "new", label: "Start a new session", args: [] },
+      { value: "latest", label: "Continue the latest session", args: ["--continue"] },
+      { value: "custom", label: "Resume by conversation ID", args: [] },
+    ]);
+    expect(setCliSessionStartup("agy", ["--model", "gemini-example"], "latest")).toEqual([
+      "--model",
+      "gemini-example",
+      "--continue",
+    ]);
+    expect(detectCliSessionStartup("agy", ["--conversation", "conversation-123"])).toBe("custom");
+    expect(cliSessionTarget("agy", ["--conversation", "conversation-123"])).toBe("conversation-123");
+    expect(setCliSessionTarget("agy", ["--continue", "--model", "gemini-example"], "conversation-456")).toEqual([
+      "--model",
+      "gemini-example",
+      "--conversation",
+      "conversation-456",
+    ]);
+    expect(cliSessionStartupOptions("claude")[0]).toMatchObject({
+      value: "managed",
+      label: "Managed project session ID",
+    });
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--continue"], "managed")).toEqual([
+      "--model",
+      "sonnet",
+    ]);
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--session-id", "fixed-id"], "managed")).toEqual([
+      "--model",
+      "sonnet",
+    ]);
+    expect(detectCliSessionStartup("claude", ["--session-id", "fixed-id"])).toBe("custom");
+    expect(setCliSessionStartup("codex", ["--model", "gpt-example"], "latest")).toEqual([
+      "--model",
+      "gpt-example",
+      "resume",
+      "--last",
+    ]);
+    expect(detectCliSessionStartup("codex", ["--model", "gpt-example", "resume", "--last"])).toBe("latest");
+    expect(detectCliSessionStartup("codex", ["resume", "--last", "--model", "gpt-example"])).toBe("latest");
+    expect(setCliSessionStartup("claude", ["--model", "sonnet", "--resume", "session-id"], "latest")).toEqual([
+      "--model",
+      "sonnet",
+      "--continue",
+    ]);
+    expect(detectCliSessionStartup("copilot", ["--resume", "named-session"])).toBe("custom");
+  });
+
+  it("persists the manager session startup policy separately from CLI args", () => {
+    const payload = buildAgentConfigSavePayload({
+      form: {
+        name: "manager",
+        roles: ["manager"],
+        prompts: {},
+        command: "claude",
+        args: "--model sonnet",
+        description: "",
+        detached: false,
+        sessionStartup: "managed",
+      },
+      includesManager: true,
+      agmsg: null,
+      isAdd: false,
+      existingNames: ["manager"],
+    });
+
+    expect(payload).toMatchObject({
+      sessionStartup: "managed",
+      args: ["--model", "sonnet"],
+    });
+  });
+
+  it("drops Codex-only options when switching to Copilot", () => {
+    const migrated = migrateCliArgsForAdapterSwitch(
+      [
+        "resume",
+        "--last",
+        "--ask-for-approval",
+        "on-request",
+        "--sandbox",
+        "read-only",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--model",
+        "claude-sonnet-5.5",
+        "--custom-flag",
+        "custom-value",
+      ],
+      resolveCliAdapter("codex"),
+      resolveCliAdapter("copilot"),
+    );
+
+    expect(migrated).toEqual([
+      "--model",
+      "claude-sonnet-5.5",
+      "--custom-flag",
+      "custom-value",
+    ]);
+  });
+
+  it("removes a shared flag when its meaning differs between CLIs", () => {
+    expect(migrateCliArgsForAdapterSwitch(
+      ["--sandbox", "workspace-write", "--model", "gpt-example"],
+      resolveCliAdapter("codex"),
+      resolveCliAdapter("agy"),
+    )).toEqual(["--model", "gpt-example"]);
+  });
+
+  it("drops Copilot-only options when switching to Codex", () => {
+    expect(migrateCliArgsForAdapterSwitch(
+      [
+        "--continue",
+        "--auto-tier",
+        "efficiency",
+        "--reasoning-effort",
+        "medium",
+        "--mode",
+        "plan",
+        "--context",
+        "default",
+        "--model",
+        "gpt-6.1-sol",
+      ],
+      resolveCliAdapter("copilot"),
+      resolveCliAdapter("codex"),
+    )).toEqual(["--model", "gpt-6.1-sol"]);
+  });
+
+  it("resets only free-form and foreign arguments for the current CLI", () => {
+    const copilot = resolveCliAdapter("copilot");
+    expect(copilot).not.toBeNull();
+
+    expect(resetFreeFormCliArgs([
+      "--continue",
+      "--model",
+      "claude-sonnet-5.5",
+      "--mode",
+      "plan",
+      "--sandbox",
+      "read-only",
+      "--custom-flag",
+      "custom-value",
+    ], copilot!)).toEqual([
+      "--continue",
+      "--model",
+      "claude-sonnet-5.5",
+      "--mode",
+      "plan",
+    ]);
+  });
+
+  it("edits only free-form argv while retaining structured and session options", () => {
+    const copilot = resolveCliAdapter("copilot")!;
+    const args = ["--continue", "--model", "gpt-6.1-sol", "--custom", "old"];
+
+    expect(extractFreeFormCliArgs(args, copilot)).toEqual(["--custom", "old"]);
+    expect(replaceFreeFormCliArgs(args, ["--other", "new value"], copilot)).toEqual([
+      "--continue",
+      "--model",
+      "gpt-6.1-sol",
+      "--other",
+      "new value",
+    ]);
+  });
+
+  it("categorizes fields in the required order and keeps empty categories hidden", () => {
+    expect(getCliFieldCategory({ flag: "--model", key: "model" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--auto-tier", key: "autoTier" })).toBe("model");
+    expect(getCliFieldCategory({ flag: "--reasoning-effort", key: "reasoningEffort" })).toBe("reasoning");
+    expect(getCliFieldCategory({ flag: "--permission-mode", key: "permissionMode" })).toBe("permissions");
+    expect(getCliFieldCategory({ flag: "--sandbox", key: "sandbox" })).toBe("sandbox");
+    expect(getCliFieldCategory({ flag: "--mode", key: "mode" })).toBe("execution");
+    expect(getCliFieldCategory({ flag: "--context", key: "context" })).toBe("context");
+    expect(getCliFieldCategory({ flag: "--allow-all", key: "allowAll" })).toBe("unattended-dangerous");
+    expect(CLI_FIELD_CATEGORY_ORDER).toEqual([
+      "model",
+      "reasoning",
+      "permissions",
+      "sandbox",
+      "execution",
+      "context",
+      "tools-access",
+      "unattended-dangerous",
+      "advanced",
+    ]);
+    expect(orderedCliFieldCategories([{ key: "model", label: "Model", flag: "--model", kind: "text", category: "model" }, { key: "reasoningEffort", label: "Reasoning", flag: "--reasoning-effort", kind: "select", category: "reasoning" }])).toEqual(["model", "reasoning", "advanced"]);
   });
 });

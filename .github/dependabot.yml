@@ -11,8 +11,21 @@ updates:
     groups:
       npm-production:
         dependency-type: production
+        update-types:
+          - minor
+          - patch
       npm-development:
         dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Major upgrades need individual compatibility review. Dependabot's
+      # grouped security updates can otherwise include majors even though the
+      # regular groups above are limited to minor and patch releases.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     open-pull-requests-limit: 10
 
   - package-ecosystem: github-actions

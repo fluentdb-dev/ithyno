@@ -3,6 +3,36 @@
 All notable changes to ithyno are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0-alpha.2] - 2026-11-02
+
+### Added
+
+- Added CLI-specific Agent argument builders with grouped model, profile,
+  approval, sandbox, reasoning, and session-start controls while preserving a
+  separate free-form argument field.
+- Added a tmux session browser with window and pane switching, retained history,
+  search and copy controls, plus an interactive shortcut panel.
+- Added generated CLI capability catalogs and local argument-validation tooling
+  for Codex, Claude Code, GitHub Copilot, and Antigravity/AGY.
+
+### Changed
+
+- Marked Codex and GitHub Copilot as verified Manager choices and sourced their
+  supported model choices from maintained capability data.
+- Updated Electron, Fastify, MCP, Azure authentication, parser, networking, and
+  GitHub Actions dependencies after cross-platform verification.
+- Limited routine Dependabot groups to minor and patch releases; major upgrades
+  now require an explicit compatibility review.
+
+### Fixed
+
+- Made CLI capability probes portable across Windows and Unix-like systems.
+- Detected psmux-supported tmux actions on Windows and disabled unavailable
+  controls instead of presenting operations that cannot run.
+- Fixed Agent edit-dialog navigation, dash-prefixed argument values, Codex
+  sandbox selection, and argument reset behavior.
+- Added a polling fallback when filesystem watching is denied by the host.
+
 ## [0.9.0-alpha.1] - 2026-10-05
 
 ### Added

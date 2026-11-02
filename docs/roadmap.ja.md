@@ -134,11 +134,11 @@ ithyno の実装計画。現在の基準バージョンは `0.8.1-alpha.1`。
 
 ## 次期候補
 
-- [ ] GitHub Copilot対応の拡張
-- [ ] dotenvxを利用した開発環境変数マネージャー
+- [x] GitHub CopilotのManager/Worker Skill・通知・Manager選択検証
+- [x] dotenvxを利用したプロジェクト環境profile向けSecrets workspace
 - [ ] 外部Skillの検出・インストール・更新・削除
-- [ ] Agent harnessごとのargs builder
-- [ ] tmux設定と操作のGUI改善
+- [x] Agent harnessごとのargs builder
+- [x] tmuxのwindow・pane・history・shortcut操作のGUI対応
 - [ ] Claude Code session間通信の確認と文書化
 - [ ] Agent CLIごとのmodel・approval・sandbox設定支援
 - [ ] SkillとAgent環境の互換性を検査するテスト機構

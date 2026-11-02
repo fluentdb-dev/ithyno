@@ -207,12 +207,14 @@ export type AboutInfo = {
 
 // ---- agent-runner ----------------------------------------------------------
 export type AgentMode = "single-prompt" | "live-shell";
+export type AgentSessionStartup = "managed" | "new" | "picker" | "latest" | "custom";
 
 export type AgentPublic = {
   name: string;
   description?: string;
   command?: string;
   args?: string[];
+  sessionStartup?: AgentSessionStartup;
   hasEnv: boolean;
   detached?: boolean;
   /** Spawn mode. Required after loader normalization (reshape-agents-yaml-mode-roles). */
@@ -264,6 +266,7 @@ export type AgentConfigPayload =
       prompts?: Record<string, string>;
       command?: string;
       args?: string[];
+      sessionStartup?: AgentSessionStartup;
       description?: string;
       detached?: boolean;
     }
@@ -459,6 +462,88 @@ export type DoctorReport = {
   burntToast?: CliStatus;
   readyForManager: boolean;
   checkedAt: string;
+};
+
+// ---- project-scoped tmux browser -----------------------------------------
+
+export type TmuxPane = {
+  id: string;
+  windowId: string;
+  windowIndex: number;
+  index: number;
+  title: string;
+  active: boolean;
+  width: number;
+  height: number;
+  currentPath: string;
+};
+
+export type TmuxWindow = {
+  id: string;
+  index: number;
+  name: string;
+  active: boolean;
+  paneCount: number;
+  layout: string;
+  panes: TmuxPane[];
+};
+
+export type TmuxTopology = {
+  available: boolean;
+  provider: "tmux" | "psmux" | null;
+  version: string | null;
+  capabilities: {
+    topology: boolean;
+    selection: boolean;
+    history: boolean;
+  };
+  session: null | {
+    name: string;
+    windows: TmuxWindow[];
+  };
+  reason?: string;
+};
+
+export type TmuxHistory = {
+  paneId: string;
+  content: string;
+  lineLimit: number;
+  truncated: boolean;
+};
+
+export type TmuxActionId =
+  | "next-window"
+  | "previous-window"
+  | "last-window"
+  | "pane-left"
+  | "pane-right"
+  | "pane-up"
+  | "pane-down"
+  | "create-window"
+  | "split-left"
+  | "split-right"
+  | "split-top"
+  | "split-bottom"
+  | "toggle-pane-zoom"
+  | "cycle-layout"
+  | "refresh-topology"
+  | "open-history"
+  | "close-pane"
+  | "kill-pane"
+  | "kill-window"
+  | "kill-session";
+
+export type TmuxActionAvailability = "executable" | "unsupported" | "client-only" | "reference-only";
+export type TmuxActionGroup = "navigation" | "pane" | "layout" | "history" | "session";
+
+export type TmuxActionCatalogEntry = {
+  id: TmuxActionId;
+  group: TmuxActionGroup;
+  label: string;
+  shortcut: string;
+  availability: TmuxActionAvailability;
+  supported: boolean;
+  description: string;
 };
 
 // ---- browse mode (unify-open-project-3-branch) -----------------------------

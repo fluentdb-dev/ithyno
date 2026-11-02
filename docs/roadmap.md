@@ -138,11 +138,11 @@ long-running operations.
 
 ## Next Candidates
 
-- [ ] Expand GitHub Copilot support
-- [ ] Add a development environment-variable manager powered by dotenvx
+- [x] Add GitHub Copilot Manager/Worker Skills, notifications, and verified Manager selection
+- [x] Add a dotenvx-powered Secrets workspace for project environment profiles
 - [ ] Discover, install, update, and remove external Skills
-- [ ] Add argument builders for individual agent harnesses
-- [ ] Improve tmux configuration and operation through the GUI
+- [x] Add argument builders for individual agent harnesses
+- [x] Add tmux window, pane, history, and shortcut controls to the GUI
 - [ ] Verify and document communication between Claude Code sessions
 - [ ] Assist with model, approval, and sandbox configuration for each agent CLI
 - [ ] Add a test mechanism for Skill and agent-environment compatibility

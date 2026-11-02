@@ -4,7 +4,7 @@ import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { AgentRegistry, validateAgents } from "./registry.js";
-import type { AgentMode } from "./registry.js";
+import type { AgentMode, AgentSessionStartup } from "./registry.js";
 import { syncSpawnOptions } from "./spawn-options-writer.js";
 
 /**
@@ -32,6 +32,7 @@ export type UpsertPayload = {
   prompts?: Record<string, string>;
   command?: string;
   args?: string[];
+  sessionStartup?: AgentSessionStartup;
   description?: string;
   detached?: boolean;
 };
@@ -128,6 +129,13 @@ function coerceUpsert(o: Record<string, unknown>): UpsertPayload | { error: stri
   const args = coerceStringArray(o.args ?? []);
   if (args === null) return { error: "args must be an array of strings" };
   payload.args = args;
+  if (o.sessionStartup !== undefined) {
+    const allowed: readonly AgentSessionStartup[] = ["managed", "new", "picker", "latest", "custom"];
+    if (typeof o.sessionStartup !== "string" || !allowed.includes(o.sessionStartup as AgentSessionStartup)) {
+      return { error: `sessionStartup must be one of ${allowed.join(", ")}` };
+    }
+    payload.sessionStartup = o.sessionStartup as AgentSessionStartup;
+  }
   return payload;
 }
 
@@ -295,6 +303,7 @@ function renderAgentYamlEntry(p: UpsertPayload): Record<string, unknown> {
     entry.command = p.command;
     entry.args = p.args ?? [];
   }
+  if (p.sessionStartup !== undefined) entry.sessionStartup = p.sessionStartup;
   if (p.prompts !== undefined && Object.keys(p.prompts).length > 0) {
     entry.prompts = p.prompts;
   }

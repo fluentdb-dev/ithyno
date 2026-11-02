@@ -17,6 +17,9 @@ import type {
   ManagerStatus,
   TagDetail,
   TagIndex,
+  TmuxActionCatalogEntry,
+  TmuxHistory,
+  TmuxTopology,
   ToggleResponse,
   WorkspaceState,
 } from "./types";
@@ -317,6 +320,58 @@ export async function setTmux(value: boolean): Promise<void> {
     { value },
   );
   if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Read the current project's ithyno-managed tmux topology. */
+export async function fetchTmuxTopology(): Promise<TmuxTopology> {
+  const res = await fetch("/api/tmux/topology", { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  if (!res.ok) throw new Error(`GET /api/tmux/topology failed: ${res.status}`);
+  return res.json();
+}
+
+/** Read the tmux browser's allowlisted cheat-sheet catalog for the current project. */
+export async function fetchTmuxActionCatalog(): Promise<TmuxActionCatalogEntry[]> {
+  const res = await fetch("/api/tmux/actions", { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  if (!res.ok) throw new Error(`GET /api/tmux/actions failed: ${res.status}`);
+  return res.json();
+}
+
+/** Execute an allowlisted tmux action in the current project's session. */
+export async function executeTmuxAction(actionId: string, paneId?: string): Promise<{ actionId: string; paneId?: string }> {
+  const payload = actionId === "close-pane" ? { actionId, paneId } : { actionId };
+  const { status, data } = await postJson<{ ok?: boolean; actionId?: string; paneId?: string; error?: string }>("/api/tmux/action", payload);
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+  return {
+    actionId: data.actionId ?? actionId,
+    paneId: data.paneId ?? paneId,
+  };
+}
+
+/** Select a validated window or pane in the current project's tmux session. */
+export async function selectTmuxTarget(target: { windowId?: string; paneId?: string }): Promise<void> {
+  const { status, data } = await postJson<{ ok?: boolean; error?: string }>("/api/tmux/select", target);
+  if (status >= 400) throw new Error(data.error ?? `HTTP ${status}`);
+}
+
+/** Capture a bounded text snapshot of a validated project tmux pane. */
+export async function fetchTmuxHistory(paneId: string, lines = 5_000): Promise<TmuxHistory> {
+  const query = new URLSearchParams({ paneId, lines: String(lines) });
+  const res = await fetch(`/api/tmux/history?${query}`, { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    onAuthExpired?.();
+    throw new AuthExpiredError(res.status);
+  }
+  const data = await res.json().catch(() => ({})) as TmuxHistory & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `GET /api/tmux/history failed: ${res.status}`);
+  return data;
 }
 
 /** Enable/disable + upsert/remove the top-level `agmsg:` block in

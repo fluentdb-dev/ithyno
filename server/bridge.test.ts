@@ -745,7 +745,7 @@ ${child.stderr ?? ""}`;
       rmSync(projectRoot, { recursive: true, force: true });
       rmSync(runtimeDir, { recursive: true, force: true });
     }
-  });
+  }, process.platform === "win32" ? 15_000 : 5_000);
 
   it("strips ITHYNO_* env from subprocesses and avoids a fixed port fallback", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ithyno-cli-"));

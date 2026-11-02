@@ -120,6 +120,36 @@ describe("normalization: mode synthesis", () => {
   });
 });
 
+describe("manager session startup policy", () => {
+  it("loads managed project sessions for Claude managers", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: claude
+    sessionStartup: managed
+    args: [--model, sonnet]
+`,
+    );
+    expect(reg.publicConfig().agents[0].sessionStartup).toBe("managed");
+  });
+
+  it("rejects managed sessions on non-Claude managers", async () => {
+    const reg = await loadWith(
+      `agents:
+  - name: manager
+    roles: [manager]
+    mode: live-shell
+    command: codex
+    sessionStartup: managed
+    args: []
+`,
+    );
+    expect(reg.publicConfig().ok).toBe(false);
+  });
+});
+
 describe("fatal cases", () => {
   it("manager without live-shell mode is rejected", async () => {
     const reg = await loadWith(

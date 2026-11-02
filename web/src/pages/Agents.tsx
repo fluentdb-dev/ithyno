@@ -299,7 +299,16 @@ function ManagerSection({
  *  is fine for the common case; users can adjust in the modal. */
 function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
   const parts = (status.resolvedStartup ?? "").trim().split(/\s+/).filter(Boolean);
-  const [command, ...args] = parts;
+  const [command, ...rawArgs] = parts;
+  let args = rawArgs;
+  let sessionStartup: AgentPublic["sessionStartup"];
+  if (status.fallbackSource === "default" && command === "claude") {
+    const sessionFlagIndex = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
+    if (sessionFlagIndex >= 0) {
+      args = args.filter((_, index) => index !== sessionFlagIndex && index !== sessionFlagIndex + 1);
+    }
+    sessionStartup = "managed";
+  }
   const initial = status.initialInput ?? undefined;
   return {
     name: "",
@@ -308,6 +317,7 @@ function fallbackToPrefillAgent(status: ManagerStatus): AgentPublic {
     mode: "live-shell",
     command: command ?? "",
     args,
+    sessionStartup,
     hasEnv: false,
     initialInput: initial,
     prompts: initial ? { manager: initial } : undefined,

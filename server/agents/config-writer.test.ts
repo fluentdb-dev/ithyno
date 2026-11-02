@@ -329,6 +329,25 @@ describe("applyAgentConfigPayload — manager guardrails (refine-agents-config-m
       prompts: { manager: "/opsx:manage" },
     });
   });
+
+  it("round-trips a manager session startup policy independently from args", async () => {
+    await seed("agents: []\n");
+    const res = await applyAgentConfigPayload(dir, {
+      action: "upsert",
+      name: "primary",
+      roles: ["manager"],
+      mode: "live-shell",
+      command: "claude",
+      args: ["--model", "sonnet"],
+      sessionStartup: "managed",
+    });
+    expect(res).toEqual({ ok: true });
+    const doc = await readBack();
+    expect((doc.agents as Array<Record<string, unknown>>)[0]).toMatchObject({
+      sessionStartup: "managed",
+      args: ["--model", "sonnet"],
+    });
+  });
 });
 
 describe("atomic write", () => {
